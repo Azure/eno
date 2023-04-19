@@ -1,10 +1,10 @@
 package parser
 
 type indentationScanner struct {
-	previousLine    int
-	currentLine     int
-	multilineRef    int
-	pastIndentation bool
+	previousLineIndentSpaces int
+	currentLineIndentSpaces  int
+	multilineReferenceSpaces int
+	hasPassedIndentation     bool
 }
 
 func (i *indentationScanner) Scan(state lexerState, inExpr bool, pos *position, b byte) (*token, bool /* skip */, bool /* break */, error) {
@@ -13,41 +13,41 @@ func (i *indentationScanner) Scan(state lexerState, inExpr bool, pos *position, 
 		return nil, false, false, nil
 	}
 
-	if i.pastIndentation {
+	if i.hasPassedIndentation {
 		if b != '\n' {
 			// Ignore characters that are not applicable
 			return nil, false, false, nil
 		}
 
 		// Reset the per-line state at each newline character
-		i.currentLine = 0
-		i.pastIndentation = false
+		i.currentLineIndentSpaces = 0
+		i.hasPassedIndentation = false
 		return nil, false, false, nil
 	}
 
 	// In multi-line strings, don't consume more indentation than the reference amount e.g. indentation of first line.
 	// Otherwise we will chomp any leading spaces within the string.
-	if state != stateMultilineString || i.currentLine < i.multilineRef {
+	if state != stateMultilineString || i.currentLineIndentSpaces < i.multilineReferenceSpaces {
 		if b == ' ' {
-			i.currentLine++
+			i.currentLineIndentSpaces++
 			return nil, true, false, nil
 		}
 		if b == '\t' {
-			i.currentLine += 2
+			i.currentLineIndentSpaces += 2
 			return nil, true, false, nil
 		}
 	}
 
 	// Indentation must be increments of two spaces
-	if i.currentLine%2 != 0 {
+	if i.currentLineIndentSpaces%2 != 0 {
 		return nil, false, false, ErrOddIndentation
 	}
 
 	// If we made it this far into the func then this line's indentation is complete
-	i.pastIndentation = true
+	i.hasPassedIndentation = true
 
-	delta := i.currentLine - i.previousLine
-	i.previousLine = i.currentLine
+	delta := i.currentLineIndentSpaces - i.previousLineIndentSpaces
+	i.previousLineIndentSpaces = i.currentLineIndentSpaces
 
 	// The first line serves as a reference for subsequent lines.
 	// In other words, all future indent/unindent tokens are relative to this line's indentation.
@@ -86,5 +86,5 @@ func (i *indentationScanner) Scan(state lexerState, inExpr bool, pos *position, 
 // OpenMultilineString updates the scanner state such that it will honor the indentation level of a multiline string
 // starting on the following line. Effectively this means expecting an extra indentation.
 func (i *indentationScanner) OpenMultilineString() {
-	i.multilineRef = i.currentLine + 2
+	i.multilineReferenceSpaces = i.currentLineIndentSpaces + 2
 }
