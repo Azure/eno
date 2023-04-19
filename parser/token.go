@@ -8,7 +8,10 @@ type token struct {
 }
 
 type position struct {
+	// Offset is the position of the cursor in bytes relative to the start of the input buffer.
+	// In the context of each token, this marks the end of the token (since it has already been consumed).
 	Offset int
+
 	Line   int
 	Column int
 }
