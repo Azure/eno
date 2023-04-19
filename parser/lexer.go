@@ -49,7 +49,7 @@ func (l *lexer) NextToken() (*token, error) {
 	if l.nextToken != nil {
 		tok := l.nextToken
 		l.nextToken = nil
-		l.state = 0
+		l.state = stateIdent
 		return tok, nil
 	}
 
