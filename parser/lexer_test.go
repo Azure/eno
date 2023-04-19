@@ -21,7 +21,7 @@ func TestLexer(t *testing.T) {
 			Lines: []string{"foo"},
 			Tokens: []token{
 				{Type: identToken, Value: "foo"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -31,7 +31,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "foo"},
 				{Type: mappingSeparatorToken, Value: ":"},
 				{Type: identToken, Value: "bar"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -54,7 +54,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "another"},
 				{Type: mappingSeparatorToken, Value: ":"},
 				{Type: identToken, Value: "value"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -65,7 +65,7 @@ func TestLexer(t *testing.T) {
 			Tokens: []token{
 				{Type: listSeparatorToken, Value: "-"},
 				{Type: identToken, Value: "foo"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -79,7 +79,7 @@ func TestLexer(t *testing.T) {
 				{Type: incrementIndentationToken, Value: ""},
 				{Type: listSeparatorToken, Value: "-"},
 				{Type: identToken, Value: "foo"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -90,7 +90,7 @@ func TestLexer(t *testing.T) {
 			Tokens: []token{
 				{Type: listSeparatorToken, Value: "-"},
 				{Type: identToken, Value: "foo-"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -100,7 +100,7 @@ func TestLexer(t *testing.T) {
 			},
 			Tokens: []token{
 				{Type: identToken, Value: "foo-"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -112,7 +112,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "foo"},
 				{Type: mappingSeparatorToken, Value: ":"},
 				{Type: identToken, Value: "bar"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -124,7 +124,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "foo"},
 				{Type: mappingSeparatorToken, Value: ":"},
 				{Type: identToken, Value: "bar:baz"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -134,7 +134,7 @@ func TestLexer(t *testing.T) {
 			},
 			Tokens: []token{
 				{Type: quotedStringFragmentToken, Value: "foo:bar"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -147,7 +147,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "foo"},
 				{Type: mappingSeparatorToken, Value: ":"},
 				{Type: identToken, Value: "bar"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -159,7 +159,7 @@ func TestLexer(t *testing.T) {
 				{Type: quotedStringFragmentToken, Value: "foo bar"},
 				{Type: mappingSeparatorToken, Value: ":"},
 				{Type: identToken, Value: "baz"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -169,7 +169,7 @@ func TestLexer(t *testing.T) {
 			},
 			Tokens: []token{
 				{Type: quotedStringFragmentToken, Value: "foo bar"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -179,7 +179,7 @@ func TestLexer(t *testing.T) {
 			},
 			Tokens: []token{
 				{Type: quotedStringFragmentToken, Value: `foo " bar`},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -193,7 +193,7 @@ func TestLexer(t *testing.T) {
 				{Type: mappingSeparatorToken, Value: ":"},
 				{Type: identToken, Value: "baz"},
 				{Type: identToken, Value: "another"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -209,7 +209,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "bar"},
 				{Type: mappingSeparatorToken, Value: ":"},
 				{Type: identToken, Value: "baz"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -228,7 +228,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "bar"},
 				{Type: mappingSeparatorToken, Value: ":"},
 				{Type: identToken, Value: "baz"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -245,7 +245,7 @@ func TestLexer(t *testing.T) {
 
 				{Type: listSeparatorToken, Value: "-"},
 				{Type: identToken, Value: "foo"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -258,7 +258,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "foo"},
 				{Type: mappingSeparatorToken, Value: ":"},
 				{Type: multilineStringFragmentToken, Value: "bar\n"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -271,7 +271,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "foo"},
 				{Type: mappingSeparatorToken, Value: ":"},
 				{Type: multilineStringFragmentToken, Value: "  bar\nbaz"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -284,7 +284,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "foo"},
 				{Type: mappingSeparatorToken, Value: ":"},
 				{Type: multilineStringFragmentToken, Value: " \nbaz"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -296,7 +296,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "foo"},
 				{Type: mappingSeparatorToken, Value: ":"},
 				{Type: quotedStringFragmentToken, Value: "b|ar"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -307,7 +307,7 @@ func TestLexer(t *testing.T) {
 			Tokens: []token{
 				{Type: identToken, Value: "f|oo"},
 				{Type: mappingSeparatorToken, Value: ":"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -320,7 +320,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "foo"},
 				{Type: mappingSeparatorToken, Value: ":"},
 				{Type: multilineStringFragmentToken, Value: "bar"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -354,7 +354,7 @@ func TestLexer(t *testing.T) {
 				{Type: openExpressionToken, Value: ""},
 				{Type: identToken, Value: "foo"},
 				{Type: closeExpressionToken, Value: ""},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -366,7 +366,7 @@ func TestLexer(t *testing.T) {
 				{Type: openExpressionToken, Value: ""},
 				{Type: identToken, Value: "foo"},
 				{Type: closeExpressionToken, Value: ""},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -379,7 +379,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "foo"},
 				{Type: identToken, Value: "bar"},
 				{Type: closeExpressionToken, Value: ""},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -393,7 +393,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "bar"},
 				{Type: closeExpressionToken, Value: ""},
 				{Type: quotedStringFragmentToken, Value: "baz"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -407,7 +407,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "bar"},
 				{Type: closeExpressionToken, Value: ""},
 				{Type: quotedStringFragmentToken, Value: " baz"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -420,7 +420,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "foo"},
 				{Type: quotedStringFragmentToken, Value: "bar"},
 				{Type: closeExpressionToken, Value: ""},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -435,7 +435,7 @@ func TestLexer(t *testing.T) {
 				{Type: quotedStringFragmentToken, Value: "bar"},
 				{Type: closeExpressionToken, Value: ""},
 				{Type: quotedStringFragmentToken, Value: ""},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -448,7 +448,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "foo:"},
 				{Type: identToken, Value: "bar"},
 				{Type: closeExpressionToken, Value: ""},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -457,7 +457,7 @@ func TestLexer(t *testing.T) {
 				"",
 			},
 			Tokens: []token{
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -467,7 +467,7 @@ func TestLexer(t *testing.T) {
 			},
 			Tokens: []token{
 				{Type: quotedStringFragmentToken, Value: ""},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -480,7 +480,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "foo"},
 				{Type: identToken, Value: "bar"},
 				{Type: closeExpressionToken, Value: ""},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -499,7 +499,7 @@ func TestLexer(t *testing.T) {
 				{Type: closeExpressionToken, Value: ""},
 				{Type: listSeparatorToken, Value: "-"},
 				{Type: identToken, Value: "baz"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -528,7 +528,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "another"},
 				{Type: mappingSeparatorToken, Value: ":"},
 				{Type: identToken, Value: "mapping"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -559,7 +559,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "another"},
 				{Type: mappingSeparatorToken, Value: ":"},
 				{Type: identToken, Value: "mapping"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -573,7 +573,7 @@ func TestLexer(t *testing.T) {
 				{Type: pipeToken, Value: "|"},
 				{Type: identToken, Value: "bar"},
 				{Type: closeExpressionToken, Value: ""},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -585,7 +585,7 @@ func TestLexer(t *testing.T) {
 				{Type: openExpressionToken, Value: ""},
 				{Type: quotedStringFragmentToken, Value: "foo|bar"},
 				{Type: closeExpressionToken, Value: ""},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -598,7 +598,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "foo:"},
 				{Type: identToken, Value: "bar"},
 				{Type: closeExpressionToken, Value: ""},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -611,7 +611,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "-"},
 				{Type: identToken, Value: "foo"},
 				{Type: closeExpressionToken, Value: ""},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -625,7 +625,7 @@ func TestLexer(t *testing.T) {
 				{Type: assignmentOperatorToken, Value: ":="},
 				{Type: identToken, Value: "bar"},
 				{Type: closeExpressionToken, Value: ""},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -637,7 +637,7 @@ func TestLexer(t *testing.T) {
 				{Type: openExpressionToken, Value: ""},
 				{Type: quotedStringFragmentToken, Value: "foo := bar"},
 				{Type: closeExpressionToken, Value: ""},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -651,7 +651,7 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "foo"},
 				{Type: identToken, Value: "-"},
 				{Type: closeExpressionToken, Value: ""},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -668,7 +668,7 @@ func TestLexer(t *testing.T) {
 			},
 			Tokens: []token{
 				{Type: closeExpressionToken, Value: ""},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -681,7 +681,7 @@ func TestLexer(t *testing.T) {
 				{Type: commentToken, Value: "foo"},
 				{Type: identToken, Value: "bar"},
 				{Type: commentToken, Value: "baz"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 		{
@@ -691,7 +691,7 @@ func TestLexer(t *testing.T) {
 			},
 			Tokens: []token{
 				{Type: quotedStringFragmentToken, Value: "bar #baz"},
-				{EOF: true},
+				{Type: eofToken},
 			},
 		},
 	}
@@ -704,7 +704,7 @@ func TestLexer(t *testing.T) {
 			if tc.Error != "" {
 				for {
 					tok, err := lex.NextToken()
-					if tok.EOF {
+					if tok.Type == eofToken {
 						t.Fatal("reached EOF before receiving any errors")
 						return
 					}

@@ -4,7 +4,6 @@ type token struct {
 	Pos   position
 	Type  tokenType
 	Value string
-	EOF   bool
 }
 
 type position struct {
@@ -31,4 +30,5 @@ const (
 	commentToken
 	pipeToken
 	assignmentOperatorToken
+	eofToken
 )

@@ -280,7 +280,7 @@ func (l *lexer) buffer(nextState lexerState, nextToken *token) *token {
 func (l *lexer) buildToken() *token {
 	// Zero state + empty buffer means we've reached the end (otherwise this func wouldn't be called)
 	if l.state == 0 && l.buf.Len() == 0 {
-		return &token{EOF: true}
+		return &token{Type: eofToken}
 	}
 
 	tok := &token{Value: l.buf.String(), Pos: l.pos}
