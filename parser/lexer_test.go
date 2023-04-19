@@ -45,12 +45,12 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "foo"},
 				{Type: mappingSeparatorToken, Value: ":"},
 
-				{Type: indentToken, Value: ""},
+				{Type: incrementIndentationToken, Value: ""},
 				{Type: identToken, Value: "bar"},
 				{Type: mappingSeparatorToken, Value: ":"},
 				{Type: identToken, Value: "baz"},
 
-				{Type: unindentToken, Value: ""},
+				{Type: decrementIndentationToken, Value: ""},
 				{Type: identToken, Value: "another"},
 				{Type: mappingSeparatorToken, Value: ":"},
 				{Type: identToken, Value: "value"},
@@ -76,7 +76,7 @@ func TestLexer(t *testing.T) {
 			},
 			Tokens: []token{
 				{Type: listSeparatorToken, Value: "-"},
-				{Type: indentToken, Value: ""},
+				{Type: incrementIndentationToken, Value: ""},
 				{Type: listSeparatorToken, Value: "-"},
 				{Type: identToken, Value: "foo"},
 				{EOF: true},
@@ -205,7 +205,7 @@ func TestLexer(t *testing.T) {
 			Tokens: []token{
 				{Type: identToken, Value: "foo"},
 				{Type: mappingSeparatorToken, Value: ":"},
-				{Type: indentToken, Value: ""},
+				{Type: incrementIndentationToken, Value: ""},
 				{Type: identToken, Value: "bar"},
 				{Type: mappingSeparatorToken, Value: ":"},
 				{Type: identToken, Value: "baz"},
@@ -513,7 +513,7 @@ func TestLexer(t *testing.T) {
 			Tokens: []token{
 				{Type: identToken, Value: "foo"},
 				{Type: mappingSeparatorToken, Value: ":"},
-				{Type: indentToken, Value: ""},
+				{Type: incrementIndentationToken, Value: ""},
 
 				{Type: identToken, Value: "bar"},
 				{Type: mappingSeparatorToken, Value: ":"},
@@ -542,7 +542,7 @@ func TestLexer(t *testing.T) {
 			Tokens: []token{
 				{Type: identToken, Value: "foo"},
 				{Type: mappingSeparatorToken, Value: ":"},
-				{Type: indentToken, Value: ""},
+				{Type: incrementIndentationToken, Value: ""},
 
 				{Type: identToken, Value: "bar"},
 				{Type: mappingSeparatorToken, Value: ":"},
@@ -550,11 +550,11 @@ func TestLexer(t *testing.T) {
 				{Type: identToken, Value: "baz"},
 				{Type: closeExpressionToken, Value: ""},
 
-				{Type: unindentToken, Value: ""},
+				{Type: decrementIndentationToken, Value: ""},
 				{Type: openExpressionToken, Value: ""},
 				{Type: identToken, Value: "arg"},
 				{Type: closeExpressionToken, Value: ""},
-				{Type: indentToken, Value: ""},
+				{Type: incrementIndentationToken, Value: ""},
 
 				{Type: identToken, Value: "another"},
 				{Type: mappingSeparatorToken, Value: ":"},

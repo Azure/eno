@@ -21,8 +21,8 @@ const (
 	identToken
 	quotedStringFragmentToken
 	multilineStringFragmentToken
-	indentToken
-	unindentToken
+	incrementIndentationToken
+	decrementIndentationToken
 	openExpressionToken
 	closeExpressionToken
 	commentToken

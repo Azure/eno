@@ -74,7 +74,7 @@ func (i *indentationScanner) Scan(state lexerState, inExpr bool, pos *position, 
 		pos.Offset--
 
 		return &token{
-			Type: tokenType(indentToken),
+			Type: tokenType(incrementIndentationToken),
 			Pos:  *pos,
 		}, false, false, nil
 	}
@@ -86,7 +86,7 @@ func (i *indentationScanner) Scan(state lexerState, inExpr bool, pos *position, 
 		}
 
 		return &token{
-			Type: tokenType(unindentToken),
+			Type: tokenType(decrementIndentationToken),
 			Pos:  *pos,
 		}, false, false, nil
 	}
