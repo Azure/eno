@@ -1,10 +1,21 @@
 package parser
 
 type indentationScanner struct {
+	// previousLineIndentSpaces is used as lookbehind to the previous line's level of indentation.
+	// Necessary to determine if the current line has changed the level of indentation.
 	previousLineIndentSpaces int
-	currentLineIndentSpaces  int
+
+	// currentLineIndentSpaces maintains a space counter while consuming the indentation of the current line.
+	// Can be compared to previousLineIndentSpaces when hasPassedIndentation == true.
+	currentLineIndentSpaces int
+
+	// multilineReferenceSpaces is kind of like previousLineIndentSpaces, but for multi-line strings.
+	// Set to the value of currentLineIndentSpaces + 2 when a multi-line string is opened.
+	// When currentLineIndentSpaces > multilineReferenceSpaces, the multi-line string has been terminated.
 	multilineReferenceSpaces int
-	hasPassedIndentation     bool
+
+	// hasPassedIndentation is true after the first non-whitespace character has been seen on the current line.
+	hasPassedIndentation bool
 }
 
 func (i *indentationScanner) Scan(state lexerState, inExpr bool, pos *position, b byte) (*token, bool /* skip */, bool /* break */, error) {
