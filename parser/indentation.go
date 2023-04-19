@@ -57,8 +57,9 @@ func (i *indentationScanner) Scan(state lexerState, inExpr bool, pos *position, 
 	// If we made it this far into the func then this line's indentation is complete
 	i.hasPassedIndentation = true
 
-	delta := i.currentLineIndentSpaces - i.previousLineIndentSpaces
-	i.previousLineIndentSpaces = i.currentLineIndentSpaces
+	defer func() {
+		i.previousLineIndentSpaces = i.currentLineIndentSpaces
+	}()
 
 	// The first line serves as a reference for subsequent lines.
 	// In other words, all future indent/unindent tokens are relative to this line's indentation.
@@ -70,7 +71,7 @@ func (i *indentationScanner) Scan(state lexerState, inExpr bool, pos *position, 
 	//
 	// Indent tokens are ignored in multiline strings since any extra whitespace is included in the string.
 	// In this case unindent tokens are also skipped. Instead, we signal the end of the string.
-	if delta > 0 && state != stateMultilineString {
+	if i.currentLineIndentSpaces > i.previousLineIndentSpaces && state != stateMultilineString {
 		pos.Offset--
 
 		return &token{
@@ -78,7 +79,7 @@ func (i *indentationScanner) Scan(state lexerState, inExpr bool, pos *position, 
 			Pos:  *pos,
 		}, false, false, nil
 	}
-	if delta < 0 {
+	if i.currentLineIndentSpaces < i.previousLineIndentSpaces {
 		pos.Offset--
 
 		if state == stateMultilineString {
