@@ -99,7 +99,6 @@ func (l *lexer) scan() (*token, error) {
 func (l *lexer) matchChar(b byte) (*token, error) {
 	// Consume newline characters that directly follow the '|' of a multi-line string
 	if l.state == stateMultilineString && l.tokenStartOffset+1 == l.pos.Offset && b == '\n' {
-		l.tokenStartOffset++
 		l.reset()
 		return nil, nil
 	}
