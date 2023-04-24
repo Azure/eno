@@ -14,8 +14,7 @@ var (
 type lexerState int
 
 const (
-	stateUnknown lexerState = iota
-	stateIdent
+	stateIdent lexerState = iota
 	stateQuotedString
 	stateMultilineString
 	stateComment
@@ -116,7 +115,7 @@ func (l *lexer) matchChar(b byte) (*token, error) {
 
 	switch b {
 	case '#':
-		if l.interminableState() && !l.inExpression {
+		if l.state == stateIdent && !l.inExpression {
 			l.state = stateComment
 			l.tokenStartOffset = 0
 			return nil, nil
@@ -198,7 +197,7 @@ func (l *lexer) matchChar(b byte) (*token, error) {
 		}), nil
 
 	case ':':
-		if l.lookahead == '=' && l.inExpression && l.interminableState() {
+		if l.lookahead == '=' && l.inExpression && l.state == stateIdent {
 			l.pos.Offset++
 			return l.buffer(stateIdent, &token{
 				Type:  assignmentOperatorToken,
@@ -216,7 +215,7 @@ func (l *lexer) matchChar(b byte) (*token, error) {
 			l.reset()
 			return tok, nil
 		}
-		if l.interminableState() && !l.inExpression && !l.inMapping {
+		if l.state == stateIdent && !l.inExpression && !l.inMapping {
 			l.pos.Offset--
 			l.inMapping = true
 			return l.buildToken(), nil
@@ -226,7 +225,7 @@ func (l *lexer) matchChar(b byte) (*token, error) {
 		if l.inExpression && l.buf.Len() == 0 {
 			return nil, nil // discard leading spaces
 		}
-		if l.interminableState() && l.buf.Len() > 0 {
+		if l.state == stateIdent && l.buf.Len() > 0 {
 			return l.buildToken(), nil
 		}
 
@@ -255,10 +254,6 @@ func (l *lexer) matchChar(b byte) (*token, error) {
 		return nil, ErrInvalidEscape
 	}
 
-	if l.state == stateUnknown {
-		l.state = stateIdent
-	}
-
 	l.escapeLookbehind = 0
 	l.buf.WriteByte(b)
 	return nil, nil
@@ -266,7 +261,7 @@ func (l *lexer) matchChar(b byte) (*token, error) {
 
 // buffer allows a state transition (and associated token) to be returned to the caller _after_ the current token is flushed using buildToken().
 func (l *lexer) buffer(nextState lexerState, nextToken *token) *token {
-	if l.interminableState() && l.buf.Len() == 0 {
+	if l.buf.Len() == 0 && l.state == stateIdent {
 		l.reset()
 		l.state = nextState
 		return nextToken
@@ -282,8 +277,8 @@ func (l *lexer) buffer(nextState lexerState, nextToken *token) *token {
 // buildToken returns a token containing the current buffer. The token type is derived from the
 // current lexer state.
 func (l *lexer) buildToken() *token {
-	// Interminable state + empty buffer means we've reached the end (otherwise this func wouldn't be called)
-	if l.interminableState() && l.buf.Len() == 0 {
+	// Zero state + empty buffer means we've reached the end (otherwise this func wouldn't be called)
+	if l.state == 0 && l.buf.Len() == 0 {
 		return &token{Type: eofToken}
 	}
 
@@ -310,9 +305,8 @@ func (l *lexer) reset() {
 		return
 	}
 	l.tokenStartOffset = 0
-	l.state = stateUnknown
+	l.state = stateIdent
 	l.buf.Reset()
 }
 
-func (l *lexer) atStateStart() bool      { return l.pos.Offset == l.tokenStartOffset }
-func (l *lexer) interminableState() bool { return l.state == stateUnknown || l.state == stateIdent }
+func (l *lexer) atStateStart() bool { return l.pos.Offset == l.tokenStartOffset }
