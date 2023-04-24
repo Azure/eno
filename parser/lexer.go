@@ -30,7 +30,7 @@ type lexer struct {
 	// Lexer state
 	escapeLookbehind   byte
 	lookahead          byte
-	nextToken          *token
+	bufferedToken      *token
 	state              lexerState
 	expressionPopState lexerState // current state when expression was started
 	tokenStartOffset   int        // pos.Offset of first character of the current token
@@ -46,9 +46,11 @@ func newLexer(input []byte) *lexer {
 // The token's type will be eofToken when the end of the file has been reached.
 // A non-nil token pointer is returned for errors to indicate their position.
 func (l *lexer) NextToken() (*token, error) {
-	if l.nextToken != nil {
-		tok := l.nextToken
-		l.nextToken = nil
+	// bufferedToken might contain a token that has been deferred by the previous call to NextToken.
+	// This is not as "pure" as re-entrance, but is much easier to grok.
+	if l.bufferedToken != nil {
+		tok := l.bufferedToken
+		l.bufferedToken = nil
 		l.state = stateIdent
 		return tok, nil
 	}
@@ -267,10 +269,10 @@ func (l *lexer) buffer(nextState lexerState, nextToken *token) *token {
 		return nextToken
 	}
 
-	if l.nextToken != nil {
+	if l.bufferedToken != nil {
 		panic("cannot buffer multiple tokens")
 	}
-	l.nextToken = nextToken
+	l.bufferedToken = nextToken
 	return l.buildToken()
 }
 
