@@ -43,7 +43,7 @@ func newLexer(input []byte) *lexer {
 }
 
 // NextToken reads from the Input and emits the next token.
-// The token's EOF field will be true when the end of the file has been reached.
+// The token's type will be eofToken when the end of the file has been reached.
 // A non-nil token pointer is returned for errors to indicate their position.
 func (l *lexer) NextToken() (*token, error) {
 	if l.nextToken != nil {
