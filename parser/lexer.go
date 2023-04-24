@@ -33,7 +33,7 @@ type lexer struct {
 	nextToken          *token
 	state              lexerState
 	expressionPopState lexerState // current state when expression was started
-	stateStartOffset   int        // pos.Offset of first character of the current state
+	tokenStartOffset   int        // pos.Offset of first character of the current token
 	inExpression       bool
 	inMapping          bool
 }
@@ -98,27 +98,27 @@ func (l *lexer) scan() (*token, error) {
 
 func (l *lexer) matchChar(b byte) (*token, error) {
 	// Consume newline characters that directly follow the '|' of a multi-line string
-	if l.state == stateMultilineString && l.stateStartOffset+1 == l.pos.Offset && b == '\n' {
-		l.stateStartOffset++
+	if l.state == stateMultilineString && l.tokenStartOffset+1 == l.pos.Offset && b == '\n' {
+		l.tokenStartOffset++
 		l.reset()
 		return nil, nil
 	}
 
 	// Consume any whitespace if not in a string
-	if l.state != stateQuotedString && l.stateStartOffset == 0 && (b == ' ' || b == '\t') {
+	if l.state != stateQuotedString && l.tokenStartOffset == 0 && (b == ' ' || b == '\t') {
 		return nil, nil
 	}
 
 	// At this point we've reached the start of a statement (if not in one already)
-	if l.stateStartOffset == 0 {
-		l.stateStartOffset = l.pos.Offset
+	if l.tokenStartOffset == 0 {
+		l.tokenStartOffset = l.pos.Offset
 	}
 
 	switch b {
 	case '#':
 		if l.state == stateIdent && !l.inExpression {
 			l.state = stateComment
-			l.stateStartOffset = 0
+			l.tokenStartOffset = 0
 			return nil, nil
 		}
 
@@ -163,7 +163,7 @@ func (l *lexer) matchChar(b byte) (*token, error) {
 			return nil, nil
 		}
 		if l.state != stateQuotedString {
-			l.stateStartOffset = 0
+			l.tokenStartOffset = 0
 			l.state = stateQuotedString
 			return nil, nil
 		}
@@ -305,9 +305,9 @@ func (l *lexer) reset() {
 	if l.state == stateMultilineString {
 		return
 	}
-	l.stateStartOffset = 0
+	l.tokenStartOffset = 0
 	l.state = stateIdent
 	l.buf.Reset()
 }
 
-func (l *lexer) atStateStart() bool { return l.pos.Offset == l.stateStartOffset }
+func (l *lexer) atStateStart() bool { return l.pos.Offset == l.tokenStartOffset }
