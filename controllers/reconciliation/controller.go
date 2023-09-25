@@ -132,6 +132,7 @@ func deepCompare(current, next *unstructured.Unstructured) bool {
 		b = next.Object["spec"]
 	}
 
+	// TODO: Consider using the k8s internal comparison semantics to avoid removing fields written by other components
 	return current.GetDeletionTimestamp() == nil &&
 		reflect.DeepEqual(a, b) &&
 		reflect.DeepEqual(current.GetLabels(), next.GetLabels()) &&
