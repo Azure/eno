@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"time"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -26,13 +25,7 @@ func main() {
 }
 
 func run() error {
-	config := &conf.Config{
-		// TODO: Expose as flags and/or env vars
-		JobTimeout:   time.Minute * 1,
-		JobTTL:       time.Minute * 2,
-		WrapperImage: "joolshevsoak.azurecr.io/eno-wrapper:v3",
-		JobNS:        "default",
-	}
+	config := &conf.Config{}
 	if err := envconfig.Process("", config); err != nil {
 		panic(err)
 	}
@@ -43,7 +36,6 @@ func run() error {
 	}
 
 	opts := ctrl.Options{
-		// TODO
 		Logger: zapr.NewLogger(zapLog),
 	}
 
