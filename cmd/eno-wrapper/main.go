@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"strconv"
 
+	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -73,6 +74,10 @@ func install(path string) error {
 
 func generate() error {
 	ctx := ctrl.SetupSignalHandler()
+	log, err := zap.NewDevelopment()
+	if err != nil {
+		panic(err)
+	}
 
 	// Inputs
 	name, genStr := os.Getenv("COMPOSITION_NAME"), os.Getenv("COMPOSITION_GENERATION")
@@ -193,7 +198,7 @@ func generate() error {
 		if err != nil {
 			return fmt.Errorf("deleting orphaned resources: %w", err)
 		}
-		// TODO: Log
+		log.Info("deleted resource", zap.String("name", res.Name), zap.String("namespace", res.Namespace), zap.String("kind", res.Kind))
 	}
 
 	// Write changes
@@ -206,7 +211,7 @@ func generate() error {
 		if err != nil {
 			return fmt.Errorf("storing generated resource: %w", err)
 		}
-		// TODO: Log
+		log.Info("wrote resource", zap.String("name", res.Name), zap.String("namespace", res.Namespace), zap.String("kind", res.Kind))
 	}
 
 	meta.SetStatusCondition(&comp.Status.Conditions, metav1.Condition{
