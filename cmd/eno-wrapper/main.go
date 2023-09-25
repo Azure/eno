@@ -205,7 +205,7 @@ func generate() error {
 	}
 
 	meta.SetStatusCondition(&comp.Status.Conditions, metav1.Condition{
-		Type:               apiv1.CompositionGeneratedConditionType,
+		Type:               apiv1.GeneratedConditionType,
 		Status:             metav1.ConditionTrue,
 		ObservedGeneration: comp.Generation,
 		LastTransitionTime: metav1.Now(),

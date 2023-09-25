@@ -19,8 +19,6 @@ import (
 	"github.com/Azure/eno/conf"
 )
 
-// TODO: What should deleted completed or unnecessary jobs?
-
 type Controller struct {
 	config *conf.Config
 	client client.Client
@@ -49,18 +47,30 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition resource: %w", err))
 	}
 
-	// Skip cases in which the GeneratedResources have already been created
 	if comp.Spec.Generator == nil {
 		return ctrl.Result{}, nil // can't generate the composed resources without a generator
 	}
-	cond := meta.FindStatusCondition(comp.Status.Conditions, apiv1.CompositionGeneratedConditionType)
+
+	// Avoid creating duplicate jobs
+	job := c.newJob(comp)
+	current := &batchv1.Job{}
+	err = c.client.Get(ctx, client.ObjectKeyFromObject(job), current)
+	if client.IgnoreNotFound(err) != nil {
+		return ctrl.Result{}, fmt.Errorf("listing current jobs: %w", err)
+	}
+	if err == nil { // !404
+		return c.updateDeadlockCondition(ctx, comp, current)
+	}
+
+	// Skip cases in which the GeneratedResources have already been created
+	cond := meta.FindStatusCondition(comp.Status.Conditions, apiv1.GeneratedConditionType)
 	if cond != nil && cond.ObservedGeneration == comp.Generation && cond.Status == metav1.ConditionTrue {
 		return ctrl.Result{}, nil // already in sync
 	}
 
 	// We're starting generation, reflect that in the resource's status
 	meta.SetStatusCondition(&comp.Status.Conditions, metav1.Condition{
-		Type:               apiv1.CompositionGeneratedConditionType,
+		Type:               apiv1.GeneratedConditionType,
 		Status:             metav1.ConditionFalse,
 		ObservedGeneration: comp.Generation,
 		LastTransitionTime: metav1.Now(),
@@ -70,17 +80,6 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	err = c.client.Status().Update(ctx, comp)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("updating composition resource status: %w", err)
-	}
-
-	// Avoid creating duplicate jobs
-	job := c.newJob(comp)
-	current := &batchv1.Job{}
-	err = c.client.Get(ctx, client.ObjectKeyFromObject(current), current)
-	if client.IgnoreNotFound(err) != nil {
-		return ctrl.Result{}, fmt.Errorf("listing current jobs: %w", err)
-	}
-	if err == nil { // !404
-		return ctrl.Result{}, nil // job already exists
 	}
 
 	// Create a job to generate the resouces!
@@ -102,8 +101,7 @@ func (c *Controller) newJob(comp *apiv1.Composition) *batchv1.Job {
 	)
 
 	hash := sha256.New()
-	hash.Write([]byte(comp.Name))
-	hash.Write([]byte(comp.ResourceVersion))
+	fmt.Fprintf(hash, "%s-%d", comp.Name, comp.Generation)
 	hashStr := hex.EncodeToString(hash.Sum(nil))[:7]
 
 	job := &batchv1.Job{}
@@ -112,13 +110,12 @@ func (c *Controller) newJob(comp *apiv1.Composition) *batchv1.Job {
 	}
 	job.Name = "generate-" + hashStr
 	job.Namespace = c.config.JobNS
-	job.Labels = map[string]string{"composition": comp.Name, "composition-resource-version": comp.ResourceVersion}
 	job.Spec.Parallelism = &parallelism
-	job.Spec.ActiveDeadlineSeconds = &timeout
 	job.Spec.TTLSecondsAfterFinished = &ttl
 	job.Spec.Template = corev1.PodTemplateSpec{
 		Spec: corev1.PodSpec{
-			RestartPolicy: corev1.RestartPolicyNever,
+			RestartPolicy:         corev1.RestartPolicyNever,
+			ActiveDeadlineSeconds: &timeout,
 			InitContainers: []corev1.Container{{
 				Name:  "setup",
 				Image: c.config.WrapperImage,
@@ -147,7 +144,7 @@ func (c *Controller) newJob(comp *apiv1.Composition) *batchv1.Job {
 						Value: comp.Name,
 					},
 					{
-						Name:  "COMPOSITION_RESOURCE_VERSION",
+						Name:  "COMPOSITION_RESOURCE_VERSION", // TODO: Use generation
 						Value: comp.ResourceVersion,
 					},
 				},
@@ -160,4 +157,31 @@ func (c *Controller) newJob(comp *apiv1.Composition) *batchv1.Job {
 	}
 
 	return job
+}
+
+func (c *Controller) updateDeadlockCondition(ctx context.Context, comp *apiv1.Composition, job *batchv1.Job) (ctrl.Result, error) {
+	failed := job.Spec.BackoffLimit != nil && job.Status.Active+job.Status.Failed == *job.Spec.BackoffLimit
+
+	expected := &metav1.Condition{
+		Type:               apiv1.DeadlockedConditionType,
+		ObservedGeneration: comp.Generation,
+	}
+	if failed {
+		expected.Status = metav1.ConditionTrue
+		expected.Reason = "JobDeadlocked"
+		expected.Message = "Job has reached its retry limit and cannot successfully complete"
+	} else {
+		expected.Status = metav1.ConditionFalse
+		expected.Reason = "JobNotDeadlocked"
+		expected.Message = "Job is not in a deadlock condition"
+	}
+
+	cond := meta.FindStatusCondition(comp.Status.Conditions, apiv1.DeadlockedConditionType)
+	if cond != nil && cond.Status == expected.Status {
+		return ctrl.Result{}, nil
+	}
+
+	expected.LastTransitionTime = metav1.Now()
+	meta.SetStatusCondition(&comp.Status.Conditions, *expected)
+	return ctrl.Result{}, c.client.Status().Update(ctx, comp)
 }

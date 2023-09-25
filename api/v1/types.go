@@ -58,8 +58,9 @@ type InputRef struct {
 }
 
 const (
-	CompositionGeneratedConditionType  = "eno.azure.io/composition-generated"
-	CompositionReconciledConditionType = "eno.azure.io/composition-reconciled"
+	GeneratedConditionType  = "eno.azure.io/generated"
+	ReconciledConditionType = "eno.azure.io/reconciled"
+	DeadlockedConditionType = "eno.azure.io/deadlocked"
 )
 
 type CompositionStatus struct {
