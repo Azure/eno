@@ -17,7 +17,7 @@ func main() {
 	corev1.AddToScheme(scheme)
 	appsv1.AddToScheme(scheme)
 
-	composition.Generate(scheme, Generate)
+	composition.MustGenerate(scheme, Generate)
 }
 
 func Generate(inputs *composition.Inputs) ([]client.Object, error) {

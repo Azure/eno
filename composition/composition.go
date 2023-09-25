@@ -15,7 +15,14 @@ import (
 
 type GenerateFn func(*Inputs) ([]client.Object, error)
 
-func Generate(scheme *runtime.Scheme, fn GenerateFn) {
+func MustGenerate(scheme *runtime.Scheme, fn GenerateFn) {
+	if err := Generate(scheme, fn); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %s\n", err)
+		os.Exit(1)
+	}
+}
+
+func Generate(scheme *runtime.Scheme, fn GenerateFn) error {
 	codec := serializer.NewCodecFactory(scheme)
 	dec := codec.UniversalDeserializer()
 
@@ -24,7 +31,7 @@ func Generate(scheme *runtime.Scheme, fn GenerateFn) {
 	for r.Scan() {
 		obj, _, err := dec.Decode(r.Bytes(), &schema.GroupVersionKind{}, nil)
 		if err != nil {
-			panic(err) // TODO: Error handling
+			return fmt.Errorf("decoding inputs: %w", err)
 		}
 		inputs = append(inputs, obj.(client.Object))
 	}
@@ -34,21 +41,22 @@ func Generate(scheme *runtime.Scheme, fn GenerateFn) {
 		scheme:  scheme,
 	})
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	enc := json.NewEncoder(os.Stdout)
 	for _, out := range outputs {
 		gvk, err := apiutil.GVKForObject(out, scheme)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		out.GetObjectKind().SetGroupVersionKind(gvk)
 
 		if err := enc.Encode(out); err != nil {
-			panic(err)
+			return fmt.Errorf("encoding inputs: %w", err)
 		}
 	}
+	return nil
 }
 
 type Inputs struct {
