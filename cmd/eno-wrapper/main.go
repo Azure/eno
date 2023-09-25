@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -73,10 +74,12 @@ func install(path string) error {
 func generate() error {
 	ctx := ctrl.SetupSignalHandler()
 
-	name, rv := os.Getenv("COMPOSITION_NAME"), os.Getenv("COMPOSITION_RESOURCE_VERSION")
-	if name == "" || rv == "" {
-		return errors.New("composition resource name and version are required")
+	// Inputs
+	name, genStr := os.Getenv("COMPOSITION_NAME"), os.Getenv("COMPOSITION_GENERATION")
+	if name == "" || genStr == "" {
+		return errors.New("composition resource name and generation are required")
 	}
+	gen, _ := strconv.ParseInt(genStr, 10, 0)
 
 	// Resource loading
 	cli, err := client.New(ctrl.GetConfigOrDie(), client.Options{})
@@ -93,6 +96,9 @@ func generate() error {
 	if err != nil {
 		return fmt.Errorf("getting composition resource: %w", err)
 	}
+	if comp.Generation != gen {
+		return fmt.Errorf("this job is no longer necessary - (%d != %d)", comp.Generation, gen)
+	}
 
 	// Input munging
 	inputJson := &bytes.Buffer{}
@@ -104,7 +110,6 @@ func generate() error {
 		ref.SetName(input.Name)
 		ref.SetNamespace(input.Namespace)
 		if err := cli.Get(ctx, client.ObjectKeyFromObject(ref), ref); err != nil {
-			// TODO: Write this to a condition
 			return fmt.Errorf("getting input resource: %w", err)
 		}
 		if err := inputJsonEnc.Encode(ref); err != nil {

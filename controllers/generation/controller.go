@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 
 	"github.com/go-logr/logr"
 	batchv1 "k8s.io/api/batch/v1"
@@ -144,8 +145,8 @@ func (c *Controller) newJob(comp *apiv1.Composition) *batchv1.Job {
 						Value: comp.Name,
 					},
 					{
-						Name:  "COMPOSITION_RESOURCE_VERSION", // TODO: Use generation
-						Value: comp.ResourceVersion,
+						Name:  "COMPOSITION_GENERATION",
+						Value: strconv.FormatInt(comp.Generation, 10),
 					},
 				},
 			}},
