@@ -19,8 +19,6 @@ import (
 
 // TODO: What should deleted completed or unnecessary jobs?
 
-// TODO: Add way to pass reconile interval from composition to generated resources
-
 type Controller struct {
 	config *conf.Config
 	client client.Client

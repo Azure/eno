@@ -39,9 +39,10 @@ type Composition struct {
 }
 
 type CompositionSpec struct {
-	Revision  int64      `json:"revision,omitempty"`
-	Generator *Generator `json:"generator,omitempty"`
-	Inputs    []InputRef `json:"inputs,omitempty"`
+	Revision          int64            `json:"revision,omitempty"`
+	ReconcileInterval *metav1.Duration `json:"reconcileInterval,omitempty"`
+	Generator         *Generator       `json:"generator,omitempty"`
+	Inputs            []InputRef       `json:"inputs,omitempty"`
 }
 
 type Generator struct {
@@ -83,8 +84,8 @@ type GeneratedResource struct {
 }
 
 type GeneratedResourceSpec struct {
-	Manifest                 string `json:"manifest,omitempty"`
-	ReconcileIntervalSeconds *int32 `json:"reconcileIntervalSeconds,omitempty"`
+	Manifest          string           `json:"manifest,omitempty"`
+	ReconcileInterval *metav1.Duration `json:"reconcileInterval,omitempty"`
 }
 
 type GeneratedResourceStatus struct {

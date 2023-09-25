@@ -146,7 +146,6 @@ func generate() error {
 
 		res := &apiv1.GeneratedResource{}
 		res.Name = fmt.Sprintf("%s-%s", comp.Name, hashStr)
-		res.Labels = map[string]string{"composition": comp.Name}
 
 		// Fetch current state
 		err = cli.Get(ctx, client.ObjectKeyFromObject(res), res)
@@ -158,6 +157,8 @@ func generate() error {
 		}
 
 		// Make changes
+		res.Spec.ReconcileInterval = comp.Spec.ReconcileInterval
+		res.Labels = map[string]string{"composition": comp.Name}
 		if err := controllerutil.SetControllerReference(res, comp, cli.Scheme()); err != nil {
 			return fmt.Errorf("setting owner reference: %w", err)
 		}

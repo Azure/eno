@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"time"
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -107,8 +106,8 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	// Update
 	if deepCompare(current, res) {
-		if gr.Spec.ReconcileIntervalSeconds != nil {
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second * time.Duration(*gr.Spec.ReconcileIntervalSeconds)}, nil
+		if gr.Spec.ReconcileInterval != nil {
+			return ctrl.Result{Requeue: true, RequeueAfter: gr.Spec.ReconcileInterval.Duration}, nil
 		}
 		return ctrl.Result{}, nil
 	}

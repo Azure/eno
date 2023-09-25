@@ -35,9 +35,8 @@ spec:
             properties:
               manifest:
                 type: string
-              reconcileIntervalSeconds:
-                format: int32
-                type: integer
+              reconcileInterval:
+                type: string
             type: object
           status:
             properties:

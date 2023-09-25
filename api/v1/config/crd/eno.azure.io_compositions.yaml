@@ -53,6 +53,8 @@ spec:
                       type: string
                   type: object
                 type: array
+              reconcileInterval:
+                type: string
               revision:
                 format: int64
                 type: integer
