@@ -2,6 +2,8 @@ package generation
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 
 	"github.com/go-logr/logr"
@@ -71,19 +73,17 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	// Avoid creating duplicate jobs
-	jobList := &batchv1.JobList{}
-	err = c.client.List(ctx, jobList, client.MatchingLabels{"composition": comp.Name, "composition-resource-version": comp.ResourceVersion}, client.Limit(1))
-	if err != nil {
+	job := c.newJob(comp)
+	current := &batchv1.Job{}
+	err = c.client.Get(ctx, client.ObjectKeyFromObject(current), current)
+	if client.IgnoreNotFound(err) != nil {
 		return ctrl.Result{}, fmt.Errorf("listing current jobs: %w", err)
 	}
-	if len(jobList.Items) > 0 {
-		return ctrl.Result{}, nil
+	if err == nil { // !404
+		return ctrl.Result{}, nil // job already exists
 	}
 
-	// TODO: avoid race condition here
-
 	// Create a job to generate the resouces!
-	job := c.newJob(comp)
 	err = c.client.Create(ctx, job)
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreAlreadyExists(fmt.Errorf("creating generation job: %w", err))
@@ -101,13 +101,18 @@ func (c *Controller) newJob(comp *apiv1.Composition) *batchv1.Job {
 		wrapperVolumeName = "wrapper"
 	)
 
+	hash := sha256.New()
+	hash.Write([]byte(comp.Name))
+	hash.Write([]byte(comp.ResourceVersion))
+	hashStr := hex.EncodeToString(hash.Sum(nil))[:7]
+
 	job := &batchv1.Job{}
 	if err := controllerutil.SetControllerReference(comp, job, c.client.Scheme()); err != nil {
 		panic(fmt.Sprintf("unable to set owner reference: %s", err))
 	}
-	job.Labels = map[string]string{"composition": comp.Name, "composition-resource-version": comp.ResourceVersion}
-	job.GenerateName = comp.Name + "-"
+	job.Name = "generate-" + hashStr
 	job.Namespace = c.config.JobNS
+	job.Labels = map[string]string{"composition": comp.Name, "composition-resource-version": comp.ResourceVersion}
 	job.Spec.Parallelism = &parallelism
 	job.Spec.ActiveDeadlineSeconds = &timeout
 	job.Spec.TTLSecondsAfterFinished = &ttl
