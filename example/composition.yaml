@@ -21,4 +21,4 @@ spec:
     namespace: "default"
     name: "test-inputs"
   generator:
-    image: "joolshevsoak.azurecr.io/eno-example:v10"
+    image: "joolshevsoak.azurecr.io/eno-example:v11"
