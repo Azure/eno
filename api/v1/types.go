@@ -90,6 +90,8 @@ type GeneratedResourceSpec struct {
 }
 
 type GeneratedResourceStatus struct {
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
 	// DerivedGeneration is the generation of the Composition resource that this resource was generated from.
 	DerivedGeneration int64 `json:"derivedGeneration,omitempty"`
 }

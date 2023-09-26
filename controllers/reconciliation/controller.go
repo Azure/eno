@@ -8,6 +8,8 @@ import (
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -18,8 +20,6 @@ import (
 )
 
 // TODO: Implement another controller to get the status of reconciled resources and reflect back into the GeneratedResource resources
-
-// TODO: Deletes need to eventually timeout if apiserver is unavailable
 
 // TODO: Will the client re-discover new types after creating CRDs?
 
@@ -66,8 +66,6 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	cli := c.client // TODO: Support external clients
 
-	// TODO: Manage condition for resource state visibility
-
 	current := res.DeepCopy()
 	err = cli.Get(ctx, client.ObjectKeyFromObject(res), current)
 	if errors.IsNotFound(err) {
@@ -77,7 +75,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 				return ctrl.Result{}, nil // done - just wait for resource deletion
 			}
 			if err := c.client.Update(ctx, gr); err != nil {
-				return ctrl.Result{}, fmt.Errorf("adding finalizer: %w", err)
+				return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
 			}
 			c.logger.Info("removed finalizer")
 			return ctrl.Result{}, nil
@@ -105,19 +103,34 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	// Update
-	if deepCompare(current, res) {
-		if gr.Spec.ReconcileInterval != nil {
-			return ctrl.Result{Requeue: true, RequeueAfter: gr.Spec.ReconcileInterval.Duration}, nil
+	if !deepCompare(current, res) {
+		err = cli.Update(ctx, res)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("updating resource: %w", err)
 		}
-		return ctrl.Result{}, nil
+		c.logger.Info("updated resource")
+		return ctrl.Result{Requeue: true}, nil
 	}
-	err = cli.Update(ctx, res)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("updating resource: %w", err)
-	}
-	c.logger.Info("updated resource")
 
-	return ctrl.Result{}, nil
+	// Reflect status back to CR
+	cond := meta.FindStatusCondition(gr.Status.Conditions, apiv1.ReconciledConditionType)
+	if cond == nil || cond.ObservedGeneration != gr.Generation {
+		meta.SetStatusCondition(&gr.Status.Conditions, metav1.Condition{
+			Type:               apiv1.ReconciledConditionType,
+			Status:             metav1.ConditionTrue,
+			ObservedGeneration: gr.Generation,
+			LastTransitionTime: metav1.Now(),
+			Reason:             "Synced",
+			Message:            "Resource is in sync",
+		})
+		return ctrl.Result{}, cli.Status().Update(ctx, gr)
+	}
+
+	result := ctrl.Result{Requeue: true}
+	if gr.Spec.ReconcileInterval != nil {
+		result.RequeueAfter = gr.Spec.ReconcileInterval.Duration
+	}
+	return result, nil
 }
 
 func deepCompare(current, next *unstructured.Unstructured) bool {
