@@ -74,6 +74,7 @@ type GeneratedResourceList struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
 type GeneratedResource struct {
 	metav1.TypeMeta   `json:",inline"`

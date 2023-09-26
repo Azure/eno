@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -130,19 +130,6 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 }
 
 func deepCompare(current, next *unstructured.Unstructured) bool {
-	// some resources like configmaps have a data property instead of spec
-	var a, b any
-	if next.Object["data"] != nil {
-		a = current.Object["data"]
-		b = next.Object["data"]
-	} else {
-		a = current.Object["spec"]
-		b = next.Object["spec"]
-	}
-
-	return current.GetDeletionTimestamp() == nil &&
-		reflect.DeepEqual(a, b) &&
-		reflect.DeepEqual(current.GetLabels(), next.GetLabels()) &&
-		reflect.DeepEqual(current.GetAnnotations(), next.GetAnnotations()) &&
-		reflect.DeepEqual(current.GetOwnerReferences(), next.GetOwnerReferences())
+	// TODO: Support other comparison schemes using resource annotations
+	return equality.Semantic.DeepDerivative(next, current)
 }

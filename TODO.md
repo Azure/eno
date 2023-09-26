@@ -1,6 +1,5 @@
 - Controller to poll for status for each generated resource
 - Controller to aggregate status of each GR into the associated composition
-- Use k8s package for resource comparison semantics
 - Support annotation for ignoring fields during reconciliation
 - Support annotation for reconciliation ordering
   - With or without waiting for readines
