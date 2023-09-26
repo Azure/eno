@@ -167,7 +167,7 @@ func generate() error {
 		// Make changes
 		res.Spec.ReconcileInterval = comp.Spec.ReconcileInterval
 		res.Labels = map[string]string{"composition": comp.Name}
-		if err := controllerutil.SetControllerReference(res, comp, cli.Scheme()); err != nil {
+		if err := controllerutil.SetControllerReference(comp, res, cli.Scheme()); err != nil {
 			return fmt.Errorf("setting owner reference: %w", err)
 		}
 		js, err := json.Marshal(raw)

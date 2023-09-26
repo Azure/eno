@@ -1,4 +1,3 @@
-- Deleting a composition doesn't delete GRs for some reason
 - Controller to poll for status for each generated resource
 - Controller to aggregate status of each GR into the associated composition
 - Consider if the resource comparison semantics are correct
