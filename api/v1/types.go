@@ -46,7 +46,6 @@ type CompositionSpec struct {
 }
 
 type Generator struct {
-	// TODO: Podspec overrides? At least allow setting resource limits? Service accounts?
 	Image string `json:"image,omitempty"`
 }
 

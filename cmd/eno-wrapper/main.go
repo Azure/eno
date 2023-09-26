@@ -25,8 +25,6 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 )
 
-// TODO: Generated resource aren't deleted when the composition is for some reason?
-
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)

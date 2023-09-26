@@ -36,8 +36,6 @@ spec:
               generator:
                 properties:
                   image:
-                    description: 'TODO: Podspec overrides? At least allow setting
-                      resource limits? Service accounts?'
                     type: string
                 type: object
               inputs:

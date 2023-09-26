@@ -19,10 +19,6 @@ import (
 	"github.com/Azure/eno/conf"
 )
 
-// TODO: Implement another controller to get the status of reconciled resources and reflect back into the GeneratedResource resources
-
-// TODO: Will the client re-discover new types after creating CRDs?
-
 const finalizerName = "eno.azure.io/cleanup"
 
 type Controller struct {
@@ -64,7 +60,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, fmt.Errorf("parsing resource manifest as json: %w", err)
 	}
 
-	cli := c.client // TODO: Support external clients
+	cli := c.client // Support external clients in the future
 
 	current := res.DeepCopy()
 	err = cli.Get(ctx, client.ObjectKeyFromObject(res), current)
@@ -144,7 +140,6 @@ func deepCompare(current, next *unstructured.Unstructured) bool {
 		b = next.Object["spec"]
 	}
 
-	// TODO: Consider using the k8s internal comparison semantics to avoid removing fields written by other components
 	return current.GetDeletionTimestamp() == nil &&
 		reflect.DeepEqual(a, b) &&
 		reflect.DeepEqual(current.GetLabels(), next.GetLabels()) &&
