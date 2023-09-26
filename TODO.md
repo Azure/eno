@@ -1,9 +1,8 @@
 - Controller to poll for status for each generated resource
 - Controller to aggregate status of each GR into the associated composition
-- Consider if the resource comparison semantics are correct
-  - Support per-resource annotation for custom patch mode?
-  - Need some way to support partial reconciliation (see: VPA feature)
-- Do we need to sort resources by type? e.g. create CRDs first, then configmaps/secrets, etc.
-  - Or support an annotation for explicit ordering?
+- Use k8s package for resource comparison semantics
+- Support annotation for ignoring fields during reconciliation
+- Support annotation for reconciliation ordering
+  - With or without waiting for readines
 - How/what should specify resource limits, security configs, etc. for job pods?
 - Dynamic/external client support
