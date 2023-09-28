@@ -8,4 +8,6 @@ type Config struct {
 	JobTimeout time.Duration `split_words:"true" default:"30s"`
 	JobTTL     time.Duration `split_words:"true" default:"5m"`
 	JobNS      string        `split_words:"true" default:"default"`
+
+	StatusPollingInterval time.Duration `split_words:"true" default:"10s"`
 }

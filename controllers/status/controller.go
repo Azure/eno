@@ -48,8 +48,8 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	cond := meta.FindStatusCondition(gr.Status.Conditions, apiv1.ReadyConditionType)
-	if cond != nil && cond.LastTransitionTime.After(time.Now().Add(-time.Minute)) { // TODO: Make sure we don't check status too often
-		return c.loop()
+	if cond != nil && time.Since(cond.LastTransitionTime.Time) < time.Second {
+		return c.loop() // provide stable upper bound on polling rate
 	}
 
 	res := &unstructured.Unstructured{}
@@ -102,13 +102,11 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 }
 
 func (c *Controller) loop() (ctrl.Result, error) {
-	// TODO: Polling loop jitter, logging, etc.
-	return ctrl.Result{RequeueAfter: time.Second * 5}, nil
+	return ctrl.Result{RequeueAfter: c.config.StatusPollingInterval}, nil
 }
 
 func (c *Controller) evaluate(obj *unstructured.Unstructured, kind string) (bool, bool) {
 	switch kind {
-	// TODO: Daemonset, etc. Also support CRs with a condition matcher annotation
 	case "Deployment":
 		deploy := &appsv1.Deployment{}
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, deploy); err != nil {
