@@ -15,6 +15,7 @@ import (
 	"github.com/Azure/eno/conf"
 	"github.com/Azure/eno/controllers/generation"
 	"github.com/Azure/eno/controllers/reconciliation"
+	"github.com/Azure/eno/controllers/status"
 )
 
 func main() {
@@ -54,6 +55,9 @@ func run() error {
 	}
 	if err := reconciliation.NewController(mgr, config); err != nil {
 		return fmt.Errorf("adding reconciliation controller: %w", err)
+	}
+	if err := status.NewController(mgr, config); err != nil {
+		return fmt.Errorf("adding status controller: %w", err)
 	}
 
 	return mgr.Start(ctrl.SetupSignalHandler())

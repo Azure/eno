@@ -60,6 +60,7 @@ const (
 	GeneratedConditionType  = "eno.azure.io/generated"
 	ReconciledConditionType = "eno.azure.io/reconciled"
 	DeadlockedConditionType = "eno.azure.io/deadlocked"
+	ReadyConditionType      = "eno.azure.io/ready"
 )
 
 type CompositionStatus struct {
