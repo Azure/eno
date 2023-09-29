@@ -17,21 +17,24 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/conf"
+	"github.com/Azure/eno/internal/clientmgr"
 )
 
 const finalizerName = "eno.azure.io/cleanup"
 
 type Controller struct {
-	config *conf.Config
-	client client.Client
-	logger logr.Logger
+	config    *conf.Config
+	client    client.Client
+	clientMgr *clientmgr.Manager[string]
+	logger    logr.Logger
 }
 
-func NewController(mgr ctrl.Manager, config *conf.Config) error {
+func NewController(mgr ctrl.Manager, cmgr *clientmgr.Manager[string], config *conf.Config) error {
 	c := &Controller{
-		config: config,
-		client: mgr.GetClient(),
-		logger: mgr.GetLogger(),
+		config:    config,
+		client:    mgr.GetClient(),
+		clientMgr: cmgr,
+		logger:    mgr.GetLogger(),
 	}
 
 	_, err := ctrl.NewControllerManagedBy(mgr).
@@ -60,7 +63,10 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, fmt.Errorf("parsing resource manifest as json: %w", err)
 	}
 
-	cli := c.client // Support external clients in the future
+	cli, err := c.clientMgr.GetClient(ctx, "")
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 
 	current := res.DeepCopy()
 	err = cli.Get(ctx, client.ObjectKeyFromObject(res), current)

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 
@@ -13,6 +15,7 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/conf"
+	"github.com/Azure/eno/internal/clientmgr"
 	"github.com/Azure/eno/internal/controllers/generation"
 	"github.com/Azure/eno/internal/controllers/reconciliation"
 	"github.com/Azure/eno/internal/controllers/status"
@@ -41,10 +44,13 @@ func run() error {
 		Logger: zapr.NewLogger(zapLog),
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), opts)
+	rc := ctrl.GetConfigOrDie()
+
+	mgr, err := ctrl.NewManager(rc, opts)
 	if err != nil {
 		return fmt.Errorf("constructing controller manager: %w", err)
 	}
+	cmgr := clientmgr.New(mgr.GetClient(), getRestConfig)
 	if err := mgr.AddHealthzCheck("running", healthz.Ping); err != nil {
 		return fmt.Errorf("adding ping healthz check: %w", err)
 	}
@@ -54,10 +60,10 @@ func run() error {
 	if err := generation.NewController(mgr, config); err != nil {
 		return fmt.Errorf("adding generation controller: %w", err)
 	}
-	if err := reconciliation.NewController(mgr, config); err != nil {
+	if err := reconciliation.NewController(mgr, cmgr, config); err != nil {
 		return fmt.Errorf("adding reconciliation controller: %w", err)
 	}
-	if err := status.NewController(mgr, config); err != nil {
+	if err := status.NewController(mgr, cmgr, config); err != nil {
 		return fmt.Errorf("adding status controller: %w", err)
 	}
 	if err := statusagg.NewController(mgr, config); err != nil {
@@ -65,4 +71,9 @@ func run() error {
 	}
 
 	return mgr.Start(ctrl.SetupSignalHandler())
+}
+
+func getRestConfig(ctx context.Context, kubeconfigSecretName string) (*rest.Config, error) {
+	// TODO: Support external clients
+	return nil, nil
 }
