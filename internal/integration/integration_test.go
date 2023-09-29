@@ -3,6 +3,7 @@ package integration
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
@@ -29,30 +31,53 @@ import (
 	"github.com/Azure/eno/internal/wrapper"
 )
 
-func TestSimple(t *testing.T) {
+var testCases = []struct {
+	Name     string
+	Inputs   []client.Object
+	Versions []composition.GenerateFn
+}{
+	{
+		Name: "basic-configmap",
+		Versions: []composition.GenerateFn{
+			func(i *composition.Inputs) ([]client.Object, error) {
+				cm := &corev1.ConfigMap{}
+				cm.Name = "test-configmap"
+				cm.Data = map[string]string{"foo": "bar"}
+
+				return []client.Object{cm}, nil
+			},
+			func(i *composition.Inputs) ([]client.Object, error) {
+				return []client.Object{}, nil
+			},
+		},
+	},
+}
+
+func TestTable(t *testing.T) {
 	mgr := setup(t)
 
-	comp := &apiv1.Composition{}
-	comp.Name = "test-1"
-	comp.Spec.Generator = &apiv1.Generator{
-		Image: "test-generator-1",
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			for i, gen := range tc.Versions {
+				comp := &apiv1.Composition{}
+				comp.Name = tc.Name
+				current := comp.DeepCopy()
+
+				image := fmt.Sprintf("%s-%d", tc.Name, i)
+
+				mgr.AddJobHandler(image, compose(t, mgr, comp, gen))
+				wait := mgr.WaitForCondition(t, comp.Name, apiv1.ReconciledConditionType, metav1.ConditionTrue)
+
+				_, err := controllerutil.CreateOrUpdate(context.Background(), mgr.GetClient(), current, func() error {
+					comp.Spec.Generator = &apiv1.Generator{Image: image}
+					return nil
+				})
+				require.NoError(t, err)
+
+				<-wait
+			}
+		})
 	}
-
-	mgr.AddJobHandler("test-generator-1", compose(t, mgr, comp,
-		func(i *composition.Inputs) ([]client.Object, error) {
-			cm := &corev1.ConfigMap{}
-			cm.Name = "test-configmap"
-			cm.Data = map[string]string{"foo": "bar"}
-
-			return []client.Object{cm}, nil
-		}))
-
-	wait := mgr.WaitForCondition(t, comp.Name, apiv1.ReconciledConditionType, metav1.ConditionTrue)
-
-	err := mgr.GetClient().Create(context.Background(), comp)
-	require.NoError(t, err)
-
-	<-wait
 }
 
 func setup(t *testing.T) *testManager {
@@ -208,7 +233,7 @@ func (c *compositionWatcher) WaitForCondition(t *testing.T, composition, condTyp
 
 	c.handlers[composition] = func(comp *apiv1.Composition) {
 		cond := meta.FindStatusCondition(comp.Status.Conditions, condType)
-		if cond != nil && cond.Status == condStatus {
+		if cond != nil && cond.Status == condStatus && cond.ObservedGeneration == comp.Generation {
 			cancel()
 			delete(c.handlers, composition)
 		}
