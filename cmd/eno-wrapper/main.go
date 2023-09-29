@@ -10,9 +10,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"os/exec"
 	"strconv"
+	"time"
 
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -39,6 +41,7 @@ func run() error {
 		wait           = flag.Bool("wait", false, "sleep forever")
 	)
 	flag.Parse()
+	rand.Seed(time.Now().UnixNano())
 
 	if *shouldGenerate {
 		return generate()
@@ -134,9 +137,8 @@ func generate() error {
 	}
 
 	// Output decoding
-	currentResources := map[string]*apiv1.GeneratedResource{}
+	raws := []*unstructured.Unstructured{}
 	dec := json.NewDecoder(outputBuf)
-	// TODO: Randomize reconciliation order?
 	for {
 		raw := &unstructured.Unstructured{}
 		if err := dec.Decode(raw); err != nil {
@@ -149,7 +151,13 @@ func generate() error {
 		if raw.GetName() == "" || raw.GetKind() == "" {
 			continue
 		}
+		raws = append(raws, raw)
+	}
+	rand.Shuffle(len(raws), func(i, j int) { raws[i], raws[j] = raws[j], raws[i] })
 
+	// Positive reconciliation
+	currentResources := map[string]*apiv1.GeneratedResource{}
+	for _, raw := range raws {
 		hash := sha256.Sum256([]byte(raw.GetName() + raw.GetKind()))
 		hashStr := hex.EncodeToString(hash[:])[:7]
 
@@ -180,7 +188,7 @@ func generate() error {
 		currentResources[res.Name] = res
 	}
 
-	// Remove orphaned resources
+	// Negative reconciliation
 	all := &apiv1.GeneratedResourceList{}
 	err = cli.List(ctx, all, client.MatchingLabels{"composition": comp.Name})
 	if err != nil {
