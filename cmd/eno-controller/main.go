@@ -16,10 +16,7 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/conf"
 	"github.com/Azure/eno/internal/clientmgr"
-	"github.com/Azure/eno/internal/controllers/generation"
-	"github.com/Azure/eno/internal/controllers/reconciliation"
-	"github.com/Azure/eno/internal/controllers/status"
-	"github.com/Azure/eno/internal/controllers/statusagg"
+	"github.com/Azure/eno/internal/controllers"
 )
 
 func main() {
@@ -57,17 +54,8 @@ func run() error {
 	if err := apiv1.SchemeBuilder.AddToScheme(mgr.GetScheme()); err != nil {
 		return fmt.Errorf("adding scheme: %w", err)
 	}
-	if err := generation.NewController(mgr, config); err != nil {
-		return fmt.Errorf("adding generation controller: %w", err)
-	}
-	if err := reconciliation.NewController(mgr, cmgr, config); err != nil {
-		return fmt.Errorf("adding reconciliation controller: %w", err)
-	}
-	if err := status.NewController(mgr, cmgr, config); err != nil {
-		return fmt.Errorf("adding status controller: %w", err)
-	}
-	if err := statusagg.NewController(mgr, config); err != nil {
-		return fmt.Errorf("adding status aggregation controller: %w", err)
+	if err := controllers.New(mgr, cmgr, config); err != nil {
+		return err
 	}
 
 	return mgr.Start(ctrl.SetupSignalHandler())

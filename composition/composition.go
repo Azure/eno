@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -23,11 +24,15 @@ func MustGenerate(scheme *runtime.Scheme, fn GenerateFn) {
 }
 
 func Generate(scheme *runtime.Scheme, fn GenerateFn) error {
+	return GenerateForIO(scheme, os.Stdin, os.Stdout, fn)
+}
+
+func GenerateForIO(scheme *runtime.Scheme, i io.Reader, o io.Writer, fn GenerateFn) error {
 	codec := serializer.NewCodecFactory(scheme)
 	dec := codec.UniversalDeserializer()
 
 	inputs := []client.Object{}
-	r := bufio.NewScanner(os.Stdin)
+	r := bufio.NewScanner(i)
 	for r.Scan() {
 		obj, _, err := dec.Decode(r.Bytes(), &schema.GroupVersionKind{}, nil)
 		if err != nil {
@@ -44,7 +49,7 @@ func Generate(scheme *runtime.Scheme, fn GenerateFn) error {
 		return err
 	}
 
-	enc := json.NewEncoder(os.Stdout)
+	enc := json.NewEncoder(o)
 	for _, out := range outputs {
 		gvk, err := apiutil.GVKForObject(out, scheme)
 		if err != nil {
