@@ -32,6 +32,9 @@ spec:
           metadata:
             type: object
           spec:
+            properties:
+              value:
+                type: integer
             type: object
           status:
             type: object

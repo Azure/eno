@@ -15,10 +15,10 @@ metadata:
   name: example
 spec:
   revision: 3
-  inputs:
-  - apiVersion: v1
-    kind: ConfigMap
-    namespace: "default"
-    name: "test-inputs"
+  # inputs:
+  # - apiVersion: v1
+  #   kind: ConfigMap
+  #   namespace: "default"
+  #   name: "test-inputs"
   generator:
-    image: "joolshevsoak.azurecr.io/eno-example:v11"
+    image: "joolshevsoak.azurecr.io/eno-example:v12"

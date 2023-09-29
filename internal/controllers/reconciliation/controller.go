@@ -106,6 +106,9 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	// Update
 	if !deepCompare(current, res) {
+		// TODO: What merge semantics should we use?
+		res.SetResourceVersion(current.GetResourceVersion())
+
 		err = cli.Update(ctx, res)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating resource: %w", err)
