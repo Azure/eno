@@ -1,7 +1,7 @@
 FROM golang:1.20 AS builder
 WORKDIR /app
 COPY . .
-RUN CGO_ENABLED=0 go build -o /eno-example ./example
+RUN CGO_ENABLED=0 go build -o /eno-example ./example/crd
 
 FROM scratch
 ENV PATH=/bin
