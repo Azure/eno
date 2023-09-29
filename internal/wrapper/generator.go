@@ -151,6 +151,14 @@ func (g *Generator) Generate(ctx context.Context) error {
 		g.Logger.Info("wrote resource", zap.String("name", res.Name), zap.String("namespace", res.Namespace), zap.String("kind", res.Kind))
 	}
 
+	// Get the composition again in case it's changed already
+	err = g.Client.Get(ctx, client.ObjectKeyFromObject(comp), comp, &client.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("getting composition resource: %w", err)
+	}
+	if comp.Generation != g.CompositionGeneration {
+		return fmt.Errorf("this job is no longer necessary - (%d != %d)", comp.Generation, g.CompositionGeneration)
+	}
 	meta.SetStatusCondition(&comp.Status.Conditions, metav1.Condition{
 		Type:               apiv1.GeneratedConditionType,
 		Status:             metav1.ConditionTrue,
