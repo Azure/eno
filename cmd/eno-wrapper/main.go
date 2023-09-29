@@ -136,6 +136,7 @@ func generate() error {
 	// Output decoding
 	currentResources := map[string]*apiv1.GeneratedResource{}
 	dec := json.NewDecoder(outputBuf)
+	// TODO: Randomize reconciliation order?
 	for {
 		raw := &unstructured.Unstructured{}
 		if err := dec.Decode(raw); err != nil {

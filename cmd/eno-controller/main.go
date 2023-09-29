@@ -13,10 +13,10 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/conf"
-	"github.com/Azure/eno/controllers/generation"
-	"github.com/Azure/eno/controllers/reconciliation"
-	"github.com/Azure/eno/controllers/status"
-	"github.com/Azure/eno/controllers/statusagg"
+	"github.com/Azure/eno/internal/controllers/generation"
+	"github.com/Azure/eno/internal/controllers/reconciliation"
+	"github.com/Azure/eno/internal/controllers/status"
+	"github.com/Azure/eno/internal/controllers/statusagg"
 )
 
 func main() {
