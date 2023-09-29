@@ -16,6 +16,7 @@ import (
 	"github.com/Azure/eno/controllers/generation"
 	"github.com/Azure/eno/controllers/reconciliation"
 	"github.com/Azure/eno/controllers/status"
+	"github.com/Azure/eno/controllers/statusagg"
 )
 
 func main() {
@@ -58,6 +59,9 @@ func run() error {
 	}
 	if err := status.NewController(mgr, config); err != nil {
 		return fmt.Errorf("adding status controller: %w", err)
+	}
+	if err := statusagg.NewController(mgr, config); err != nil {
+		return fmt.Errorf("adding status aggregation controller: %w", err)
 	}
 
 	return mgr.Start(ctrl.SetupSignalHandler())

@@ -1,7 +1,6 @@
-- Controller to aggregate status of each GR into the associated composition
 - Support annotation for ignoring fields during reconciliation
 - Support annotation for reconciliation ordering
-  - With or without waiting for readines
+  - With or without waiting for readiness
 - How/what should specify resource limits, security configs, etc. for job pods?
 - Dynamic/external client support
 - Support getting CR status using condition matcher in annotation
