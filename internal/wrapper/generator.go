@@ -11,7 +11,6 @@ import (
 	"io"
 	"math/rand"
 
-	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -135,7 +134,7 @@ func (g *Generator) Generate(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("deleting orphaned resources: %w", err)
 		}
-		g.Logger.Info("deleted resource", zap.String("name", res.Name), zap.String("namespace", res.Namespace), zap.String("kind", res.Kind))
+		g.Logger.Info("deleted resource", "name", res.Name, "namespace", res.Namespace, "kind", res.Kind)
 	}
 
 	// Write changes
@@ -148,7 +147,7 @@ func (g *Generator) Generate(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("storing generated resource: %w", err)
 		}
-		g.Logger.Info("wrote resource", zap.String("name", res.Name), zap.String("namespace", res.Namespace), zap.String("kind", res.Kind))
+		g.Logger.Info("wrote resource", "name", res.Name, "namespace", res.Namespace, "kind", res.Kind)
 	}
 
 	// Get the composition again in case it's changed already

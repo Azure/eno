@@ -62,7 +62,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// Readiness agg logic
 	ok := true
 	for _, gr := range grs.Items {
-		if len(gr.OwnerReferences) == 0 || gr.OwnerReferences[0].UID != comp.UID {
+		if len(gr.OwnerReferences) == 0 || gr.OwnerReferences[0].UID != comp.UID || gr.Status.DerivedGeneration != comp.Generation {
 			continue
 		}
 		grCond := meta.FindStatusCondition(gr.Status.Conditions, apiv1.ReadyConditionType)
