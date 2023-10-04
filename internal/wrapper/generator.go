@@ -11,8 +11,6 @@ import (
 	"io"
 	"math/rand"
 
-	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -81,6 +79,7 @@ func (g *Generator) Generate(ctx context.Context) error {
 			continue
 		}
 		raws = append(raws, raw)
+		// TODO: Refactor to build resources here?
 	}
 	rand.Shuffle(len(raws), func(i, j int) { raws[i], raws[j] = raws[j], raws[i] })
 
@@ -98,7 +97,7 @@ func (g *Generator) Generate(ctx context.Context) error {
 		if client.IgnoreNotFound(err) != nil {
 			return fmt.Errorf("getting current generated resource state: %w", err)
 		}
-		if res.Status.DerivedGeneration == comp.Generation {
+		if res.Spec.DerivedGeneration == comp.Generation {
 			continue // already in sync
 		}
 
@@ -113,7 +112,7 @@ func (g *Generator) Generate(ctx context.Context) error {
 			return fmt.Errorf("encoding generated resource as json: %w", err)
 		}
 		res.Spec.Manifest = string(js)
-		res.Status.DerivedGeneration = comp.Generation
+		res.Spec.DerivedGeneration = comp.Generation
 		currentResources[res.Name] = res
 	}
 
@@ -150,7 +149,7 @@ func (g *Generator) Generate(ctx context.Context) error {
 		g.Logger.Info("wrote resource", "name", res.Name, "namespace", res.Namespace, "kind", res.Kind)
 	}
 
-	// Get the composition again in case it's changed already
+	// Status updates
 	err = g.Client.Get(ctx, client.ObjectKeyFromObject(comp), comp, &client.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("getting composition resource: %w", err)
@@ -158,14 +157,7 @@ func (g *Generator) Generate(ctx context.Context) error {
 	if comp.Generation != g.CompositionGeneration {
 		return fmt.Errorf("this job is no longer necessary - (%d != %d)", comp.Generation, g.CompositionGeneration)
 	}
-	meta.SetStatusCondition(&comp.Status.Conditions, metav1.Condition{
-		Type:               apiv1.GeneratedConditionType,
-		Status:             metav1.ConditionTrue,
-		ObservedGeneration: comp.Generation,
-		LastTransitionTime: metav1.Now(),
-		Reason:             "JobCompleted",
-		Message:            "the resource generation job completed successfully",
-	})
-
+	comp.Status.ObservedGeneration = comp.Generation
+	comp.Status.GeneratedResourceCount = int64(len(raws))
 	return g.Client.Status().Update(ctx, comp)
 }

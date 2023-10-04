@@ -57,14 +57,14 @@ type InputRef struct {
 }
 
 const (
-	GeneratedConditionType  = "eno.azure.io/generated"
 	ReconciledConditionType = "eno.azure.io/reconciled"
-	DeadlockedConditionType = "eno.azure.io/deadlocked"
 	ReadyConditionType      = "eno.azure.io/ready"
 )
 
 type CompositionStatus struct {
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	ObservedGeneration     int64              `json:"observedGeneration,omitempty"`
+	GeneratedResourceCount int64              `json:"generatedResourceCount,omitempty"`
+	Conditions             []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -88,11 +88,9 @@ type GeneratedResource struct {
 type GeneratedResourceSpec struct {
 	Manifest          string           `json:"manifest,omitempty"`
 	ReconcileInterval *metav1.Duration `json:"reconcileInterval,omitempty"`
+	DerivedGeneration int64            `json:"derivedGeneration,omitempty"`
 }
 
 type GeneratedResourceStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
-
-	// DerivedGeneration is the generation of the Composition resource that this resource was generated from.
-	DerivedGeneration int64 `json:"derivedGeneration,omitempty"`
 }

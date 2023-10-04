@@ -33,6 +33,9 @@ spec:
             type: object
           spec:
             properties:
+              derivedGeneration:
+                format: int64
+                type: integer
               manifest:
                 type: string
               reconcileInterval:
@@ -108,11 +111,6 @@ spec:
                   - type
                   type: object
                 type: array
-              derivedGeneration:
-                description: DerivedGeneration is the generation of the Composition
-                  resource that this resource was generated from.
-                format: int64
-                type: integer
             type: object
         type: object
     served: true

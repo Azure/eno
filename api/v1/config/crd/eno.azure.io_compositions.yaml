@@ -127,6 +127,12 @@ spec:
                   - type
                   type: object
                 type: array
+              generatedResourceCount:
+                format: int64
+                type: integer
+              observedGeneration:
+                format: int64
+                type: integer
             type: object
         type: object
     served: true

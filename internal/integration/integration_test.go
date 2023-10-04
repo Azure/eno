@@ -52,6 +52,7 @@ var testCases = []struct {
 				Verify: func(t *testing.T, c client.Client) {
 					cm := &corev1.ConfigMap{}
 					cm.Name = "test-configmap"
+					cm.Namespace = "default"
 					err := c.Get(context.Background(), client.ObjectKeyFromObject(cm), cm)
 					require.NoError(t, err)
 					assert.Equal(t, map[string]string{"foo": "bar"}, cm.Data)

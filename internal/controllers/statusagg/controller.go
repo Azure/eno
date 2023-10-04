@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -41,59 +42,74 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition: %w", err))
 	}
+	if comp.Status.ObservedGeneration != comp.Generation {
+		return ctrl.Result{}, nil
+	}
+	original := comp.DeepCopy()
 
-	// TODO: Use an index to avoid listing all GRs
 	grs := &apiv1.GeneratedResourceList{}
-	err = c.client.List(ctx, grs)
+	err = c.client.List(ctx, grs, client.MatchingLabels{"composition": comp.Name})
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("listing generated resources: %w", err))
 	}
 
-	// Condition construction
-	cond := meta.FindStatusCondition(comp.Status.Conditions, apiv1.ReadyConditionType)
-	if cond == nil {
-		cond = &metav1.Condition{
-			Type:               apiv1.ReadyConditionType,
-			ObservedGeneration: comp.Generation,
-			LastTransitionTime: metav1.Now(),
-		}
-	}
-
-	// Readiness agg logic
-	ok := true
+	// Aggregation
+	var ready, reconciled int64
 	for _, gr := range grs.Items {
-		if len(gr.OwnerReferences) == 0 || gr.OwnerReferences[0].UID != comp.UID || gr.Status.DerivedGeneration != comp.Generation {
+		if gr.Spec.DerivedGeneration != comp.Generation {
 			continue
 		}
-		grCond := meta.FindStatusCondition(gr.Status.Conditions, apiv1.ReadyConditionType)
-		if grCond == nil || grCond.Status == metav1.ConditionFalse {
-			ok = false
-			break
+		cond := meta.FindStatusCondition(gr.Status.Conditions, apiv1.ReadyConditionType)
+		if cond != nil && cond.Status == metav1.ConditionTrue {
+			ready++
+		}
+		cond = meta.FindStatusCondition(gr.Status.Conditions, apiv1.ReconciledConditionType)
+		if cond != nil && cond.Status == metav1.ConditionTrue {
+			reconciled++
 		}
 	}
 
-	// Updates
-	orig := cond.DeepCopy()
-	if ok {
-		cond.Status = metav1.ConditionTrue
-		cond.Reason = "Ready"
-		cond.Message = "All resources are ready"
+	// Condition writes
+	readyCond := metav1.Condition{
+		Type:               apiv1.ReadyConditionType,
+		ObservedGeneration: comp.Generation,
+		LastTransitionTime: metav1.Now(),
+	}
+	if ready == comp.Status.GeneratedResourceCount {
+		readyCond.Status = metav1.ConditionTrue
+		readyCond.Reason = "Ready"
+		readyCond.Message = "All resources are ready"
 	} else {
-		cond.Status = metav1.ConditionFalse
-		cond.Reason = "NotReady"
-		cond.Message = "One or more resources is not ready"
+		readyCond.Status = metav1.ConditionFalse
+		readyCond.Reason = "NotReady"
+		readyCond.Message = fmt.Sprintf("only %d out of %d are ready", ready, comp.Status.GeneratedResourceCount)
 	}
+	meta.SetStatusCondition(&comp.Status.Conditions, readyCond)
 
-	// Writes
-	if cond.Status == orig.Status {
-		return ctrl.Result{}, nil // already in sync
+	recociledCond := metav1.Condition{
+		Type:               apiv1.ReconciledConditionType,
+		ObservedGeneration: comp.Generation,
+		LastTransitionTime: metav1.Now(),
 	}
-	meta.SetStatusCondition(&comp.Status.Conditions, *cond)
+	if reconciled == comp.Status.GeneratedResourceCount {
+		recociledCond.Status = metav1.ConditionTrue
+		recociledCond.Reason = "Synced"
+		recociledCond.Message = "All resources are in sync"
+	} else {
+		recociledCond.Status = metav1.ConditionFalse
+		recociledCond.Reason = "OutOfSync"
+		recociledCond.Message = fmt.Sprintf("only %d out of %d are in sync", reconciled, comp.Status.GeneratedResourceCount)
+	}
+	meta.SetStatusCondition(&comp.Status.Conditions, recociledCond)
+
+	if equality.Semantic.DeepEqual(comp, original.Status) {
+		return ctrl.Result{}, nil // no changes
+	}
 	err = c.client.Status().Update(ctx, comp)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 	}
 
-	c.logger.Info("updated composition readiness status")
+	c.logger.Info("updated aggregated composition status")
 	return ctrl.Result{}, nil
 }
