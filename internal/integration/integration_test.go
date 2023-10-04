@@ -39,7 +39,7 @@ var testCases = []struct {
 	States []*state
 }{
 	{
-		Name: "add-remove-single-configmap",
+		Name: "crud-single-configmap",
 		States: []*state{
 			{
 				Generate: func(i *composition.Inputs) ([]client.Object, error) {
@@ -57,6 +57,24 @@ var testCases = []struct {
 					err := c.Get(context.Background(), client.ObjectKeyFromObject(cm), cm)
 					require.NoError(t, err)
 					assert.Equal(t, map[string]string{"foo": "bar"}, cm.Data)
+				},
+			},
+			{
+				Generate: func(i *composition.Inputs) ([]client.Object, error) {
+					cm := &corev1.ConfigMap{}
+					cm.Name = "test-configmap"
+					cm.Namespace = "default"
+					cm.Data = map[string]string{"bar": "baz"}
+
+					return []client.Object{cm}, nil
+				},
+				Verify: func(t *testing.T, c client.Client) {
+					cm := &corev1.ConfigMap{}
+					cm.Name = "test-configmap"
+					cm.Namespace = "default"
+					err := c.Get(context.Background(), client.ObjectKeyFromObject(cm), cm)
+					require.NoError(t, err)
+					assert.Equal(t, map[string]string{"bar": "baz"}, cm.Data)
 				},
 			},
 			{

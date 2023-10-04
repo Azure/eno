@@ -68,6 +68,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			reconciled++
 		}
 	}
+	grCount := int64(len(grs.Items))
 
 	// Condition writes
 	readyCond := metav1.Condition{
@@ -75,7 +76,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		ObservedGeneration: comp.Generation,
 		LastTransitionTime: metav1.Now(),
 	}
-	if ready == comp.Status.GeneratedResourceCount {
+	if grCount == comp.Status.GeneratedResourceCount && ready == grCount {
 		readyCond.Status = metav1.ConditionTrue
 		readyCond.Reason = "Ready"
 		readyCond.Message = "All resources are ready"
@@ -91,7 +92,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		ObservedGeneration: comp.Generation,
 		LastTransitionTime: metav1.Now(),
 	}
-	if reconciled == comp.Status.GeneratedResourceCount {
+	if grCount == comp.Status.GeneratedResourceCount && reconciled == grCount {
 		recociledCond.Status = metav1.ConditionTrue
 		recociledCond.Reason = "Synced"
 		recociledCond.Message = "All resources are in sync"
