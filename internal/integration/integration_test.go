@@ -91,7 +91,7 @@ func TestTable(t *testing.T) {
 				image := fmt.Sprintf("%s-%d", tc.Name, i)
 
 				mgr.AddJobHandler(image, compose(t, mgr, comp, state.Generate))
-				wait := mgr.WaitForCondition(t, comp.Name, apiv1.GeneratedConditionType, metav1.ConditionTrue)
+				wait := mgr.WaitForCondition(t, comp.Name, apiv1.ReconciledConditionType, metav1.ConditionTrue)
 				// TODO: Wait for all GRs to be reconciled
 
 				_, err := controllerutil.CreateOrUpdate(context.Background(), mgr.GetClient(), current, func() error {

@@ -1,3 +1,5 @@
+- Retry jobs forever with backoff, remove deadlock condition
+- Consider merging reconciled/generated conditions?
 - Better UX for composition helpers package
 - Integration tests
 - Support annotation for ignoring fields during reconciliation (consider field ownership/merge semantics more broadly)
