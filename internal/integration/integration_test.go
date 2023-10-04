@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
@@ -33,13 +34,13 @@ import (
 )
 
 var testCases = []struct {
-	Name     string
-	Inputs   []client.Object
-	Versions []*state
+	Name   string
+	Inputs []client.Object
+	States []*state
 }{
 	{
-		Name: "basic-configmap",
-		Versions: []*state{
+		Name: "add-remove-single-configmap",
+		States: []*state{
 			{
 				Generate: func(i *composition.Inputs) ([]client.Object, error) {
 					cm := &corev1.ConfigMap{}
@@ -58,17 +59,18 @@ var testCases = []struct {
 					assert.Equal(t, map[string]string{"foo": "bar"}, cm.Data)
 				},
 			},
-			// {
-			// 	Generate: func(i *composition.Inputs) ([]client.Object, error) {
-			// 		return []client.Object{}, nil
-			// 	},
-			// 	Verify: func(t *testing.T, c client.Client) {
-			// 		cm := &corev1.ConfigMap{}
-			// 		cm.Name = "test-configmap"
-			// 		err := c.Get(context.Background(), client.ObjectKeyFromObject(cm), cm)
-			// 		assert.True(t, errors.IsNotFound(err))
-			// 	},
-			// },
+			{
+				Generate: func(i *composition.Inputs) ([]client.Object, error) {
+					return []client.Object{}, nil
+				},
+				Verify: func(t *testing.T, c client.Client) {
+					cm := &corev1.ConfigMap{}
+					cm.Name = "test-configmap"
+					cm.Namespace = "default"
+					err := c.Get(context.Background(), client.ObjectKeyFromObject(cm), cm)
+					assert.True(t, errors.IsNotFound(err) || (cm != nil && cm.DeletionTimestamp != nil))
+				},
+			},
 		},
 	},
 }
@@ -83,29 +85,23 @@ func TestTable(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
-			for i, state := range tc.Versions {
-				comp := &apiv1.Composition{}
-				comp.Name = tc.Name
-				current := comp.DeepCopy()
-				mgr.GetLogger().Info("starting table test segment", "name", tc.Name, "version", i)
+			for i, state := range tc.States {
+				mgr.GetLogger().Info("starting table test segment", "name", tc.Name, "state", i)
 
 				image := fmt.Sprintf("%s-%d", tc.Name, i)
+				mgr.AddJobHandler(image, compose(t, mgr, tc.Name, state.Generate))
 
-				mgr.AddJobHandler(image, compose(t, mgr, comp, state.Generate))
-				wait := mgr.WaitForCondition(t, comp.Name, apiv1.ReconciledConditionType, metav1.ConditionTrue)
-				// TODO: Wait for all GRs to be reconciled
-
-				_, err := controllerutil.CreateOrUpdate(context.Background(), mgr.GetClient(), current, func() error {
-					current.Spec.Generator = &apiv1.Generator{Image: image}
-					return nil
-				})
-				require.NoError(t, err)
-
+				wait := mgr.WaitForCondition(t, tc.Name, apiv1.ReconciledConditionType, metav1.ConditionTrue)
+				syncTestComposition(t, mgr, tc.Name, image)
 				<-wait
+
 				state.Verify(t, mgr.GetClient())
 			}
 
-			// TODO: Delete
+			mgr.GetLogger().Info("cleaning up table test segment", "name", tc.Name)
+			wait := mgr.WaitForDeletion(t, tc.Name)
+			deleteTestComposition(t, mgr, tc.Name)
+			<-wait
 		})
 	}
 }
@@ -254,8 +250,25 @@ func (c *compositionWatcher) WaitForCondition(t *testing.T, composition, condTyp
 	// TODO: Timeout eventually
 
 	c.handlers[composition] = func(comp *apiv1.Composition) {
+		if comp == nil {
+			return
+		}
 		cond := meta.FindStatusCondition(comp.Status.Conditions, condType)
 		if cond != nil && cond.Status == condStatus && cond.ObservedGeneration == comp.Generation {
+			cancel()
+			delete(c.handlers, composition)
+		}
+	}
+
+	return ctx.Done()
+}
+
+func (c *compositionWatcher) WaitForDeletion(t *testing.T, composition string) <-chan struct{} {
+	ctx, cancel := context.WithCancel(context.Background())
+	// TODO: Timeout eventually
+
+	c.handlers[composition] = func(comp *apiv1.Composition) {
+		if comp == nil {
 			cancel()
 			delete(c.handlers, composition)
 		}
@@ -268,21 +281,31 @@ func (c *compositionWatcher) Reconcile(ctx context.Context, req ctrl.Request) (c
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, req.NamespacedName, comp)
 	if err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if errors.IsNotFound(err) {
+			comp = nil
+		} else {
+			return ctrl.Result{}, err
+		}
 	}
-	handler := c.handlers[comp.Name]
+
+	return c.invokeHandler(req.Name, comp)
+}
+
+func (c *compositionWatcher) invokeHandler(name string, comp *apiv1.Composition) (ctrl.Result, error) {
+	handler := c.handlers[name]
 	if handler == nil {
 		return ctrl.Result{}, nil
 	}
-	handler(comp)
 
+	handler(comp)
 	return ctrl.Result{}, nil
 }
 
-func compose(t *testing.T, mgr *testManager, comp *apiv1.Composition, fn composition.GenerateFn) func() {
+func compose(t *testing.T, mgr *testManager, comp string, fn composition.GenerateFn) func() {
 	return func() {
 		current := &apiv1.Composition{}
-		err := mgr.GetClient().Get(context.Background(), client.ObjectKeyFromObject(comp), current)
+		current.Name = comp
+		err := mgr.GetClient().Get(context.Background(), client.ObjectKeyFromObject(current), current)
 		require.NoError(t, err)
 
 		gen := &wrapper.Generator{
@@ -299,4 +322,25 @@ func compose(t *testing.T, mgr *testManager, comp *apiv1.Composition, fn composi
 		err = gen.Generate(context.Background())
 		require.NoError(t, err)
 	}
+}
+
+func syncTestComposition(t *testing.T, mgr ctrl.Manager, name, generatorImage string) {
+	comp := &apiv1.Composition{}
+	comp.Name = name
+	_, err := controllerutil.CreateOrUpdate(context.Background(), mgr.GetClient(), comp, func() error {
+		comp.Spec.Generator = &apiv1.Generator{Image: generatorImage}
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+func deleteTestComposition(t *testing.T, mgr ctrl.Manager, name string) {
+	comp := &apiv1.Composition{}
+	comp.Name = name
+
+	err := mgr.GetClient().Get(context.Background(), client.ObjectKeyFromObject(comp), comp)
+	require.NoError(t, err)
+
+	err = mgr.GetClient().Delete(context.Background(), comp)
+	require.NoError(t, err)
 }
