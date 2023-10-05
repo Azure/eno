@@ -24,7 +24,7 @@ func (m *Manager[T]) GetClient(ctx context.Context, key T) (client.Client, error
 		return nil, err
 	}
 
-	// TODO: Cache clients
+	// TODO(jordan): Add support for pooled external clients
 
 	var cli client.Client
 	if rc == nil {

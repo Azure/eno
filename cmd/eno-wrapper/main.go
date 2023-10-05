@@ -83,6 +83,7 @@ func generate() error {
 	}
 	gen, _ := strconv.ParseInt(genStr, 10, 0)
 
+	// TODO(jordan): Allow rate limiting to be configured
 	cli, err := client.New(ctrl.GetConfigOrDie(), client.Options{})
 	if err != nil {
 		return fmt.Errorf("constructing new k8s client: %w", err)
@@ -102,6 +103,7 @@ func generate() error {
 }
 
 func spawnChild(ctx context.Context, buf []byte) ([]byte, error) {
+	// TODO(jordan): Some process sandboxing (no network access, etc.)
 	cmd := exec.CommandContext(ctx, "generate")
 	cmd.Stdin = bytes.NewBuffer(buf)
 

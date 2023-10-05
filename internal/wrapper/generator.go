@@ -50,17 +50,25 @@ func (g *Generator) Generate(ctx context.Context) error {
 		return err
 	}
 
-	goal, goalByName, err := g.buildOutputs(ctx, comp, outputJson)
+	goal, names, err := g.buildOutputs(ctx, comp, outputJson)
 	if err != nil {
 		return err
 	}
 
-	err = g.reconcileNegative(ctx, comp, goalByName)
+	// TODO(jordan): Pagination for this list to support high resource count
+	current := &apiv1.GeneratedResourceList{}
+	err = g.Client.List(ctx, current, client.MatchingLabels{"composition": comp.Name})
+	if err != nil {
+		return fmt.Errorf("listng current generated resource state: %w", err)
+	}
+	rand.Shuffle(len(current.Items), func(i, j int) { current.Items[i], current.Items[j] = current.Items[j], current.Items[i] })
+
+	currentByName, err := g.reconcileNegative(ctx, comp, current, names)
 	if err != nil {
 		return err
 	}
 
-	err = g.reconcilePositive(ctx, comp, goal)
+	err = g.reconcilePositive(ctx, comp, goal, currentByName)
 	if err != nil {
 		return err
 	}
@@ -90,9 +98,9 @@ func (g *Generator) fetchInputResources(ctx context.Context, comp *apiv1.Composi
 	return buffer.Bytes(), nil
 }
 
-func (g *Generator) buildOutputs(ctx context.Context, comp *apiv1.Composition, buffer []byte) ([]*apiv1.GeneratedResource, map[string]*apiv1.GeneratedResource, error) {
+func (g *Generator) buildOutputs(ctx context.Context, comp *apiv1.Composition, buffer []byte) ([]*apiv1.GeneratedResource, map[string]struct{}, error) {
 	goal := []*apiv1.GeneratedResource{}
-	goalByName := map[string]*apiv1.GeneratedResource{}
+	names := map[string]struct{}{}
 	dec := json.NewDecoder(bytes.NewBuffer(buffer))
 
 	for {
@@ -107,72 +115,73 @@ func (g *Generator) buildOutputs(ctx context.Context, comp *apiv1.Composition, b
 			continue // invalid resource
 		}
 
-		res := &apiv1.GeneratedResource{}
 		hash := sha256.Sum256([]byte(raw.GetName() + raw.GetKind()))
 		hashStr := hex.EncodeToString(hash[:])[:7]
+
+		res := &apiv1.GeneratedResource{}
 		res.Name = fmt.Sprintf("%s-%s", comp.Name, hashStr)
-
-		// Fetch current state
-		err := g.Client.Get(ctx, client.ObjectKeyFromObject(res), res)
-		if client.IgnoreNotFound(err) != nil {
-			return nil, nil, fmt.Errorf("getting current generated resource state: %w", err)
-		}
-		if res.Spec.DerivedGeneration == comp.Generation {
-			continue // already in sync
-		}
-
-		// Mutate
-		res.Spec.ReconcileInterval = comp.Spec.ReconcileInterval
 		res.Labels = map[string]string{"composition": comp.Name}
+		res.Spec.ReconcileInterval = comp.Spec.ReconcileInterval
+		res.Spec.DerivedGeneration = comp.Generation
+
 		if err := controllerutil.SetControllerReference(comp, res, g.Client.Scheme()); err != nil {
 			return nil, nil, fmt.Errorf("setting owner reference: %w", err)
 		}
+
 		js, err := json.Marshal(raw)
 		if err != nil {
 			return nil, nil, fmt.Errorf("encoding generated resource as json: %w", err)
 		}
 		res.Spec.Manifest = string(js)
-		res.Spec.DerivedGeneration = comp.Generation
 
-		goalByName[res.Name] = res
+		names[res.Name] = struct{}{}
 		goal = append(goal, res)
 	}
 
 	rand.Shuffle(len(goal), func(i, j int) { goal[i], goal[j] = goal[j], goal[i] })
-	return goal, goalByName, nil
+	return goal, names, nil
 }
 
-func (g *Generator) reconcileNegative(ctx context.Context, comp *apiv1.Composition, goalByName map[string]*apiv1.GeneratedResource) error {
-	all := &apiv1.GeneratedResourceList{}
-	err := g.Client.List(ctx, all, client.MatchingLabels{"composition": comp.Name})
-	if err != nil {
-		return fmt.Errorf("listng current generated resource state: %w", err)
-	}
-	rand.Shuffle(len(all.Items), func(i, j int) { all.Items[i], all.Items[j] = all.Items[j], all.Items[i] })
+// TODO(jordan): Retry writes here to avoid re-spawning the generator process on conflict
 
-	for _, res := range all.Items {
-		if _, ok := goalByName[res.Name]; ok {
+func (g *Generator) reconcileNegative(ctx context.Context, comp *apiv1.Composition, current *apiv1.GeneratedResourceList, names map[string]struct{}) (map[string]*apiv1.GeneratedResource, error) {
+	byName := map[string]*apiv1.GeneratedResource{}
+
+	for _, res := range current.Items {
+		res := res
+		byName[res.Name] = &res
+
+		if _, ok := names[res.Name]; ok {
 			continue
 		}
 		if res.DeletionTimestamp != nil {
 			continue
 		}
-		err = g.Client.Delete(ctx, &res)
+
+		err := g.Client.Delete(ctx, &res)
 		if err != nil {
-			return fmt.Errorf("deleting orphaned resources: %w", err)
+			return nil, fmt.Errorf("deleting orphaned resources: %w", err)
 		}
 		g.Logger.Info("deleted resource", "name", res.Name, "namespace", res.Namespace, "kind", res.Kind)
 	}
 
-	return nil
+	return byName, nil
 }
 
-func (g *Generator) reconcilePositive(ctx context.Context, comp *apiv1.Composition, goal []*apiv1.GeneratedResource) (err error) {
+func (g *Generator) reconcilePositive(ctx context.Context, comp *apiv1.Composition, goal []*apiv1.GeneratedResource, currentByName map[string]*apiv1.GeneratedResource) (err error) {
 	for _, res := range goal {
-		if res.ResourceVersion == "" {
+		current, ok := currentByName[res.Name]
+
+		if ok && current.Spec.DerivedGeneration == comp.Generation {
+			continue // already in sync
+		}
+
+		if !ok {
 			err = g.Client.Create(ctx, res)
 		} else {
-			err = g.Client.Update(ctx, res)
+			next := current.DeepCopy()
+			next.Spec = res.Spec // replace the entire spec — we manage it and nothing else should write to it
+			err = g.Client.Update(ctx, next)
 		}
 		if err != nil {
 			return fmt.Errorf("storing generated resource: %w", err)
