@@ -26,7 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/composition"
+	"github.com/Azure/eno/generation"
 	"github.com/Azure/eno/internal/clientmgr"
 	"github.com/Azure/eno/internal/conf"
 	"github.com/Azure/eno/internal/controllers"
@@ -42,7 +42,7 @@ var testCases = []struct {
 		Name: "crud-single-configmap",
 		States: []*state{
 			{
-				Generate: func(i *composition.Inputs) ([]client.Object, error) {
+				Generate: func(i *generation.Inputs) ([]client.Object, error) {
 					cm := &corev1.ConfigMap{}
 					cm.Name = "test-configmap"
 					cm.Namespace = "default"
@@ -60,7 +60,7 @@ var testCases = []struct {
 				},
 			},
 			{
-				Generate: func(i *composition.Inputs) ([]client.Object, error) {
+				Generate: func(i *generation.Inputs) ([]client.Object, error) {
 					cm := &corev1.ConfigMap{}
 					cm.Name = "test-configmap"
 					cm.Namespace = "default"
@@ -78,7 +78,7 @@ var testCases = []struct {
 				},
 			},
 			{
-				Generate: func(i *composition.Inputs) ([]client.Object, error) {
+				Generate: func(i *generation.Inputs) ([]client.Object, error) {
 					return []client.Object{}, nil
 				},
 				Verify: func(t *testing.T, c client.Client) {
@@ -94,7 +94,7 @@ var testCases = []struct {
 }
 
 type state struct {
-	Generate composition.GenerateFn
+	Generate generation.GenerateFn
 	Verify   func(*testing.T, client.Client)
 }
 
@@ -319,7 +319,7 @@ func (c *compositionWatcher) invokeHandler(name string, comp *apiv1.Composition)
 	return ctrl.Result{}, nil
 }
 
-func compose(t *testing.T, mgr *testManager, comp string, fn composition.GenerateFn) func() {
+func compose(t *testing.T, mgr *testManager, comp string, fn generation.GenerateFn) func() {
 	return func() {
 		current := &apiv1.Composition{}
 		current.Name = comp
@@ -333,7 +333,7 @@ func compose(t *testing.T, mgr *testManager, comp string, fn composition.Generat
 			CompositionGeneration: current.Generation,
 			Exec: func(ctx context.Context, b []byte) ([]byte, error) {
 				out := bytes.Buffer{}
-				err := composition.GenerateForIO(mgr.GetScheme(), bytes.NewBuffer(b), &out, fn)
+				err := generation.GenerateForIO(mgr.GetScheme(), bytes.NewBuffer(b), &out, fn)
 				return out.Bytes(), err
 			},
 		}

@@ -9,7 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/Azure/eno/composition"
+	"github.com/Azure/eno/generation"
 )
 
 func main() {
@@ -17,11 +17,11 @@ func main() {
 	corev1.AddToScheme(scheme)
 	appsv1.AddToScheme(scheme)
 
-	composition.MustGenerate(scheme, Generate)
+	generation.MustGenerate(scheme, Generate)
 }
 
-func Generate(inputs *composition.Inputs) ([]client.Object, error) {
-	test := composition.FindResource[*corev1.ConfigMap](inputs, "test-inputs")
+func Generate(inputs *generation.Inputs) ([]client.Object, error) {
+	test := generation.FindResource[*corev1.ConfigMap](inputs, "test-inputs")
 
 	if test.Data["enable"] == "false" {
 		return nil, nil

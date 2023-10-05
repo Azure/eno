@@ -1,4 +1,5 @@
-package composition
+// Generation defines a framework for writing generator processes in Go.
+package generation
 
 import (
 	"bufio"
@@ -63,8 +64,6 @@ func GenerateForIO(scheme *runtime.Scheme, i io.Reader, o io.Writer, fn Generate
 	}
 	return nil
 }
-
-// TODO: Using Inputs to pass around the scheme is... not beautiful
 
 type Inputs struct {
 	Objects []client.Object

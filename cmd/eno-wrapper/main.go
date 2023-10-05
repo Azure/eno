@@ -1,3 +1,5 @@
+// eno-wrapper is a small wrapper around the generator process to handle interactions with apiserver.
+// Essentially it proxies between apiserver and the generator's stdio.
 package main
 
 import (

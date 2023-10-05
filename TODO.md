@@ -4,3 +4,5 @@
 - How/what should specify resource limits, security configs, etc. for job pods?
 - Dynamic/external client support
 - Support getting CR status using condition matcher in annotation
+- Restrict privileges of generator process
+- Expose leader election and other controller settings
