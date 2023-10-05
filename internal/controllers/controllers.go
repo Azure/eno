@@ -5,8 +5,8 @@ import (
 
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	"github.com/Azure/eno/conf"
 	"github.com/Azure/eno/internal/clientmgr"
+	"github.com/Azure/eno/internal/conf"
 	"github.com/Azure/eno/internal/controllers/generation"
 	"github.com/Azure/eno/internal/controllers/readiness"
 	"github.com/Azure/eno/internal/controllers/reconciliation"

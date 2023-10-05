@@ -16,8 +16,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/conf"
 	"github.com/Azure/eno/internal/clientmgr"
+	"github.com/Azure/eno/internal/conf"
 )
 
 const finalizerName = "eno.azure.io/cleanup"

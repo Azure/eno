@@ -14,8 +14,8 @@ import (
 	"go.uber.org/zap"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/conf"
 	"github.com/Azure/eno/internal/clientmgr"
+	"github.com/Azure/eno/internal/conf"
 	"github.com/Azure/eno/internal/controllers"
 )
 
