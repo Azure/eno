@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -142,12 +143,16 @@ func startMgr(t *testing.T, mgr *testManager) {
 }
 
 type jobRunner struct {
-	client   client.Client
-	logger   logr.Logger
-	handlers map[string]func() // TODO: Mut
+	client client.Client
+	logger logr.Logger
+
+	mutex    sync.Mutex
+	handlers map[string]func()
 }
 
 func (c *jobRunner) AddJobHandler(image string, fn func()) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 	c.handlers[image] = fn
 }
 
@@ -165,7 +170,12 @@ func (c *jobRunner) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resul
 	}
 	image := job.Spec.Template.Spec.Containers[0].Image
 
-	handler := c.handlers[image]
+	var handler func()
+	func() {
+		c.mutex.Lock()
+		defer c.mutex.Unlock()
+		handler = c.handlers[image]
+	}()
 	if handler == nil {
 		c.logger.Info("no handler found for job")
 		return ctrl.Result{}, nil
@@ -200,14 +210,17 @@ func compose(t *testing.T, mgr *testManager, comp string, fn generation.Generate
 }
 
 type compositionWatcher struct {
-	client   client.Client
-	handlers map[string]func(*apiv1.Composition) // TODO: Mut
+	client client.Client
+
+	mutex    sync.Mutex
+	handlers map[string]func(*apiv1.Composition)
 }
 
 func (c *compositionWatcher) WaitForCondition(t *testing.T, composition, condType string, condStatus metav1.ConditionStatus) <-chan struct{} {
-	ctx, cancel := context.WithCancel(context.Background())
-	// TODO: Timeout eventually
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 
+	ctx, cancel := context.WithCancel(context.Background())
 	c.handlers[composition] = func(comp *apiv1.Composition) {
 		if comp == nil {
 			return
@@ -215,7 +228,7 @@ func (c *compositionWatcher) WaitForCondition(t *testing.T, composition, condTyp
 		cond := meta.FindStatusCondition(comp.Status.Conditions, condType)
 		if cond != nil && cond.Status == condStatus && cond.ObservedGeneration == comp.Generation {
 			cancel()
-			delete(c.handlers, composition)
+			c.removeHandler(composition)
 		}
 	}
 
@@ -223,13 +236,14 @@ func (c *compositionWatcher) WaitForCondition(t *testing.T, composition, condTyp
 }
 
 func (c *compositionWatcher) WaitForDeletion(t *testing.T, composition string) <-chan struct{} {
-	ctx, cancel := context.WithCancel(context.Background())
-	// TODO: Timeout eventually
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 
+	ctx, cancel := context.WithCancel(context.Background())
 	c.handlers[composition] = func(comp *apiv1.Composition) {
 		if comp == nil {
 			cancel()
-			delete(c.handlers, composition)
+			c.removeHandler(composition)
 		}
 	}
 
@@ -251,13 +265,24 @@ func (c *compositionWatcher) Reconcile(ctx context.Context, req ctrl.Request) (c
 }
 
 func (c *compositionWatcher) invokeHandler(name string, comp *apiv1.Composition) (ctrl.Result, error) {
-	handler := c.handlers[name]
+	var handler func(*apiv1.Composition)
+	func() {
+		c.mutex.Lock()
+		defer c.mutex.Unlock()
+		handler = c.handlers[name]
+	}()
 	if handler == nil {
 		return ctrl.Result{}, nil
 	}
 
 	handler(comp)
 	return ctrl.Result{}, nil
+}
+
+func (c *compositionWatcher) removeHandler(name string) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	delete(c.handlers, name)
 }
 
 func syncTestComposition(t *testing.T, mgr ctrl.Manager, name, generatorImage string) {
