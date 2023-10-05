@@ -84,13 +84,20 @@ func FindResource[T client.Object](inputs *Inputs, name string) T {
 	panic(fmt.Errorf("expected an input resource %s of type %T but received none", name, zero))
 }
 
-func Parse(inputs *Inputs, yml []byte) (client.Object, error) {
-	codec := serializer.NewCodecFactory(inputs.scheme)
-	dec := codec.UniversalDeserializer()
-	obj, _, err := dec.Decode(yml, &schema.GroupVersionKind{}, nil)
-	if err != nil {
-		return nil, err
-	}
+func WithStaticManifest(yml []byte, next GenerateFn) GenerateFn {
+	return func(i *Inputs) ([]client.Object, error) {
+		codec := serializer.NewCodecFactory(i.scheme)
+		dec := codec.UniversalDeserializer()
+		obj, _, err := dec.Decode(yml, &schema.GroupVersionKind{}, nil)
+		if err != nil {
+			return nil, err
+		}
 
-	return obj.(client.Object), nil
+		more, err := next(i)
+		if err != nil {
+			return nil, err
+		}
+
+		return append(more, obj.(client.Object)), nil
+	}
 }

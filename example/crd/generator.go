@@ -11,26 +11,21 @@ import (
 	"github.com/Azure/eno/generation"
 )
 
+//go:embed api/config/crd/example.azure.io_examples.yaml
+var crdYaml []byte
+
 func main() {
 	scheme := runtime.NewScheme()
 	extv1.AddToScheme(scheme)
 	apiv1.SchemeBuilder.AddToScheme(scheme)
 
-	generation.MustGenerate(scheme, Generate)
+	generation.MustGenerate(scheme, generation.WithStaticManifest(crdYaml, Generate))
 }
-
-//go:embed api/config/crd/example.azure.io_examples.yaml
-var crdYaml []byte
 
 func Generate(inputs *generation.Inputs) ([]client.Object, error) {
 	cr := &apiv1.Example{}
 	cr.Name = "example-resource"
 	cr.Spec.Value = 123
 
-	crd, err := generation.Parse(inputs, crdYaml)
-	if err != nil {
-		return nil, err
-	}
-
-	return []client.Object{crd, cr}, nil
+	return []client.Object{cr}, nil
 }
