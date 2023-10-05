@@ -96,6 +96,33 @@ var testCases = []struct {
 			},
 		},
 	},
+	{
+		Name: "delete-when-resource-exists",
+		States: []*state{
+			{
+				Generate: func(i *generation.Inputs) ([]client.Object, error) {
+					cm := &corev1.ConfigMap{}
+					cm.Name = "test-configmap"
+					cm.Namespace = "default"
+					cm.Data = map[string]string{"foo": "bar"}
+
+					return []client.Object{cm}, nil
+				},
+			},
+			{
+				Generate: func(i *generation.Inputs) ([]client.Object, error) {
+					return []client.Object{}, nil
+				},
+				Verify: func(t *testing.T, c client.Client) {
+					cm := &corev1.ConfigMap{}
+					cm.Name = "test-configmap"
+					cm.Namespace = "default"
+					err := c.Get(context.Background(), client.ObjectKeyFromObject(cm), cm)
+					assert.True(t, errors.IsNotFound(err) || (cm != nil && cm.DeletionTimestamp != nil))
+				},
+			},
+		},
+	},
 }
 
 type state struct {
@@ -118,7 +145,9 @@ func TestTable(t *testing.T) {
 				syncTestComposition(t, mgr, tc.Name, image)
 				<-wait
 
-				state.Verify(t, mgr.GetClient())
+				if state.Verify != nil {
+					state.Verify(t, mgr.GetClient())
+				}
 			}
 
 			mgr.GetLogger().Info("cleaning up table test segment", "name", tc.Name)
