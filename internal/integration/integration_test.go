@@ -1,3 +1,6 @@
+// Integration contains simple integration tests to cover the various components (controllers, wrapper process, generation framework, etc.)
+// This is accomplished by replacing the wrapper and generator processes with in-process shims to the relevant code.
+// Don't add too many tests here — most functionality can be covered in controller-scoped tests.
 package integration
 
 import (
@@ -32,6 +35,8 @@ import (
 	"github.com/Azure/eno/internal/controllers"
 	"github.com/Azure/eno/internal/wrapper"
 )
+
+// TODO: Test crd (reconcile randomness)
 
 var testCases = []struct {
 	Name   string

@@ -64,7 +64,8 @@ func (g *Generator) Generate(ctx context.Context) error {
 	}
 
 	// Output decoding
-	raws := []*unstructured.Unstructured{}
+	goal := []*apiv1.GeneratedResource{}
+	goalByName := map[string]*apiv1.GeneratedResource{}
 	dec := json.NewDecoder(bytes.NewBuffer(outputBuf))
 	for {
 		raw := &unstructured.Unstructured{}
@@ -78,14 +79,6 @@ func (g *Generator) Generate(ctx context.Context) error {
 		if raw.GetName() == "" || raw.GetKind() == "" {
 			continue
 		}
-		raws = append(raws, raw)
-		// TODO: Refactor to build resources here?
-	}
-	rand.Shuffle(len(raws), func(i, j int) { raws[i], raws[j] = raws[j], raws[i] })
-
-	// Positive reconciliation
-	currentResources := map[string]*apiv1.GeneratedResource{}
-	for _, raw := range raws {
 		hash := sha256.Sum256([]byte(raw.GetName() + raw.GetKind()))
 		hashStr := hex.EncodeToString(hash[:])[:7]
 
@@ -101,7 +94,7 @@ func (g *Generator) Generate(ctx context.Context) error {
 			continue // already in sync
 		}
 
-		// Make changes
+		// Changes
 		res.Spec.ReconcileInterval = comp.Spec.ReconcileInterval
 		res.Labels = map[string]string{"composition": comp.Name}
 		if err := controllerutil.SetControllerReference(comp, res, g.Client.Scheme()); err != nil {
@@ -113,7 +106,9 @@ func (g *Generator) Generate(ctx context.Context) error {
 		}
 		res.Spec.Manifest = string(js)
 		res.Spec.DerivedGeneration = comp.Generation
-		currentResources[res.Name] = res
+
+		goalByName[res.Name] = res
+		goal = append(goal, res)
 	}
 
 	// Negative reconciliation
@@ -122,8 +117,10 @@ func (g *Generator) Generate(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("listng current generated resource state: %w", err)
 	}
+
+	rand.Shuffle(len(all.Items), func(i, j int) { all.Items[i], all.Items[j] = all.Items[j], all.Items[i] })
 	for _, res := range all.Items {
-		if _, ok := currentResources[res.Name]; ok {
+		if _, ok := goalByName[res.Name]; ok {
 			continue
 		}
 		if res.DeletionTimestamp != nil {
@@ -136,8 +133,9 @@ func (g *Generator) Generate(ctx context.Context) error {
 		g.Logger.Info("deleted resource", "name", res.Name, "namespace", res.Namespace, "kind", res.Kind)
 	}
 
-	// Write changes
-	for _, res := range currentResources {
+	// Positive reconciliation
+	rand.Shuffle(len(goal), func(i, j int) { goal[i], goal[j] = goal[j], goal[i] })
+	for _, res := range goal {
 		if res.ResourceVersion == "" {
 			err = g.Client.Create(ctx, res)
 		} else {
@@ -158,6 +156,6 @@ func (g *Generator) Generate(ctx context.Context) error {
 		return fmt.Errorf("this job is no longer necessary - (%d != %d)", comp.Generation, g.CompositionGeneration)
 	}
 	comp.Status.ObservedGeneration = comp.Generation
-	comp.Status.GeneratedResourceCount = int64(len(raws))
+	comp.Status.GeneratedResourceCount = int64(len(goal))
 	return g.Client.Status().Update(ctx, comp)
 }
