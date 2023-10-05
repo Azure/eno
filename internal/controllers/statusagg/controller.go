@@ -60,11 +60,11 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			continue
 		}
 		cond := meta.FindStatusCondition(gr.Status.Conditions, apiv1.ReadyConditionType)
-		if cond != nil && cond.Status == metav1.ConditionTrue {
+		if cond != nil && cond.Status == metav1.ConditionTrue && cond.ObservedGeneration == comp.Generation {
 			ready++
 		}
 		cond = meta.FindStatusCondition(gr.Status.Conditions, apiv1.ReconciledConditionType)
-		if cond != nil && cond.Status == metav1.ConditionTrue {
+		if cond != nil && cond.Status == metav1.ConditionTrue && cond.ObservedGeneration == comp.Generation {
 			reconciled++
 		}
 	}

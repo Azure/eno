@@ -38,8 +38,6 @@ import (
 
 // TODO: Test crd (reconcile randomness)
 
-// TODO: Fix update race
-
 var testCases = []struct {
 	Name   string
 	Inputs []client.Object
