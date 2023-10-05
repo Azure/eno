@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/generation"
@@ -23,6 +24,11 @@ import (
 
 //go:embed api/config/crd/example.azure.io_examples.yaml
 var crdYaml []byte
+
+type state struct {
+	Generate generation.GenerateFn
+	Verify   func(*testing.T, client.Client)
+}
 
 var testCases = []struct {
 	Name   string
@@ -146,11 +152,120 @@ var testCases = []struct {
 			},
 		},
 	},
+	{
+		Name: "unmanaged-property-configmap",
+		States: (&mergeTest[*corev1.ConfigMap]{
+			New: func() *corev1.ConfigMap {
+				return &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "test-configmap", Namespace: "default"}}
+			},
+			SetPropertyUnderTest: func(i int, obj *corev1.ConfigMap) {
+				obj.Data = map[string]string{"testval": fmt.Sprintf("value-%d", i)}
+			},
+			GetPropertyUnderTest: func(obj *corev1.ConfigMap) any { return obj.Data },
+		}).Build(),
+	},
+	{
+		Name: "unmanaged-label-configmap",
+		States: (&mergeTest[*corev1.ConfigMap]{
+			New: func() *corev1.ConfigMap {
+				return &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "test-configmap", Namespace: "default"}}
+			},
+			SetPropertyUnderTest: func(i int, obj *corev1.ConfigMap) {
+				if obj.Labels == nil {
+					obj.Labels = map[string]string{}
+				}
+				obj.Labels["val"] = fmt.Sprintf("value-%d", i)
+			},
+			GetPropertyUnderTest: func(obj *corev1.ConfigMap) any { return obj.Labels["val"] },
+		}).Build(),
+	},
+	{
+		Name: "unmanaged-annotation-configmap",
+		States: (&mergeTest[*corev1.ConfigMap]{
+			New: func() *corev1.ConfigMap {
+				return &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "test-configmap", Namespace: "default"}}
+			},
+			SetPropertyUnderTest: func(i int, obj *corev1.ConfigMap) {
+				if obj.Annotations == nil {
+					obj.Annotations = map[string]string{}
+				}
+				obj.Annotations["val"] = fmt.Sprintf("value-%d", i)
+			},
+			GetPropertyUnderTest: func(obj *corev1.ConfigMap) any { return obj.Annotations["val"] },
+		}).Build(),
+	},
+	{
+		Name: "unmanaged-property-cr",
+		States: (&mergeTest[*testapi.Example]{
+			New: func() *testapi.Example {
+				return &testapi.Example{ObjectMeta: metav1.ObjectMeta{Name: "test-cr"}}
+			},
+			SetPropertyUnderTest: func(i int, obj *testapi.Example) {
+				obj.Spec.Value = i
+			},
+			GetPropertyUnderTest: func(obj *testapi.Example) any { return obj.Spec.Value },
+		}).Build(),
+	},
 }
 
-type state struct {
-	Generate generation.GenerateFn
-	Verify   func(*testing.T, client.Client)
+type mergeTest[T client.Object] struct {
+	New                  func() T
+	SetPropertyUnderTest func(i int, obj T)
+	GetPropertyUnderTest func(obj T) any
+}
+
+func (m *mergeTest[T]) Build() []*state {
+	return []*state{
+		{
+			Generate: generation.WithStaticManifest(crdYaml,
+				func(i *generation.Inputs) ([]client.Object, error) {
+					obj := m.New()
+					return []client.Object{obj}, nil
+				}),
+			Verify: func(t *testing.T, c client.Client) {
+				obj := m.New()
+
+				_, err := controllerutil.CreateOrUpdate(context.Background(), c, obj, func() error {
+					m.SetPropertyUnderTest(1, obj)
+					return nil
+				})
+				require.NoError(t, err)
+			},
+		},
+		{
+			Generate: generation.WithStaticManifest(crdYaml,
+				func(i *generation.Inputs) ([]client.Object, error) {
+					obj := m.New()
+					return []client.Object{obj}, nil
+				}),
+			Verify: func(t *testing.T, c client.Client) {
+				obj := m.New()
+				err := c.Get(context.Background(), client.ObjectKeyFromObject(obj), obj)
+				require.NoError(t, err)
+
+				expected := m.New()
+				m.SetPropertyUnderTest(1, expected)
+				assert.Equal(t, m.GetPropertyUnderTest(expected), m.GetPropertyUnderTest(obj))
+			},
+		},
+		{
+			Generate: generation.WithStaticManifest(crdYaml,
+				func(i *generation.Inputs) ([]client.Object, error) {
+					obj := m.New()
+					m.SetPropertyUnderTest(2, obj)
+					return []client.Object{obj}, nil
+				}),
+			Verify: func(t *testing.T, c client.Client) {
+				obj := m.New()
+				err := c.Get(context.Background(), client.ObjectKeyFromObject(obj), obj)
+				require.NoError(t, err)
+
+				expected := m.New()
+				m.SetPropertyUnderTest(2, expected)
+				assert.Equal(t, m.GetPropertyUnderTest(expected), m.GetPropertyUnderTest(obj))
+			},
+		},
+	}
 }
 
 func TestTable(t *testing.T) {
