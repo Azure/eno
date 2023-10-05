@@ -6,6 +6,7 @@ package integration
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -33,10 +34,12 @@ import (
 	"github.com/Azure/eno/internal/clientmgr"
 	"github.com/Azure/eno/internal/conf"
 	"github.com/Azure/eno/internal/controllers"
+	testapi "github.com/Azure/eno/internal/integration/api"
 	"github.com/Azure/eno/internal/wrapper"
 )
 
-// TODO: Test crd (reconcile randomness)
+//go:embed api/config/crd/example.azure.io_examples.yaml
+var crdYaml []byte
 
 var testCases = []struct {
 	Name   string
@@ -123,6 +126,43 @@ var testCases = []struct {
 			},
 		},
 	},
+	{
+		Name: "crud-crd-and-cr",
+		States: []*state{
+			{
+				Generate: generation.WithStaticManifest(crdYaml,
+					func(i *generation.Inputs) ([]client.Object, error) {
+						cr := &testapi.Example{}
+						cr.Name = "test-cr"
+						cr.Spec.Value = 123
+						return []client.Object{cr}, nil
+					}),
+				Verify: func(t *testing.T, c client.Client) {
+					cr := &testapi.Example{}
+					cr.Name = "test-cr"
+					err := c.Get(context.Background(), client.ObjectKeyFromObject(cr), cr)
+					require.NoError(t, err)
+					assert.Equal(t, 123, cr.Spec.Value)
+				},
+			},
+			{
+				Generate: generation.WithStaticManifest(crdYaml,
+					func(i *generation.Inputs) ([]client.Object, error) {
+						cr := &testapi.Example{}
+						cr.Name = "test-cr"
+						cr.Spec.Value = 234
+						return []client.Object{cr}, nil
+					}),
+				Verify: func(t *testing.T, c client.Client) {
+					cr := &testapi.Example{}
+					cr.Name = "test-cr"
+					err := c.Get(context.Background(), client.ObjectKeyFromObject(cr), cr)
+					require.NoError(t, err)
+					assert.Equal(t, 234, cr.Spec.Value)
+				},
+			},
+		},
+	},
 }
 
 type state struct {
@@ -167,7 +207,7 @@ func setup(t *testing.T) *testManager {
 		StatusPollingInterval: time.Millisecond * 100,
 	}
 
-	mgr := &testManager{Manager: setupMgr(t)}
+	mgr := setupMgr(t)
 	setupTestControllers(t, mgr)
 
 	cmgr := clientmgr.New(mgr.GetClient(), func(ctx context.Context, key string) (*rest.Config, error) {
@@ -185,9 +225,11 @@ type testManager struct {
 	ctrl.Manager
 	*jobRunner
 	*compositionWatcher
+
+	wrapperClient client.Client
 }
 
-func setupMgr(t *testing.T) ctrl.Manager {
+func setupMgr(t *testing.T) *testManager {
 	env := &envtest.Environment{
 		CRDDirectoryPaths: []string{filepath.Join("..", "..", "api", "v1", "config", "crd")},
 	}
@@ -214,7 +256,14 @@ func setupMgr(t *testing.T) ctrl.Manager {
 	err = apiv1.SchemeBuilder.AddToScheme(mgr.GetScheme())
 	require.NoError(t, err)
 
-	return mgr
+	// Use a separate client/scheme for the wrapper process to better approximate real life
+	wrapperClient, err := client.New(cfg, client.Options{})
+	require.NoError(t, err)
+
+	err = testapi.SchemeBuilder.AddToScheme(wrapperClient.Scheme())
+	require.NoError(t, err)
+
+	return &testManager{Manager: mgr, wrapperClient: wrapperClient}
 }
 
 func setupTestControllers(t *testing.T, mgr *testManager) {
@@ -361,7 +410,7 @@ func compose(t *testing.T, mgr *testManager, comp string, fn generation.Generate
 		require.NoError(t, err)
 
 		gen := &wrapper.Generator{
-			Client:                mgr.GetClient(),
+			Client:                mgr.wrapperClient,
 			Logger:                mgr.GetLogger(),
 			CompositionName:       current.Name,
 			CompositionGeneration: current.Generation,

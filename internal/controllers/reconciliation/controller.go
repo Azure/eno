@@ -105,15 +105,16 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	// Update
+	// TODO: Does this stomp on annotations/labels/owners?
+	current.Object["metadata"] = res.Object["metadata"]
+	current.Object["status"] = res.Object["status"]
 	if !deepCompare(current, res) {
-		// TODO: What merge semantics should we use?
-		res.SetResourceVersion(current.GetResourceVersion())
-
-		err = cli.Update(ctx, res)
+		err = cli.Patch(ctx, res, client.MergeFrom(current))
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating resource: %w", err)
 		}
 		c.logger.Info("updated resource")
+
 		return ctrl.Result{Requeue: true}, nil
 	}
 
@@ -131,7 +132,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, cli.Status().Update(ctx, gr)
 	}
 
-	result := ctrl.Result{Requeue: true}
+	result := ctrl.Result{}
 	if gr.Spec.ReconcileInterval != nil {
 		result.RequeueAfter = gr.Spec.ReconcileInterval.Duration
 	}
