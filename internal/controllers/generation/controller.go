@@ -71,7 +71,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreAlreadyExists(fmt.Errorf("creating generation job: %w", err))
 	}
-	c.logger.Info("created job to generate resources for composition", "jobName", job.Name)
+	c.logger.Info("created job to generate resources for composition", "jobName", job.Name, "compositionName", comp.Name, "compositionGeneration", comp.Generation)
 
 	return ctrl.Result{}, nil
 }

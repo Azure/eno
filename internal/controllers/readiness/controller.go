@@ -99,7 +99,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	// Updates
-	c.logger.Info("generated resource readiness state transition", "state", cond.Status)
+	c.logger.Info("generated resource readiness state transition", "state", cond.Status, "generatedResourceName", gr.Name, "generatedResourceGeneration", gr.Generation)
 	meta.SetStatusCondition(&gr.Status.Conditions, *cond)
 	if err := cli.Status().Update(ctx, gr); err != nil {
 		return ctrl.Result{}, err

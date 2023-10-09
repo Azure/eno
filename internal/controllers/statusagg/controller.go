@@ -111,6 +111,6 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 	}
 
-	c.logger.Info("updated aggregated composition status")
+	c.logger.Info("updated aggregated composition status", "compositionName", comp.Name, "compositionGeneration", comp.Generation)
 	return ctrl.Result{}, nil
 }

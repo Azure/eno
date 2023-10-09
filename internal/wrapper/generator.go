@@ -162,7 +162,7 @@ func (g *Generator) reconcileNegative(ctx context.Context, comp *apiv1.Compositi
 		if err != nil {
 			return nil, fmt.Errorf("deleting orphaned resources: %w", err)
 		}
-		g.Logger.Info("deleted resource", "name", res.Name, "namespace", res.Namespace, "kind", res.Kind)
+		g.Logger.Info("deleted resource", "generatedResourceName", res.Name, "resourceKind", res.Kind)
 	}
 
 	return byName, nil
@@ -186,7 +186,7 @@ func (g *Generator) reconcilePositive(ctx context.Context, comp *apiv1.Compositi
 		if err != nil {
 			return fmt.Errorf("storing generated resource: %w", err)
 		}
-		g.Logger.Info("wrote resource", "name", res.Name, "namespace", res.Namespace, "kind", res.Kind)
+		g.Logger.Info("wrote resource", "generatedResourceName", res.Name, "resourceKind", res.Kind)
 	}
 	return nil
 }

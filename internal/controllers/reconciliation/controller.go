@@ -50,12 +50,13 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting generated resource: %w", err))
 	}
+	logger := c.logger.WithValues("generatedResourceName", gr.Name, "generatedResourceGeneration", gr.Generation)
 
 	if controllerutil.AddFinalizer(gr, finalizerName) {
 		if err := c.client.Update(ctx, gr); err != nil {
 			return ctrl.Result{}, fmt.Errorf("adding finalizer: %w", err)
 		}
-		c.logger.Info("added finalizer")
+		logger.Info("added finalizer")
 	}
 
 	res := &unstructured.Unstructured{}
@@ -79,7 +80,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			if err := c.client.Update(ctx, gr); err != nil {
 				return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
 			}
-			c.logger.Info("removed finalizer")
+			logger.Info("removed finalizer")
 			return ctrl.Result{}, nil
 		}
 		err = nil
@@ -94,7 +95,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("deleting resource: %w", err)
 		}
-		c.logger.Info("deleted resource")
+		logger.Info("deleted resource")
 		return ctrl.Result{Requeue: true}, nil
 	}
 
@@ -105,7 +106,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, fmt.Errorf("updating resource: %w", err)
 	}
 	if !equality.Semantic.DeepEqual(res, current) {
-		c.logger.Info("wrote resource")
+		logger.Info("wrote resource")
 		return ctrl.Result{Requeue: true}, nil
 	}
 
