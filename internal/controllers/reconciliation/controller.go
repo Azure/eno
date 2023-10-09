@@ -105,16 +105,12 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	// Update
-	// TODO: Does this stomp on annotations/labels/owners?
-	current.Object["metadata"] = res.Object["metadata"]
-	current.Object["status"] = res.Object["status"]
-	if !deepCompare(current, res) {
-		err = cli.Patch(ctx, res, client.MergeFrom(current))
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("updating resource: %w", err)
-		}
+	err = cli.Patch(ctx, res, client.Apply, client.FieldOwner("eno"), client.ForceOwnership)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("updating resource: %w", err)
+	}
+	if !equality.Semantic.DeepEqual(res, current) {
 		c.logger.Info("updated resource")
-
 		return ctrl.Result{Requeue: true}, nil
 	}
 
@@ -137,9 +133,4 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		result.RequeueAfter = gr.Spec.ReconcileInterval.Duration
 	}
 	return result, nil
-}
-
-func deepCompare(current, next *unstructured.Unstructured) bool {
-	// TODO: Support other comparison schemes using resource annotations
-	return equality.Semantic.DeepDerivative(next, current)
 }

@@ -71,7 +71,7 @@ var testCases = []struct {
 					cm.Namespace = "default"
 					err := c.Get(context.Background(), client.ObjectKeyFromObject(cm), cm)
 					require.NoError(t, err)
-					assert.Equal(t, map[string]string{"bar": "baz"}, cm.Data)
+					assert.Equal(t, map[string]string{"foo": "bar", "bar": "baz"}, cm.Data)
 				},
 			},
 			{
