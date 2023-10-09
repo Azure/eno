@@ -1,5 +1,5 @@
-- Retry jobs forever with backoff
-- Support annotation for ignoring fields during reconciliation (consider field ownership/merge semantics more broadly)
-- How/what should specify resource limits, security configs, etc. for job pods?
-- Support getting CR status using condition matcher in annotation
+- Annotation to pass current state of resource to generator as input (for allowing fields to be overridden, etc.)
+- YAML template on disk for generating jobs (for non-default security/resources/tolerations/etc.)
+- More readiness support (conditions matcher for CRs, more core resources)
+- Figure out how to handle jobs that fail forever
 - Expose leader election and other controller settings
