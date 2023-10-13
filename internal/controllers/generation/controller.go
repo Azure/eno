@@ -50,8 +50,15 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, nil // can't generate the composed resources without a generator
 	}
 
+	gen := &apiv1.Generator{}
+	gen.Name = comp.Spec.Generator.Name
+	err = c.client.Get(ctx, client.ObjectKeyFromObject(gen), gen)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("listing current jobs: %w", err)
+	}
+
 	// Avoid creating duplicate jobs
-	job := c.newJob(comp)
+	job := c.newJob(comp, gen)
 	current := &batchv1.Job{}
 	err = c.client.Get(ctx, client.ObjectKeyFromObject(job), current)
 	if client.IgnoreNotFound(err) != nil {
@@ -76,7 +83,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	return ctrl.Result{}, nil
 }
 
-func (c *Controller) newJob(comp *apiv1.Composition) *batchv1.Job {
+func (c *Controller) newJob(comp *apiv1.Composition, gen *apiv1.Generator) *batchv1.Job {
 	var (
 		parallelism       = int32(1)
 		timeout           = int64(c.config.JobTimeout.Seconds())
@@ -113,7 +120,7 @@ func (c *Controller) newJob(comp *apiv1.Composition) *batchv1.Job {
 			}},
 			Containers: []corev1.Container{{
 				Name:  "generator",
-				Image: comp.Spec.Generator.Image,
+				Image: gen.Spec.Image,
 				Command: []string{
 					"/wrapper/eno-wrapper", "--generate",
 				},

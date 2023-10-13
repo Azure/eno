@@ -286,10 +286,18 @@ func (c *compositionWatcher) removeHandler(name string) {
 }
 
 func syncTestComposition(t *testing.T, mgr ctrl.Manager, name, generatorImage string) {
+	gen := &apiv1.Generator{}
+	gen.GenerateName = generatorImage
+	_, err := controllerutil.CreateOrUpdate(context.Background(), mgr.GetClient(), gen, func() error {
+		gen.Spec.Image = generatorImage
+		return nil
+	})
+	require.NoError(t, err)
+
 	comp := &apiv1.Composition{}
 	comp.Name = name
-	_, err := controllerutil.CreateOrUpdate(context.Background(), mgr.GetClient(), comp, func() error {
-		comp.Spec.Generator = &apiv1.Generator{Image: generatorImage}
+	_, err = controllerutil.CreateOrUpdate(context.Background(), mgr.GetClient(), comp, func() error {
+		comp.Spec.Generator = &apiv1.GeneratorRef{Name: gen.Name}
 		return nil
 	})
 	require.NoError(t, err)

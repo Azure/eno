@@ -16,6 +16,7 @@ var (
 func init() {
 	SchemeBuilder.Register(&CompositionList{}, &Composition{})
 	SchemeBuilder.Register(&GeneratedResourceList{}, &GeneratedResource{})
+	SchemeBuilder.Register(&GeneratorList{}, &Generator{})
 }
 
 //go:generate controller-gen object crd rbac:roleName=resourceprovider paths=./...
@@ -41,12 +42,12 @@ type Composition struct {
 type CompositionSpec struct {
 	Revision          int64            `json:"revision,omitempty"`
 	ReconcileInterval *metav1.Duration `json:"reconcileInterval,omitempty"`
-	Generator         *Generator       `json:"generator,omitempty"`
+	Generator         *GeneratorRef    `json:"generator,omitempty"`
 	Inputs            []InputRef       `json:"inputs,omitempty"`
 }
 
-type Generator struct {
-	Image string `json:"image,omitempty"`
+type GeneratorRef struct {
+	Name string `json:"name,omitempty"`
 }
 
 type InputRef struct {
@@ -93,4 +94,29 @@ type GeneratedResourceSpec struct {
 
 type GeneratedResourceStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+type GeneratorList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []Generator `json:"items"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Cluster
+type Generator struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   GeneratorSpec   `json:"spec,omitempty"`
+	Status GeneratorStatus `json:"status,omitempty"`
+}
+
+type GeneratorSpec struct {
+	Image string `json:"image,omitempty"`
+}
+
+type GeneratorStatus struct {
 }
