@@ -1,5 +1,9 @@
-- Annotation to pass current state of resource to generator as input (for allowing fields to be overridden, etc.)
-- YAML template on disk for generating jobs (for non-default security/resources/tolerations/etc.)
+- Generator CRD for configuring the generation runtime (support slow rollout between versions)
 - More readiness support (conditions matcher for CRs, more core resources)
-- Figure out how to handle jobs that fail forever
+- Two-way Helm ownership migration
+- Reconcile ordering using depedency annotations (wait for readiness)
+- Reconcile partitioning
+- Reconcile prioritization
 - Expose leader election and other controller settings
+
+- Configmap/secret reconcile ordering?
