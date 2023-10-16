@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 
 	"github.com/go-logr/zapr"
@@ -47,12 +51,13 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("constructing controller manager: %w", err)
 	}
-	cmgr := clientmgr.New(mgr.GetClient(), getRestConfig)
-	if err := mgr.AddHealthzCheck("running", healthz.Ping); err != nil {
-		return fmt.Errorf("adding ping healthz check: %w", err)
-	}
 	if err := apiv1.SchemeBuilder.AddToScheme(mgr.GetScheme()); err != nil {
 		return fmt.Errorf("adding scheme: %w", err)
+	}
+	cli := mgr.GetClient()
+	cmgr := clientmgr.New(cli, getRestConfigGetter(cli))
+	if err := mgr.AddHealthzCheck("running", healthz.Ping); err != nil {
+		return fmt.Errorf("adding ping healthz check: %w", err)
 	}
 	if err := controllers.New(mgr, cmgr, config); err != nil {
 		return err
@@ -61,7 +66,31 @@ func run() error {
 	return mgr.Start(ctrl.SetupSignalHandler())
 }
 
-func getRestConfig(ctx context.Context, kubeconfigSecretName string) (*rest.Config, error) {
-	// TODO: Support external clients
-	return nil, nil
+func getRestConfigGetter(cli client.Client) clientmgr.ConfigGetter[*apiv1.SecretKeyRef] {
+	return func(ctx context.Context, secretRef *apiv1.SecretKeyRef) (*rest.Config, error) {
+		if secretRef == nil {
+			return nil, nil
+		}
+
+		secret := &corev1.Secret{}
+		secret.Name = secretRef.Name
+		secret.Namespace = secretRef.Namespace
+		err := cli.Get(ctx, client.ObjectKeyFromObject(secret), secret)
+		if err != nil {
+			return nil, err
+		}
+
+		var data []byte
+		if secretRef.Key != "" {
+			data = secret.Data[secretRef.Key]
+		} else {
+			data = secret.Data["value"]
+		}
+
+		if data != nil {
+			return nil, errors.New("secret does not contain kubeconfig data")
+		}
+
+		return clientcmd.RESTConfigFromKubeConfig(data)
+	}
 }

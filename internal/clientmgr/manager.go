@@ -19,6 +19,7 @@ func New[T comparable](defaultClient client.Client, cg ConfigGetter[T]) *Manager
 }
 
 func (m *Manager[T]) GetClient(ctx context.Context, key T) (client.Client, error) {
+	// TODO(mariano): Cache rest configs?
 	rc, err := m.confGetter(ctx, key)
 	if err != nil {
 		return nil, err

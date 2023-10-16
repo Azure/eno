@@ -25,11 +25,11 @@ const finalizerName = "eno.azure.io/cleanup"
 type Controller struct {
 	config    *conf.Config
 	client    client.Client
-	clientMgr *clientmgr.Manager[string]
+	clientMgr *clientmgr.Manager[*apiv1.SecretKeyRef]
 	logger    logr.Logger
 }
 
-func NewController(mgr ctrl.Manager, cmgr *clientmgr.Manager[string], config *conf.Config) error {
+func NewController(mgr ctrl.Manager, cmgr *clientmgr.Manager[*apiv1.SecretKeyRef], config *conf.Config) error {
 	c := &Controller{
 		config:    config,
 		client:    mgr.GetClient(),
@@ -64,7 +64,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, fmt.Errorf("parsing resource manifest as json: %w", err)
 	}
 
-	cli, err := c.clientMgr.GetClient(ctx, "")
+	cli, err := c.clientMgr.GetClient(ctx, gr.Spec.KubeConfig)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
