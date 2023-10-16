@@ -3,8 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.11.3
-  creationTimestamp: null
+    controller-gen.kubebuilder.io/version: v0.13.0
   name: generatedresources.eno.azure.io
 spec:
   group: eno.azure.io
@@ -36,6 +35,17 @@ spec:
               derivedGeneration:
                 format: int64
                 type: integer
+              kubeConfig:
+                properties:
+                  key:
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - name
+                type: object
               manifest:
                 type: string
               reconcileInterval:
