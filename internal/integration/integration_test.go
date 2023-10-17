@@ -61,7 +61,7 @@ var testCases = []struct {
 					cm := &corev1.ConfigMap{}
 					cm.Name = "test-configmap"
 					cm.Namespace = "default"
-					cm.Data = map[string]string{"foo": "baz"}
+					cm.Data = map[string]string{"bar": "baz"}
 
 					return []client.Object{cm}, nil
 				},
@@ -71,7 +71,7 @@ var testCases = []struct {
 					cm.Namespace = "default"
 					err := c.Get(context.Background(), client.ObjectKeyFromObject(cm), cm)
 					require.NoError(t, err)
-					assert.Equal(t, map[string]string{"foo": "baz"}, cm.Data)
+					assert.Equal(t, map[string]string{"foo": "bar", "bar": "baz"}, cm.Data)
 				},
 			},
 			{
@@ -192,6 +192,18 @@ var testCases = []struct {
 				obj.Annotations["val"] = fmt.Sprintf("value-%d", i)
 			},
 			GetPropertyUnderTest: func(obj *corev1.ConfigMap) any { return obj.Annotations["val"] },
+		}).Build(),
+	},
+	{
+		Name: "unmanaged-property-cr",
+		States: (&mergeTest[*testapi.Example]{
+			New: func() *testapi.Example {
+				return &testapi.Example{ObjectMeta: metav1.ObjectMeta{Name: "test-cr"}}
+			},
+			SetPropertyUnderTest: func(i int, obj *testapi.Example) {
+				obj.Spec.Value = i
+			},
+			GetPropertyUnderTest: func(obj *testapi.Example) any { return obj.Spec.Value },
 		}).Build(),
 	},
 }

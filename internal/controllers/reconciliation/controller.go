@@ -83,7 +83,13 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			logger.Info("removed finalizer")
 			return ctrl.Result{}, nil
 		}
-		err = nil
+
+		// Create
+		if err := cli.Create(ctx, res); err != nil {
+			return ctrl.Result{}, fmt.Errorf("creating resource: %w", err)
+		}
+		c.logger.Info("created resource")
+		return ctrl.Result{Requeue: true}, nil
 	}
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("getting resource: %w", err)
@@ -99,14 +105,17 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Create/update
-	// TODO: Avoid patching for every reconcile by writing the resource version to the GR status - only reconcile when the resource version of GR or reconciled resource have changed
+	// Update
 	err = cli.Patch(ctx, res, client.Apply, client.FieldOwner("eno"), client.ForceOwnership)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("updating resource: %w", err)
 	}
 	if !equality.Semantic.DeepEqual(res, current) {
+<<<<<<< HEAD
 		logger.Info("wrote resource")
+=======
+		c.logger.Info("updated resource")
+>>>>>>> parent of 2e7bce3 (Use SSA for creation)
 		return ctrl.Result{Requeue: true}, nil
 	}
 
