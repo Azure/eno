@@ -6,6 +6,7 @@ type SecretKeyRef struct {
 	// +optional
 	Namespace string `json:"namespace,omitempty"`
 	// +optional
+	// +kubebuilder:default:=value
 	Key string `json:"key,omitempty"`
 }
 

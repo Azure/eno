@@ -53,6 +53,7 @@ spec:
               kubeConfig:
                 properties:
                   key:
+                    default: value
                     type: string
                   name:
                     type: string
