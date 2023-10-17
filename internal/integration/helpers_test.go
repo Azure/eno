@@ -54,7 +54,7 @@ func setup(t *testing.T) *testManager {
 	mgr := setupMgr(t)
 	setupTestControllers(t, mgr)
 
-	cmgr := clientmgr.New(mgr.GetClient(), func(ctx context.Context, key string) (*rest.Config, error) {
+	cmgr := clientmgr.New(mgr.GetClient(), func(ctx context.Context, key *apiv1.SecretKeyRef) (*rest.Config, error) {
 		return nil, nil
 	})
 
