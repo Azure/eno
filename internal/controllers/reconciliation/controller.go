@@ -121,7 +121,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			Reason:             "Synced",
 			Message:            "Resource is in sync",
 		})
-		return ctrl.Result{}, cli.Status().Update(ctx, gr)
+		return ctrl.Result{}, c.client.Status().Update(ctx, gr)
 	}
 
 	result := ctrl.Result{}
