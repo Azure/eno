@@ -147,5 +147,9 @@ func (c *Controller) newJob(comp *apiv1.Composition, gen *apiv1.Generator) *batc
 		},
 	}
 
+	if c.config.JobSA != "" {
+		job.Spec.Template.Spec.ServiceAccountName = c.config.JobSA
+	}
+
 	return job
 }
