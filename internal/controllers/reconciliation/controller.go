@@ -48,8 +48,6 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 	logger := c.logger.WithValues("generatedResourceName", gr.Name, "generatedResourceGeneration", gr.Generation)
 
-	// TODO: Allow the kubeconfig used by kubectl to be different than the one used by the controller
-
 	// TODO: Should we have a per-resource cooldown period to debounce frequent updates?
 
 	// Delete
@@ -58,6 +56,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		cmd.Stderr = os.Stderr
 		cmd.Stdout = os.Stdout
 		cmd.Stdin = bytes.NewBufferString(gr.Spec.Manifest)
+		cmd.Env = []string{fmt.Sprintf("KUBECONFIG=/etc/upstream-kubeconfig")}
 		if err := cmd.Run(); err != nil {
 			return ctrl.Result{}, fmt.Errorf("deleting resource: %w", err)
 		}
@@ -83,6 +82,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
 	cmd.Stdin = bytes.NewBufferString(gr.Spec.Manifest)
+	cmd.Env = []string{fmt.Sprintf("KUBECONFIG=/etc/upstream-kubeconfig")}
 	if err := cmd.Run(); err != nil {
 		return ctrl.Result{}, fmt.Errorf("applying resource: %w", err)
 	}
