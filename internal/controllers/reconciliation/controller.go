@@ -111,11 +111,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, fmt.Errorf("updating resource: %w", err)
 	}
 	if !equality.Semantic.DeepEqual(res, current) {
-<<<<<<< HEAD
 		logger.Info("wrote resource")
-=======
-		c.logger.Info("updated resource")
->>>>>>> parent of 2e7bce3 (Use SSA for creation)
 		return ctrl.Result{Requeue: true}, nil
 	}
 
