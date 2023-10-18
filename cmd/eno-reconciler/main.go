@@ -55,7 +55,7 @@ func run() error {
 	if err := mgr.AddHealthzCheck("running", healthz.Ping); err != nil {
 		return fmt.Errorf("adding ping healthz check: %w", err)
 	}
-	if err := reconciliation.NewController(mgr, cmgr, config); err != nil {
+	if err := reconciliation.NewController(mgr, config); err != nil {
 		return err
 	}
 	if err := readiness.NewController(mgr, cmgr, config); err != nil {
