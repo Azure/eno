@@ -18,6 +18,8 @@ import (
 	"github.com/Azure/eno/internal/controllers/reconciliation"
 )
 
+// TODO: Separate config package per process — reconciler doesn't need wrapper tag
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)

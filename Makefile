@@ -13,6 +13,8 @@ images/tags.env:
 	@echo > $@
 	@echo "export CONTROLLER_IMAGE=$(IMAGE_PREFIX)/eno-controller:$(NOW)" >> $@
 	@echo "export WRAPPER_IMAGE=$(IMAGE_PREFIX)/eno-wrapper:$(NOW)" >> $@
+	@echo "export RECONCILER_IMAGE=$(IMAGE_PREFIX)/eno-reconciler:$(NOW)" >> $@
+	@echo "export EXAMPLE_IMAGE=$(IMAGE_PREFIX)/eno-simple-example:$(NOW)" >> $@
 
 .PHONY: deploy
 deploy:

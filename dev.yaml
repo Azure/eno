@@ -22,3 +22,64 @@ spec:
         env:
         - name: WRAPPER_IMAGE
           value: ${WRAPPER_IMAGE}
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eno-reconciler
+  labels:
+    app: eno-reconciler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: eno-reconciler
+  template:
+    metadata:
+      labels:
+        app: eno-reconciler
+    spec:
+      containers:
+      - name: controller
+        image: ${RECONCILER_IMAGE}
+        env:
+        - name: WRAPPER_IMAGE
+          value: ${WRAPPER_IMAGE}
+
+---
+
+apiVersion: eno.azure.io/v1
+kind: Generator
+metadata:
+  name: simple-example
+spec:
+  image: ${EXAMPLE_IMAGE}
+
+---
+
+apiVersion: eno.azure.io/v1
+kind: Composition
+metadata:
+  name: example
+spec:
+  revision: 3
+  inputs:
+  - apiVersion: v1
+    kind: ConfigMap
+    namespace: "default"
+    name: "test-inputs"
+  generator:
+    name: simple-example
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-inputs
+  namespace: default
+data:
+  enable: "true"
+  replicas: "1"
