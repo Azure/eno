@@ -5,6 +5,7 @@ import (
 	"os"
 
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 
 	"github.com/go-logr/zapr"
@@ -39,6 +40,11 @@ func run() error {
 
 	opts := ctrl.Options{
 		Logger: zapr.NewLogger(zapLog),
+		Cache: cache.Options{
+			DefaultNamespaces: map[string]cache.Config{
+				config.Namespace: {},
+			},
+		},
 	}
 
 	rc := ctrl.GetConfigOrDie()

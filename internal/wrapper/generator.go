@@ -24,6 +24,7 @@ type Generator struct {
 	Logger logr.Logger
 
 	CompositionName       string
+	CompositionNamespace  string
 	CompositionGeneration int64
 
 	Exec func(context.Context, []byte) ([]byte, error)
@@ -32,6 +33,7 @@ type Generator struct {
 func (g *Generator) Generate(ctx context.Context) error {
 	comp := &apiv1.Composition{}
 	comp.Name = g.CompositionName
+	comp.Namespace = g.CompositionNamespace
 	err := g.Client.Get(ctx, client.ObjectKeyFromObject(comp), comp, &client.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("getting composition resource: %w", err)

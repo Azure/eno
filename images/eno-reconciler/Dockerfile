@@ -3,7 +3,6 @@ WORKDIR /app
 COPY . .
 RUN curl -LO https://dl.k8s.io/release/v1.28.2/bin/linux/amd64/kubectl
 RUN chmod +x kubectl
-RUN ls -l
 RUN CGO_ENABLED=0 go build ./cmd/eno-reconciler
 
 FROM scratch

@@ -77,9 +77,9 @@ func generate() error {
 		panic(err)
 	}
 
-	name, genStr := os.Getenv("COMPOSITION_NAME"), os.Getenv("COMPOSITION_GENERATION")
+	name, ns, genStr := os.Getenv("COMPOSITION_NAME"), os.Getenv("COMPOSITION_NAMESPACE"), os.Getenv("COMPOSITION_GENERATION")
 	if name == "" || genStr == "" {
-		return errors.New("composition resource name and generation are required")
+		return errors.New("composition resource name, namespace, and generation are required")
 	}
 	gen, _ := strconv.ParseInt(genStr, 10, 0)
 
@@ -96,6 +96,7 @@ func generate() error {
 		Client:                cli,
 		Logger:                zapr.NewLogger(log),
 		CompositionName:       name,
+		CompositionNamespace:  ns,
 		CompositionGeneration: gen,
 		Exec:                  spawnChild,
 	}

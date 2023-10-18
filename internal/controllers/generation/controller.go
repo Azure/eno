@@ -96,11 +96,11 @@ func (c *Controller) newJob(comp *apiv1.Composition, gen *apiv1.Generator) *batc
 	hashStr := hex.EncodeToString(hash.Sum(nil))[:7]
 
 	job := &batchv1.Job{}
+	job.Name = "generate-" + hashStr
+	job.Namespace = comp.Namespace
 	if err := controllerutil.SetControllerReference(comp, job, c.client.Scheme()); err != nil {
 		panic(fmt.Sprintf("unable to set owner reference: %s", err))
 	}
-	job.Name = "generate-" + hashStr
-	job.Namespace = c.config.JobNS
 	job.Spec.Parallelism = &parallelism
 	job.Spec.TTLSecondsAfterFinished = &ttl
 	job.Spec.Template = corev1.PodTemplateSpec{
@@ -133,6 +133,10 @@ func (c *Controller) newJob(comp *apiv1.Composition, gen *apiv1.Generator) *batc
 					{
 						Name:  "COMPOSITION_NAME",
 						Value: comp.Name,
+					},
+					{
+						Name:  "COMPOSITION_NAMESPACE",
+						Value: comp.Namespace,
 					},
 					{
 						Name:  "COMPOSITION_GENERATION",

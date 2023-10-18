@@ -25,6 +25,7 @@ spec:
 
 ---
 
+# Optionally mount /etc/upstream-kubeconfig to reconcile against another cluster
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -47,6 +48,8 @@ spec:
         env:
         - name: WRAPPER_IMAGE
           value: ${WRAPPER_IMAGE}
+        - name: NAMESPACE
+          value: default
 
 ---
 
@@ -63,8 +66,9 @@ apiVersion: eno.azure.io/v1
 kind: Composition
 metadata:
   name: example
+  namespace: default
 spec:
-  revision: 3
+  revision: 1
   inputs:
   - apiVersion: v1
     kind: ConfigMap
