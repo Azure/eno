@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
-	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -91,24 +90,14 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	// Delete
 	if gr.DeletionTimestamp != nil {
-		err = cli.Delete(ctx, res)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("deleting resource: %w", err)
-		}
+		// TODO: kubectl delete
 		logger.Info("deleted resource")
 		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Create/update
-	// TODO: Avoid patching for every reconcile by writing the resource version to the GR status - only reconcile when the resource version of GR or reconciled resource have changed
-	err = cli.Patch(ctx, res, client.Apply, client.FieldOwner("eno"), client.ForceOwnership)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("updating resource: %w", err)
-	}
-	if !equality.Semantic.DeepEqual(res, current) {
-		logger.Info("wrote resource")
-		return ctrl.Result{Requeue: true}, nil
-	}
+	// TODO: kubectl apply and return if no changes
+	logger.Info("wrote resource")
 
 	// Reflect status back to CR
 	cond := meta.FindStatusCondition(gr.Status.Conditions, apiv1.ReconciledConditionType)

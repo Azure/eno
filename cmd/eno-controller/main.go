@@ -12,9 +12,9 @@ import (
 	"go.uber.org/zap"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/clientmgr"
 	"github.com/Azure/eno/internal/conf"
-	"github.com/Azure/eno/internal/controllers"
+	"github.com/Azure/eno/internal/controllers/generation"
+	"github.com/Azure/eno/internal/controllers/statusagg"
 )
 
 func main() {
@@ -48,13 +48,15 @@ func run() error {
 	if err := apiv1.SchemeBuilder.AddToScheme(mgr.GetScheme()); err != nil {
 		return fmt.Errorf("adding scheme: %w", err)
 	}
-	cli := mgr.GetClient()
-	cmgr := clientmgr.New(cli, clientmgr.GetSecretConfigGetter(cli))
 	if err := mgr.AddHealthzCheck("running", healthz.Ping); err != nil {
 		return fmt.Errorf("adding ping healthz check: %w", err)
 	}
-	if err := controllers.New(mgr, cmgr, config); err != nil {
-		return err
+
+	if err := generation.NewController(mgr, config); err != nil {
+		return fmt.Errorf("adding generation controller: %w", err)
+	}
+	if err := statusagg.NewController(mgr, config); err != nil {
+		return fmt.Errorf("adding status aggregation controller: %w", err)
 	}
 
 	return mgr.Start(ctrl.SetupSignalHandler())

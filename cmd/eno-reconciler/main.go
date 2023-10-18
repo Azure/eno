@@ -14,6 +14,7 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/clientmgr"
 	"github.com/Azure/eno/internal/conf"
+	"github.com/Azure/eno/internal/controllers/readiness"
 	"github.com/Azure/eno/internal/controllers/reconciliation"
 )
 
@@ -50,11 +51,15 @@ func run() error {
 	}
 	cli := mgr.GetClient()
 	cmgr := clientmgr.New(cli, clientmgr.GetSecretConfigGetter(cli))
+
 	if err := mgr.AddHealthzCheck("running", healthz.Ping); err != nil {
 		return fmt.Errorf("adding ping healthz check: %w", err)
 	}
 	if err := reconciliation.NewController(mgr, cmgr, config); err != nil {
 		return err
+	}
+	if err := readiness.NewController(mgr, cmgr, config); err != nil {
+		return fmt.Errorf("adding readiness controller: %w", err)
 	}
 
 	return mgr.Start(ctrl.SetupSignalHandler())
