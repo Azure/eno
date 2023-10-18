@@ -11,7 +11,6 @@ type GeneratedResourceList struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster
 type GeneratedResource struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -24,7 +23,6 @@ type GeneratedResourceSpec struct {
 	Manifest          string           `json:"manifest,omitempty"`
 	ReconcileInterval *metav1.Duration `json:"reconcileInterval,omitempty"`
 	DerivedGeneration int64            `json:"derivedGeneration,omitempty"`
-	KubeConfig        *SecretKeyRef    `json:"kubeConfig,omitempty"`
 }
 
 type GeneratedResourceStatus struct {
