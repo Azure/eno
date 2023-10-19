@@ -21,16 +21,18 @@ import (
 const finalizerName = "eno.azure.io/cleanup"
 
 type Controller struct {
-	config *conf.Config
-	client client.Client
-	logger logr.Logger
+	config             *conf.Config
+	client             client.Client
+	logger             logr.Logger
+	upstreamKubeconfig string
 }
 
 func NewController(mgr ctrl.Manager, config *conf.Config) error {
 	c := &Controller{
-		config: config,
-		client: mgr.GetClient(),
-		logger: mgr.GetLogger(),
+		config:             config,
+		client:             mgr.GetClient(),
+		logger:             mgr.GetLogger(),
+		upstreamKubeconfig: os.Getenv("UPSTREAM_KUBECONFIG"),
 	}
 
 	_, err := ctrl.NewControllerManagedBy(mgr).
@@ -56,7 +58,9 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		cmd.Stderr = os.Stderr
 		cmd.Stdout = os.Stdout
 		cmd.Stdin = bytes.NewBufferString(gr.Spec.Manifest)
-		cmd.Env = []string{fmt.Sprintf("KUBECONFIG=/etc/upstream-kubeconfig")}
+		if c.upstreamKubeconfig != "" {
+			cmd.Env = []string{fmt.Sprintf("KUBECONFIG=" + c.upstreamKubeconfig)}
+		}
 		if err := cmd.Run(); err != nil {
 			return ctrl.Result{}, fmt.Errorf("deleting resource: %w", err)
 		}
@@ -82,7 +86,9 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
 	cmd.Stdin = bytes.NewBufferString(gr.Spec.Manifest)
-	cmd.Env = []string{fmt.Sprintf("KUBECONFIG=/etc/upstream-kubeconfig")}
+	if c.upstreamKubeconfig != "" {
+		cmd.Env = []string{fmt.Sprintf("KUBECONFIG=" + c.upstreamKubeconfig)}
+	}
 	if err := cmd.Run(); err != nil {
 		return ctrl.Result{}, fmt.Errorf("applying resource: %w", err)
 	}

@@ -25,7 +25,7 @@ spec:
 
 ---
 
-# Optionally mount /etc/upstream-kubeconfig to reconcile against another cluster
+# Optionally set UPSTREAM_KUBECONFIG to reconcile against another cluster
 apiVersion: apps/v1
 kind: Deployment
 metadata:
