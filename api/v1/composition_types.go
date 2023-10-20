@@ -33,7 +33,8 @@ const (
 )
 
 type CompositionStatus struct {
-	ObservedGeneration     int64              `json:"observedGeneration,omitempty"`
+	CompositionGeneration  int64              `json:"compositionGeneration,omitempty"`
+	GeneratorGeneration    int64              `json:"generatorGeneration,omitempty"`
 	GeneratedResourceCount int64              `json:"generatedResourceCount,omitempty"`
 	Conditions             []metav1.Condition `json:"conditions,omitempty"`
 }

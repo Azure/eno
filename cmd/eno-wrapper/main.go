@@ -77,11 +77,12 @@ func generate() error {
 		panic(err)
 	}
 
-	name, ns, genStr := os.Getenv("COMPOSITION_NAME"), os.Getenv("COMPOSITION_NAMESPACE"), os.Getenv("COMPOSITION_GENERATION")
+	name, ns, genStr, genGenStr := os.Getenv("COMPOSITION_NAME"), os.Getenv("COMPOSITION_NAMESPACE"), os.Getenv("COMPOSITION_GENERATION"), os.Getenv("GENERATOR_GENERATION")
 	if name == "" || genStr == "" {
 		return errors.New("composition resource name, namespace, and generation are required")
 	}
 	gen, _ := strconv.ParseInt(genStr, 10, 0)
+	genGen, _ := strconv.ParseInt(genGenStr, 10, 0)
 
 	// TODO(jordan): Allow rate limiting to be configured
 	cli, err := client.New(ctrl.GetConfigOrDie(), client.Options{})
@@ -98,6 +99,7 @@ func generate() error {
 		CompositionName:       name,
 		CompositionNamespace:  ns,
 		CompositionGeneration: gen,
+		GeneratorGeneration:   genGen,
 		Exec:                  spawnChild,
 	}
 	return g.Generate(ctx)

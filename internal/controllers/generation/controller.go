@@ -30,9 +30,11 @@ func NewController(mgr ctrl.Manager, config *conf.Config) error {
 		logger: mgr.GetLogger(),
 	}
 
+	// TODO: We need to watch generators for the rollout logic to work
+
 	_, err := ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
-		Owns(&corev1.Pod{}).
+		Owns(&corev1.Pod{}). // TODO: Need to use a label selector for perf
 		Build(c)
 
 	return err
@@ -59,6 +61,8 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// Avoid creating duplicate pods
 	pod := c.newPod(comp, gen)
 	current := &corev1.Pod{}
+	logger := c.logger.WithValues("podName", pod.Name, "compositionName", comp.Name, "compositionGeneration", comp.Generation, "generatorGeneration", gen.Generation)
+
 	err = c.client.Get(ctx, client.ObjectKeyFromObject(pod), current)
 	if client.IgnoreNotFound(err) != nil {
 		return ctrl.Result{}, fmt.Errorf("getting current pod: %w", err)
@@ -69,14 +73,20 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("error deleting pod: %w", err)
 			}
-			c.logger.Info("deleted generation pod", "podName", current.Name, "compositionName", comp.Name, "compositionGeneration", comp.Generation)
+			c.logger.Info("deleted generation pod")
 		}
 		return ctrl.Result{}, nil
 	}
 
 	// Skip cases in which the GeneratedResources have already been created
-	if comp.Status.ObservedGeneration == comp.Generation {
+	if comp.Status.CompositionGeneration == comp.Generation && comp.Status.GeneratorGeneration == gen.Generation {
 		return ctrl.Result{}, nil // already in sync
+	}
+
+	// Slow-roll generator changes across referencing compositions
+	if comp.Status.GeneratorGeneration != gen.Generation {
+		logger.Info("regenerating composition because generator changed")
+		// TODO: Implement slow-roll logic
 	}
 
 	// Create a pod to generate the resouces!
@@ -84,7 +94,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreAlreadyExists(fmt.Errorf("creating generation pod: %w", err))
 	}
-	c.logger.Info("created pod to generate resources for composition", "podName", pod.Name, "compositionName", comp.Name, "compositionGeneration", comp.Generation)
+	logger.Info("created pod to generate resources for composition")
 
 	return ctrl.Result{}, nil
 }
@@ -142,6 +152,10 @@ func (c *Controller) newPod(comp *apiv1.Composition, gen *apiv1.Generator) *core
 				{
 					Name:  "COMPOSITION_GENERATION",
 					Value: strconv.FormatInt(comp.Generation, 10),
+				},
+				{
+					Name:  "GENERATOR_GENERATION",
+					Value: strconv.FormatInt(gen.Generation, 10),
 				},
 			},
 		}},

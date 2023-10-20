@@ -42,7 +42,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition: %w", err))
 	}
-	if comp.Status.ObservedGeneration != comp.Generation {
+	if comp.Status.CompositionGeneration != comp.Generation {
 		return ctrl.Result{}, nil
 	}
 	original := comp.DeepCopy()

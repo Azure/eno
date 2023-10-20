@@ -26,6 +26,7 @@ type Generator struct {
 	CompositionName       string
 	CompositionNamespace  string
 	CompositionGeneration int64
+	GeneratorGeneration   int64
 
 	Exec func(context.Context, []byte) ([]byte, error)
 }
@@ -202,7 +203,8 @@ func (g *Generator) updateCompositionStatus(ctx context.Context, comp *apiv1.Com
 	if comp.Generation != g.CompositionGeneration {
 		return fmt.Errorf("this job is no longer necessary - (%d != %d)", comp.Generation, g.CompositionGeneration)
 	}
-	comp.Status.ObservedGeneration = comp.Generation
+	comp.Status.CompositionGeneration = comp.Generation
+	comp.Status.GeneratorGeneration = g.GeneratorGeneration
 	comp.Status.GeneratedResourceCount = int64(len(goal))
 	return g.Client.Status().Update(ctx, comp)
 }

@@ -1,5 +1,4 @@
-- Implement slow rollout for generator updates
-  - Add revision to generator CRD for no-change rollouts (tracking external state)
+- Implements slow rollout for generator updates
 - Remove `kubectl apply` patch annotation if it is invalid
 - Fix readiness controller
 - Two-way Helm ownership migration

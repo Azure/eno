@@ -71,6 +71,9 @@ spec:
             type: object
           status:
             properties:
+              compositionGeneration:
+                format: int64
+                type: integer
               conditions:
                 items:
                   description: "Condition contains details for one aspect of the current
@@ -142,7 +145,7 @@ spec:
               generatedResourceCount:
                 format: int64
                 type: integer
-              observedGeneration:
+              generatorGeneration:
                 format: int64
                 type: integer
             type: object
