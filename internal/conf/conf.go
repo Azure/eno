@@ -12,4 +12,5 @@ type Config struct {
 	JobSA string `split_words:"true" default:""`
 
 	StatusPollingInterval time.Duration `split_words:"true" default:"10s"`
+	RolloutCooldown       time.Duration `split_words:"true" default:"30s"`
 }

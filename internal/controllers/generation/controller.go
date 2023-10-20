@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -61,6 +62,8 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, fmt.Errorf("listing current pods: %w", err)
 	}
 
+	// TODO: Clean up all pods owned by this composition, use generateName for their names
+
 	// Avoid creating duplicate pods
 	pod := c.newPod(comp, gen)
 	current := &corev1.Pod{}
@@ -71,6 +74,16 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, fmt.Errorf("getting current pod: %w", err)
 	}
 	if err == nil {
+		if !comp.Status.LastGeneratorCreation.Equal(&current.CreationTimestamp) {
+			// TODO: Is there ever a case in which this code would not be reached? I think there is but it isn't obvious
+			comp.Status.LastGeneratorCreation = &current.CreationTimestamp
+			if err := c.client.Status().Update(ctx, comp); err != nil {
+				return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
+			}
+			c.logger.Info("set last generator creation time in composition status")
+			return ctrl.Result{}, nil
+		}
+
 		if current.DeletionTimestamp == nil && shouldDeletePod(current) {
 			err = c.client.Delete(ctx, current)
 			if err != nil {
@@ -86,10 +99,17 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, nil // already in sync
 	}
 
-	// Slow-roll generator changes across referencing compositions
-	if comp.Status.GeneratorGeneration != gen.Generation {
-		logger.Info("regenerating composition because generator changed")
-		// TODO: Implement slow-roll logic
+	// Slow-roll generator changes across referencing compositions only when the composition itself hasn't changed
+	if comp.Status.GeneratorGeneration != gen.Generation && comp.Status.CompositionGeneration == comp.Generation {
+		res, err := c.shouldDeferForRollingUpdate(ctx, gen)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if res != nil {
+			logger.Info(fmt.Sprintf("deferring re-generation for %s because another composition is within the cooldown window", res.RequeueAfter))
+			return *res, nil
+		}
+		logger.Info("re-generating composition because generator changed")
 	}
 
 	// Create a pod to generate the resouces!
@@ -173,6 +193,26 @@ func (c *Controller) newPod(comp *apiv1.Composition, gen *apiv1.Generator) *core
 	}
 
 	return pod
+}
+
+func (c *Controller) shouldDeferForRollingUpdate(ctx context.Context, gen *apiv1.Generator) (*ctrl.Result, error) {
+	list := &apiv1.CompositionList{}
+	if err := c.client.List(ctx, list); err != nil { // TODO: Consider an index here
+		return nil, err
+	}
+
+	for _, item := range list.Items {
+		if item.Spec.Generator == nil || item.Spec.Generator.Name != gen.Name || item.Status.LastGeneratorCreation == nil {
+			continue
+		}
+		sinceLastGeneration := time.Since(item.Status.LastGeneratorCreation.Time)
+		remainingCooldown := c.config.RolloutCooldown - sinceLastGeneration
+		if remainingCooldown > 0 {
+			return &ctrl.Result{Requeue: true, RequeueAfter: remainingCooldown}, nil
+		}
+	}
+
+	return nil, nil
 }
 
 func shouldDeletePod(pod *corev1.Pod) bool {
