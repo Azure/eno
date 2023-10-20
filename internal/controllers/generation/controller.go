@@ -9,9 +9,13 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/conf"
@@ -30,11 +34,10 @@ func NewController(mgr ctrl.Manager, config *conf.Config) error {
 		logger: mgr.GetLogger(),
 	}
 
-	// TODO: We need to watch generators for the rollout logic to work
-
 	_, err := ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
 		Owns(&corev1.Pod{}). // TODO: Need to use a label selector for perf
+		Watches(&apiv1.Generator{}, &generatorHandler{ctrl: c}).
 		Build(c)
 
 	return err
@@ -186,4 +189,53 @@ func shouldDeletePod(pod *corev1.Pod) bool {
 		}
 	}
 	return len(pod.Status.ContainerStatuses) > 0
+}
+
+type generatorHandler struct {
+	ctrl *Controller
+}
+
+func (h *generatorHandler) Generic(ctx context.Context, evt event.GenericEvent, q workqueue.RateLimitingInterface) {
+	h.handle(ctx, evt.Object, q)
+}
+
+func (h *generatorHandler) Create(ctx context.Context, evt event.CreateEvent, q workqueue.RateLimitingInterface) {
+	h.handle(ctx, evt.Object, q)
+}
+
+func (h *generatorHandler) Delete(ctx context.Context, evt event.DeleteEvent, q workqueue.RateLimitingInterface) {
+	h.handle(ctx, evt.Object, q)
+}
+
+func (h *generatorHandler) Update(ctx context.Context, evt event.UpdateEvent, q workqueue.RateLimitingInterface) {
+	switch {
+	case evt.ObjectNew != nil:
+		h.handle(ctx, evt.ObjectNew, q)
+	case evt.ObjectOld != nil:
+		h.handle(ctx, evt.ObjectOld, q)
+	default:
+	}
+}
+
+func (h *generatorHandler) handle(ctx context.Context, obj client.Object, q workqueue.RateLimitingInterface) {
+	if obj == nil {
+		h.ctrl.logger.Info("generator handler got nil object")
+		return
+	}
+
+	list := &apiv1.CompositionList{}
+	err := h.ctrl.client.List(ctx, list)
+	if err != nil {
+		// this should be impossible since we're reading from the informer cache
+		h.ctrl.logger.Error(err, "error while listing compositions to be enqueued")
+		return
+	}
+	for _, item := range list.Items {
+		if item.Spec.Generator != nil && item.Spec.Generator.Name == obj.GetName() {
+			q.Add(reconcile.Request{NamespacedName: types.NamespacedName{
+				Name:      item.GetName(),
+				Namespace: item.GetNamespace(),
+			}})
+		}
+	}
 }
