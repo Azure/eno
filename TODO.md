@@ -1,11 +1,12 @@
-- Switch to client-side patching w/ cached openapi discovery
-- More readiness support (conditions matcher for CRs, more core resources)
-- Implement rollout between generator versions
-- Support controller generators
+- Implement slow rollout for generator updates
+  - Add revision to generator CRD for no-change rollouts (tracking external state)
+- Remove `kubectl apply` patch annotation if it is invalid
+- Fix readiness controller
 - Two-way Helm ownership migration
-- Reconcile ordering using depedency annotations (wait for readiness)
-- Reconcile partitioning
-- Reconcile prioritization
-- Expose leader election and other controller settings
+
+Consider:
 
 - Configmap/secret reconcile ordering?
+- Custom ordering using annotations?
+- How to support partial reconciliation?
+- Rename GeneratedResource to ManagedResource?

@@ -69,6 +69,7 @@ metadata:
   namespace: default
 spec:
   revision: 1
+  reconcileInterval: 1s
   inputs:
   - apiVersion: v1
     kind: ConfigMap
