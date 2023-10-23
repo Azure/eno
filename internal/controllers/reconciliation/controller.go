@@ -12,11 +12,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/conf"
 )
+
+// TODO: Handle 404 on deletion
 
 const finalizerName = "eno.azure.io/cleanup"
 
@@ -37,6 +40,9 @@ func NewController(mgr ctrl.Manager, config *conf.Config) error {
 
 	_, err := ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.GeneratedResource{}).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 8,
+		}).
 		Build(c)
 
 	return err

@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-logr/zapr"
 	"go.uber.org/zap"
+	"k8s.io/client-go/util/flowcontrol"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -84,8 +85,11 @@ func generate() error {
 	gen, _ := strconv.ParseInt(genStr, 10, 0)
 	genGen, _ := strconv.ParseInt(genGenStr, 10, 0)
 
+	rc := ctrl.GetConfigOrDie()
+	rc.RateLimiter = flowcontrol.NewTokenBucketRateLimiter(100, 5)
+
 	// TODO(jordan): Allow rate limiting to be configured
-	cli, err := client.New(ctrl.GetConfigOrDie(), client.Options{})
+	cli, err := client.New(rc, client.Options{})
 	if err != nil {
 		return fmt.Errorf("constructing new k8s client: %w", err)
 	}

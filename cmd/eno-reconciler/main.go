@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"k8s.io/client-go/util/flowcontrol"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -48,6 +49,7 @@ func run() error {
 	}
 
 	rc := ctrl.GetConfigOrDie()
+	rc.RateLimiter = flowcontrol.NewTokenBucketRateLimiter(100, 5)
 
 	mgr, err := ctrl.NewManager(rc, opts)
 	if err != nil {
