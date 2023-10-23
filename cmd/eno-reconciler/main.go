@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
+	"time"
 
 	"net/http"
 	_ "net/http/pprof"
@@ -34,6 +36,8 @@ func main() {
 }
 
 func run() error {
+	rand.Seed(time.Now().UnixNano())
+
 	go func() {
 		// For pprof
 		panic(http.ListenAndServe(":6060", nil)) // TODO: Disable by default
@@ -58,7 +62,7 @@ func run() error {
 					LabelSelector:         labels.Everything(),
 					FieldSelector:         fields.Everything(),
 					Transform:             func(in interface{}) (interface{}, error) { return in, nil },
-					UnsafeDisableDeepCopy: &ok,
+					UnsafeDisableDeepCopy: &ok, // TODO: Make sure the controller honors this
 				},
 			},
 		},

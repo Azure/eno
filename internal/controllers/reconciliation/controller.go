@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -41,7 +43,7 @@ func NewController(mgr ctrl.Manager, config *conf.Config) error {
 	_, err := ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.GeneratedResource{}).
 		WithOptions(controller.Options{
-			MaxConcurrentReconciles: 8,
+			MaxConcurrentReconciles: 1, // TODO: Expose
 		}).
 		Build(c)
 
@@ -116,7 +118,13 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	result := ctrl.Result{}
 	if gr.Spec.ReconcileInterval != nil {
-		result.RequeueAfter = gr.Spec.ReconcileInterval.Duration
+		result.RequeueAfter = addJitter(gr.Spec.ReconcileInterval.Duration)
 	}
 	return result, nil
+}
+
+func addJitter(dur time.Duration) time.Duration {
+	maxJitter := dur * 20 / 100 // max of 20% jitter
+	jitter := time.Duration(rand.Int63n(int64(maxJitter*2)) - int64(maxJitter))
+	return dur + jitter
 }
