@@ -41,7 +41,7 @@ spec:
           value: ${WRAPPER_IMAGE}
 YAML
 
-for i in {1..1}; do
+for i in {1..10}; do
 	cat >> loadtest.yaml <<YAML
 ---
 
@@ -55,7 +55,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: admin
+  name: admin-loadgen-${i}
 subjects:
 - kind: ServiceAccount
   name: default
@@ -113,7 +113,8 @@ metadata:
   name: loadgen
   namespace: loadgen-${i}
 spec:
-  reconcileInterval: 5m
+  revision: 10
+  reconcileInterval: 10m
   inputs:
   - name: test-inputs
     resource:
