@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strconv"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -27,38 +28,29 @@ func Generate(inputs *generation.Inputs) ([]client.Object, error) {
 		return nil, nil
 	}
 
-	replicasInt, err := strconv.Atoi(test.Data["replicas"])
+	count, err := strconv.Atoi(test.Data["replicas"])
 	if err != nil {
 		return nil, err
 	}
-	replicas := int32(replicasInt)
 
-	podLabels := map[string]string{"app": "nginx"}
-
-	output := &appsv1.Deployment{
+	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        "nginx",
-			Namespace:   "default",
-			Annotations: test.Data, // pass through the input
-		},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: &replicas,
-			Selector: &metav1.LabelSelector{
-				MatchLabels: podLabels,
-			},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: podLabels,
-				},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{{
-						Name:  "nginx",
-						Image: "nginx:latest",
-					}},
-				},
-			},
+			Name: test.Data["namespace"],
 		},
 	}
 
-	return []client.Object{output}, nil
+	objects := []client.Object{ns}
+	for i := 0; i < count; i++ {
+		objects = append(objects, &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("test-%d", i),
+				Namespace: ns.Name,
+			},
+			Data: map[string]string{
+				"empty": string(make([]byte, 1024)),
+			},
+		})
+	}
+
+	return objects, nil
 }

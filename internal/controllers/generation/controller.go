@@ -28,6 +28,8 @@ type Controller struct {
 	logger logr.Logger
 }
 
+// TODO: Remove pod ttl - it doesn't work like I expected
+
 func NewController(mgr ctrl.Manager, config *conf.Config) error {
 	c := &Controller{
 		config: config,
@@ -218,7 +220,7 @@ func (c *Controller) shouldDeferForRollingUpdate(ctx context.Context, gen *apiv1
 func shouldDeletePod(pod *corev1.Pod) bool {
 	for _, cont := range pod.Status.ContainerStatuses {
 		// Recreate the pod on another node eventually in case it was scheduled to a broken one
-		if cont.RestartCount > 5 {
+		if cont.RestartCount > 5 { // TODO: Expose in config
 			return true
 		}
 

@@ -62,6 +62,18 @@ spec:
 
 ---
 
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-inputs
+  namespace: default
+data:
+  enable: "true"
+  namespace: "test-1"
+  replicas: "200"
+
+---
+
 apiVersion: eno.azure.io/v1
 kind: Composition
 metadata:
@@ -69,7 +81,7 @@ metadata:
   namespace: default
 spec:
   revision: 1
-  reconcileInterval: 1s
+  reconcileInterval: 1m
   inputs:
   - apiVersion: v1
     kind: ConfigMap
@@ -83,8 +95,59 @@ spec:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: test-inputs
+  name: test-inputs-2
   namespace: default
 data:
   enable: "true"
-  replicas: "1"
+  namespace: "test-2"
+  replicas: "50"
+
+---
+
+apiVersion: eno.azure.io/v1
+kind: Composition
+metadata:
+  name: example-2
+  namespace: default
+spec:
+  revision: 1
+  reconcileInterval: 1m
+  inputs:
+  - apiVersion: v1
+    kind: ConfigMap
+    namespace: "default"
+    name: "test-inputs-2"
+  generator:
+    name: simple-example
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-inputs-3
+  namespace: default
+data:
+  enable: "true"
+  namespace: "test-3"
+  replicas: "50"
+
+---
+
+apiVersion: eno.azure.io/v1
+kind: Composition
+metadata:
+  name: example-3
+  namespace: default
+spec:
+  revision: 1
+  reconcileInterval: 5s
+  inputs:
+  - apiVersion: v1
+    kind: ConfigMap
+    namespace: "default"
+    name: "test-inputs-3"
+  generator:
+    name: simple-example
+
+# TODO: This doesn't work because input names need to be mapped
