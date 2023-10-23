@@ -4,6 +4,11 @@ import (
 	"fmt"
 	"os"
 
+	"net/http"
+	_ "net/http/pprof"
+
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/util/flowcontrol"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -29,6 +34,11 @@ func main() {
 }
 
 func run() error {
+	go func() {
+		// For pprof
+		panic(http.ListenAndServe(":6060", nil)) // TODO: Disable by default
+	}()
+
 	config := &conf.Config{}
 	if err := envconfig.Process("", config); err != nil {
 		panic(err)
@@ -39,11 +49,17 @@ func run() error {
 		panic(err)
 	}
 
+	ok := true
 	opts := ctrl.Options{
 		Logger: zapr.NewLogger(zapLog),
 		Cache: cache.Options{
 			DefaultNamespaces: map[string]cache.Config{
-				config.Namespace: {},
+				config.Namespace: {
+					LabelSelector:         labels.Everything(),
+					FieldSelector:         fields.Everything(),
+					Transform:             func(in interface{}) (interface{}, error) { return in, nil },
+					UnsafeDisableDeepCopy: &ok,
+				},
 			},
 		},
 	}
