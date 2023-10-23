@@ -102,7 +102,7 @@ metadata:
   namespace: loadgen-${i}
 data:
   enable: "true"
-  namespace: "test-1"
+  namespace: "loadgen-${i}"
   replicas: "3000"
 
 ---
