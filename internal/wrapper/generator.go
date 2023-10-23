@@ -60,7 +60,7 @@ func (g *Generator) Generate(ctx context.Context) error {
 
 	// TODO(jordan): Pagination for this list to support high resource count
 	current := &apiv1.GeneratedResourceList{}
-	err = g.Client.List(ctx, current, client.MatchingLabels{"composition": comp.Name})
+	err = g.Client.List(ctx, current, client.MatchingLabels{"composition": comp.Name}, client.InNamespace(comp.Namespace))
 	if err != nil {
 		return fmt.Errorf("listng current generated resource state: %w", err)
 	}
