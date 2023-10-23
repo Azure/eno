@@ -72,7 +72,7 @@ type Inputs struct {
 
 func FindResource[T client.Object](inputs *Inputs, name string) T {
 	for _, cur := range inputs.Objects {
-		if cur.GetName() != name {
+		if anno := cur.GetAnnotations(); anno == nil || anno["eno.azure.io/input-name"] != name {
 			continue
 		}
 		if ret, ok := cur.(T); ok {
@@ -81,6 +81,7 @@ func FindResource[T client.Object](inputs *Inputs, name string) T {
 	}
 
 	var zero T
+	// TODO: This message could be more specific
 	panic(fmt.Errorf("expected an input resource %s of type %T but received none", name, zero))
 }
 

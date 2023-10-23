@@ -15,6 +15,11 @@ type GeneratorRef struct {
 }
 
 type InputRef struct {
+	Name     string            `json:"name,omitempty"`
+	Resource *ResourceInputRef `json:"resource,omitempty"`
+}
+
+type ResourceInputRef struct {
 	APIVersion string `json:"apiVersion,omitempty"`
 	Kind       string `json:"kind,omitempty"`
 	Namespace  string `json:"namespace,omitempty"`

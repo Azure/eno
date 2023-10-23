@@ -41,14 +41,19 @@ spec:
               inputs:
                 items:
                   properties:
-                    apiVersion:
-                      type: string
-                    kind:
-                      type: string
                     name:
                       type: string
-                    namespace:
-                      type: string
+                    resource:
+                      properties:
+                        apiVersion:
+                          type: string
+                        kind:
+                          type: string
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                      type: object
                   type: object
                 type: array
               kubeConfig:

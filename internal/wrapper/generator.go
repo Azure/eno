@@ -84,15 +84,26 @@ func (g *Generator) fetchInputResources(ctx context.Context, comp *apiv1.Composi
 	enc := json.NewEncoder(buffer)
 
 	for _, input := range comp.Spec.Inputs {
+		if input.Resource == nil {
+			continue
+		}
 		ref := &unstructured.Unstructured{}
-		ref.SetAPIVersion(input.APIVersion)
-		ref.SetKind(input.Kind)
-		ref.SetName(input.Name)
-		ref.SetNamespace(input.Namespace)
+		ref.SetAPIVersion(input.Resource.APIVersion)
+		ref.SetKind(input.Resource.Kind)
+		ref.SetName(input.Resource.Name)
+		ref.SetNamespace(input.Resource.Namespace)
 
 		if err := g.Client.Get(ctx, client.ObjectKeyFromObject(ref), ref); err != nil {
 			return nil, fmt.Errorf("getting input resource: %w", err)
 		}
+
+		anno := ref.GetAnnotations()
+		if anno == nil {
+			anno = map[string]string{}
+		}
+		anno["eno.azure.io/input-name"] = input.Name
+		ref.SetAnnotations(anno)
+
 		if err := enc.Encode(ref); err != nil {
 			return nil, fmt.Errorf("encoding input resource: %w", err)
 		}
