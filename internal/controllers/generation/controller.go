@@ -28,8 +28,6 @@ type Controller struct {
 	logger logr.Logger
 }
 
-// TODO: Remove pod ttl - it doesn't work like I expected
-
 func NewController(mgr ctrl.Manager, config *conf.Config) error {
 	c := &Controller{
 		config: config,
@@ -125,10 +123,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 }
 
 func (c *Controller) newPod(comp *apiv1.Composition, gen *apiv1.Generator) *corev1.Pod {
-	var (
-		timeout           = int64(c.config.JobTimeout.Seconds())
-		wrapperVolumeName = "wrapper"
-	)
+	const wrapperVolumeName = "wrapper"
 
 	hash := sha256.New()
 	fmt.Fprintf(hash, "%s-%d", comp.Name, comp.Generation)
@@ -141,8 +136,7 @@ func (c *Controller) newPod(comp *apiv1.Composition, gen *apiv1.Generator) *core
 		panic(fmt.Sprintf("unable to set owner reference: %s", err))
 	}
 	pod.Spec = corev1.PodSpec{
-		RestartPolicy:         corev1.RestartPolicyOnFailure,
-		ActiveDeadlineSeconds: &timeout,
+		RestartPolicy: corev1.RestartPolicyOnFailure,
 		InitContainers: []corev1.Container{{
 			Name:  "setup",
 			Image: c.config.WrapperImage,
