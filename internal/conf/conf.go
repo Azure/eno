@@ -14,5 +14,5 @@ type Config struct {
 
 	ResyncInterval            time.Duration `split_words:"true" default:"5m"`
 	AccumulationWindow        time.Duration `split_words:"true" default:"5s"`
-	MaxReconcileResourceCount int           `split_words:"true" default:"500"`
+	MaxReconcileResourceCount int           `split_words:"true" default:"200"`
 }

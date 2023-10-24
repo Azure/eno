@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -38,7 +39,7 @@ func NewController(mgr ctrl.Manager, config *conf.Config) error {
 		upstreamKubeconfig: os.Getenv("UPSTREAM_KUBECONFIG"),
 	}
 
-	accumulator := newAccumulatingReconciler(config, c.ReconcileMany)
+	accumulator := newAccumulatingReconciler(config, mgr.GetClient(), c.ReconcileMany)
 	if err := mgr.Add(accumulator); err != nil {
 		return err
 	}
@@ -66,6 +67,9 @@ func (c *Controller) ReconcileMany(ctx context.Context, reqs []ctrl.Request) err
 		for _, req := range reqs {
 			gr := &apiv1.GeneratedResource{}
 			err := c.client.Get(ctx, req.NamespacedName, gr)
+			if errors.IsNotFound(err) {
+				continue // has since been removed
+			}
 			if err != nil {
 				panic(err) // TODO: Handle well
 			}
@@ -130,7 +134,7 @@ func (c *Controller) ReconcileMany(ctx context.Context, reqs []ctrl.Request) err
 		cmd.Env = []string{fmt.Sprintf("KUBECONFIG=" + c.upstreamKubeconfig)}
 	}
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("deleting resources: %w", err)
+		// TODO: Parse/handle errors
 	}
 
 	// TODO: Need same logic as mentioned previously for status updates
@@ -138,7 +142,7 @@ func (c *Controller) ReconcileMany(ctx context.Context, reqs []ctrl.Request) err
 		if !controllerutil.RemoveFinalizer(gr, "eno.azure.io/cleanup") {
 			continue
 		}
-		if err := c.client.Update(ctx, gr); err != nil {
+		if err := c.client.Update(ctx, gr); client.IgnoreNotFound(err) != nil {
 			return fmt.Errorf("removing finalizer after deletion: %w", err) // TODO: Don't break loop here
 		}
 	}
@@ -150,6 +154,7 @@ type accumulatingReconcilerHandler = func(context.Context, []ctrl.Request) error
 
 type accumulatingReconciler struct {
 	config  *conf.Config
+	client  client.Client
 	handler accumulatingReconcilerHandler
 	trigger chan struct{}
 	join    sync.Cond
@@ -159,9 +164,10 @@ type accumulatingReconciler struct {
 
 // TODO: Do we need to disable resync in controller?
 
-func newAccumulatingReconciler(config *conf.Config, handler accumulatingReconcilerHandler) *accumulatingReconciler {
+func newAccumulatingReconciler(config *conf.Config, client client.Client, handler accumulatingReconcilerHandler) *accumulatingReconciler {
 	return &accumulatingReconciler{
 		config:  config,
+		client:  client,
 		trigger: make(chan struct{}, 1),
 		join:    *sync.NewCond(&sync.Mutex{}),
 		handler: handler,
@@ -184,20 +190,23 @@ func (a *accumulatingReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		a.join.L.Unlock()
 	}
 
-	return ctrl.Result{}, nil
+	gr := &apiv1.GeneratedResource{}
+	err := a.client.Get(ctx, req.NamespacedName, gr)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if gr.DeletionTimestamp != nil {
+		return ctrl.Result{}, nil // don't requeue
+	} else {
+		return ctrl.Result{RequeueAfter: a.config.ResyncInterval}, nil
+	}
 }
 
 func (a *accumulatingReconciler) Start(ctx context.Context) error {
-	timer := time.NewTimer(addJitter(a.config.ResyncInterval))
-	defer timer.Stop()
-
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-timer.C:
-			a.handler(ctx, nil)
-			timer.Reset(addJitter(a.config.ResyncInterval))
 		case <-a.trigger:
 		}
 

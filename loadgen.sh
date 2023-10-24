@@ -41,7 +41,7 @@ spec:
           value: ${WRAPPER_IMAGE}
 YAML
 
-for i in {1..10}; do
+for i in {1..95}; do
 	cat >> loadtest.yaml <<YAML
 ---
 
@@ -84,6 +84,9 @@ spec:
       labels:
         app: eno-reconciler
     spec:
+      tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
       containers:
       - name: controller
         image: ${RECONCILER_IMAGE}
@@ -92,6 +95,8 @@ spec:
           value: ${WRAPPER_IMAGE}
         - name: NAMESPACE
           value: loadgen-${i}
+        - name: ACCUMULATION_WINDOW
+          value: 5s
 
 ---
 
@@ -103,7 +108,7 @@ metadata:
 data:
   enable: "true"
   namespace: "loadgen-${i}"
-  replicas: "3000"
+  replicas: "500"
 
 ---
 
@@ -113,8 +118,7 @@ metadata:
   name: loadgen
   namespace: loadgen-${i}
 spec:
-  revision: 10
-  reconcileInterval: 10m
+  revision: 11
   inputs:
   - name: test-inputs
     resource:
