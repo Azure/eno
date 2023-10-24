@@ -136,7 +136,6 @@ func (g *Generator) buildOutputs(ctx context.Context, comp *apiv1.Composition, b
 		res.Name = fmt.Sprintf("%s-%s", comp.Name, hashStr)
 		res.Namespace = comp.Namespace
 		res.Labels = map[string]string{"composition": comp.Name}
-		res.Spec.ReconcileInterval = comp.Spec.ReconcileInterval
 		res.Spec.DerivedGeneration = comp.Generation
 
 		if err := controllerutil.SetControllerReference(comp, res, g.Client.Scheme()); err != nil {

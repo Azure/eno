@@ -38,8 +38,6 @@ spec:
                 type: integer
               manifest:
                 type: string
-              reconcileInterval:
-                type: string
             type: object
           status:
             properties:

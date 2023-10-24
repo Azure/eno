@@ -46,7 +46,7 @@ func NewController(mgr ctrl.Manager, config *conf.Config) error {
 		For(&apiv1.GeneratedResource{}).
 		WithEventFilter(newEventFilter(config)).
 		WithOptions(controller.Options{
-			MaxConcurrentReconciles: 1, // TODO: Expose
+			MaxConcurrentReconciles: 16, // TODO: Expose
 		}).
 		Build(c)
 
@@ -119,11 +119,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, c.client.Status().Update(ctx, gr)
 	}
 
-	result := ctrl.Result{}
-	if gr.Spec.ReconcileInterval != nil {
-		result.RequeueAfter = addJitter(gr.Spec.ReconcileInterval.Duration)
-	}
-	return result, nil
+	return ctrl.Result{}, nil
 }
 
 func addJitter(dur time.Duration) time.Duration {

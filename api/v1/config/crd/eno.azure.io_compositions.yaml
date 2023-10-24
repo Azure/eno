@@ -68,8 +68,6 @@ spec:
                 required:
                 - name
                 type: object
-              reconcileInterval:
-                type: string
               revision:
                 format: int64
                 type: integer

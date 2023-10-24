@@ -20,11 +20,10 @@ type Composition struct {
 }
 
 type CompositionSpec struct {
-	Revision          int64            `json:"revision,omitempty"`
-	ReconcileInterval *metav1.Duration `json:"reconcileInterval,omitempty"`
-	Generator         *GeneratorRef    `json:"generator,omitempty"`
-	Inputs            []InputRef       `json:"inputs,omitempty"`
-	KubeConfig        *SecretKeyRef    `json:"kubeConfig,omitempty"`
+	Revision   int64         `json:"revision,omitempty"`
+	Generator  *GeneratorRef `json:"generator,omitempty"`
+	Inputs     []InputRef    `json:"inputs,omitempty"`
+	KubeConfig *SecretKeyRef `json:"kubeConfig,omitempty"`
 }
 
 const (

@@ -20,9 +20,8 @@ type GeneratedResource struct {
 }
 
 type GeneratedResourceSpec struct {
-	Manifest          string           `json:"manifest,omitempty"`
-	ReconcileInterval *metav1.Duration `json:"reconcileInterval,omitempty"`
-	DerivedGeneration int64            `json:"derivedGeneration,omitempty"`
+	Manifest          string `json:"manifest,omitempty"`
+	DerivedGeneration int64  `json:"derivedGeneration,omitempty"`
 }
 
 type GeneratedResourceStatus struct {
