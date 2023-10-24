@@ -11,4 +11,8 @@ type Config struct {
 
 	StatusPollingInterval time.Duration `split_words:"true" default:"10s"`
 	RolloutCooldown       time.Duration `split_words:"true" default:"30s"`
+
+	ResyncInterval            time.Duration `split_words:"true" default:"5m"`
+	AccumulationWindow        time.Duration `split_words:"true" default:"5s"`
+	MaxReconcileResourceCount int           `split_words:"true" default:"500"`
 }

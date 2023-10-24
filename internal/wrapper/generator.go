@@ -138,6 +138,7 @@ func (g *Generator) buildOutputs(ctx context.Context, comp *apiv1.Composition, b
 		res.Labels = map[string]string{"composition": comp.Name}
 		res.Spec.DerivedGeneration = comp.Generation
 
+		controllerutil.AddFinalizer(res, "eno.azure.io/cleanup")
 		if err := controllerutil.SetControllerReference(comp, res, g.Client.Scheme()); err != nil {
 			return nil, nil, fmt.Errorf("setting owner reference: %w", err)
 		}
