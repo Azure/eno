@@ -14,7 +14,6 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/conf"
 	"github.com/Azure/eno/internal/controllers/generation"
-	"github.com/Azure/eno/internal/controllers/statusagg"
 )
 
 func main() {
@@ -55,9 +54,9 @@ func run() error {
 	if err := generation.NewController(mgr, config); err != nil {
 		return fmt.Errorf("adding generation controller: %w", err)
 	}
-	if err := statusagg.NewController(mgr, config); err != nil {
-		return fmt.Errorf("adding status aggregation controller: %w", err)
-	}
+	// if err := statusagg.NewController(mgr, config); err != nil {
+	// 	return fmt.Errorf("adding status aggregation controller: %w", err)
+	// }
 
 	return mgr.Start(ctrl.SetupSignalHandler())
 }
