@@ -60,7 +60,7 @@ func run() error {
 			DefaultNamespaces: map[string]cache.Config{
 				config.Namespace: {
 					LabelSelector:         labels.Everything(),
-					FieldSelector:         fields.Everything(),
+					FieldSelector:         fields.ParseSelectorOrDie(fmt.Sprintf("metadata.namespace=%s", config.Namespace)), // TODO: Expose this selector as config instead of only the namespace?
 					Transform:             func(in interface{}) (interface{}, error) { return in, nil },
 					UnsafeDisableDeepCopy: &ok, // TODO: Make sure the controller honors this
 				},

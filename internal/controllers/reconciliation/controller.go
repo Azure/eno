@@ -16,8 +16,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/conf"
@@ -44,7 +42,6 @@ func NewController(mgr ctrl.Manager, config *conf.Config) error {
 
 	_, err := ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.GeneratedResource{}).
-		WithEventFilter(newEventFilter(config)).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 16, // TODO: Expose
 		}).
@@ -59,7 +56,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting generated resource: %w", err))
 	}
-	logger := c.logger.WithValues("generatedResourceName", gr.Name, "generatedResourceGeneration", gr.Generation)
+	logger := c.logger.WithValues("generatedResourceName", gr.Name, "generatedResourceNamespace", gr.Namespace, "generatedResourceGeneration", gr.Generation)
 
 	// TODO: Should we have a per-resource cooldown period to debounce frequent updates?
 
@@ -126,18 +123,4 @@ func addJitter(dur time.Duration) time.Duration {
 	maxJitter := dur * 20 / 100 // max of 20% jitter
 	jitter := time.Duration(rand.Int63n(int64(maxJitter*2)) - int64(maxJitter))
 	return dur + jitter
-}
-
-func newEventFilter(config *conf.Config) predicate.Funcs {
-	return predicate.Funcs{
-		CreateFunc: func(ev event.CreateEvent) bool {
-			return ev.Object.GetNamespace() == config.Namespace
-		},
-		DeleteFunc: func(ev event.DeleteEvent) bool {
-			return ev.Object.GetNamespace() == config.Namespace
-		},
-		UpdateFunc: func(ev event.UpdateEvent) bool {
-			return ev.ObjectNew.GetNamespace() == config.Namespace
-		},
-	}
 }
