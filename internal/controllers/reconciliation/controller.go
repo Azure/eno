@@ -152,6 +152,7 @@ type accumulatingReconciler struct {
 	config  *conf.Config
 	handler accumulatingReconcilerHandler
 	trigger chan struct{}
+	join    sync.Cond
 	mut     sync.Mutex
 	next    []ctrl.Request
 }
@@ -162,19 +163,25 @@ func newAccumulatingReconciler(config *conf.Config, handler accumulatingReconcil
 	return &accumulatingReconciler{
 		config:  config,
 		trigger: make(chan struct{}, 1),
+		join:    *sync.NewCond(&sync.Mutex{}),
 		handler: handler,
 	}
 }
 
 func (a *accumulatingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	a.mut.Lock()
-	defer a.mut.Unlock()
-
 	a.next = append(a.next, req)
-
+	count := len(a.next)
 	select {
 	case a.trigger <- struct{}{}:
 	default:
+	}
+	a.mut.Unlock()
+
+	if count >= a.config.MaxReconcileResourceCount {
+		a.join.L.Lock()
+		a.join.Wait() // block until the current batch has been reconciled
+		a.join.L.Unlock()
 	}
 
 	return ctrl.Result{}, nil
@@ -201,6 +208,9 @@ func (a *accumulatingReconciler) Start(ctx context.Context) error {
 		a.next = []ctrl.Request{} // TODO: Small optimization would be to swap between two buffers instead of allocating every time
 		a.mut.Unlock()
 		a.handler(ctx, copy)
+		a.join.Broadcast()
+
+		// TODO: Unblock other routine(s) if waiting
 	}
 }
 
