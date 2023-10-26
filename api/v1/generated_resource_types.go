@@ -25,5 +25,6 @@ type GeneratedResourceSpec struct {
 }
 
 type GeneratedResourceStatus struct {
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	PreviousManifest string             `json:"previousManifest,omitempty"`
+	Conditions       []metav1.Condition `json:"conditions,omitempty"`
 }
