@@ -139,11 +139,6 @@ spec:
         name: data
       - emptyDir: {}
         name: tmp
-      tolerations:
-        - key: "agentpool"
-          operator: "Equal"
-          value: "infra"
-          effect: "NoSchedule"
 
 ---
 
@@ -274,11 +269,6 @@ spec:
       volumes:
       - emptyDir: {}
         name: temp
-      tolerations:
-        - key: "agentpool"
-          operator: "Equal"
-          value: "infra"
-          effect: "NoSchedule"
 YAML
 done
 

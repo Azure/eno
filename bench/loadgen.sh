@@ -84,9 +84,6 @@ spec:
       labels:
         app: eno-reconciler
     spec:
-      tolerations:
-      - key: CriticalAddonsOnly
-        operator: Exists
       containers:
       - name: controller
         image: ${RECONCILER_IMAGE}
