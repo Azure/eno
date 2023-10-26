@@ -116,10 +116,6 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	return ctrl.Result{RequeueAfter: jitter(c.config.ResyncInterval)}, c.client.Status().Update(ctx, gr)
 }
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
-
 func jitter(dur time.Duration) time.Duration {
 	maxJitter := dur * 20 / 100
 	jitter := time.Duration(rand.Int63n(int64(maxJitter*2)) - int64(maxJitter))
