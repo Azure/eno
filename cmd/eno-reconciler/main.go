@@ -22,7 +22,6 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/conf"
-	"github.com/Azure/eno/internal/controllers/readiness"
 	"github.com/Azure/eno/internal/controllers/reconciliation"
 )
 
@@ -85,9 +84,9 @@ func run() error {
 	if err := reconciliation.NewController(mgr, config); err != nil {
 		return err
 	}
-	if err := readiness.NewController(mgr, config); err != nil {
-		return fmt.Errorf("adding readiness controller: %w", err)
-	}
+	// if err := readiness.NewController(mgr, config); err != nil {
+	// 	return fmt.Errorf("adding readiness controller: %w", err)
+	// }
 
 	return mgr.Start(ctrl.SetupSignalHandler())
 }
