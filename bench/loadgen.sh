@@ -41,7 +41,7 @@ spec:
           value: ${WRAPPER_IMAGE}
 YAML
 
-for i in {1..95}; do
+for i in {1..1}; do
 	cat >> loadtest.yaml <<YAML
 ---
 
@@ -110,7 +110,7 @@ metadata:
 data:
   enable: "true"
   namespace: "loadgen-${i}"
-  replicas: "500"
+  replicas: "5"
 
 ---
 
