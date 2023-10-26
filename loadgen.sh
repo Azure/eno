@@ -95,6 +95,8 @@ spec:
           value: ${WRAPPER_IMAGE}
         - name: NAMESPACE
           value: loadgen-${i}
+        - name: MAX_RECONCILE_RESOURCE_COUNT
+          value: "800"
         - name: ACCUMULATION_WINDOW
           value: 5s
 
