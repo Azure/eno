@@ -35,9 +35,6 @@ spec:
             properties:
               image:
                 type: string
-              revision:
-                format: int64
-                type: integer
             type: object
           status:
             type: object

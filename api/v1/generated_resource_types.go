@@ -29,26 +29,12 @@ type GeneratedResource struct {
 }
 
 type GeneratedResourceSliceStatus struct {
-	Resources []*ReconciliationStatus `json:"reconciliation,omitempty"`
+	Resources []*ResourceStatus `json:"resourceStatus,omitempty"`
 }
 
-type ReconciliationStatus struct {
-	Ref ResourceRef `json:"ref,omitempty"`
-
-	// Reconciled is true when the resource has been reconciled with the current manifest.
-	Reconciled bool `json:"reconciled,omitempty"`
-
-	// Ready is true when the resource has been initialized based on its own semantics.
-	// For example, deployments are ready when the expected number of up-to-date pod are passing readiness probes.
-	Ready bool `json:"ready,omitempty"`
-
-	// Message is a human-readable opaque string that describes the current state.
-	Message string `json:"message,omitempty"`
-}
-
-type ResourceRef struct {
-	APIVersion string `json:"apiVersion,omitempty"`
-	Kind       string `json:"kind,omitempty"`
-	Namespace  string `json:"namespace,omitempty"`
-	Name       string `json:"name,omitempty"`
+type ResourceStatus struct {
+	Ref        ResourceRef `json:"ref,omitempty"`
+	Reconciled bool        `json:"reconciled,omitempty"`
+	Ready      bool        `json:"ready,omitempty"`
+	Message    string      `json:"message,omitempty"`
 }

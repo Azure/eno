@@ -46,22 +46,14 @@ spec:
             type: object
           status:
             properties:
-              reconciliation:
+              resourceStatus:
                 items:
                   properties:
                     message:
-                      description: Message is a human-readable opaque string that
-                        describes the current state.
                       type: string
                     ready:
-                      description: Ready is true when the resource has been initialized
-                        based on its own semantics. For example, deployments are ready
-                        when the expected number of up-to-date pod are passing readiness
-                        probes.
                       type: boolean
                     reconciled:
-                      description: Reconciled is true when the resource has been reconciled
-                        with the current manifest.
                       type: boolean
                     ref:
                       properties:

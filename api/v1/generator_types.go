@@ -21,8 +21,7 @@ type Generator struct {
 }
 
 type GeneratorSpec struct {
-	Revision int64  `json:"revision,omitempty"`
-	Image    string `json:"image,omitempty"`
+	Image string `json:"image,omitempty"`
 }
 
 type GeneratorStatus struct {
