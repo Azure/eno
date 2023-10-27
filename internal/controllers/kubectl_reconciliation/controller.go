@@ -45,7 +45,7 @@ func NewController(mgr ctrl.Manager, config *conf.Config) error {
 	}
 
 	_, err := ctrl.NewControllerManagedBy(mgr).
-		For(&apiv1.GeneratedResource{}).
+		For(&apiv1.GeneratedResourceSlice{}).
 		Build(accumulator)
 
 	return err
@@ -54,13 +54,13 @@ func NewController(mgr ctrl.Manager, config *conf.Config) error {
 func (c *Controller) ReconcileMany(ctx context.Context, reqs []ctrl.Request) error {
 	c.logger.Info(fmt.Sprintf("reconciling %d resources", len(reqs)))
 
-	forApplication := []*apiv1.GeneratedResource{}
-	forDeletion := []*apiv1.GeneratedResource{}
+	forApplication := []*apiv1.GeneratedResourceSlice{}
+	forDeletion := []*apiv1.GeneratedResourceSlice{}
 	r, w := io.Pipe()
 	go func() {
 		defer w.Close()
 		for _, req := range reqs {
-			gr := &apiv1.GeneratedResource{}
+			gr := &apiv1.GeneratedResourceSlice{}
 			err := c.client.Get(ctx, req.NamespacedName, gr)
 			if errors.IsNotFound(err) {
 				continue // has since been removed
@@ -187,7 +187,7 @@ func (a *accumulatingReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		a.join.L.Unlock()
 	}
 
-	gr := &apiv1.GeneratedResource{}
+	gr := &apiv1.GeneratedResourceSlice{}
 	err := a.client.Get(ctx, req.NamespacedName, gr)
 	if err != nil {
 		return ctrl.Result{}, err

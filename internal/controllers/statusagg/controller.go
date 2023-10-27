@@ -30,7 +30,7 @@ func NewController(mgr ctrl.Manager, config *conf.Config) error {
 
 	_, err := ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
-		Owns(&apiv1.GeneratedResource{}).
+		Owns(&apiv1.GeneratedResourceSlice{}).
 		Build(c)
 
 	return err
@@ -47,7 +47,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 	original := comp.DeepCopy()
 
-	grs := &apiv1.GeneratedResourceList{}
+	grs := &apiv1.GeneratedResourceSliceList{}
 	err = c.client.List(ctx, grs, client.MatchingLabels{"composition": comp.Name})
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("listing generated resources: %w", err))

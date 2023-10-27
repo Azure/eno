@@ -40,14 +40,14 @@ func NewController(mgr ctrl.Manager, config *conf.Config) error {
 	}
 
 	_, err := ctrl.NewControllerManagedBy(mgr).
-		For(&apiv1.GeneratedResource{}).
+		For(&apiv1.GeneratedResourceSlice{}).
 		Build(c)
 
 	return err
 }
 
 func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	gr := &apiv1.GeneratedResource{}
+	gr := &apiv1.GeneratedResourceSlice{}
 	err := c.client.Get(ctx, req.NamespacedName, gr)
 	if errors.IsNotFound(err) {
 		delete(c.cache, req.NamespacedName)
