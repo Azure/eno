@@ -24,10 +24,17 @@ type GeneratedResourceSliceSpec struct {
 	// It refers to the metadata.generation property of the Generation resource that caused this resource to be created.
 	GenerationGeneration int64 `json:"generationGeneration,omitempty"`
 
-	Resources []GeneratedResource `json:"resources,omitempty"`
+	Resources []GeneratedResourceSpec `json:"resources,omitempty"`
 }
 
-type GeneratedResource struct {
+type GeneratedResourceSliceStatus struct {
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// Elements of resources correspond in index to those in spec.resources at the observed generation.
+	Resources []GeneratedResourceStatus `json:"resources,omitempty"`
+}
+
+type GeneratedResourceSpec struct {
 	// +required
 	Manifest string `json:"manifest,omitempty"`
 
@@ -36,13 +43,6 @@ type GeneratedResource struct {
 	// A reference to the secret holding this generated resource.
 	// This is only relevant when this resource's kind is Secret.
 	SecretName *string `json:"secretName,omitempty"`
-}
-
-type GeneratedResourceSliceStatus struct {
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-
-	// Elements of resources correspond in index to those in spec.resources at the observed generation.
-	Resources []GeneratedResourceStatus `json:"resources,omitempty"`
 }
 
 type GeneratedResourceStatus struct {
