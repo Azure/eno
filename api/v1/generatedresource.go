@@ -38,7 +38,7 @@ type GeneratedResourceSpec struct {
 	// +required
 	Manifest string `json:"manifest,omitempty"`
 
-	PreviousManifest *string `json:"previousManifest,omitempty"`
+	PreviousManifest string `json:"previousManifest,omitempty"`
 
 	ReconcileInterval *metav1.Duration `json:"reconcileInterval,omitempty"`
 
