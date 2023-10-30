@@ -20,15 +20,22 @@ type Composition struct {
 }
 
 type CompositionSpec struct {
-	Generator *GeneratorRef `json:"generator,omitempty"`
-	Inputs    []InputRef    `json:"inputs,omitempty"`
+	Revision   int64         `json:"revision,omitempty"`
+	Generator  *GeneratorRef `json:"generator,omitempty"`
+	Inputs     []InputRef    `json:"inputs,omitempty"`
+	KubeConfig *SecretKeyRef `json:"kubeConfig,omitempty"`
 }
 
-type CompositionStatus struct {
-	ObservedGeneration int64            `json:"observedGeneration,omitempty"`
-	InSync             bool             `json:"inSync,omitempty"`
-	NonReadyResources  []ResourceStatus `json:"nonReadyResources,omitempty"` // limited to ~50, just to find deadlocks
+const (
+	ReconciledConditionType = "eno.azure.io/reconciled"
+	ReadyConditionType      = "eno.azure.io/ready"
+)
 
-	GeneratorGeneration   int64        `json:"generatorGeneration,omitempty"`
-	LastGeneratorCreation *metav1.Time `json:"lastGeneratorCreation,omitempty"`
+type CompositionStatus struct {
+	CompositionGeneration int64 `json:"compositionGeneration,omitempty"`
+	GeneratorGeneration   int64 `json:"generatorGeneration,omitempty"`
+
+	LastGeneratorCreation  *metav1.Time       `json:"lastGeneratorCreation,omitempty"`
+	GeneratedResourceCount int64              `json:"generatedResourceCount,omitempty"`
+	Conditions             []metav1.Condition `json:"conditions,omitempty"`
 }
