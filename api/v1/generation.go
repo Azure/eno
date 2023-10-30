@@ -20,8 +20,9 @@ type Generation struct {
 }
 
 type GenerationSpec struct {
-	Generator GeneratorRef `json:"generator,omitempty"`
-	Inputs    []InputRef   `json:"inputs,omitempty"`
+	Generator         GeneratorRef     `json:"generator,omitempty"`
+	ReconcileInterval *metav1.Duration `json:"reconcileInterval,omitempty"`
+	Inputs            []InputRef       `json:"inputs,omitempty"`
 }
 
 type InputRef struct {

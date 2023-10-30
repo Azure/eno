@@ -6,6 +6,7 @@
 package v1
 
 import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -118,6 +119,11 @@ func (in *GeneratedResourceSpec) DeepCopyInto(out *GeneratedResourceSpec) {
 	if in.PreviousManifest != nil {
 		in, out := &in.PreviousManifest, &out.PreviousManifest
 		*out = new(string)
+		**out = **in
+	}
+	if in.ReconcileInterval != nil {
+		in, out := &in.ReconcileInterval, &out.ReconcileInterval
+		*out = new(metav1.Duration)
 		**out = **in
 	}
 	if in.SecretName != nil {
@@ -241,6 +247,11 @@ func (in *GenerationList) DeepCopyObject() runtime.Object {
 func (in *GenerationSpec) DeepCopyInto(out *GenerationSpec) {
 	*out = *in
 	out.Generator = in.Generator
+	if in.ReconcileInterval != nil {
+		in, out := &in.ReconcileInterval, &out.ReconcileInterval
+		*out = new(metav1.Duration)
+		**out = **in
+	}
 	if in.Inputs != nil {
 		in, out := &in.Inputs, &out.Inputs
 		*out = make([]InputRef, len(*in))

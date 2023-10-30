@@ -46,6 +46,8 @@ spec:
                       type: string
                     previousManifest:
                       type: string
+                    reconcileInterval:
+                      type: string
                     secretName:
                       description: A reference to the secret holding this generated
                         resource. This is only relevant when this resource's kind
