@@ -27,12 +27,12 @@ func main() {
 
 	ctx := context.Background()
 
-	list := &apiv1.GeneratedResourceSliceList{}
+	list := &apiv1.GeneratedResourceList{}
 	if err := cli.List(ctx, list); err != nil {
 		panic(err)
 	}
 
-	items := make(chan *apiv1.GeneratedResourceSlice)
+	items := make(chan *apiv1.GeneratedResource)
 	for i := 0; i < 32; i++ {
 		go func() {
 			for item := range items {
