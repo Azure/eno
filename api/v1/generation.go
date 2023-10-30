@@ -47,8 +47,7 @@ type GenerationStatus struct {
 	Ready              bool  `json:"ready,omitempty"`
 	Synced             bool  `json:"synced,omitempty"`
 
-	ActiveSlices   []*GeneratedResourceSliceRef `json:"activeResources,omitempty"`
-	LastGeneration *GenerationAttempt           `json:"lastGeneration,omitempty"`
+	LastGeneration *GenerationAttempt `json:"lastGeneration,omitempty"`
 }
 
 type GenerationAttempt struct {

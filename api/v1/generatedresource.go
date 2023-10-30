@@ -62,8 +62,3 @@ type GeneratedResourceStatus struct {
 	// The last seen resource version of the sync'd resource.
 	ResourceVersion *string `json:"resourceVersion,omitempty"`
 }
-
-type GeneratedResourceSliceRef struct {
-	// +required
-	Name string `json:"name,omitempty"`
-}
