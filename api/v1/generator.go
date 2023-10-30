@@ -21,9 +21,17 @@ type Generator struct {
 }
 
 type GeneratorSpec struct {
-	Revision int64  `json:"revision,omitempty"`
-	Image    string `json:"image,omitempty"`
+	// +required
+	Image string `json:"image,omitempty"`
 }
 
 type GeneratorStatus struct {
+	// The metadata.generation of this resource at the oldest version currently used by any Generations.
+	// This will equal the current generation when slow rollout of an update to the Generations is complete.
+	CurrentGeneration int64 `json:"currentGeneration,omitempty"`
+}
+
+type GeneratorRef struct {
+	// +required
+	Name string `json:"name,omitempty"`
 }
