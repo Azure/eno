@@ -44,8 +44,6 @@ spec:
                   properties:
                     manifest:
                       type: string
-                    previousManifest:
-                      type: string
                     reconcileInterval:
                       type: string
                     secretName:
@@ -77,11 +75,6 @@ spec:
                         specified manifest. This property latches: it will remain
                         true if it has ever been true in the life of this generated
                         resource.'
-                      type: boolean
-                    released:
-                      description: True when this representation of the given resource
-                        no longer needs to be persisted. When all resources in this
-                        slice have been released, the slice can safely be deleted.
                       type: boolean
                     resourceVersion:
                       description: The last seen resource version of the sync'd resource.

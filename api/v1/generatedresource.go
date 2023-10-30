@@ -38,8 +38,6 @@ type GeneratedResourceSpec struct {
 	// +required
 	Manifest string `json:"manifest,omitempty"`
 
-	PreviousManifest string `json:"previousManifest,omitempty"`
-
 	ReconcileInterval *metav1.Duration `json:"reconcileInterval,omitempty"`
 
 	// A reference to the secret holding this generated resource.
@@ -48,10 +46,6 @@ type GeneratedResourceSpec struct {
 }
 
 type GeneratedResourceStatus struct {
-	// True when this representation of the given resource no longer needs to be persisted.
-	// When all resources in this slice have been released, the slice can safely be deleted.
-	Released bool `json:"released,omitempty"`
-
 	// True when the resource has been sync'd to the specified manifest.
 	// This property latches: it will remain true if it has ever been true in the life of this generated resource.
 	Reconciled bool `json:"reconciled,omitempty"`
