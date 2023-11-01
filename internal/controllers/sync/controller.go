@@ -17,8 +17,6 @@ import (
 
 // TODO: Logging
 
-// TODO: Min reconcile interval? Or is this handled by the workqueue?
-
 type Controller struct {
 	client, upstreamClient client.Client
 	resourceClient         reconstitution.Client
@@ -83,8 +81,6 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	return ctrl.Result{RequeueAfter: resource.Spec.ReconcileInterval}, nil
 }
 
-// TODO: Consider the need to PUT a resource if the previous state is somehow lost
-
 func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reconstitution.GeneratedResource, current *unstructured.Unstructured) error {
 	// Delete
 	if resource == nil {
@@ -109,9 +105,7 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 	}
 
 	// No need to reconcile if the actual and desired state haven't been written since last reconciliation
-	if resource.Status.ObservedResourceVersion == current.GetResourceVersion() {
-		return nil // this will not be reached when new generated resources are created because status.resourceVersion will be empty
-	}
+	// TODO: Optimize by caching last observed resource version
 
 	// TODO: Support strategic patch where supported
 

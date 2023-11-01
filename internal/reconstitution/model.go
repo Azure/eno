@@ -13,9 +13,8 @@ type GeneratedResourceMeta struct {
 
 // GeneratedResource is the controller's internal representation of a single generated resource out of a GeneratedResourceSlice.
 type GeneratedResource struct {
-	Meta   *GeneratedResourceMeta
-	Spec   *GeneratedResourceSpec
-	Status *GeneratedResourceStatus
+	Meta *GeneratedResourceMeta
+	Spec *GeneratedResourceSpec
 }
 
 type GeneratedResourceSpec struct {
@@ -23,11 +22,6 @@ type GeneratedResourceSpec struct {
 	Object   *unstructured.Unstructured
 
 	ReconcileInterval time.Duration
-}
-
-type GeneratedResourceStatus struct {
-	Synced                  bool
-	ObservedResourceVersion string
 }
 
 type Request struct {

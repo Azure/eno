@@ -154,9 +154,6 @@ func (r *reconstituter) buildGeneratedResource(ctx context.Context, resource *ap
 			Manifest: resource.Manifest,
 			Object:   parsed,
 		},
-		Status: &GeneratedResourceStatus{
-			// TODO: ?
-		},
 	}
 	if resource.ReconcileInterval != nil {
 		gr.Spec.ReconcileInterval = resource.ReconcileInterval.Duration
