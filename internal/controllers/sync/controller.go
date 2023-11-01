@@ -75,7 +75,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		return ctrl.Result{}, err
 	}
 
-	err = c.resourceClient.ObserveResource(ctx, currentGen, &req.GeneratedResourceMeta, current.GetResourceVersion())
+	err = c.resourceClient.ObserveResource(ctx, req, currentGen, current.GetResourceVersion())
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("updating status: %w", err)
 	}

@@ -84,7 +84,7 @@ func (r *reconstituter) populateCache(ctx context.Context, gen *apiv1.Generation
 
 	slices := &apiv1.GeneratedResourceSliceList{}
 	err := r.Client.List(ctx, slices, client.MatchingFieldsSelector{
-		// TODO: Index to match only this generation
+		// TODO: Index to match only this generation attempt
 	})
 	if err != nil {
 		return fmt.Errorf("listing resource slices: %w", err)
@@ -209,7 +209,6 @@ func (r *reconstituter) purgeDanglingResources(nsn types.NamespacedName, gen *ap
 	}
 }
 
-func (r *reconstituter) ObserveResource(ctx context.Context, gen int64, ref *GeneratedResourceMeta, resourceVersion string) error {
+func (r *reconstituter) ObserveResource(ctx context.Context, req *Request, gen int64, resourceVersion string) error {
 	return nil // TODO: Use work queue for batching? Re-enqueue in main queue on failure/conflict to retry, add slice resource version private to req
-	// TODO: Weird edge case: we need to keep track of pending writes to honor the resource version cache
 }
