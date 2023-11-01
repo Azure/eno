@@ -71,6 +71,9 @@ spec:
                     type: string
                   ready:
                     type: boolean
+                  resourceSliceCount:
+                    format: int64
+                    type: integer
                   synced:
                     type: boolean
                 type: object
@@ -84,6 +87,9 @@ spec:
                     type: string
                   ready:
                     type: boolean
+                  resourceSliceCount:
+                    format: int64
+                    type: integer
                   synced:
                     type: boolean
                 type: object

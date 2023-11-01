@@ -50,6 +50,7 @@ type GenerationStatus struct {
 
 type GenerationAttempt struct {
 	ObservedGeneration int64       `json:"observedGeneration,omitempty"`
+	ResourceSliceCount int64       `json:"resourceSliceCount,omitempty"`
 	Ready              bool        `json:"ready,omitempty"`
 	Synced             bool        `json:"synced,omitempty"`
 	PodCreation        metav1.Time `json:"podCreation,omitempty"`

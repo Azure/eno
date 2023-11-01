@@ -29,7 +29,7 @@ func New(mgr *reconstitution.Manager) error {
 	})
 }
 
-func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.GeneratedResourceReq) (ctrl.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.GeneratedResourceMeta) (ctrl.Result, error) {
 	resource, err := c.resourceClient.Get(ctx, req)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("getting resource: %w", err)

@@ -6,12 +6,13 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-type GeneratedResourceReq struct {
+type GeneratedResourceMeta struct {
 	Name, Namespace, Kind string
 }
 
 // GeneratedResource is the controller's internal representation of a single generated resource out of a GeneratedResourceSlice.
 type GeneratedResource struct {
+	Meta   *GeneratedResourceMeta
 	Spec   *GeneratedResourceSpec
 	Status *GeneratedResourceStatus
 }
