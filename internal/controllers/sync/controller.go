@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -10,6 +11,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/reconstitution"
 )
 
@@ -18,21 +20,44 @@ import (
 // TODO: Min reconcile interval? Or is this handled by the workqueue?
 
 type Controller struct {
-	upstreamClient client.Client
-	resourceClient reconstitution.Client
+	client, upstreamClient client.Client
+	resourceClient         reconstitution.Client
 }
 
 func New(mgr *reconstitution.Manager) error {
 	return mgr.Add(&Controller{
+		client:         mgr.Manager.GetClient(),
 		upstreamClient: mgr.Manager.GetClient(), // TODO: Support separate client here, consider raw rest client to avoid json encode/decode hop
 		resourceClient: mgr.GetClient(),
 	})
 }
 
-func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.GeneratedResourceMeta) (ctrl.Result, error) {
-	resource, err := c.resourceClient.Get(ctx, req)
+func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request) (ctrl.Result, error) {
+	gen := &apiv1.Generation{}
+	err := c.client.Get(ctx, req.Generation, gen)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("getting resource: %w", err)
+		return ctrl.Result{}, fmt.Errorf("getting generation: %w", err)
+	}
+
+	if gen.Status.CurrentState == nil {
+		return ctrl.Result{}, nil
+	}
+	currentGen := gen.Status.CurrentState.ObservedGeneration
+
+	resource, err := c.resourceClient.Get(ctx, currentGen, &req.GeneratedResourceMeta)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("getting current resource: %w", err)
+	}
+
+	var prev *reconstitution.GeneratedResource
+	if gen.Status.PreviousState != nil {
+		prev, err = c.resourceClient.Get(ctx, gen.Status.PreviousState.ObservedGeneration, &req.GeneratedResourceMeta)
+		if errors.Is(err, reconstitution.ErrNotFound) {
+			err = nil
+		}
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("getting previous resource: %w", err)
+		}
 	}
 
 	// Fetch the current resource
@@ -46,28 +71,23 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Generate
 	}
 
 	// Do the reconciliation
-	if err := c.reconcileResource(ctx, resource, current); err != nil {
+	if err := c.reconcileResource(ctx, prev, resource, current); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	// Update status if it has drifted
-	rv := current.GetResourceVersion()
-	if !resource.Status.Synced || resource.Status.ObservedResourceVersion != rv {
-		resource.Status.Synced = true
-		resource.Status.ObservedResourceVersion = rv
-
-		err = c.resourceClient.UpdateStatus(ctx, req, resource.Status)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("updating status: %w", err)
-		}
+	err = c.resourceClient.ObserveResource(ctx, currentGen, &req.GeneratedResourceMeta, current.GetResourceVersion())
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("updating status: %w", err)
 	}
 
 	return ctrl.Result{RequeueAfter: resource.Spec.ReconcileInterval}, nil
 }
 
-func (c *Controller) reconcileResource(ctx context.Context, resource *reconstitution.GeneratedResource, current *unstructured.Unstructured) error {
+// TODO: Consider the need to PUT a resource if the previous state is somehow lost
+
+func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reconstitution.GeneratedResource, current *unstructured.Unstructured) error {
 	// Delete
-	if false { // TODO: Logic
+	if resource == nil {
 		if current.GetResourceVersion() == "" {
 			return nil // already deleted
 		}
@@ -100,7 +120,7 @@ func (c *Controller) reconcileResource(ctx context.Context, resource *reconstitu
 	if err != nil {
 		return fmt.Errorf("building json representation of desired state: %w", err)
 	}
-	patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch([]byte("TODO PREVIOUS MANIFEST"), []byte(resource.Spec.Manifest), desiredJS)
+	patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch([]byte(prev.Spec.Manifest), []byte(resource.Spec.Manifest), desiredJS)
 	if err != nil {
 		return fmt.Errorf("building jsonpatch: %w", err)
 	}
