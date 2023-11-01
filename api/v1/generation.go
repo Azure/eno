@@ -44,14 +44,13 @@ type ResourceInputRef struct {
 }
 
 type GenerationStatus struct {
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-	Ready              bool  `json:"ready,omitempty"`
-	Synced             bool  `json:"synced,omitempty"`
-
-	LastGeneration *GenerationAttempt `json:"lastGeneration,omitempty"`
+	CurrentState  *GenerationAttempt `json:"currentState,omitempty"`
+	PreviousState *GenerationAttempt `json:"previousState,omitempty"`
 }
 
 type GenerationAttempt struct {
 	ObservedGeneration int64       `json:"observedGeneration,omitempty"`
+	Ready              bool        `json:"ready,omitempty"`
+	Synced             bool        `json:"synced,omitempty"`
 	PodCreation        metav1.Time `json:"podCreation,omitempty"`
 }

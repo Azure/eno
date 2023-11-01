@@ -52,9 +52,9 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Generate
 
 	// Update status if it has drifted
 	rv := current.GetResourceVersion()
-	if !resource.Status.Reconciled || resource.Status.ResourceVersion != rv {
-		resource.Status.Reconciled = true
-		resource.Status.ResourceVersion = rv
+	if !resource.Status.Synced || resource.Status.ObservedResourceVersion != rv {
+		resource.Status.Synced = true
+		resource.Status.ObservedResourceVersion = rv
 
 		err = c.resourceClient.UpdateStatus(ctx, req, resource.Status)
 		if err != nil {
@@ -67,12 +67,12 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Generate
 
 func (c *Controller) reconcileResource(ctx context.Context, resource *reconstitution.GeneratedResource, current *unstructured.Unstructured) error {
 	// Delete
-	if resource.Spec.Removed {
+	if false { // TODO: Logic
 		if current.GetResourceVersion() == "" {
 			return nil // already deleted
 		}
 
-		err := c.upstreamClient.Delete(ctx, resource.Spec.Parsed)
+		err := c.upstreamClient.Delete(ctx, resource.Spec.Object)
 		if err != nil {
 			return fmt.Errorf("deleting resource: %w", err)
 		}
@@ -81,7 +81,7 @@ func (c *Controller) reconcileResource(ctx context.Context, resource *reconstitu
 
 	// Create
 	if current.GetResourceVersion() == "" {
-		err := c.upstreamClient.Create(ctx, resource.Spec.Parsed)
+		err := c.upstreamClient.Create(ctx, resource.Spec.Object)
 		if err != nil {
 			return fmt.Errorf("creating resource: %w", err)
 		}
@@ -89,7 +89,7 @@ func (c *Controller) reconcileResource(ctx context.Context, resource *reconstitu
 	}
 
 	// No need to reconcile if the actual and desired state haven't been written since last reconciliation
-	if resource.Status.ResourceVersion == current.GetResourceVersion() {
+	if resource.Status.ObservedResourceVersion == current.GetResourceVersion() {
 		return nil // this will not be reached when new generated resources are created because status.resourceVersion will be empty
 	}
 
@@ -100,7 +100,7 @@ func (c *Controller) reconcileResource(ctx context.Context, resource *reconstitu
 	if err != nil {
 		return fmt.Errorf("building json representation of desired state: %w", err)
 	}
-	patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch([]byte(resource.Spec.PreviousManifest), []byte(resource.Spec.Manifest), desiredJS)
+	patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch([]byte("TODO PREVIOUS MANIFEST"), []byte(resource.Spec.Manifest), desiredJS)
 	if err != nil {
 		return fmt.Errorf("building jsonpatch: %w", err)
 	}

@@ -17,15 +17,13 @@ type GeneratedResource struct {
 }
 
 type GeneratedResourceSpec struct {
-	Removed bool
-
-	Parsed                     *unstructured.Unstructured
-	Manifest, PreviousManifest string
+	Manifest string
+	Object   *unstructured.Unstructured
 
 	ReconcileInterval time.Duration
 }
 
 type GeneratedResourceStatus struct {
-	Reconciled      bool
-	ResourceVersion string
+	Synced                  bool
+	ObservedResourceVersion string
 }

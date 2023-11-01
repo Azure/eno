@@ -3,6 +3,7 @@ package reconstitution
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"k8s.io/client-go/util/workqueue"
@@ -131,22 +132,35 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	slice := &apiv1.GeneratedResourceSlice{}
 	err := r.Client.Get(ctx, req.NamespacedName, slice)
 	if err != nil {
-		return ctrl.Result{}, err
+		// TODO: Handle 404? What if informer is already empty after deletion?
+		return ctrl.Result{}, fmt.Errorf("getting resource: %w", err)
 	}
 
-	// TODO:
-	// - Add generation generation to the index
-	// - Add current/previous generation to the generation
-	// - Build slice of children/parents for each resource, across all slices owned by that generation resource
-	//   - Requeue each child when done applying new version
-	//   - Check status of each parent before syncing
+	if refs := slice.OwnerReferences; len(refs) == 0 || refs[0].Kind != "Composition" {
+		return ctrl.Result{}, nil // Shouldn't ever happen
+	}
 
-	// Questions:
-	// - How will current/previous work with informers? Consider specifying a slice count also?
+	//
+	// TODO: Turn around watch to generation -> slice since writes to generation always follow slices, and slices are immutable
+	//
+
+	// Get parent
+	gen := &apiv1.Generation{}
+	gen.Name = slice.OwnerReferences[0].Name
+	gen.Namespace = slice.Namespace
+	err = r.Client.Get(ctx, client.ObjectKeyFromObject(gen), gen)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("getting parent resource: %w", err)
+	}
+
+	//
+	// TODO: Build cache of every resource indexed by generation generation, work item without it (controller owns versioning concept)
+	//
 
 	return ctrl.Result{}, nil
 }
 
 func (r *reconstituter) UpdateStatus(context.Context, *GeneratedResourceReq, *GeneratedResourceStatus) error {
 	return nil // TODO: Use work queue for batching? Re-enqueue in main queue on failure/conflict to retry, add slice resource version private to req
+	// TODO: Weird edge case: we need to keep track of pending writes to honor the resource version cache
 }

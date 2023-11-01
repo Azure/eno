@@ -61,7 +61,7 @@ spec:
             type: object
           status:
             properties:
-              lastGeneration:
+              currentState:
                 properties:
                   observedGeneration:
                     format: int64
@@ -69,14 +69,24 @@ spec:
                   podCreation:
                     format: date-time
                     type: string
+                  ready:
+                    type: boolean
+                  synced:
+                    type: boolean
                 type: object
-              observedGeneration:
-                format: int64
-                type: integer
-              ready:
-                type: boolean
-              synced:
-                type: boolean
+              previousState:
+                properties:
+                  observedGeneration:
+                    format: int64
+                    type: integer
+                  podCreation:
+                    format: date-time
+                    type: string
+                  ready:
+                    type: boolean
+                  synced:
+                    type: boolean
+                type: object
             type: object
         type: object
     served: true
