@@ -3,11 +3,13 @@ package reconstitution
 import (
 	"context"
 	"errors"
+	"strconv"
 
 	"k8s.io/apimachinery/pkg/types"
 
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 )
@@ -36,7 +38,28 @@ func New(mgr ctrl.Manager) (*Manager, error) {
 		},
 	}
 
-	_, err := ctrl.NewControllerManagedBy(mgr).
+	err := mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.GeneratedResourceSlice{}, "spec.generationGeneration", func(o client.Object) []string {
+		slice := o.(*apiv1.GeneratedResourceSlice)
+		return []string{strconv.FormatInt(slice.Spec.GenerationGeneration, 10)}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.GeneratedResourceSlice{}, "metadata.ownerReferences.name", func(o client.Object) (keys []string) {
+		slice := o.(*apiv1.GeneratedResourceSlice)
+		for _, owner := range slice.OwnerReferences {
+			if owner.Kind == "Generation" {
+				keys = append(keys, owner.Name)
+			}
+		}
+		return keys
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = ctrl.NewControllerManagedBy(mgr).
 		Named("reconstituter").
 		For(&apiv1.Generation{}).
 		Owns(&apiv1.GeneratedResourceSlice{}).

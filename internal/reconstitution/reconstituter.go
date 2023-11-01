@@ -3,6 +3,7 @@ package reconstitution
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -83,8 +84,9 @@ func (r *reconstituter) populateCache(ctx context.Context, gen *apiv1.Generation
 	}
 
 	slices := &apiv1.GeneratedResourceSliceList{}
-	err := r.Client.List(ctx, slices, client.MatchingFieldsSelector{
-		// TODO: Index to match only this generation attempt
+	err := r.Client.List(ctx, slices, client.MatchingFields{
+		"spec.generationGeneration":     strconv.FormatInt(attempt.ObservedGeneration, 10),
+		"metadata.ownerReferences.name": gen.Name,
 	})
 	if err != nil {
 		return fmt.Errorf("listing resource slices: %w", err)
