@@ -1,0 +1,31 @@
+package reconstitution
+
+import (
+	"time"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+)
+
+type GeneratedResourceReq struct {
+	Name, Namespace, Kind string
+}
+
+// GeneratedResource is the controller's internal representation of a single generated resource out of a GeneratedResourceSlice.
+type GeneratedResource struct {
+	Spec   *GeneratedResourceSpec
+	Status *GeneratedResourceStatus
+}
+
+type GeneratedResourceSpec struct {
+	Removed bool
+
+	Parsed                     *unstructured.Unstructured
+	Manifest, PreviousManifest string
+
+	ReconcileInterval time.Duration
+}
+
+type GeneratedResourceStatus struct {
+	Reconciled      bool
+	ResourceVersion string
+}

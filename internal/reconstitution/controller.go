@@ -5,7 +5,6 @@ import (
 	"errors"
 	"sync"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -17,27 +16,13 @@ import (
 
 var ErrNotFound = errors.New("resource not found")
 
-type GeneratedResourceReq struct {
-	Name, Namespace, Kind string
-}
-
-type GeneratedResource struct {
-	Spec   apiv1.GeneratedResourceSpec
-	Status apiv1.GeneratedResourceStatus
-
-	// TODO: Populate these values
-	Parsed           *unstructured.Unstructured
-	PreviousManifest string
-	Removed          bool
-}
-
 type Reconciler interface {
 	Reconcile(ctx context.Context, req *GeneratedResourceReq) (ctrl.Result, error)
 }
 
 type Client interface {
 	Get(ctx context.Context, req *GeneratedResourceReq) (*GeneratedResource, error)
-	UpdateStatus(context.Context, *GeneratedResourceReq, *apiv1.GeneratedResourceStatus) error
+	UpdateStatus(context.Context, *GeneratedResourceReq, *GeneratedResourceStatus) error
 }
 
 // New creates a new Manager, which is responsible for "reconstituting" generated resources
@@ -131,18 +116,6 @@ type reconstituter struct {
 	byReq map[GeneratedResourceReq]*GeneratedResource
 }
 
-func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	slice := &apiv1.GeneratedResourceSlice{}
-	err := r.Client.Get(ctx, req.NamespacedName, slice)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
-	// TODO: Parse, cache, push to queue while handling the possibility of multiple versions
-
-	return ctrl.Result{}, nil
-}
-
 func (r *reconstituter) Get(ctx context.Context, req *GeneratedResourceReq) (*GeneratedResource, error) {
 	r.mut.Lock()
 	defer r.mut.Unlock()
@@ -154,6 +127,26 @@ func (r *reconstituter) Get(ctx context.Context, req *GeneratedResourceReq) (*Ge
 	return res, nil
 }
 
-func (r *reconstituter) UpdateStatus(context.Context, *GeneratedResourceReq, *apiv1.GeneratedResourceStatus) error {
+func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	slice := &apiv1.GeneratedResourceSlice{}
+	err := r.Client.Get(ctx, req.NamespacedName, slice)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// TODO:
+	// - Add generation generation to the index
+	// - Add current/previous generation to the generation
+	// - Build slice of children/parents for each resource, across all slices owned by that generation resource
+	//   - Requeue each child when done applying new version
+	//   - Check status of each parent before syncing
+
+	// Questions:
+	// - How will current/previous work with informers? Consider specifying a slice count also?
+
+	return ctrl.Result{}, nil
+}
+
+func (r *reconstituter) UpdateStatus(context.Context, *GeneratedResourceReq, *GeneratedResourceStatus) error {
 	return nil // TODO: Use work queue for batching? Re-enqueue in main queue on failure/conflict to retry, add slice resource version private to req
 }

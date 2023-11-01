@@ -15,6 +15,8 @@ import (
 
 // TODO: Logging
 
+// TODO: Min reconcile interval? Or is this handled by the workqueue?
+
 type Controller struct {
 	upstreamClient client.Client
 	resourceClient reconstitution.Client
@@ -49,32 +51,28 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Generate
 	}
 
 	// Update status if it has drifted
-	status := resource.Status.DeepCopy()
 	rv := current.GetResourceVersion()
-	if !status.Reconciled || status.ResourceVersion == nil || *status.ResourceVersion != rv {
-		status.ResourceVersion = &rv
-		status.Reconciled = true
+	if !resource.Status.Reconciled || resource.Status.ResourceVersion != rv {
+		resource.Status.Reconciled = true
+		resource.Status.ResourceVersion = rv
 
-		err = c.resourceClient.UpdateStatus(ctx, req, status)
+		err = c.resourceClient.UpdateStatus(ctx, req, resource.Status)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating status: %w", err)
 		}
 	}
 
-	if interval := resource.Spec.ReconcileInterval; interval != nil {
-		return ctrl.Result{RequeueAfter: interval.Duration}, nil
-	}
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: resource.Spec.ReconcileInterval}, nil
 }
 
 func (c *Controller) reconcileResource(ctx context.Context, resource *reconstitution.GeneratedResource, current *unstructured.Unstructured) error {
 	// Delete
-	if resource.Removed {
+	if resource.Spec.Removed {
 		if current.GetResourceVersion() == "" {
 			return nil // already deleted
 		}
 
-		err := c.upstreamClient.Delete(ctx, resource.Parsed)
+		err := c.upstreamClient.Delete(ctx, resource.Spec.Parsed)
 		if err != nil {
 			return fmt.Errorf("deleting resource: %w", err)
 		}
@@ -83,7 +81,7 @@ func (c *Controller) reconcileResource(ctx context.Context, resource *reconstitu
 
 	// Create
 	if current.GetResourceVersion() == "" {
-		err := c.upstreamClient.Create(ctx, resource.Parsed)
+		err := c.upstreamClient.Create(ctx, resource.Spec.Parsed)
 		if err != nil {
 			return fmt.Errorf("creating resource: %w", err)
 		}
@@ -91,8 +89,8 @@ func (c *Controller) reconcileResource(ctx context.Context, resource *reconstitu
 	}
 
 	// No need to reconcile if the actual and desired state haven't been written since last reconciliation
-	if rv := resource.Status.ResourceVersion; rv != nil && *rv == current.GetResourceVersion() {
-		return nil // this will not be reached when new generated resources are created because status.resourceVersion will be nil
+	if resource.Status.ResourceVersion == current.GetResourceVersion() {
+		return nil // this will not be reached when new generated resources are created because status.resourceVersion will be empty
 	}
 
 	// TODO: Support strategic patch where supported
@@ -102,7 +100,7 @@ func (c *Controller) reconcileResource(ctx context.Context, resource *reconstitu
 	if err != nil {
 		return fmt.Errorf("building json representation of desired state: %w", err)
 	}
-	patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch([]byte(resource.PreviousManifest), []byte(resource.Spec.Manifest), desiredJS)
+	patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch([]byte(resource.Spec.PreviousManifest), []byte(resource.Spec.Manifest), desiredJS)
 	if err != nil {
 		return fmt.Errorf("building jsonpatch: %w", err)
 	}
