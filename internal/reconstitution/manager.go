@@ -37,6 +37,11 @@ func New(mgr ctrl.Manager) (*Manager, error) {
 			resourcesByGenerationAttempt: map[generationKey][]resourceKey{},
 		},
 	}
+	m.buf = &writeBuffer{
+		reconstituter: m.recon,
+		Client:        mgr.GetClient(),
+	}
+	mgr.Add(m.buf)
 
 	err := mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.GeneratedResourceSlice{}, "spec.generationGeneration", func(o client.Object) []string {
 		slice := o.(*apiv1.GeneratedResourceSlice)
@@ -74,9 +79,10 @@ func New(mgr ctrl.Manager) (*Manager, error) {
 type Manager struct {
 	ctrl.Manager
 	recon *reconstituter
+	buf   *writeBuffer
 }
 
-func (m *Manager) GetClient() Client { return m.recon }
+func (m *Manager) GetClient() Client { return m.buf }
 
 func (m *Manager) Add(rec Reconciler) error {
 	rateLimiter := workqueue.DefaultControllerRateLimiter()

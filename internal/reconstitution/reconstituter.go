@@ -210,7 +210,3 @@ func (r *reconstituter) purgeDanglingResources(nsn types.NamespacedName, gen *ap
 		r.attemptsByGeneration[nsn] = attemptGens
 	}
 }
-
-func (r *reconstituter) ObserveResource(ctx context.Context, req *Request, gen int64, resourceVersion string) error {
-	return nil // TODO: Use work queue for batching? Re-enqueue in main queue on failure/conflict to retry, add slice resource version private to req
-}
