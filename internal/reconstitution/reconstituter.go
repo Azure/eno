@@ -239,6 +239,6 @@ func (r *reconstituter) purgeDanglingResources(ctx context.Context, nsn types.Na
 		delete(r.synthesesByComposition, nsn)
 		logger.V(5).Info("no more synthesis exist for this composition - removing from cache")
 	} else {
-		r.synthesesByComposition[nsn] = synGens
+		r.synthesesByComposition[nsn] = newGens
 	}
 }
