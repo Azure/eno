@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -112,12 +113,13 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 	// Build our internal representation of each resource
 	resources := map[resourceKey]*Resource{}
 	for _, slice := range slices.Items {
+		slice := slice
 
 		// NOTE: In the future we can build a DAG here to find edges between dependant resources
 
 		for _, resource := range slice.Spec.Resources {
 			resource := resource
-			gr, err := r.buildResource(ctx, &resource)
+			gr, err := r.buildResource(ctx, &slice, &resource)
 			if err != nil {
 				logger.V(2).Error(err, "invalid resource - skipping")
 				continue
@@ -155,14 +157,26 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 	return nil
 }
 
-func (r *reconstituter) buildResource(ctx context.Context, resource *apiv1.ResourceSpec) (*Resource, error) {
+func (r *reconstituter) buildResource(ctx context.Context, slice *apiv1.ResourceSlice, resource *apiv1.ResourceSpec) (*Resource, error) {
+	manifest := resource.Manifest
+	if resource.SecretName != nil {
+		secret := &corev1.Secret{}
+		secret.Name = *resource.SecretName
+		secret.Namespace = slice.Namespace
+		err := r.Client.Get(ctx, client.ObjectKeyFromObject(secret), secret)
+		if err != nil {
+			return nil, fmt.Errorf("getting secret: %w", err)
+		}
+		if secret.StringData != nil {
+			manifest = secret.StringData["manifest"]
+		}
+	}
+
 	parsed := &unstructured.Unstructured{}
-	err := parsed.UnmarshalJSON([]byte(resource.Manifest))
+	err := parsed.UnmarshalJSON([]byte(manifest))
 	if err != nil {
 		return nil, fmt.Errorf("invalid json: %w", err)
 	}
-
-	// TODO: Fetch the manifests of sensitive resources (e.g. secrets) from secrets referenced by the resource
 
 	gr := &Resource{
 		Meta: &ResourceMeta{
