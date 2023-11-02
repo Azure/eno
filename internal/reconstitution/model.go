@@ -7,17 +7,17 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-type GeneratedResourceMeta struct {
+type ResourceMeta struct {
 	Name, Namespace, Kind string
 }
 
-// GeneratedResource is the controller's internal representation of a single generated resource out of a GeneratedResourceSlice.
-type GeneratedResource struct {
-	Meta *GeneratedResourceMeta
-	Spec *GeneratedResourceSpec
+// Resource is the controller's internal representation of a single resource out of a ResourceSlice.
+type Resource struct {
+	Meta *ResourceMeta
+	Spec *ResourceSpec
 }
 
-type GeneratedResourceSpec struct {
+type ResourceSpec struct {
 	Manifest string
 	Object   *unstructured.Unstructured
 
@@ -25,7 +25,7 @@ type GeneratedResourceSpec struct {
 }
 
 type Request struct {
-	GeneratedResourceMeta
+	ResourceMeta
 	Generation types.NamespacedName
 }
 
@@ -34,7 +34,7 @@ type resourceKey struct {
 	GenerationGeneration  int64 // metadata.generation of the parent Generation resource
 }
 
-func newResourceKey(gen int64, gr *GeneratedResource) resourceKey {
+func newResourceKey(gen int64, gr *Resource) resourceKey {
 	return resourceKey{
 		Namespace:            gr.Meta.Namespace,
 		Name:                 gr.Meta.Name,

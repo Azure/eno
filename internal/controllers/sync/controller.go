@@ -47,7 +47,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 	currentGen := gen.Status.CurrentState.ObservedGeneration
 
-	resource, err := c.resourceClient.Get(ctx, currentGen, &req.GeneratedResourceMeta)
+	resource, err := c.resourceClient.Get(ctx, currentGen, &req.ResourceMeta)
 	if errors.Is(err, reconstitution.ErrNotFound) {
 		logger.V(3).Info("resource not found - dropping")
 		return ctrl.Result{}, nil
@@ -56,9 +56,9 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		return ctrl.Result{}, fmt.Errorf("getting current resource: %w", err)
 	}
 
-	var prev *reconstitution.GeneratedResource
+	var prev *reconstitution.Resource
 	if gen.Status.PreviousState != nil {
-		prev, err = c.resourceClient.Get(ctx, gen.Status.PreviousState.ObservedGeneration, &req.GeneratedResourceMeta)
+		prev, err = c.resourceClient.Get(ctx, gen.Status.PreviousState.ObservedGeneration, &req.ResourceMeta)
 		if errors.Is(err, reconstitution.ErrNotFound) {
 			logger.V(5).Info("no previous resource manifest found")
 			err = nil
@@ -94,7 +94,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	return ctrl.Result{RequeueAfter: resource.Spec.ReconcileInterval}, nil
 }
 
-func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reconstitution.GeneratedResource, current *unstructured.Unstructured) error {
+func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) error {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	// Delete

@@ -22,12 +22,12 @@ type reconstituter struct {
 	Queues []workqueue.Interface
 
 	mut                          sync.Mutex
-	resources                    map[resourceKey]*GeneratedResource
+	resources                    map[resourceKey]*Resource
 	attemptsByGeneration         map[types.NamespacedName][]int64
 	resourcesByGenerationAttempt map[generationKey][]resourceKey
 }
 
-func (r *reconstituter) Get(ctx context.Context, gen int64, req *GeneratedResourceMeta) (*GeneratedResource, error) {
+func (r *reconstituter) Get(ctx context.Context, gen int64, req *ResourceMeta) (*Resource, error) {
 	r.mut.Lock()
 	defer r.mut.Unlock()
 
@@ -96,14 +96,14 @@ func (r *reconstituter) populateCache(ctx context.Context, gen *apiv1.Generation
 	}
 
 	// Build our internal representation of each resource
-	resources := map[resourceKey]*GeneratedResource{}
+	resources := map[resourceKey]*Resource{}
 	for _, slice := range slices.Items {
 
 		// NOTE: In the future we can build a DAG here to find edges between dependant resources
 
 		for _, resource := range slice.Spec.Resources {
 			resource := resource
-			gr, err := r.buildGeneratedResource(ctx, &resource)
+			gr, err := r.buildResource(ctx, &resource)
 			if err != nil {
 				continue // skip invalid resources
 			}
@@ -135,22 +135,22 @@ func (r *reconstituter) populateCache(ctx context.Context, gen *apiv1.Generation
 	return nil
 }
 
-func (r *reconstituter) buildGeneratedResource(ctx context.Context, resource *apiv1.ResourceSpec) (*GeneratedResource, error) {
+func (r *reconstituter) buildResource(ctx context.Context, resource *apiv1.ResourceSpec) (*Resource, error) {
 	parsed := &unstructured.Unstructured{}
 	err := parsed.UnmarshalJSON([]byte(resource.Manifest))
 	if err != nil {
 		return nil, fmt.Errorf("invalid json: %w", err)
 	}
 
-	// TODO: Fetch the manifests of sensitive resources (e.g. secrets) from secrets referenced by the GeneratedResource
+	// TODO: Fetch the manifests of sensitive resources (e.g. secrets) from secrets referenced by the resource
 
-	gr := &GeneratedResource{
-		Meta: &GeneratedResourceMeta{
+	gr := &Resource{
+		Meta: &ResourceMeta{
 			Namespace: parsed.GetNamespace(),
 			Name:      parsed.GetName(),
 			Kind:      parsed.GetKind(),
 		},
-		Spec: &GeneratedResourceSpec{
+		Spec: &ResourceSpec{
 			Manifest: resource.Manifest,
 			Object:   parsed,
 		},
@@ -164,10 +164,10 @@ func (r *reconstituter) buildGeneratedResource(ctx context.Context, resource *ap
 	return gr, nil
 }
 
-func (r *reconstituter) enqueue(key *generationKey, gr *GeneratedResource) {
+func (r *reconstituter) enqueue(key *generationKey, gr *Resource) {
 	for _, q := range r.Queues {
 		q.Add(&Request{
-			GeneratedResourceMeta: *gr.Meta,
+			ResourceMeta: *gr.Meta,
 			Generation: types.NamespacedName{
 				Namespace: key.Namespace,
 				Name:      key.Name,

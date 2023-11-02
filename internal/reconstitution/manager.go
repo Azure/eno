@@ -21,18 +21,18 @@ type Reconciler interface {
 }
 
 type Client interface {
-	Get(ctx context.Context, gen int64, req *GeneratedResourceMeta) (*GeneratedResource, error)
+	Get(ctx context.Context, gen int64, req *ResourceMeta) (*Resource, error)
 	ObserveResource(ctx context.Context, req *Request, gen int64, resourceVersion string) error
 }
 
-// New creates a new Manager, which is responsible for "reconstituting" generated resources
-// i.e. allowing controllers to treat them as individual resources instead of their storage representation (GeneratedResourceSlice).
+// New creates a new Manager, which is responsible for "reconstituting" resources
+// i.e. allowing controllers to treat them as individual resources instead of their storage representation (ResourceSlice).
 func New(mgr ctrl.Manager) (*Manager, error) {
 	m := &Manager{
 		Manager: mgr,
 		recon: &reconstituter{
 			Client:                       mgr.GetClient(),
-			resources:                    make(map[resourceKey]*GeneratedResource),
+			resources:                    make(map[resourceKey]*Resource),
 			attemptsByGeneration:         make(map[types.NamespacedName][]int64),
 			resourcesByGenerationAttempt: map[generationKey][]resourceKey{},
 		},
@@ -87,7 +87,7 @@ func (m *Manager) GetClient() Client { return m.buf }
 func (m *Manager) Add(rec Reconciler) error {
 	rateLimiter := workqueue.DefaultControllerRateLimiter()
 	queue := workqueue.NewRateLimitingQueueWithConfig(rateLimiter, workqueue.RateLimitingQueueConfig{
-		Name: "generatedResourceReconciler",
+		Name: "resourceReconciler",
 	})
 	qp := &queueProcessor{
 		Client:  m.Manager.GetClient(),
