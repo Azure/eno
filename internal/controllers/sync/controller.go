@@ -84,7 +84,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 	logger.V(3).Info("sync'd resource")
 
-	err = c.resourceClient.ObserveResource(ctx, req, currentGen, current.GetResourceVersion())
+	err = c.resourceClient.ObserveResource(ctx, req, currentGen)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("updating status: %w", err)
 	}
