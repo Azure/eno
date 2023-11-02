@@ -3,6 +3,7 @@ package reconstitution
 import (
 	"context"
 
+	"github.com/go-logr/logr"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -12,6 +13,7 @@ type queueProcessor struct {
 	Queue   workqueue.RateLimitingInterface
 	Recon   *reconstituter
 	Handler Reconciler
+	Logger  logr.Logger
 }
 
 func (q *queueProcessor) Start(ctx context.Context) error {
@@ -32,6 +34,8 @@ func (q *queueProcessor) processQueueItem(ctx context.Context) bool {
 	defer q.Queue.Done(item)
 
 	req := item.(*Request)
+	logger := q.Logger.WithValues("composition", req.Composition, "resource", req.ResourceMeta)
+	ctx = logr.NewContext(ctx, logger)
 
 	result, err := q.Handler.Reconcile(ctx, req)
 	if err != nil {

@@ -17,6 +17,7 @@ import (
 var ErrNotFound = errors.New("resource not found")
 
 type Reconciler interface {
+	Name() string
 	Reconcile(ctx context.Context, req *Request) (ctrl.Result, error)
 }
 
@@ -87,13 +88,14 @@ func (m *Manager) GetClient() Client { return m.buf }
 func (m *Manager) Add(rec Reconciler) error {
 	rateLimiter := workqueue.DefaultControllerRateLimiter()
 	queue := workqueue.NewRateLimitingQueueWithConfig(rateLimiter, workqueue.RateLimitingQueueConfig{
-		Name: "resourceReconciler",
+		Name: rec.Name(),
 	})
 	qp := &queueProcessor{
 		Client:  m.Manager.GetClient(),
 		Queue:   queue,
 		Recon:   m.recon,
 		Handler: rec,
+		Logger:  m.Manager.GetLogger().WithValues("controller", rec.Name()),
 	}
 	m.recon.Queues = append(m.recon.Queues, qp.Queue)
 	return m.Manager.Add(qp)

@@ -19,7 +19,6 @@ import (
 type Controller struct {
 	client, upstreamClient client.Client
 	resourceClient         reconstitution.Client
-	logger                 logr.Logger
 }
 
 func New(mgr *reconstitution.Manager, upstream client.Client) error {
@@ -27,19 +26,18 @@ func New(mgr *reconstitution.Manager, upstream client.Client) error {
 		client:         mgr.Manager.GetClient(),
 		upstreamClient: upstream,
 		resourceClient: mgr.GetClient(),
-		logger:         mgr.GetLogger(),
 	})
 }
 
+func (c *Controller) Name() string { return "syncController" }
+
 func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request) (ctrl.Result, error) {
+	logger := logr.FromContextOrDiscard(ctx)
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, req.Composition, comp)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("getting composition: %w", err)
 	}
-	// TODO: Construct upstream from here
-	logger := c.logger.WithValues("compName", comp.Name, "compNS", comp.Namespace, "compGen", comp.Generation, "resourceName", req.Name, "resourceNS", req.Namespace, "resourceKind", req.Kind)
-	ctx = logr.NewContext(ctx, logger)
 
 	if comp.Status.CurrentState == nil {
 		logger.V(5).Info("composition has not yet been synthesized")
