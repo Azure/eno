@@ -84,11 +84,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 	logger.V(3).Info("sync'd resource")
 
-	err = c.resourceClient.MarkResourceSynced(ctx, req, currentGen)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("updating status: %w", err)
-	}
-
+	c.resourceClient.MarkResourceSynced(ctx, req, currentGen)
 	return ctrl.Result{RequeueAfter: resource.ReconcileInterval}, nil
 }
 
