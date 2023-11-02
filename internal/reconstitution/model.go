@@ -26,17 +26,8 @@ type Request struct {
 }
 
 type resourceKey struct {
-	Namespace, Name, Kind string
+	ResourceMeta
 	CompositionGeneration int64
-}
-
-func newResourceKey(gen int64, gr *Resource) resourceKey {
-	return resourceKey{
-		Namespace:             gr.Meta.Namespace,
-		Name:                  gr.Meta.Name,
-		Kind:                  gr.Meta.Kind,
-		CompositionGeneration: gen,
-	}
 }
 
 type synthesisKey struct {

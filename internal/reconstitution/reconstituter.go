@@ -27,14 +27,12 @@ type reconstituter struct {
 	resourcesBySynthesis   map[synthesisKey][]resourceKey
 }
 
-func (r *reconstituter) Get(ctx context.Context, gen int64, req *ResourceMeta) (*Resource, error) {
+func (r *reconstituter) Get(ctx context.Context, gen int64, meta *ResourceMeta) (*Resource, error) {
 	r.mut.Lock()
 	defer r.mut.Unlock()
 
 	res, ok := r.resources[resourceKey{
-		Namespace:             req.Namespace,
-		Name:                  req.Name,
-		Kind:                  req.Kind,
+		ResourceMeta:          *meta,
 		CompositionGeneration: gen,
 	}]
 	if !ok {
@@ -107,7 +105,10 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 			if err != nil {
 				continue // skip invalid resources
 			}
-			key := newResourceKey(slice.Spec.CompositionGeneration, gr)
+			key := resourceKey{
+				ResourceMeta:          *gr.Meta,
+				CompositionGeneration: slice.Spec.CompositionGeneration,
+			}
 			resources[key] = gr
 		}
 	}
