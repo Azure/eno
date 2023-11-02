@@ -34,6 +34,7 @@ func New(mgr ctrl.Manager) (*Manager, error) {
 		recon: &reconstituter{
 			Client:                 mgr.GetClient(),
 			resources:              make(map[resourceKey]*Resource),
+			Logger:                 mgr.GetLogger().WithName("reconstituter"),
 			synthesesByComposition: make(map[types.NamespacedName][]int64),
 			resourcesBySynthesis:   map[synthesisKey][]resourceKey{},
 		},

@@ -15,11 +15,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/go-logr/logr"
 )
+
+// TODO: How to add log fields to error messages?
 
 type reconstituter struct {
 	Client client.Client
 	Queues []workqueue.Interface
+	Logger logr.Logger
 
 	mut                    sync.Mutex
 	resources              map[resourceKey]*Resource
@@ -42,10 +46,13 @@ func (r *reconstituter) Get(ctx context.Context, gen int64, meta *ResourceMeta) 
 }
 
 func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := r.Logger.WithValues("composition", req)
+	ctx = logr.NewContext(ctx, logger)
+
 	comp := &apiv1.Composition{}
 	err := r.Client.Get(ctx, req.NamespacedName, comp)
 	if k8serrors.IsNotFound(err) {
-		r.purgeDanglingResources(req.NamespacedName, nil)
+		r.purgeDanglingResources(ctx, req.NamespacedName, nil)
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
@@ -62,35 +69,44 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, fmt.Errorf("processing current state: %w", err)
 	}
 
-	r.purgeDanglingResources(req.NamespacedName, comp)
+	r.purgeDanglingResources(ctx, req.NamespacedName, comp)
 	return ctrl.Result{}, nil
 }
 
-func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Composition, attempt *apiv1.Synthesis) error {
-	if attempt == nil {
+func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis) error {
+	logger := logr.FromContextOrDiscard(ctx)
+
+	if synthesis == nil {
 		return nil
 	}
 
-	key := synthesisKey{Namespace: comp.Namespace, Name: comp.Name, CompositionGeneration: attempt.ObservedGeneration}
+	key := synthesisKey{Namespace: comp.Namespace, Name: comp.Name, CompositionGeneration: synthesis.ObservedGeneration}
 
 	r.mut.Lock()
 	_, exists := r.resourcesBySynthesis[key]
 	r.mut.Unlock()
 
+	logger = logger.WithValues("synthesisGen", synthesis.ObservedGeneration)
+	logr.NewContext(ctx, logger)
+
 	if exists {
-		return nil // already cached
+		logger.V(5).Info("this synthesis has already been cached")
+		return nil
 	}
 
 	slices := &apiv1.ResourceSliceList{}
 	err := r.Client.List(ctx, slices, client.MatchingFields{
-		"spec.compositionGeneration":    strconv.FormatInt(attempt.ObservedGeneration, 10),
+		"spec.compositionGeneration":    strconv.FormatInt(synthesis.ObservedGeneration, 10),
 		"metadata.ownerReferences.name": comp.Name,
 	})
 	if err != nil {
 		return fmt.Errorf("listing resource slices: %w", err)
 	}
-	if int64(len(slices.Items)) != attempt.ResourceSliceCount {
-		return nil // wait for the cache to be fully populated
+
+	logger.V(5).Info(fmt.Sprintf("found %d slices", len(slices.Items)))
+	if int64(len(slices.Items)) != synthesis.ResourceSliceCount {
+		logger.V(5).Info("stale informer - waiting for sync")
+		return nil
 	}
 
 	// Build our internal representation of each resource
@@ -103,7 +119,8 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 			resource := resource
 			gr, err := r.buildResource(ctx, &resource)
 			if err != nil {
-				continue // skip invalid resources
+				logger.V(2).Error(err, "invalid resource - skipping")
+				continue
 			}
 			key := resourceKey{
 				ResourceMeta:          *gr.Meta,
@@ -119,11 +136,12 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 	// Store items and notify listeners
 	_, exists = r.resourcesBySynthesis[key]
 	if exists {
-		return nil // extreme edge case - only possible if concurrency is somehow > 1
+		logger.V(1).Info("the synthesis was cached before this routine was able to build its internal representation - is concurrency > 1?")
+		return nil
 	}
 
 	nsn := types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}
-	r.synthesesByComposition[nsn] = append(r.synthesesByComposition[nsn], attempt.ObservedGeneration)
+	r.synthesesByComposition[nsn] = append(r.synthesesByComposition[nsn], synthesis.ObservedGeneration)
 
 	keys := []resourceKey{}
 	for rk, gr := range resources {
@@ -132,6 +150,7 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 		r.enqueue(&key, gr)
 	}
 	r.resourcesBySynthesis[key] = keys
+	logger.Info("cache filled")
 
 	return nil
 }
@@ -175,7 +194,8 @@ func (r *reconstituter) enqueue(key *synthesisKey, gr *Resource) {
 	}
 }
 
-func (r *reconstituter) purgeDanglingResources(nsn types.NamespacedName, comp *apiv1.Composition) {
+func (r *reconstituter) purgeDanglingResources(ctx context.Context, nsn types.NamespacedName, comp *apiv1.Composition) {
+	logger := logr.FromContextOrDiscard(ctx)
 	r.mut.Lock()
 	defer r.mut.Unlock()
 
@@ -199,9 +219,11 @@ func (r *reconstituter) purgeDanglingResources(nsn types.NamespacedName, comp *a
 		}
 
 		delete(r.resourcesBySynthesis, synKey)
+		logger.V(5).Info("purged synthesis from cache", "synthesisGen", gen)
 	}
 	if len(synGens) == 0 {
 		delete(r.synthesesByComposition, nsn)
+		logger.V(5).Info("no more synthesis exist for this composition - removing from cache")
 	} else {
 		r.synthesesByComposition[nsn] = synGens
 	}
