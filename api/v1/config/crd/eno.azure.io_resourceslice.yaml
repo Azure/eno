@@ -5,14 +5,14 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.11.3
   creationTimestamp: null
-  name: generatedresourceslice.eno.azure.io
+  name: resourceslice.eno.azure.io
 spec:
   group: eno.azure.io
   names:
-    kind: GeneratedResourceSlice
-    listKind: GeneratedResourceSliceList
-    plural: generatedresourceslice
-    singular: generatedresourceslice
+    kind: ResourceSlice
+    listKind: ResourceSliceList
+    plural: resourceslice
+    singular: resourceslice
   scope: Namespaced
   versions:
   - name: v1

@@ -43,16 +43,16 @@ func New(mgr ctrl.Manager) (*Manager, error) {
 	}
 	mgr.Add(m.buf)
 
-	err := mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.GeneratedResourceSlice{}, "spec.generationGeneration", func(o client.Object) []string {
-		slice := o.(*apiv1.GeneratedResourceSlice)
+	err := mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, "spec.generationGeneration", func(o client.Object) []string {
+		slice := o.(*apiv1.ResourceSlice)
 		return []string{strconv.FormatInt(slice.Spec.GenerationGeneration, 10)}
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.GeneratedResourceSlice{}, "metadata.ownerReferences.name", func(o client.Object) (keys []string) {
-		slice := o.(*apiv1.GeneratedResourceSlice)
+	err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, "metadata.ownerReferences.name", func(o client.Object) (keys []string) {
+		slice := o.(*apiv1.ResourceSlice)
 		for _, owner := range slice.OwnerReferences {
 			if owner.Kind == "Generation" {
 				keys = append(keys, owner.Name)
@@ -67,7 +67,7 @@ func New(mgr ctrl.Manager) (*Manager, error) {
 	_, err = ctrl.NewControllerManagedBy(mgr).
 		Named("reconstituter").
 		For(&apiv1.Generation{}).
-		Owns(&apiv1.GeneratedResourceSlice{}).
+		Owns(&apiv1.ResourceSlice{}).
 		Build(m.recon)
 	if err != nil {
 		return nil, err

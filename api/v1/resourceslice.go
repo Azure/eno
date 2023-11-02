@@ -3,38 +3,38 @@ package v1
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // +kubebuilder:object:root=true
-type GeneratedResourceSliceList struct {
+type ResourceSliceList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []GeneratedResourceSlice `json:"items"`
+	Items           []ResourceSlice `json:"items"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-type GeneratedResourceSlice struct {
+type ResourceSlice struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   GeneratedResourceSliceSpec   `json:"spec,omitempty"`
-	Status GeneratedResourceSliceStatus `json:"status,omitempty"`
+	Spec   ResourceSliceSpec   `json:"spec,omitempty"`
+	Status ResourceSliceStatus `json:"status,omitempty"`
 }
 
-type GeneratedResourceSliceSpec struct {
+type ResourceSliceSpec struct {
 	// The product of unfortunate type names and naming conventions.
 	// It refers to the metadata.generation property of the Generation resource that caused this resource to be created.
 	GenerationGeneration int64 `json:"generationGeneration,omitempty"`
 
-	Resources []GeneratedResourceSpec `json:"resources,omitempty"`
+	Resources []ResourceSpec `json:"resources,omitempty"`
 }
 
-type GeneratedResourceSliceStatus struct {
+type ResourceSliceStatus struct {
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// Elements of resources correspond in index to those in spec.resources at the observed generation.
-	Resources []GeneratedResourceStatus `json:"resources,omitempty"`
+	Resources []ResourceStatus `json:"resources,omitempty"`
 }
 
-type GeneratedResourceSpec struct {
+type ResourceSpec struct {
 	// +required
 	Manifest string `json:"manifest,omitempty"`
 
@@ -45,7 +45,7 @@ type GeneratedResourceSpec struct {
 	SecretName *string `json:"secretName,omitempty"`
 }
 
-type GeneratedResourceStatus struct {
+type ResourceStatus struct {
 	// True when the resource has been sync'd to the specified manifest.
 	// This property latches: it will remain true if it has ever been true in the life of this generated resource.
 	Reconciled bool `json:"reconciled,omitempty"`

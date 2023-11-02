@@ -83,7 +83,7 @@ func (r *reconstituter) populateCache(ctx context.Context, gen *apiv1.Generation
 		return nil // already cached
 	}
 
-	slices := &apiv1.GeneratedResourceSliceList{}
+	slices := &apiv1.ResourceSliceList{}
 	err := r.Client.List(ctx, slices, client.MatchingFields{
 		"spec.generationGeneration":     strconv.FormatInt(attempt.ObservedGeneration, 10),
 		"metadata.ownerReferences.name": gen.Name,
@@ -135,7 +135,7 @@ func (r *reconstituter) populateCache(ctx context.Context, gen *apiv1.Generation
 	return nil
 }
 
-func (r *reconstituter) buildGeneratedResource(ctx context.Context, resource *apiv1.GeneratedResourceSpec) (*GeneratedResource, error) {
+func (r *reconstituter) buildGeneratedResource(ctx context.Context, resource *apiv1.ResourceSpec) (*GeneratedResource, error) {
 	parsed := &unstructured.Unstructured{}
 	err := parsed.UnmarshalJSON([]byte(resource.Manifest))
 	if err != nil {

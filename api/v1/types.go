@@ -17,5 +17,5 @@ var (
 func init() {
 	SchemeBuilder.Register(&GeneratorList{}, &Generator{})
 	SchemeBuilder.Register(&GenerationList{}, &Generation{})
-	SchemeBuilder.Register(&GeneratedResourceSliceList{}, &GeneratedResourceSlice{})
+	SchemeBuilder.Register(&ResourceSliceList{}, &ResourceSlice{})
 }
