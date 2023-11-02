@@ -23,7 +23,7 @@ type Reconciler interface {
 
 type Client interface {
 	Get(ctx context.Context, gen int64, req *ResourceMeta) (*Resource, error)
-	ObserveResource(ctx context.Context, req *Request, gen int64) error
+	MarkResourceSynced(ctx context.Context, req *Request, gen int64) error
 }
 
 // New creates a new Manager, which is responsible for "reconstituting" resources

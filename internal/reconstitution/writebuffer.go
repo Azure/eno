@@ -15,7 +15,7 @@ func (w *writeBuffer) Start(ctx context.Context) error {
 	return nil
 }
 
-func (w *writeBuffer) ObserveResource(ctx context.Context, req *Request, gen int64) error {
+func (w *writeBuffer) MarkResourceSynced(ctx context.Context, req *Request, gen int64) error {
 	// TODO
 	return nil
 }
