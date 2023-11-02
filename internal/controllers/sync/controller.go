@@ -91,7 +91,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		return ctrl.Result{}, fmt.Errorf("updating status: %w", err)
 	}
 
-	return ctrl.Result{RequeueAfter: resource.Spec.ReconcileInterval}, nil
+	return ctrl.Result{RequeueAfter: resource.ReconcileInterval}, nil
 }
 
 func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) error {
@@ -104,7 +104,7 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 		}
 
 		logger.V(3).Info("deleting resource")
-		err := c.upstreamClient.Delete(ctx, resource.Spec.Object)
+		err := c.upstreamClient.Delete(ctx, resource.Object)
 		if err != nil {
 			return fmt.Errorf("deleting resource: %w", err)
 		}
@@ -114,7 +114,7 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 	// Create
 	if current.GetResourceVersion() == "" {
 		logger.V(3).Info("creating resource")
-		err := c.upstreamClient.Create(ctx, resource.Spec.Object)
+		err := c.upstreamClient.Create(ctx, resource.Object)
 		if err != nil {
 			return fmt.Errorf("creating resource: %w", err)
 		}
@@ -128,7 +128,7 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 	if err != nil {
 		return fmt.Errorf("building json representation of desired state: %w", err)
 	}
-	patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch([]byte(prev.Spec.Manifest), []byte(resource.Spec.Manifest), desiredJS)
+	patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch([]byte(prev.Manifest), []byte(resource.Manifest), desiredJS)
 	if err != nil {
 		return fmt.Errorf("building jsonpatch: %w", err)
 	}

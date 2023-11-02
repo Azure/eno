@@ -14,13 +14,9 @@ type ResourceMeta struct {
 // Resource is the controller's internal representation of a single resource out of a ResourceSlice.
 type Resource struct {
 	Meta *ResourceMeta
-	Spec *ResourceSpec
-}
 
-type ResourceSpec struct {
-	Manifest string
-	Object   *unstructured.Unstructured
-
+	Manifest          string
+	Object            *unstructured.Unstructured
 	ReconcileInterval time.Duration
 }
 

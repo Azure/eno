@@ -150,13 +150,11 @@ func (r *reconstituter) buildResource(ctx context.Context, resource *apiv1.Resou
 			Name:      parsed.GetName(),
 			Kind:      parsed.GetKind(),
 		},
-		Spec: &ResourceSpec{
-			Manifest: resource.Manifest,
-			Object:   parsed,
-		},
+		Manifest: resource.Manifest,
+		Object:   parsed,
 	}
 	if resource.ReconcileInterval != nil {
-		gr.Spec.ReconcileInterval = resource.ReconcileInterval.Duration
+		gr.ReconcileInterval = resource.ReconcileInterval.Duration
 	}
 	if gr.Meta.Name == "" || gr.Meta.Kind == "" {
 		return nil, fmt.Errorf("missing name or kind")
