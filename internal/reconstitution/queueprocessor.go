@@ -32,6 +32,7 @@ func (q *queueProcessor) processQueueItem(ctx context.Context) bool {
 	defer q.Queue.Done(item)
 
 	req := item.(*Request)
+
 	result, err := q.Handler.Reconcile(ctx, req)
 	if err != nil {
 		q.Queue.AddRateLimited(item)
