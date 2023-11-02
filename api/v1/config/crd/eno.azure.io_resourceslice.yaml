@@ -50,6 +50,9 @@ spec:
                   type: object
                 type: array
             type: object
+            x-kubernetes-validations:
+            - message: Value is immutable
+              rule: self == oldSelf
           status:
             properties:
               observedGeneration:
@@ -69,8 +72,7 @@ spec:
                     reconciled:
                       description: 'True when the resource has been sync''d to the
                         specified manifest. This property latches: it will remain
-                        true if it has ever been true in the life of this generated
-                        resource.'
+                        true if it has ever been true in the life of this resource.'
                       type: boolean
                   type: object
                 type: array

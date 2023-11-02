@@ -19,6 +19,7 @@ type ResourceSlice struct {
 	Status ResourceSliceStatus `json:"status,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable"
 type ResourceSliceSpec struct {
 	CompositionGeneration int64 `json:"compositionGeneration,omitempty"`
 
@@ -45,7 +46,7 @@ type ResourceSpec struct {
 
 type ResourceStatus struct {
 	// True when the resource has been sync'd to the specified manifest.
-	// This property latches: it will remain true if it has ever been true in the life of this generated resource.
+	// This property latches: it will remain true if it has ever been true in the life of this resource.
 	Reconciled bool `json:"reconciled,omitempty"`
 
 	// nil if Eno is unable to determine the readiness of this resource.
