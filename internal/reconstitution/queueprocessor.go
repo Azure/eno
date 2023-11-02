@@ -40,6 +40,7 @@ func (q *queueProcessor) processQueueItem(ctx context.Context) bool {
 	result, err := q.Handler.Reconcile(ctx, req)
 	if err != nil {
 		q.Queue.AddRateLimited(item)
+		logger.Error(err, "error while processing queue item")
 		return true
 	}
 	if result.RequeueAfter != 0 {
