@@ -72,9 +72,6 @@ spec:
                         true if it has ever been true in the life of this generated
                         resource.'
                       type: boolean
-                    resourceVersion:
-                      description: The last seen resource version of the sync'd resource.
-                      type: string
                   type: object
                 type: array
             type: object

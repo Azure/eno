@@ -52,7 +52,4 @@ type ResourceStatus struct {
 	// Otherwise it is true when the resource is ready, false otherwise.
 	// Like Reconciled, it latches and will never transition from true->false.
 	Ready *bool `json:"ready,omitempty"`
-
-	// The last seen resource version of the sync'd resource.
-	ResourceVersion *string `json:"resourceVersion,omitempty"`
 }
