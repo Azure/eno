@@ -38,8 +38,8 @@ type ResourceSpec struct {
 
 	ReconcileInterval *metav1.Duration `json:"reconcileInterval,omitempty"`
 
-	// A reference to the secret holding this generated resource.
-	// This is only relevant when this resource's kind is Secret.
+	// A reference to the secret holding this resource.
+	// This is only relevant when the resource's kind is Secret.
 	SecretName *string `json:"secretName,omitempty"`
 }
 
