@@ -5,14 +5,14 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.11.3
   creationTimestamp: null
-  name: generators.eno.azure.io
+  name: synthesizers.eno.azure.io
 spec:
   group: eno.azure.io
   names:
-    kind: Generator
-    listKind: GeneratorList
-    plural: generators
-    singular: generator
+    kind: Synthesizer
+    listKind: SynthesizerList
+    plural: synthesizers
+    singular: synthesizer
   scope: Cluster
   versions:
   - name: v1
