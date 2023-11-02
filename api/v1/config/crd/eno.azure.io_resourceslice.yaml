@@ -33,10 +33,7 @@ spec:
             type: object
           spec:
             properties:
-              generationGeneration:
-                description: The product of unfortunate type names and naming conventions.
-                  It refers to the metadata.generation property of the Generation
-                  resource that caused this resource to be created.
+              compositionGeneration:
                 format: int64
                 type: integer
               resources:

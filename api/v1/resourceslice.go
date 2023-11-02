@@ -20,9 +20,7 @@ type ResourceSlice struct {
 }
 
 type ResourceSliceSpec struct {
-	// The product of unfortunate type names and naming conventions.
-	// It refers to the metadata.generation property of the Generation resource that caused this resource to be created.
-	GenerationGeneration int64 `json:"generationGeneration,omitempty"`
+	CompositionGeneration int64 `json:"compositionGeneration,omitempty"`
 
 	Resources []ResourceSpec `json:"resources,omitempty"`
 }

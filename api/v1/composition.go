@@ -3,24 +3,24 @@ package v1
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // +kubebuilder:object:root=true
-type GenerationList struct {
+type CompositionList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []Generation `json:"items"`
+	Items           []Composition `json:"items"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-type Generation struct {
+type Composition struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   GenerationSpec   `json:"spec,omitempty"`
-	Status GenerationStatus `json:"status,omitempty"`
+	Spec   CompositionSpec   `json:"spec,omitempty"`
+	Status CompositionStatus `json:"status,omitempty"`
 }
 
-type GenerationSpec struct {
-	Generator         SynthesizerRef   `json:"generator,omitempty"`
+type CompositionSpec struct {
+	Synthesizer       SynthesizerRef   `json:"synthesizer,omitempty"`
 	ReconcileInterval *metav1.Duration `json:"reconcileInterval,omitempty"`
 	Inputs            []InputRef       `json:"inputs,omitempty"`
 }
@@ -43,12 +43,12 @@ type ResourceInputRef struct {
 	Name string `json:"name,omitempty"`
 }
 
-type GenerationStatus struct {
-	CurrentState  *GenerationAttempt `json:"currentState,omitempty"`
-	PreviousState *GenerationAttempt `json:"previousState,omitempty"`
+type CompositionStatus struct {
+	CurrentState  *Synthesis `json:"currentState,omitempty"`
+	PreviousState *Synthesis `json:"previousState,omitempty"`
 }
 
-type GenerationAttempt struct {
+type Synthesis struct {
 	ObservedGeneration int64       `json:"observedGeneration,omitempty"`
 	ResourceSliceCount int64       `json:"resourceSliceCount,omitempty"`
 	Ready              bool        `json:"ready,omitempty"`

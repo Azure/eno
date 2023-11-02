@@ -5,14 +5,14 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.11.3
   creationTimestamp: null
-  name: generations.eno.azure.io
+  name: compositions.eno.azure.io
 spec:
   group: eno.azure.io
   names:
-    kind: Generation
-    listKind: GenerationList
-    plural: generations
-    singular: generation
+    kind: Composition
+    listKind: CompositionList
+    plural: compositions
+    singular: composition
   scope: Namespaced
   versions:
   - name: v1
@@ -33,11 +33,6 @@ spec:
             type: object
           spec:
             properties:
-              generator:
-                properties:
-                  name:
-                    type: string
-                type: object
               inputs:
                 items:
                   properties:
@@ -58,6 +53,11 @@ spec:
                 type: array
               reconcileInterval:
                 type: string
+              synthesizer:
+                properties:
+                  name:
+                    type: string
+                type: object
             type: object
           status:
             properties:

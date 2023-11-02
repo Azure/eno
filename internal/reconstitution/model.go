@@ -26,24 +26,24 @@ type ResourceSpec struct {
 
 type Request struct {
 	ResourceMeta
-	Generation types.NamespacedName
+	Composition types.NamespacedName
 }
 
 type resourceKey struct {
 	Namespace, Name, Kind string
-	GenerationGeneration  int64 // metadata.generation of the parent Generation resource
+	CompositionGeneration int64
 }
 
 func newResourceKey(gen int64, gr *Resource) resourceKey {
 	return resourceKey{
-		Namespace:            gr.Meta.Namespace,
-		Name:                 gr.Meta.Name,
-		Kind:                 gr.Meta.Kind,
-		GenerationGeneration: gen,
+		Namespace:             gr.Meta.Namespace,
+		Name:                  gr.Meta.Name,
+		Kind:                  gr.Meta.Kind,
+		CompositionGeneration: gen,
 	}
 }
 
-type generationKey struct {
-	Namespace, Name string
-	Generation      int64
+type synthesisKey struct {
+	Namespace, Name       string
+	CompositionGeneration int64
 }

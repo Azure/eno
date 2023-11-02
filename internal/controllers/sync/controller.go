@@ -32,20 +32,20 @@ func New(mgr *reconstitution.Manager, upstream client.Client) error {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request) (ctrl.Result, error) {
-	gen := &apiv1.Generation{}
-	err := c.client.Get(ctx, req.Generation, gen)
+	comp := &apiv1.Composition{}
+	err := c.client.Get(ctx, req.Composition, comp)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("getting generation: %w", err)
+		return ctrl.Result{}, fmt.Errorf("getting composition: %w", err)
 	}
 	// TODO: Construct upstream from here
-	logger := c.logger.WithValues("generationName", gen.Name, "generationNamespace", gen.Namespace, "generatorGeneration", gen.Generation, "resourceName", req.Name, "resourceNamespace", req.Namespace, "resourceKind", req.Kind)
+	logger := c.logger.WithValues("compName", comp.Name, "compNS", comp.Namespace, "compGen", comp.Generation, "resourceName", req.Name, "resourceNS", req.Namespace, "resourceKind", req.Kind)
 	ctx = logr.NewContext(ctx, logger)
 
-	if gen.Status.CurrentState == nil {
-		logger.V(5).Info("generation is pending")
+	if comp.Status.CurrentState == nil {
+		logger.V(5).Info("composition has not yet been synthesized")
 		return ctrl.Result{}, nil
 	}
-	currentGen := gen.Status.CurrentState.ObservedGeneration
+	currentGen := comp.Status.CurrentState.ObservedGeneration
 
 	resource, err := c.resourceClient.Get(ctx, currentGen, &req.ResourceMeta)
 	if errors.Is(err, reconstitution.ErrNotFound) {
@@ -57,8 +57,8 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 
 	var prev *reconstitution.Resource
-	if gen.Status.PreviousState != nil {
-		prev, err = c.resourceClient.Get(ctx, gen.Status.PreviousState.ObservedGeneration, &req.ResourceMeta)
+	if comp.Status.PreviousState != nil {
+		prev, err = c.resourceClient.Get(ctx, comp.Status.PreviousState.ObservedGeneration, &req.ResourceMeta)
 		if errors.Is(err, reconstitution.ErrNotFound) {
 			logger.V(5).Info("no previous resource manifest found")
 			err = nil
