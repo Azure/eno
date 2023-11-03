@@ -84,7 +84,14 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 	logger.V(3).Info("sync'd resource")
 
-	c.resourceClient.MarkResourceSynced(ctx, req, currentGen)
+	c.resourceClient.PatchStatusAsync(ctx, req, func(rs *apiv1.ResourceStatus) bool {
+		if rs.Reconciled {
+			return false // already in sync
+		}
+		rs.Reconciled = true
+		return true
+	})
+
 	return ctrl.Result{RequeueAfter: resource.ReconcileInterval}, nil
 }
 

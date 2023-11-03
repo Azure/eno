@@ -27,8 +27,6 @@ type ResourceSliceSpec struct {
 }
 
 type ResourceSliceStatus struct {
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-
 	// Elements of resources correspond in index to those in spec.resources at the observed generation.
 	Resources []ResourceStatus `json:"resources,omitempty"`
 }

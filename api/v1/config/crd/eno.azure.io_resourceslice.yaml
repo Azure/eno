@@ -55,9 +55,6 @@ spec:
               rule: self == oldSelf
           status:
             properties:
-              observedGeneration:
-                format: int64
-                type: integer
               resources:
                 description: Elements of resources correspond in index to those in
                   spec.resources at the observed generation.

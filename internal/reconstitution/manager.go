@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"time"
 
 	"k8s.io/apimachinery/pkg/types"
 
@@ -23,12 +24,12 @@ type Reconciler interface {
 
 type Client interface {
 	Get(ctx context.Context, gen int64, req *ResourceRef) (*Resource, error)
-	MarkResourceSynced(ctx context.Context, req *Request, gen int64)
+	PatchStatusAsync(ctx context.Context, req *Request, patchFn func(*apiv1.ResourceStatus) bool)
 }
 
 // New creates a new Manager, which is responsible for "reconstituting" resources
 // i.e. allowing controllers to treat them as individual resources instead of their storage representation (ResourceSlice).
-func New(mgr ctrl.Manager) (*Manager, error) {
+func New(mgr ctrl.Manager, writeBatchInterval time.Duration) (*Manager, error) {
 	m := &Manager{
 		Manager: mgr,
 		recon: &reconstituter{
@@ -39,11 +40,7 @@ func New(mgr ctrl.Manager) (*Manager, error) {
 			resourcesBySynthesis:   map[synthesisKey][]resourceKey{},
 		},
 	}
-	m.buf = &writeBuffer{
-		reconstituter: m.recon,
-		Client:        mgr.GetClient(),
-	}
-	mgr.Add(m.buf)
+	m.buf = newWriteBuffer(mgr, m.recon, writeBatchInterval)
 
 	err := mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, "spec.compositionGeneration", func(o client.Object) []string {
 		slice := o.(*apiv1.ResourceSlice)
