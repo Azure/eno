@@ -1,0 +1,8 @@
+apiVersion: eno.azure.io/v1
+kind: Composition
+metadata:
+  name: comp
+status:
+  currentState:
+    observedGeneration: 1
+    resourceSliceCount: 1

@@ -1,5 +1,7 @@
 package v1
 
+// TODO: Set correct plural name
+
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // +kubebuilder:object:root=true
@@ -31,6 +33,7 @@ type ResourceSliceStatus struct {
 	Resources []ResourceStatus `json:"resources,omitempty"`
 }
 
+// TODO: Consider renaming to Manifest?
 type ResourceSpec struct {
 	// +required
 	Manifest string `json:"manifest,omitempty"`

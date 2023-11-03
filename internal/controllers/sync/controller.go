@@ -73,6 +73,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	current.SetName(req.Name)
 	current.SetNamespace(req.Namespace)
 	current.SetKind(req.Kind)
+	current.SetAPIVersion(resource.Object.GetAPIVersion())
 	err = c.upstreamClient.Get(ctx, client.ObjectKeyFromObject(current), current)
 	if client.IgnoreNotFound(err) != nil {
 		return ctrl.Result{}, fmt.Errorf("getting current state: %w", err)
@@ -124,12 +125,17 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 
 	// TODO: Support strategic patch where supported
 
+	var prevManifest []byte
+	if prev != nil {
+		prevManifest = []byte(prev.Manifest)
+	}
+
 	// Patch
 	desiredJS, err := current.MarshalJSON()
 	if err != nil {
 		return fmt.Errorf("building json representation of desired state: %w", err)
 	}
-	patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch([]byte(prev.Manifest), []byte(resource.Manifest), desiredJS)
+	patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(prevManifest, []byte(resource.Manifest), desiredJS)
 	if err != nil {
 		return fmt.Errorf("building jsonpatch: %w", err)
 	}

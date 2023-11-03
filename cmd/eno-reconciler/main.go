@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"time"
@@ -44,6 +43,7 @@ func run() error {
 		panic(err)
 	}
 
+	// TODO: Production ready logging
 	zapLog, err := zap.NewDevelopment(zap.IncreaseLevel(zapcore.DebugLevel))
 	if err != nil {
 		panic(err)

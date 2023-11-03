@@ -59,6 +59,7 @@ func (w *writeBuffer) PatchStatusAsync(ctx context.Context, req *Request, patchF
 		SlicedResource: &req.SlicedResource,
 		PatchFn:        patchFn,
 	})
+	w.queue.AddRateLimited(req.SlicedResource.SliceResource)
 }
 
 func (w *writeBuffer) Start(ctx context.Context) error {

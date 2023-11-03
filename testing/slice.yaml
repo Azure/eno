@@ -1,0 +1,17 @@
+apiVersion: eno.azure.io/v1
+kind: ResourceSlice
+metadata:
+  name: comp
+spec:
+  compositionGeneration: 1
+  resources:
+  - reconcileInterval: 30s
+    manifest: |
+      {
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {
+          "name": "test-managed-configmap",
+          "namespace": "default"
+        }
+      }
