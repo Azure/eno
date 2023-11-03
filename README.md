@@ -1,6 +1,6 @@
 # Eno
 
-A toolkit for working with Helm charts.
+Work in progress.
 
 ## Contributing
 
