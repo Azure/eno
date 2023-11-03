@@ -47,6 +47,8 @@ func (r *reconstituter) Get(ctx context.Context, gen int64, ref *ResourceRef) (*
 }
 
 func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	r.Logger.V(1).WithValues("composition", req).Info("caching composition")
+
 	comp := &apiv1.Composition{}
 	err := r.Client.Get(ctx, req.NamespacedName, comp)
 	if k8serrors.IsNotFound(err) {
@@ -88,22 +90,23 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 	ctx = logr.NewContext(ctx, logger)
 
 	if exists {
-		logger.V(5).Info("this synthesis has already been cached")
+		logger.V(1).Info("this synthesis has already been cached")
 		return nil
 	}
 
 	slices := &apiv1.ResourceSliceList{}
 	err := r.Client.List(ctx, slices, client.MatchingFields{
-		"spec.compositionGeneration":    strconv.FormatInt(synthesis.ObservedGeneration, 10),
-		"metadata.ownerReferences.name": comp.Name,
+		"spec.compositionGeneration": strconv.FormatInt(synthesis.ObservedGeneration, 10),
+		// TODO: Need to merge these selectors
+		// "metadata.ownerReferences.name": comp.Name,
 	})
 	if err != nil {
 		return fmt.Errorf("listing resource slices: %w", err)
 	}
 
-	logger.V(5).Info(fmt.Sprintf("found %d slices", len(slices.Items)))
+	logger.V(1).Info(fmt.Sprintf("found %d slices", len(slices.Items)))
 	if int64(len(slices.Items)) != synthesis.ResourceSliceCount {
-		logger.V(5).Info("stale informer - waiting for sync")
+		logger.V(1).Info("stale informer - waiting for sync")
 		return nil
 	}
 
@@ -119,7 +122,7 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 			resource := resource
 			gr, err := r.buildResource(ctx, &slice, &resource)
 			if err != nil {
-				logger.V(2).Error(err, "invalid resource - skipping")
+				logger.V(0).Error(err, "invalid resource - skipping")
 				continue
 			}
 			key := resourceKey{
@@ -237,11 +240,11 @@ func (r *reconstituter) purgeDanglingResources(ctx context.Context, nsn types.Na
 		}
 
 		delete(r.resourcesBySynthesis, synKey)
-		logger.V(5).Info("purged synthesis from cache", "synthesisGen", gen)
+		logger.V(1).Info("purged synthesis from cache", "synthesisGen", gen)
 	}
 	if len(synGens) == 0 {
 		delete(r.synthesesByComposition, nsn)
-		logger.V(5).Info("no more synthesis exist for this composition - removing from cache")
+		logger.V(1).Info("no more synthesis exist for this composition - removing from cache")
 	} else {
 		r.synthesesByComposition[nsn] = newGens
 	}

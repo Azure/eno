@@ -72,7 +72,7 @@ func New(mgr ctrl.Manager, writeBatchInterval time.Duration) (*Manager, error) {
 		return nil, err
 	}
 
-	return nil, nil
+	return m, nil
 }
 
 type Manager struct {

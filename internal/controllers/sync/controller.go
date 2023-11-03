@@ -40,14 +40,14 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 
 	if comp.Status.CurrentState == nil {
-		logger.V(5).Info("composition has not yet been synthesized")
+		logger.V(1).Info("composition has not yet been synthesized")
 		return ctrl.Result{}, nil
 	}
 	currentGen := comp.Status.CurrentState.ObservedGeneration
 
 	resource, err := c.resourceClient.Get(ctx, currentGen, &req.ResourceRef)
 	if errors.Is(err, reconstitution.ErrNotFound) {
-		logger.V(3).Info("resource not found - dropping")
+		logger.V(0).Info("resource not found - dropping")
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
@@ -58,14 +58,14 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	if comp.Status.PreviousState != nil {
 		prev, err = c.resourceClient.Get(ctx, comp.Status.PreviousState.ObservedGeneration, &req.ResourceRef)
 		if errors.Is(err, reconstitution.ErrNotFound) {
-			logger.V(5).Info("no previous resource manifest found")
+			logger.V(1).Info("no previous resource manifest found")
 			err = nil
 		}
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("getting previous resource: %w", err)
 		}
 	} else {
-		logger.V(5).Info("no previous state given")
+		logger.V(1).Info("no previous state given")
 	}
 
 	// Fetch the current resource
@@ -82,7 +82,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	if err := c.reconcileResource(ctx, prev, resource, current); err != nil {
 		return ctrl.Result{}, err
 	}
-	logger.V(3).Info("sync'd resource")
+	logger.V(0).Info("sync'd resource")
 
 	c.resourceClient.PatchStatusAsync(ctx, req, func(rs *apiv1.ResourceStatus) bool {
 		if rs.Reconciled {
@@ -104,7 +104,7 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 			return nil // already deleted
 		}
 
-		logger.V(3).Info("deleting resource")
+		logger.V(0).Info("deleting resource")
 		err := c.upstreamClient.Delete(ctx, resource.Object)
 		if err != nil {
 			return fmt.Errorf("deleting resource: %w", err)
@@ -114,7 +114,7 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 
 	// Create
 	if current.GetResourceVersion() == "" {
-		logger.V(3).Info("creating resource")
+		logger.V(0).Info("creating resource")
 		err := c.upstreamClient.Create(ctx, resource.Object)
 		if err != nil {
 			return fmt.Errorf("creating resource: %w", err)
@@ -134,11 +134,11 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 		return fmt.Errorf("building jsonpatch: %w", err)
 	}
 	if string(patch) == "{}" {
-		logger.V(5).Info("skipping empty patch")
+		logger.V(1).Info("skipping empty patch")
 		return nil
 	}
 
-	logger.V(3).Info("patching resource")
+	logger.V(0).Info("patching resource")
 	err = c.upstreamClient.Patch(ctx, current, client.RawPatch(types.MergePatchType, patch))
 	if err != nil {
 		return fmt.Errorf("applying patch: %w", err)

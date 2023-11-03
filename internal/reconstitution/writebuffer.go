@@ -52,7 +52,7 @@ func (w *writeBuffer) PatchStatusAsync(ctx context.Context, req *Request, patchF
 	w.mut.Lock()
 	defer w.mut.Unlock()
 
-	w.Logger.V(5).WithValues(req.LogValues()...).Info("buffering status update")
+	w.Logger.V(1).WithValues(req.LogValues()...).Info("buffering status update")
 
 	key := req.SlicedResource.SliceResource
 	w.state[key] = append(w.state[key], &asyncStatusUpdate{
@@ -88,7 +88,7 @@ func (w *writeBuffer) processQueueItem(ctx context.Context) bool {
 	ctx = logr.NewContext(ctx, logger)
 
 	if len(updates) == 0 {
-		logger.V(2).Info("dropping queue item because no updates were found for this slice (this is suspicious)")
+		logger.V(0).Info("dropping queue item because no updates were found for this slice (this is suspicious)")
 		w.queue.Forget(item)
 		return true
 	}
@@ -99,7 +99,7 @@ func (w *writeBuffer) processQueueItem(ctx context.Context) bool {
 	}
 
 	// Put the updates back in the buffer to retry on the next attempt
-	logger.V(5).Info("update failed - adding updates back to the buffer")
+	logger.V(1).Info("update failed - adding updates back to the buffer")
 	w.mut.Lock()
 	w.state[sliceNSN] = append(w.state[sliceNSN], updates...)
 	w.mut.Unlock()
@@ -109,12 +109,12 @@ func (w *writeBuffer) processQueueItem(ctx context.Context) bool {
 
 func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.NamespacedName, updates []*asyncStatusUpdate) bool {
 	logger := logr.FromContextOrDiscard(ctx)
-	logger.V(5).Info("starting to update slice status")
+	logger.V(1).Info("starting to update slice status")
 
 	slice := &apiv1.ResourceSlice{}
 	err := w.client.Get(ctx, sliceNSN, slice)
 	if errors.IsNotFound(err) {
-		logger.V(2).Info("slice has been deleted, skipping status update")
+		logger.V(0).Info("slice has been deleted, skipping status update")
 		return true
 	}
 	if err != nil {
@@ -123,7 +123,7 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 	}
 
 	if len(slice.Status.Resources) != len(slice.Spec.Resources) {
-		logger.V(5).Info("allocating resource status slice")
+		logger.V(1).Info("allocating resource status slice")
 		slice.Status.Resources = make([]apiv1.ResourceStatus, len(slice.Spec.Resources))
 	}
 
@@ -133,14 +133,14 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 		statusPtr := &slice.Status.Resources[update.SlicedResource.ResourceIndex]
 
 		if update.PatchFn(statusPtr) {
-			logger.V(5).Info("patch caused status to change")
+			logger.V(1).Info("patch caused status to change")
 			dirty = true
 		} else {
-			logger.V(5).Info("patch did not cause status to change")
+			logger.V(1).Info("patch did not cause status to change")
 		}
 	}
 	if !dirty {
-		logger.V(5).Info("no status updates were necessary")
+		logger.V(1).Info("no status updates were necessary")
 		return true
 	}
 
@@ -150,6 +150,6 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 		return false
 	}
 
-	logger.V(2).Info(fmt.Sprintf("updated the status of %d resources in slice", len(updates)))
+	logger.V(0).Info(fmt.Sprintf("updated the status of %d resources in slice", len(updates)))
 	return true
 }
