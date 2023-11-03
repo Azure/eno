@@ -85,7 +85,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 	logger.V(0).Info("sync'd resource")
 
-	c.resourceClient.PatchStatusAsync(ctx, req, func(rs *apiv1.ResourceStatus) bool {
+	c.resourceClient.PatchStatusAsync(ctx, req, func(rs *apiv1.ResourceState) bool {
 		if rs.Reconciled {
 			return false // already in sync
 		}

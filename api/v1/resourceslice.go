@@ -1,7 +1,5 @@
 package v1
 
-// TODO: Set correct plural name
-
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // +kubebuilder:object:root=true
@@ -25,16 +23,10 @@ type ResourceSlice struct {
 type ResourceSliceSpec struct {
 	CompositionGeneration int64 `json:"compositionGeneration,omitempty"`
 
-	Resources []ResourceSpec `json:"resources,omitempty"`
+	Resources []Manifest `json:"resources,omitempty"`
 }
 
-type ResourceSliceStatus struct {
-	// Elements of resources correspond in index to those in spec.resources at the observed generation.
-	Resources []ResourceStatus `json:"resources,omitempty"`
-}
-
-// TODO: Consider renaming to Manifest?
-type ResourceSpec struct {
+type Manifest struct {
 	// +required
 	Manifest string `json:"manifest,omitempty"`
 
@@ -45,7 +37,12 @@ type ResourceSpec struct {
 	SecretName *string `json:"secretName,omitempty"`
 }
 
-type ResourceStatus struct {
+type ResourceSliceStatus struct {
+	// Elements of resources correspond in index to those in spec.resources at the observed generation.
+	Resources []ResourceState `json:"resources,omitempty"`
+}
+
+type ResourceState struct {
 	// True when the resource has been sync'd to the specified manifest.
 	// This property latches: it will remain true if it has ever been true in the life of this resource.
 	Reconciled bool `json:"reconciled,omitempty"`

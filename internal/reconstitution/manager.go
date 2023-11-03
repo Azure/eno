@@ -24,7 +24,7 @@ type Reconciler interface {
 
 type Client interface {
 	Get(ctx context.Context, gen int64, req *ResourceRef) (*Resource, error)
-	PatchStatusAsync(ctx context.Context, req *Request, patchFn func(*apiv1.ResourceStatus) bool)
+	PatchStatusAsync(ctx context.Context, req *Request, patchFn func(*apiv1.ResourceState) bool)
 }
 
 // New creates a new Manager, which is responsible for "reconstituting" resources

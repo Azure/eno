@@ -19,7 +19,7 @@ import (
 
 type asyncStatusUpdate struct {
 	SlicedResource *SlicedResourceRef
-	PatchFn        func(*apiv1.ResourceStatus) bool
+	PatchFn        func(*apiv1.ResourceState) bool
 }
 
 type writeBuffer struct {
@@ -48,7 +48,7 @@ func newWriteBuffer(mgr ctrl.Manager, recon *reconstituter, writeBatchInterval t
 	return w
 }
 
-func (w *writeBuffer) PatchStatusAsync(ctx context.Context, req *Request, patchFn func(*apiv1.ResourceStatus) bool) {
+func (w *writeBuffer) PatchStatusAsync(ctx context.Context, req *Request, patchFn func(*apiv1.ResourceState) bool) {
 	w.mut.Lock()
 	defer w.mut.Unlock()
 
@@ -125,7 +125,7 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 
 	if len(slice.Status.Resources) != len(slice.Spec.Resources) {
 		logger.V(1).Info("allocating resource status slice")
-		slice.Status.Resources = make([]apiv1.ResourceStatus, len(slice.Spec.Resources))
+		slice.Status.Resources = make([]apiv1.ResourceState, len(slice.Spec.Resources))
 	}
 
 	var dirty bool

@@ -176,7 +176,7 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 	return nil
 }
 
-func (r *reconstituter) buildResource(ctx context.Context, slice *apiv1.ResourceSlice, resource *apiv1.ResourceSpec) (*Resource, error) {
+func (r *reconstituter) buildResource(ctx context.Context, slice *apiv1.ResourceSlice, resource *apiv1.Manifest) (*Resource, error) {
 	manifest := resource.Manifest
 	if resource.SecretName != nil {
 		secret := &corev1.Secret{}
