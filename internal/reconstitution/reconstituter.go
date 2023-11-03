@@ -112,12 +112,13 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 
 	// Build our internal representation of each resource
 	resources := map[resourceKey]*Resource{}
+	requests := []*Request{}
 	for _, slice := range slices.Items {
 		slice := slice
 
 		// NOTE: In the future we can build a DAG here to find edges between dependant resources
 
-		for _, resource := range slice.Spec.Resources {
+		for i, resource := range slice.Spec.Resources {
 			resource := resource
 			gr, err := r.buildResource(ctx, &slice, &resource)
 			if err != nil {
@@ -129,6 +130,20 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 				CompositionGeneration: slice.Spec.CompositionGeneration,
 			}
 			resources[key] = gr
+			requests = append(requests, &Request{
+				ResourceMeta: *gr.Meta,
+				Composition: types.NamespacedName{
+					Namespace: comp.Namespace,
+					Name:      comp.Name,
+				},
+				Slice: ResourceSliceRef{
+					SliceResource: types.NamespacedName{
+						Namespace: slice.Namespace,
+						Name:      slice.Name,
+					},
+					ResourceIndex: i,
+				},
+			})
 		}
 	}
 
@@ -146,10 +161,14 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 	r.synthesesByComposition[nsn] = append(r.synthesesByComposition[nsn], synthesis.ObservedGeneration)
 
 	keys := []resourceKey{}
-	for rk, gr := range resources {
+	for rk, resource := range resources {
 		keys = append(keys, rk)
-		r.resources[rk] = gr
-		r.enqueue(&key, gr)
+		r.resources[rk] = resource
+	}
+	for _, req := range requests {
+		for _, queue := range r.Queues {
+			queue.Add(req)
+		}
 	}
 	r.resourcesBySynthesis[key] = keys
 	logger.Info("cache filled")
@@ -194,18 +213,6 @@ func (r *reconstituter) buildResource(ctx context.Context, slice *apiv1.Resource
 		return nil, fmt.Errorf("missing name or kind")
 	}
 	return gr, nil
-}
-
-func (r *reconstituter) enqueue(key *synthesisKey, gr *Resource) {
-	for _, q := range r.Queues {
-		q.Add(&Request{
-			ResourceMeta: *gr.Meta,
-			Composition: types.NamespacedName{
-				Namespace: key.Namespace,
-				Name:      key.Name,
-			},
-		})
-	}
 }
 
 func (r *reconstituter) purgeDanglingResources(ctx context.Context, nsn types.NamespacedName, comp *apiv1.Composition) {

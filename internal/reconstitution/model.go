@@ -23,6 +23,12 @@ type Resource struct {
 type Request struct {
 	ResourceMeta
 	Composition types.NamespacedName
+	Slice       ResourceSliceRef
+}
+
+type ResourceSliceRef struct {
+	SliceResource types.NamespacedName
+	ResourceIndex int
 }
 
 type resourceKey struct {
