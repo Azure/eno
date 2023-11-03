@@ -45,7 +45,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 	currentGen := comp.Status.CurrentState.ObservedGeneration
 
-	resource, err := c.resourceClient.Get(ctx, currentGen, &req.ResourceMeta)
+	resource, err := c.resourceClient.Get(ctx, currentGen, &req.ResourceRef)
 	if errors.Is(err, reconstitution.ErrNotFound) {
 		logger.V(3).Info("resource not found - dropping")
 		return ctrl.Result{}, nil
@@ -56,7 +56,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	var prev *reconstitution.Resource
 	if comp.Status.PreviousState != nil {
-		prev, err = c.resourceClient.Get(ctx, comp.Status.PreviousState.ObservedGeneration, &req.ResourceMeta)
+		prev, err = c.resourceClient.Get(ctx, comp.Status.PreviousState.ObservedGeneration, &req.ResourceRef)
 		if errors.Is(err, reconstitution.ErrNotFound) {
 			logger.V(5).Info("no previous resource manifest found")
 			err = nil

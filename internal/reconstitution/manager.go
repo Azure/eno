@@ -22,7 +22,7 @@ type Reconciler interface {
 }
 
 type Client interface {
-	Get(ctx context.Context, gen int64, req *ResourceMeta) (*Resource, error)
+	Get(ctx context.Context, gen int64, req *ResourceRef) (*Resource, error)
 	MarkResourceSynced(ctx context.Context, req *Request, gen int64)
 }
 

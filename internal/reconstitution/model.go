@@ -7,13 +7,14 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-type ResourceMeta struct {
+// ResourceRef refers to a specific synthesized resource.
+type ResourceRef struct {
 	Name, Namespace, Kind string
 }
 
 // Resource is the controller's internal representation of a single resource out of a ResourceSlice.
 type Resource struct {
-	Meta *ResourceMeta
+	Ref *ResourceRef
 
 	Manifest          string
 	Object            *unstructured.Unstructured
@@ -21,18 +22,19 @@ type Resource struct {
 }
 
 type Request struct {
-	ResourceMeta
-	Composition types.NamespacedName
-	Slice       ResourceSliceRef
+	ResourceRef
+	Composition    types.NamespacedName
+	SlicedResource SlicedResourceRef
 }
 
-type ResourceSliceRef struct {
+// SlicedResourceRef references a particular resource within a resource slice.
+type SlicedResourceRef struct {
 	SliceResource types.NamespacedName
-	ResourceIndex int
+	ResourceIndex int // position of this resource in the slice's Resources array
 }
 
 type resourceKey struct {
-	ResourceMeta
+	ResourceRef
 	CompositionGeneration int64
 }
 

@@ -32,12 +32,12 @@ type reconstituter struct {
 	resourcesBySynthesis   map[synthesisKey][]resourceKey
 }
 
-func (r *reconstituter) Get(ctx context.Context, gen int64, meta *ResourceMeta) (*Resource, error) {
+func (r *reconstituter) Get(ctx context.Context, gen int64, ref *ResourceRef) (*Resource, error) {
 	r.mut.Lock()
 	defer r.mut.Unlock()
 
 	res, ok := r.resources[resourceKey{
-		ResourceMeta:          *meta,
+		ResourceRef:           *ref,
 		CompositionGeneration: gen,
 	}]
 	if !ok {
@@ -126,17 +126,17 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 				continue
 			}
 			key := resourceKey{
-				ResourceMeta:          *gr.Meta,
+				ResourceRef:           *gr.Ref,
 				CompositionGeneration: slice.Spec.CompositionGeneration,
 			}
 			resources[key] = gr
 			requests = append(requests, &Request{
-				ResourceMeta: *gr.Meta,
+				ResourceRef: *gr.Ref,
 				Composition: types.NamespacedName{
 					Namespace: comp.Namespace,
 					Name:      comp.Name,
 				},
-				Slice: ResourceSliceRef{
+				SlicedResource: SlicedResourceRef{
 					SliceResource: types.NamespacedName{
 						Namespace: slice.Namespace,
 						Name:      slice.Name,
@@ -198,7 +198,7 @@ func (r *reconstituter) buildResource(ctx context.Context, slice *apiv1.Resource
 	}
 
 	gr := &Resource{
-		Meta: &ResourceMeta{
+		Ref: &ResourceRef{
 			Namespace: parsed.GetNamespace(),
 			Name:      parsed.GetName(),
 			Kind:      parsed.GetKind(),
@@ -209,7 +209,7 @@ func (r *reconstituter) buildResource(ctx context.Context, slice *apiv1.Resource
 	if resource.ReconcileInterval != nil {
 		gr.ReconcileInterval = resource.ReconcileInterval.Duration
 	}
-	if gr.Meta.Name == "" || gr.Meta.Kind == "" {
+	if gr.Ref.Name == "" || gr.Ref.Kind == "" {
 		return nil, fmt.Errorf("missing name or kind")
 	}
 	return gr, nil
