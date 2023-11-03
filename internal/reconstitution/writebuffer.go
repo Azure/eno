@@ -2,6 +2,7 @@ package reconstitution
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/go-logr/logr"
 )
 
 type asyncStatusUpdate struct {
@@ -22,7 +24,8 @@ type asyncStatusUpdate struct {
 
 type writeBuffer struct {
 	*reconstituter
-	Client client.Client
+	client client.Client
+	logger logr.Logger
 
 	mut   sync.Mutex
 	state map[types.NamespacedName][]*asyncStatusUpdate
@@ -32,7 +35,8 @@ type writeBuffer struct {
 func newWriteBuffer(mgr ctrl.Manager, recon *reconstituter, writeBatchInterval time.Duration) *writeBuffer {
 	w := &writeBuffer{
 		reconstituter: recon,
-		Client:        mgr.GetClient(),
+		client:        mgr.GetClient(),
+		logger:        mgr.GetLogger().WithValues("controller", "writeBuffer"),
 		state:         make(map[types.NamespacedName][]*asyncStatusUpdate),
 		queue: workqueue.NewRateLimitingQueueWithConfig(
 			&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Every(writeBatchInterval), 2)},
@@ -47,6 +51,8 @@ func newWriteBuffer(mgr ctrl.Manager, recon *reconstituter, writeBatchInterval t
 func (w *writeBuffer) PatchStatusAsync(ctx context.Context, req *Request, patchFn func(*apiv1.ResourceStatus) bool) {
 	w.mut.Lock()
 	defer w.mut.Unlock()
+
+	w.Logger.V(5).WithValues(req.LogValues()...).Info("buffering status update")
 
 	key := req.SlicedResource.SliceResource
 	w.state[key] = append(w.state[key], &asyncStatusUpdate{
@@ -75,10 +81,14 @@ func (w *writeBuffer) processQueueItem(ctx context.Context) bool {
 
 	w.mut.Lock()
 	updates := w.state[sliceNSN]
-	w.state[sliceNSN] = []*asyncStatusUpdate{}
+	delete(w.state, sliceNSN)
 	w.mut.Unlock()
 
+	logger := w.Logger.WithValues("slice", sliceNSN)
+	ctx = logr.NewContext(ctx, logger)
+
 	if len(updates) == 0 {
+		logger.V(2).Info("dropping queue item because no updates were found for this slice (this is suspicious)")
 		w.queue.Forget(item)
 		return true
 	}
@@ -89,6 +99,7 @@ func (w *writeBuffer) processQueueItem(ctx context.Context) bool {
 	}
 
 	// Put the updates back in the buffer to retry on the next attempt
+	logger.V(5).Info("update failed - adding updates back to the buffer")
 	w.mut.Lock()
 	w.state[sliceNSN] = append(w.state[sliceNSN], updates...)
 	w.mut.Unlock()
@@ -97,36 +108,48 @@ func (w *writeBuffer) processQueueItem(ctx context.Context) bool {
 }
 
 func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.NamespacedName, updates []*asyncStatusUpdate) bool {
+	logger := logr.FromContextOrDiscard(ctx)
+	logger.V(5).Info("starting to update slice status")
+
 	slice := &apiv1.ResourceSlice{}
-	err := w.Client.Get(ctx, sliceNSN, slice)
+	err := w.client.Get(ctx, sliceNSN, slice)
 	if errors.IsNotFound(err) {
+		logger.V(2).Info("slice has been deleted, skipping status update")
 		return true
 	}
 	if err != nil {
-		// TODO
+		logger.Error(err, "unable to get resource slice")
 		return false
 	}
 
 	if len(slice.Status.Resources) != len(slice.Spec.Resources) {
+		logger.V(5).Info("allocating resource status slice")
 		slice.Status.Resources = make([]apiv1.ResourceStatus, len(slice.Spec.Resources))
 	}
 
 	var dirty bool
 	for _, update := range updates {
+		logger := logger.WithValues("slicedResource", update.SlicedResource)
 		statusPtr := &slice.Status.Resources[update.SlicedResource.ResourceIndex]
+
 		if update.PatchFn(statusPtr) {
+			logger.V(5).Info("patch caused status to change")
 			dirty = true
+		} else {
+			logger.V(5).Info("patch did not cause status to change")
 		}
 	}
 	if !dirty {
+		logger.V(5).Info("no status updates were necessary")
 		return true
 	}
 
-	err = w.Client.Status().Update(ctx, slice)
+	err = w.client.Status().Update(ctx, slice)
 	if err != nil {
-		// TODO
+		logger.Error(err, "unable to update resource slice")
 		return false
 	}
 
+	logger.V(2).Info(fmt.Sprintf("updated the status of %d resources in slice", len(updates)))
 	return true
 }

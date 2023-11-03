@@ -47,9 +47,6 @@ func (r *reconstituter) Get(ctx context.Context, gen int64, ref *ResourceRef) (*
 }
 
 func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := r.Logger.WithValues("composition", req)
-	ctx = logr.NewContext(ctx, logger)
-
 	comp := &apiv1.Composition{}
 	err := r.Client.Get(ctx, req.NamespacedName, comp)
 	if k8serrors.IsNotFound(err) {

@@ -27,6 +27,10 @@ type Request struct {
 	SlicedResource SlicedResourceRef
 }
 
+func (r *Request) LogValues() []any {
+	return []any{"composition", r.Composition, "resource", r.ResourceRef, "slicedResource", r.SlicedResource}
+}
+
 // SlicedResourceRef references a particular resource within a resource slice.
 type SlicedResourceRef struct {
 	SliceResource types.NamespacedName

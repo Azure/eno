@@ -34,7 +34,7 @@ func (q *queueProcessor) processQueueItem(ctx context.Context) bool {
 	defer q.Queue.Done(item)
 
 	req := item.(*Request)
-	logger := q.Logger.WithValues("composition", req.Composition, "resource", req.ResourceRef)
+	logger := q.Logger.WithValues(req.LogValues()...)
 	ctx = logr.NewContext(ctx, logger)
 
 	result, err := q.Handler.Reconcile(ctx, req)
