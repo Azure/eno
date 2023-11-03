@@ -18,7 +18,7 @@ import (
 )
 
 type asyncStatusUpdate struct {
-	SlicedResource *SlicedResourceRef
+	SlicedResource *ManifestRef
 	PatchFn        func(*apiv1.ResourceState) bool
 }
 
@@ -54,12 +54,12 @@ func (w *writeBuffer) PatchStatusAsync(ctx context.Context, req *Request, patchF
 
 	w.Logger.V(1).WithValues(req.LogValues()...).Info("buffering status update")
 
-	key := req.SlicedResource.SliceResource
+	key := req.Manifest.SliceResource
 	w.state[key] = append(w.state[key], &asyncStatusUpdate{
-		SlicedResource: &req.SlicedResource,
+		SlicedResource: &req.Manifest,
 		PatchFn:        patchFn,
 	})
-	w.queue.AddRateLimited(req.SlicedResource.SliceResource)
+	w.queue.AddRateLimited(req.Manifest.SliceResource)
 }
 
 func (w *writeBuffer) Start(ctx context.Context) error {
@@ -131,7 +131,7 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 	var dirty bool
 	for _, update := range updates {
 		logger := logger.WithValues("slicedResource", update.SlicedResource)
-		statusPtr := &slice.Status.Resources[update.SlicedResource.ResourceIndex]
+		statusPtr := &slice.Status.Resources[update.SlicedResource.Index]
 
 		if update.PatchFn(statusPtr) {
 			logger.V(1).Info("patch caused status to change")

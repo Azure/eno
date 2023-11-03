@@ -23,18 +23,18 @@ type Resource struct {
 
 type Request struct {
 	ResourceRef
-	Composition    types.NamespacedName
-	SlicedResource SlicedResourceRef
+	Composition types.NamespacedName
+	Manifest    ManifestRef
 }
 
 func (r *Request) LogValues() []any {
-	return []any{"composition", r.Composition, "resource", r.ResourceRef, "slicedResource", r.SlicedResource}
+	return []any{"composition", r.Composition, "resource", r.ResourceRef, "manifest", r.Manifest}
 }
 
-// SlicedResourceRef references a particular resource within a resource slice.
-type SlicedResourceRef struct {
+// ManifestRef references a particular resource manifest within a resource slice.
+type ManifestRef struct {
 	SliceResource types.NamespacedName
-	ResourceIndex int // position of this resource in the slice's Resources array
+	Index         int // position of this manifest within the slice
 }
 
 type resourceKey struct {

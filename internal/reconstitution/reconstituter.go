@@ -136,12 +136,12 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 					Namespace: comp.Namespace,
 					Name:      comp.Name,
 				},
-				SlicedResource: SlicedResourceRef{
+				Manifest: ManifestRef{
 					SliceResource: types.NamespacedName{
 						Namespace: slice.Namespace,
 						Name:      slice.Name,
 					},
-					ResourceIndex: i,
+					Index: i,
 				},
 			})
 		}
