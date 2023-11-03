@@ -20,7 +20,6 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// TODO: How to add log fields to error messages?
 var ErrNotFound = errors.New("resource not found")
 
 type reconstituter struct {
@@ -155,7 +154,7 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 	// Store items and notify listeners
 	_, exists = r.resourcesBySynthesis[key]
 	if exists {
-		logger.V(1).Info("the synthesis was cached before this routine was able to build its internal representation - is concurrency > 1?")
+		logger.V(1).Info("the synthesis was cached before this routine was able to build its internal representation - this should be very concerning")
 		return nil
 	}
 
