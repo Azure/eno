@@ -2,6 +2,7 @@ package reconstitution
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -20,6 +21,7 @@ import (
 )
 
 // TODO: How to add log fields to error messages?
+var ErrNotFound = errors.New("resource not found")
 
 type reconstituter struct {
 	Client client.Client
@@ -137,7 +139,7 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 					Name:      comp.Name,
 				},
 				Manifest: ManifestRef{
-					SliceResource: types.NamespacedName{
+					Slice: types.NamespacedName{
 						Namespace: slice.Namespace,
 						Name:      slice.Name,
 					},

@@ -10,7 +10,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -19,47 +18,47 @@ import (
 
 type asyncStatusUpdate struct {
 	SlicedResource *ManifestRef
-	PatchFn        func(*apiv1.ResourceState) bool
+	PatchFn        StatusPatchFn
 }
 
+// writeBuffer reduces load on etcd/apiserver by collecting resource slice status
+// updates over a short period of time and applying them in a single update request.
 type writeBuffer struct {
-	*reconstituter
 	client client.Client
 	logger logr.Logger
 
+	// queue items are per-slice.
+	// the state map collects multiple updates per slice to be dispatched by next queue item.
 	mut   sync.Mutex
 	state map[types.NamespacedName][]*asyncStatusUpdate
 	queue workqueue.RateLimitingInterface
 }
 
-func newWriteBuffer(mgr ctrl.Manager, recon *reconstituter, writeBatchInterval time.Duration) *writeBuffer {
-	w := &writeBuffer{
-		reconstituter: recon,
-		client:        mgr.GetClient(),
-		logger:        mgr.GetLogger().WithValues("controller", "writeBuffer"),
-		state:         make(map[types.NamespacedName][]*asyncStatusUpdate),
+func newWriteBuffer(cli client.Client, logger logr.Logger, batchInterval time.Duration) *writeBuffer {
+	return &writeBuffer{
+		client: cli,
+		logger: logger.WithValues("controller", "writeBuffer"),
+		state:  make(map[types.NamespacedName][]*asyncStatusUpdate),
 		queue: workqueue.NewRateLimitingQueueWithConfig(
-			&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Every(writeBatchInterval), 2)},
+			&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Every(batchInterval), 2)},
 			workqueue.RateLimitingQueueConfig{
 				Name: "writeBuffer",
 			}),
 	}
-	mgr.Add(w)
-	return w
 }
 
-func (w *writeBuffer) PatchStatusAsync(ctx context.Context, req *Request, patchFn func(*apiv1.ResourceState) bool) {
+func (w *writeBuffer) PatchStatusAsync(ctx context.Context, ref *ManifestRef, patchFn StatusPatchFn) {
 	w.mut.Lock()
 	defer w.mut.Unlock()
 
-	w.Logger.V(1).WithValues(req.LogValues()...).Info("buffering status update")
+	logr.FromContextOrDiscard(ctx).V(1).Info("buffering status update")
 
-	key := req.Manifest.SliceResource
+	key := ref.Slice
 	w.state[key] = append(w.state[key], &asyncStatusUpdate{
-		SlicedResource: &req.Manifest,
+		SlicedResource: ref,
 		PatchFn:        patchFn,
 	})
-	w.queue.AddRateLimited(req.Manifest.SliceResource)
+	w.queue.AddRateLimited(key)
 }
 
 func (w *writeBuffer) Start(ctx context.Context) error {
@@ -85,7 +84,7 @@ func (w *writeBuffer) processQueueItem(ctx context.Context) bool {
 	delete(w.state, sliceNSN)
 	w.mut.Unlock()
 
-	logger := w.Logger.WithValues("slice", sliceNSN)
+	logger := w.logger.WithValues("slice", sliceNSN)
 	ctx = logr.NewContext(ctx, logger)
 
 	if len(updates) == 0 {
@@ -104,6 +103,8 @@ func (w *writeBuffer) processQueueItem(ctx context.Context) bool {
 	w.mut.Lock()
 	w.state[sliceNSN] = append(w.state[sliceNSN], updates...)
 	w.mut.Unlock()
+	w.queue.Forget(item)
+	w.queue.AddRateLimited(item)
 
 	return true
 }

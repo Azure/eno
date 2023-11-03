@@ -2,7 +2,6 @@ package reconstitution
 
 import (
 	"context"
-	"errors"
 	"strconv"
 	"time"
 
@@ -15,24 +14,12 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 )
 
-var ErrNotFound = errors.New("resource not found")
-
-type Reconciler interface {
-	Name() string
-	Reconcile(ctx context.Context, req *Request) (ctrl.Result, error)
-}
-
-type Client interface {
-	Get(ctx context.Context, gen int64, req *ResourceRef) (*Resource, error)
-	PatchStatusAsync(ctx context.Context, req *Request, patchFn func(*apiv1.ResourceState) bool)
-}
-
 // New creates a new Manager, which is responsible for "reconstituting" resources
 // i.e. allowing controllers to treat them as individual resources instead of their storage representation (ResourceSlice).
 func New(mgr ctrl.Manager, writeBatchInterval time.Duration) (*Manager, error) {
 	m := &Manager{
 		Manager: mgr,
-		recon: &reconstituter{
+		reconstituter: &reconstituter{
 			Client:                 mgr.GetClient(),
 			resources:              make(map[resourceKey]*Resource),
 			Logger:                 mgr.GetLogger().WithName("reconstituter"),
@@ -40,7 +27,8 @@ func New(mgr ctrl.Manager, writeBatchInterval time.Duration) (*Manager, error) {
 			resourcesBySynthesis:   map[synthesisKey][]resourceKey{},
 		},
 	}
-	m.buf = newWriteBuffer(mgr, m.recon, writeBatchInterval)
+	m.writeBuffer = newWriteBuffer(mgr.GetClient(), mgr.GetLogger(), writeBatchInterval)
+	mgr.Add(m.writeBuffer)
 
 	err := mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, "spec.compositionGeneration", func(o client.Object) []string {
 		slice := o.(*apiv1.ResourceSlice)
@@ -67,7 +55,7 @@ func New(mgr ctrl.Manager, writeBatchInterval time.Duration) (*Manager, error) {
 		Named("reconstituter").
 		For(&apiv1.Composition{}).
 		Owns(&apiv1.ResourceSlice{}).
-		Build(m.recon)
+		Build(m.reconstituter)
 	if err != nil {
 		return nil, err
 	}
@@ -75,13 +63,14 @@ func New(mgr ctrl.Manager, writeBatchInterval time.Duration) (*Manager, error) {
 	return m, nil
 }
 
+// TODO: Don't expose all public methods
 type Manager struct {
 	ctrl.Manager
-	recon *reconstituter
-	buf   *writeBuffer
+	*reconstituter
+	*writeBuffer
 }
 
-func (m *Manager) GetClient() Client { return m.buf }
+func (m *Manager) GetClient() Client { return m }
 
 func (m *Manager) Add(rec Reconciler) error {
 	rateLimiter := workqueue.DefaultControllerRateLimiter()
@@ -91,10 +80,10 @@ func (m *Manager) Add(rec Reconciler) error {
 	qp := &queueProcessor{
 		Client:  m.Manager.GetClient(),
 		Queue:   queue,
-		Recon:   m.recon,
+		Recon:   m.reconstituter,
 		Handler: rec,
 		Logger:  m.Manager.GetLogger().WithValues("controller", rec.Name()),
 	}
-	m.recon.Queues = append(m.recon.Queues, qp.Queue)
+	m.reconstituter.Queues = append(m.reconstituter.Queues, qp.Queue)
 	return m.Manager.Add(qp)
 }
