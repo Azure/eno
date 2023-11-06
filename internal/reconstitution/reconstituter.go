@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -55,10 +56,11 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 	if synthesis == nil {
 		return nil
 	}
+	compNSN := types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}
 
 	logger = logger.WithValues("synthesisGen", synthesis.ObservedGeneration)
 	ctx = logr.NewContext(ctx, logger)
-	if r.cache.Exists(comp, synthesis) {
+	if r.cache.HasSynthesis(compNSN, synthesis) {
 		logger.V(1).Info("this synthesis has already been cached")
 		return nil
 	}
@@ -79,7 +81,7 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 		return nil
 	}
 
-	reqs, err := r.cache.Fill(ctx, comp, synthesis, slices.Items)
+	reqs, err := r.cache.Fill(ctx, compNSN, synthesis, slices.Items)
 	if err != nil {
 		return err
 	}

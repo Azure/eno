@@ -1,0 +1,238 @@
+package reconstitution
+
+import (
+	"encoding/json"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/uuid"
+
+	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/testutil"
+)
+
+func TestCacheBasics(t *testing.T) {
+	ctx := testutil.NewContext(t)
+
+	client := testutil.NewClient(t)
+	c := newCache(client)
+
+	comp, synth, resources, expectedReqs := newCacheTestFixtures(2, 3)
+	t.Run("fill", func(t *testing.T) {
+		reqs, err := c.Fill(ctx, comp, synth, resources)
+		require.NoError(t, err)
+		assert.Equal(t, expectedReqs, reqs)
+	})
+
+	t.Run("check", func(t *testing.T) {
+		// positive
+		assert.True(t, c.HasSynthesis(comp, synth))
+
+		// negative
+		assert.False(t, c.HasSynthesis(comp, &apiv1.Synthesis{ObservedGeneration: 123}))
+	})
+
+	t.Run("get", func(t *testing.T) {
+		// positive
+		resource, exists := c.Get(synth.ObservedGeneration, &expectedReqs[0].ResourceRef)
+		require.True(t, exists)
+		assert.NotEmpty(t, resource.Manifest)
+		assert.Equal(t, "ConfigMap", resource.Object.GetKind())
+		assert.Equal(t, "slice-0-resource-0", resource.Object.GetName())
+
+		// negative
+		_, exists = c.Get(123, &expectedReqs[0].ResourceRef)
+		assert.False(t, exists)
+	})
+
+	t.Run("purge", func(t *testing.T) {
+		c.Purge(ctx, comp, nil)
+
+		// confirm
+		_, exists := c.Get(synth.ObservedGeneration, &expectedReqs[0].ResourceRef)
+		assert.False(t, exists)
+
+		assert.Len(t, c.resources, 0)
+		assert.Len(t, c.resourcesBySynthesis, 0)
+		assert.Len(t, c.synthesesByComposition, 0)
+	})
+}
+
+func TestCacheSecretNotFound(t *testing.T) {
+	ctx := testutil.NewContext(t)
+
+	client := testutil.NewClient(t)
+	c := newCache(client)
+
+	comp, synth, resources, _ := newCacheTestFixtures(1, 1)
+	secretName := "does-not-exist"
+	resources[0].Spec.Resources[0].SecretName = &secretName
+
+	_, err := c.Fill(ctx, comp, synth, resources)
+	require.Error(t, err)
+	assert.True(t, errors.IsNotFound(err))
+}
+
+func TestCacheSecret(t *testing.T) {
+	ctx := testutil.NewContext(t)
+
+	client := testutil.NewClient(t)
+	c := newCache(client)
+
+	comp, synth, resources, expectedReqs := newCacheTestFixtures(1, 1)
+
+	// Store the resource's manifest in a secret
+	secret := &corev1.Secret{}
+	secret.Name = "test-manifest"
+	secret.Namespace = resources[0].Namespace
+	secret.Data = map[string][]byte{"manifest": []byte(resources[0].Spec.Resources[0].Manifest)}
+	require.NoError(t, client.Create(ctx, secret))
+
+	// Reference the secret's manifest and remove it from the resource slice itself
+	resources[0].Spec.Resources[0].SecretName = &secret.Name
+	resources[0].Spec.Resources[0].Manifest = ""
+
+	// Everything should still work
+	reqs, err := c.Fill(ctx, comp, synth, resources)
+	require.NoError(t, err)
+	assert.Equal(t, expectedReqs, reqs)
+
+	// Confirm cache was filled correctly
+	resource, exists := c.Get(synth.ObservedGeneration, &expectedReqs[0].ResourceRef)
+	require.True(t, exists)
+	assert.NotEmpty(t, resource.Manifest)
+	assert.Equal(t, "ConfigMap", resource.Object.GetKind())
+	assert.Equal(t, "slice-0-resource-0", resource.Object.GetName())
+}
+
+func TestCacheInvalidManifest(t *testing.T) {
+	ctx := testutil.NewContext(t)
+
+	client := testutil.NewClient(t)
+	c := newCache(client)
+
+	comp, synth, resources, _ := newCacheTestFixtures(1, 1)
+	resources[0].Spec.Resources[0].Manifest = "not valid json"
+
+	_, err := c.Fill(ctx, comp, synth, resources)
+	require.ErrorContains(t, err, "invalid json:")
+}
+
+func TestCacheReconcileInterval(t *testing.T) {
+	ctx := testutil.NewContext(t)
+
+	client := testutil.NewClient(t)
+	c := newCache(client)
+
+	comp, synth, resources, expectedReqs := newCacheTestFixtures(1, 1)
+	interval := time.Second * 3
+	resources[0].Spec.Resources[0].ReconcileInterval = &metav1.Duration{Duration: interval}
+
+	reqs, err := c.Fill(ctx, comp, synth, resources)
+	require.NoError(t, err)
+	assert.Equal(t, expectedReqs, reqs)
+
+	resource, exists := c.Get(synth.ObservedGeneration, &expectedReqs[0].ResourceRef)
+	require.True(t, exists)
+	assert.Equal(t, interval, resource.ReconcileInterval)
+}
+
+func TestCachePartialPurge(t *testing.T) {
+	ctx := testutil.NewContext(t)
+
+	client := testutil.NewClient(t)
+	c := newCache(client)
+
+	// Fill our main composition
+	compNSN, synth, resources, _ := newCacheTestFixtures(3, 4)
+	_, err := c.Fill(ctx, compNSN, synth, resources)
+	require.NoError(t, err)
+	originalGen := synth.ObservedGeneration
+
+	// Add another resource to the composition but synthesized from a newer generation
+	_, _, resources, expectedReqs := newCacheTestFixtures(1, 1)
+	synth.ObservedGeneration++
+	resources[0].Spec.CompositionGeneration = synth.ObservedGeneration
+	_, err = c.Fill(ctx, compNSN, synth, resources)
+	require.NoError(t, err)
+
+	// Fill another composition - this one shouldn't be purged
+	var toBePreserved *ResourceRef
+	{
+		compNSN, synth, resources, expectedReqs := newCacheTestFixtures(3, 4)
+		_, err := c.Fill(ctx, compNSN, synth, resources)
+		require.NoError(t, err)
+		toBePreserved = &expectedReqs[0].ResourceRef
+	}
+
+	comp := &apiv1.Composition{}
+	comp.Status.CurrentState = synth // only reference the most recent synthesis
+
+	// Purge only a single synthesis of a generation
+	c.Purge(ctx, compNSN, comp)
+
+	// The newer resource should still exist
+	_, exists := c.Get(synth.ObservedGeneration, &expectedReqs[0].ResourceRef)
+	assert.True(t, exists)
+
+	// The older resource is not referenced by the composition and should have been removed
+	_, exists = c.Get(originalGen, &expectedReqs[0].ResourceRef)
+	assert.False(t, exists)
+
+	// Resource of the other composition are unaffected
+	_, exists = c.Get(originalGen, toBePreserved)
+	assert.True(t, exists)
+}
+
+func newCacheTestFixtures(sliceCount, resPerSliceCount int) (types.NamespacedName, *apiv1.Synthesis, []apiv1.ResourceSlice, []*Request) {
+	comp := types.NamespacedName{Namespace: string(uuid.NewUUID()), Name: string(uuid.NewUUID())}
+	synth := &apiv1.Synthesis{ObservedGeneration: 3} // just not 0
+
+	resources := make([]apiv1.ResourceSlice, sliceCount)
+	requests := []*Request{}
+	for i := 0; i < sliceCount; i++ {
+		slice := apiv1.ResourceSlice{}
+		slice.Name = string(uuid.NewUUID())
+		slice.Namespace = "slice-ns"
+		slice.Spec.Resources = make([]apiv1.Manifest, resPerSliceCount)
+		slice.Spec.CompositionGeneration = synth.ObservedGeneration
+
+		for j := 0; j < resPerSliceCount; j++ {
+			resource := &corev1.ConfigMap{}
+			resource.Name = fmt.Sprintf("slice-%d-resource-%d", i, j)
+			resource.Namespace = "resource-ns"
+			resource.Kind = "ConfigMap"
+			resource.APIVersion = "v1"
+			js, _ := json.Marshal(resource)
+
+			slice.Spec.Resources[j] = apiv1.Manifest{
+				Manifest: string(js),
+			}
+			requests = append(requests, &Request{
+				ResourceRef: ResourceRef{
+					Name:      resource.Name,
+					Namespace: resource.Namespace,
+					Kind:      resource.Kind,
+				},
+				Composition: comp,
+				Manifest: ManifestRef{
+					Slice: types.NamespacedName{
+						Name:      slice.Name,
+						Namespace: slice.Namespace,
+					},
+					Index: j,
+				},
+			})
+		}
+		resources[i] = slice
+	}
+
+	return comp, synth, resources, requests
+}

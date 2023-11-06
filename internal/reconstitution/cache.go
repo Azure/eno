@@ -33,18 +33,6 @@ func newCache(client client.Client) *cache {
 	}
 }
 
-func (c *cache) Exists(comp *apiv1.Composition, synthesis *apiv1.Synthesis) bool {
-	key := synthesisKey{
-		Composition: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name},
-		Generation:  synthesis.ObservedGeneration,
-	}
-
-	c.mut.Lock()
-	_, exists := c.resourcesBySynthesis[key]
-	c.mut.Unlock()
-	return exists
-}
-
 func (c *cache) Get(gen int64, ref *ResourceRef) (*Resource, bool) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
@@ -56,9 +44,22 @@ func (c *cache) Get(gen int64, ref *ResourceRef) (*Resource, bool) {
 	return res, ok
 }
 
+// HasSynthesis returns true if the cache contains the resources generated as part of the given synthesis.
+func (c *cache) HasSynthesis(comp types.NamespacedName, synthesis *apiv1.Synthesis) bool {
+	key := synthesisKey{
+		Composition: comp,
+		Generation:  synthesis.ObservedGeneration,
+	}
+
+	c.mut.Lock()
+	_, exists := c.resourcesBySynthesis[key]
+	c.mut.Unlock()
+	return exists
+}
+
 // Fill populates the cache with resources from the given slices and associates them with a
 // composition and synthesis such that they can easily be purged from the cache after deletion.
-func (c *cache) Fill(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis, items []apiv1.ResourceSlice) ([]*Request, error) {
+func (c *cache) Fill(ctx context.Context, comp types.NamespacedName, synthesis *apiv1.Synthesis, items []apiv1.ResourceSlice) ([]*Request, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	// Building resources can be expensive (secret lookups, json parsing, etc.) so don't hold the lock during this call
@@ -70,8 +71,7 @@ func (c *cache) Fill(ctx context.Context, comp *apiv1.Composition, synthesis *ap
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	compNSN := types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}
-	synKey := synthesisKey{Composition: compNSN, Generation: synthesis.ObservedGeneration}
+	synKey := synthesisKey{Composition: comp, Generation: synthesis.ObservedGeneration}
 
 	// Cache the resources by their lookup key
 	resKeys := []resourceKey{}
@@ -84,13 +84,13 @@ func (c *cache) Fill(ctx context.Context, comp *apiv1.Composition, synthesis *ap
 	c.resourcesBySynthesis[synKey] = resKeys
 
 	// Associate this synthesis with the composition
-	c.synthesesByComposition[compNSN] = append(c.synthesesByComposition[compNSN], synthesis.ObservedGeneration)
+	c.synthesesByComposition[comp] = append(c.synthesesByComposition[comp], synthesis.ObservedGeneration)
 
 	logger.Info("cache filled")
 	return requests, nil
 }
 
-func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, items []apiv1.ResourceSlice) (map[resourceKey]*Resource, []*Request, error) {
+func (c *cache) buildResources(ctx context.Context, comp types.NamespacedName, items []apiv1.ResourceSlice) (map[resourceKey]*Resource, []*Request, error) {
 	resources := map[resourceKey]*Resource{}
 	requests := []*Request{}
 	for _, slice := range items {
@@ -139,8 +139,8 @@ func (c *cache) buildResource(ctx context.Context, slice *apiv1.ResourceSlice, r
 		if err != nil {
 			return nil, fmt.Errorf("getting secret: %w", err)
 		}
-		if secret.StringData != nil {
-			manifest = secret.StringData["manifest"]
+		if secret.Data != nil {
+			manifest = string(secret.Data["manifest"])
 		}
 	}
 
@@ -156,7 +156,7 @@ func (c *cache) buildResource(ctx context.Context, slice *apiv1.ResourceSlice, r
 			Name:      parsed.GetName(),
 			Kind:      parsed.GetKind(),
 		},
-		Manifest: resource.Manifest,
+		Manifest: manifest,
 		Object:   parsed,
 	}
 	if resource.ReconcileInterval != nil {
@@ -189,8 +189,7 @@ func (c *cache) Purge(ctx context.Context, compNSN types.NamespacedName, comp *a
 		synKey := synthesisKey{Composition: compNSN, Generation: gen}
 
 		// Remove resources from the main lookup map
-		resources := c.resourcesBySynthesis[synKey]
-		for _, key := range resources {
+		for _, key := range c.resourcesBySynthesis[synKey] {
 			delete(c.resources, key)
 		}
 
@@ -200,7 +199,7 @@ func (c *cache) Purge(ctx context.Context, compNSN types.NamespacedName, comp *a
 	}
 
 	// Don't orphan composition -> synthesis mappings
-	if len(synGens) == 0 {
+	if len(newGens) == 0 {
 		delete(c.synthesesByComposition, compNSN)
 		logger.V(1).Info("no more synthesis exist for this composition - removing from cache")
 	} else {
