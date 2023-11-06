@@ -33,22 +33,22 @@ func TestCacheBasics(t *testing.T) {
 
 	t.Run("check", func(t *testing.T) {
 		// positive
-		assert.True(t, c.HasSynthesis(comp, synth))
+		assert.True(t, c.HasSynthesis(ctx, comp, synth))
 
 		// negative
-		assert.False(t, c.HasSynthesis(comp, &apiv1.Synthesis{ObservedGeneration: 123}))
+		assert.False(t, c.HasSynthesis(ctx, comp, &apiv1.Synthesis{ObservedGeneration: 123}))
 	})
 
 	t.Run("get", func(t *testing.T) {
 		// positive
-		resource, exists := c.Get(synth.ObservedGeneration, &expectedReqs[0].ResourceRef)
+		resource, exists := c.Get(ctx, comp, synth.ObservedGeneration, &expectedReqs[0].ResourceRef)
 		require.True(t, exists)
 		assert.NotEmpty(t, resource.Manifest)
 		assert.Equal(t, "ConfigMap", resource.Object.GetKind())
 		assert.Equal(t, "slice-0-resource-0", resource.Object.GetName())
 
 		// negative
-		_, exists = c.Get(123, &expectedReqs[0].ResourceRef)
+		_, exists = c.Get(ctx, comp, 123, &expectedReqs[0].ResourceRef)
 		assert.False(t, exists)
 	})
 
@@ -56,12 +56,10 @@ func TestCacheBasics(t *testing.T) {
 		c.Purge(ctx, comp, nil)
 
 		// confirm
-		_, exists := c.Get(synth.ObservedGeneration, &expectedReqs[0].ResourceRef)
+		_, exists := c.Get(ctx, comp, synth.ObservedGeneration, &expectedReqs[0].ResourceRef)
 		assert.False(t, exists)
 
 		assert.Len(t, c.resources, 0)
-		assert.Len(t, c.resourcesBySynthesis, 0)
-		assert.Len(t, c.synthesesByComposition, 0)
 	})
 }
 
@@ -105,7 +103,7 @@ func TestCacheSecret(t *testing.T) {
 	assert.Equal(t, expectedReqs, reqs)
 
 	// Confirm cache was filled correctly
-	resource, exists := c.Get(synth.ObservedGeneration, &expectedReqs[0].ResourceRef)
+	resource, exists := c.Get(ctx, comp, synth.ObservedGeneration, &expectedReqs[0].ResourceRef)
 	require.True(t, exists)
 	assert.NotEmpty(t, resource.Manifest)
 	assert.Equal(t, "ConfigMap", resource.Object.GetKind())
@@ -139,7 +137,7 @@ func TestCacheReconcileInterval(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, expectedReqs, reqs)
 
-	resource, exists := c.Get(synth.ObservedGeneration, &expectedReqs[0].ResourceRef)
+	resource, exists := c.Get(ctx, comp, synth.ObservedGeneration, &expectedReqs[0].ResourceRef)
 	require.True(t, exists)
 	assert.Equal(t, interval, resource.ReconcileInterval)
 }
@@ -165,11 +163,13 @@ func TestCachePartialPurge(t *testing.T) {
 
 	// Fill another composition - this one shouldn't be purged
 	var toBePreserved *ResourceRef
+	var untouchedComp types.NamespacedName
 	{
 		compNSN, synth, resources, expectedReqs := newCacheTestFixtures(3, 4)
 		_, err := c.Fill(ctx, compNSN, synth, resources)
 		require.NoError(t, err)
 		toBePreserved = &expectedReqs[0].ResourceRef
+		untouchedComp = compNSN
 	}
 
 	comp := &apiv1.Composition{}
@@ -179,15 +179,15 @@ func TestCachePartialPurge(t *testing.T) {
 	c.Purge(ctx, compNSN, comp)
 
 	// The newer resource should still exist
-	_, exists := c.Get(synth.ObservedGeneration, &expectedReqs[0].ResourceRef)
+	_, exists := c.Get(ctx, compNSN, synth.ObservedGeneration, &expectedReqs[0].ResourceRef)
 	assert.True(t, exists)
 
 	// The older resource is not referenced by the composition and should have been removed
-	_, exists = c.Get(originalGen, &expectedReqs[0].ResourceRef)
+	_, exists = c.Get(ctx, compNSN, originalGen, &expectedReqs[0].ResourceRef)
 	assert.False(t, exists)
 
 	// Resource of the other composition are unaffected
-	_, exists = c.Get(originalGen, toBePreserved)
+	_, exists = c.Get(ctx, untouchedComp, originalGen, toBePreserved)
 	assert.True(t, exists)
 }
 

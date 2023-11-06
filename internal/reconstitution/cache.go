@@ -14,45 +14,43 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// cache maintains a fast index of (ResourceRef + generation) -> Resource.
+// cache maintains a fast index of (ResourceRef + Composition + Synthesis) -> Resource.
 type cache struct {
 	client client.Client
 
-	mut                    sync.Mutex
-	resources              map[resourceKey]*Resource
-	synthesesByComposition map[types.NamespacedName][]int64
-	resourcesBySynthesis   map[synthesisKey][]resourceKey
+	mut       sync.Mutex
+	resources map[synthesisKey]map[ResourceRef]*Resource
 }
 
 func newCache(client client.Client) *cache {
 	return &cache{
-		client:                 client,
-		resources:              make(map[resourceKey]*Resource),
-		synthesesByComposition: make(map[types.NamespacedName][]int64),
-		resourcesBySynthesis:   make(map[synthesisKey][]resourceKey),
+		client:    client,
+		resources: make(map[synthesisKey]map[ResourceRef]*Resource),
 	}
 }
 
-func (c *cache) Get(gen int64, ref *ResourceRef) (*Resource, bool) {
+func (c *cache) Get(ctx context.Context, comp types.NamespacedName, gen int64, ref *ResourceRef) (*Resource, bool) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	res, ok := c.resources[resourceKey{
-		ResourceRef:           *ref,
-		CompositionGeneration: gen,
-	}]
+	key := synthesisKey{Composition: comp, Generation: gen}
+	resources, ok := c.resources[key]
+	if !ok {
+		return nil, false
+	}
+	res, ok := resources[*ref]
 	return res, ok
 }
 
 // HasSynthesis returns true if the cache contains the resources generated as part of the given synthesis.
-func (c *cache) HasSynthesis(comp types.NamespacedName, synthesis *apiv1.Synthesis) bool {
+func (c *cache) HasSynthesis(ctx context.Context, comp types.NamespacedName, synthesis *apiv1.Synthesis) bool {
 	key := synthesisKey{
 		Composition: comp,
 		Generation:  synthesis.ObservedGeneration,
 	}
 
 	c.mut.Lock()
-	_, exists := c.resourcesBySynthesis[key]
+	_, exists := c.resources[key]
 	c.mut.Unlock()
 	return exists
 }
@@ -72,26 +70,14 @@ func (c *cache) Fill(ctx context.Context, comp types.NamespacedName, synthesis *
 	defer c.mut.Unlock()
 
 	synKey := synthesisKey{Composition: comp, Generation: synthesis.ObservedGeneration}
-
-	// Cache the resources by their lookup key
-	resKeys := []resourceKey{}
-	for rk, resource := range resources {
-		resKeys = append(resKeys, rk)
-		c.resources[rk] = resource
-	}
-
-	// Associate each resource with this synthesis
-	c.resourcesBySynthesis[synKey] = resKeys
-
-	// Associate this synthesis with the composition
-	c.synthesesByComposition[comp] = append(c.synthesesByComposition[comp], synthesis.ObservedGeneration)
+	c.resources[synKey] = resources
 
 	logger.Info("cache filled")
 	return requests, nil
 }
 
-func (c *cache) buildResources(ctx context.Context, comp types.NamespacedName, items []apiv1.ResourceSlice) (map[resourceKey]*Resource, []*Request, error) {
-	resources := map[resourceKey]*Resource{}
+func (c *cache) buildResources(ctx context.Context, comp types.NamespacedName, items []apiv1.ResourceSlice) (map[ResourceRef]*Resource, []*Request, error) {
+	resources := map[ResourceRef]*Resource{}
 	requests := []*Request{}
 	for _, slice := range items {
 		slice := slice
@@ -104,11 +90,7 @@ func (c *cache) buildResources(ctx context.Context, comp types.NamespacedName, i
 			if err != nil {
 				return nil, nil, fmt.Errorf("building resource at index %d of slice %s: %w", i, slice.Name, err)
 			}
-			key := resourceKey{
-				ResourceRef:           *gr.Ref,
-				CompositionGeneration: slice.Spec.CompositionGeneration,
-			}
-			resources[key] = gr
+			resources[*gr.Ref] = gr
 			requests = append(requests, &Request{
 				ResourceRef: *gr.Ref,
 				Composition: types.NamespacedName{
@@ -173,43 +155,32 @@ func (c *cache) buildResource(ctx context.Context, slice *apiv1.ResourceSlice, r
 // Otherwise all resources deriving from the referenced composition are removed.
 // This design allows the cache to stay consistent without deletion tombstones.
 func (c *cache) Purge(ctx context.Context, compNSN types.NamespacedName, comp *apiv1.Composition) {
-	logger := logr.FromContextOrDiscard(ctx)
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	synGens := c.synthesesByComposition[compNSN]
-	newGens := []int64{}
-	for _, gen := range synGens {
-		// If the composition still exists, don't remove syntheses that are referenced by it
-		if comp != nil && ((comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == gen) || (comp.Status.PreviousState != nil && comp.Status.PreviousState.ObservedGeneration == gen)) {
-			newGens = append(newGens, gen)
+	// For simplicity we don't index syntheses by composition.
+	// Losing track of a deleted composition is rare enough we don't need to worry about perf here.
+	if comp == nil {
+		for key := range c.resources {
+			if key.Composition != compNSN {
+				continue
+			}
+			delete(c.resources, key)
+			break
+		}
+		return
+	}
+
+	// TODO(jordan): Consider an index here
+	for key := range c.resources {
+		if key.Composition != compNSN {
+			continue
+		}
+		if (comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == key.Generation) || (comp.Status.PreviousState != nil && comp.Status.PreviousState.ObservedGeneration == key.Generation) {
 			continue // still referenced by the Generation
 		}
-
-		synKey := synthesisKey{Composition: compNSN, Generation: gen}
-
-		// Remove resources from the main lookup map
-		for _, key := range c.resourcesBySynthesis[synKey] {
-			delete(c.resources, key)
-		}
-
-		// Remove mapping of synthesis -> resource keys
-		delete(c.resourcesBySynthesis, synKey)
-		logger.V(1).Info("purged synthesis from cache", "synthesisGen", gen)
+		delete(c.resources, key)
 	}
-
-	// Don't orphan composition -> synthesis mappings
-	if len(newGens) == 0 {
-		delete(c.synthesesByComposition, compNSN)
-		logger.V(1).Info("no more synthesis exist for this composition - removing from cache")
-	} else {
-		c.synthesesByComposition[compNSN] = newGens
-	}
-}
-
-type resourceKey struct {
-	ResourceRef
-	CompositionGeneration int64
 }
 
 type synthesisKey struct {

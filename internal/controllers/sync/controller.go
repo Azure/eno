@@ -46,7 +46,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 	currentGen := comp.Status.CurrentState.ObservedGeneration
 
-	resource, found := c.resourceClient.Get(currentGen, &req.ResourceRef)
+	resource, found := c.resourceClient.Get(ctx, req.Composition, currentGen, &req.ResourceRef)
 	if !found {
 		logger.V(0).Info("resource not found - dropping")
 		return ctrl.Result{}, nil
@@ -54,7 +54,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	var prev *reconstitution.Resource
 	if comp.Status.PreviousState != nil {
-		prev, found = c.resourceClient.Get(comp.Status.PreviousState.ObservedGeneration, &req.ResourceRef)
+		prev, found = c.resourceClient.Get(ctx, req.Composition, comp.Status.PreviousState.ObservedGeneration, &req.ResourceRef)
 		if !found {
 			// TODO: This is incorrect. It should return an error because the cache may not have been filled yet. Composition status is canonical.
 			logger.V(1).Info("no previous resource manifest found")

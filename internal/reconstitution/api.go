@@ -20,7 +20,7 @@ type Reconciler interface {
 }
 
 type Client interface {
-	Get(gen int64, req *ResourceRef) (*Resource, bool)
+	Get(ctx context.Context, comp types.NamespacedName, gen int64, ref *ResourceRef) (*Resource, bool)
 	PatchStatusAsync(ctx context.Context, req *ManifestRef, patchFn StatusPatchFn)
 }
 

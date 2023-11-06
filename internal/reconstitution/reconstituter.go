@@ -60,7 +60,7 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 
 	logger = logger.WithValues("synthesisGen", synthesis.ObservedGeneration)
 	ctx = logr.NewContext(ctx, logger)
-	if r.cache.HasSynthesis(compNSN, synthesis) {
+	if r.cache.HasSynthesis(ctx, compNSN, synthesis) {
 		logger.V(1).Info("this synthesis has already been cached")
 		return nil
 	}
