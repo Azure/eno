@@ -90,8 +90,6 @@ func (w *writeBuffer) processQueueItem(ctx context.Context) bool {
 
 	if len(updates) == 0 {
 		logger.V(0).Info("dropping queue item because no updates were found for this slice (this is suspicious)")
-		w.queue.Forget(item)
-		return true
 	}
 
 	if w.updateSlice(ctx, sliceNSN, updates) {
