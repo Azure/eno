@@ -2,16 +2,11 @@ package reconstitution
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
-	"sync"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/types"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -20,31 +15,11 @@ import (
 	"github.com/go-logr/logr"
 )
 
-var ErrNotFound = errors.New("resource not found")
-
 type reconstituter struct {
+	*cache
 	Client client.Client
 	Queues []workqueue.Interface
 	Logger logr.Logger
-
-	mut                    sync.Mutex
-	resources              map[resourceKey]*Resource
-	synthesesByComposition map[types.NamespacedName][]int64
-	resourcesBySynthesis   map[synthesisKey][]resourceKey
-}
-
-func (r *reconstituter) Get(ctx context.Context, gen int64, ref *ResourceRef) (*Resource, error) {
-	r.mut.Lock()
-	defer r.mut.Unlock()
-
-	res, ok := r.resources[resourceKey{
-		ResourceRef:           *ref,
-		CompositionGeneration: gen,
-	}]
-	if !ok {
-		return nil, ErrNotFound
-	}
-	return res, nil
 }
 
 func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -53,7 +28,7 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	comp := &apiv1.Composition{}
 	err := r.Client.Get(ctx, req.NamespacedName, comp)
 	if k8serrors.IsNotFound(err) {
-		r.purgeDanglingResources(ctx, req.NamespacedName, nil)
+		r.cache.Purge(ctx, req.NamespacedName, nil)
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
@@ -70,7 +45,7 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, fmt.Errorf("processing current state: %w", err)
 	}
 
-	r.purgeDanglingResources(ctx, req.NamespacedName, comp)
+	r.cache.Purge(ctx, req.NamespacedName, comp)
 	return ctrl.Result{}, nil
 }
 
@@ -81,16 +56,9 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 		return nil
 	}
 
-	key := synthesisKey{Namespace: comp.Namespace, Name: comp.Name, CompositionGeneration: synthesis.ObservedGeneration}
-
-	r.mut.Lock()
-	_, exists := r.resourcesBySynthesis[key]
-	r.mut.Unlock()
-
 	logger = logger.WithValues("synthesisGen", synthesis.ObservedGeneration)
 	ctx = logr.NewContext(ctx, logger)
-
-	if exists {
+	if r.cache.Exists(comp, synthesis) {
 		logger.V(1).Info("this synthesis has already been cached")
 		return nil
 	}
@@ -111,142 +79,15 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 		return nil
 	}
 
-	// Build our internal representation of each resource
-	resources := map[resourceKey]*Resource{}
-	requests := []*Request{}
-	for _, slice := range slices.Items {
-		slice := slice
-
-		// NOTE: In the future we can build a DAG here to find edges between dependant resources
-
-		for i, resource := range slice.Spec.Resources {
-			resource := resource
-			gr, err := r.buildResource(ctx, &slice, &resource)
-			if err != nil {
-				logger.V(0).Error(err, "invalid resource - skipping")
-				continue
-			}
-			key := resourceKey{
-				ResourceRef:           *gr.Ref,
-				CompositionGeneration: slice.Spec.CompositionGeneration,
-			}
-			resources[key] = gr
-			requests = append(requests, &Request{
-				ResourceRef: *gr.Ref,
-				Composition: types.NamespacedName{
-					Namespace: comp.Namespace,
-					Name:      comp.Name,
-				},
-				Manifest: ManifestRef{
-					Slice: types.NamespacedName{
-						Namespace: slice.Namespace,
-						Name:      slice.Name,
-					},
-					Index: i,
-				},
-			})
-		}
+	reqs, err := r.cache.Fill(ctx, comp, synthesis, slices.Items)
+	if err != nil {
+		return err
 	}
-
-	r.mut.Lock()
-	defer r.mut.Unlock()
-
-	// Store items and notify listeners
-	_, exists = r.resourcesBySynthesis[key]
-	if exists {
-		logger.V(1).Info("the synthesis was cached before this routine was able to build its internal representation - this should be very concerning")
-		return nil
-	}
-
-	nsn := types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}
-	r.synthesesByComposition[nsn] = append(r.synthesesByComposition[nsn], synthesis.ObservedGeneration)
-
-	keys := []resourceKey{}
-	for rk, resource := range resources {
-		keys = append(keys, rk)
-		r.resources[rk] = resource
-	}
-	for _, req := range requests {
+	for _, req := range reqs {
 		for _, queue := range r.Queues {
 			queue.Add(req)
 		}
 	}
-	r.resourcesBySynthesis[key] = keys
-	logger.Info("cache filled")
 
 	return nil
-}
-
-func (r *reconstituter) buildResource(ctx context.Context, slice *apiv1.ResourceSlice, resource *apiv1.Manifest) (*Resource, error) {
-	manifest := resource.Manifest
-	if resource.SecretName != nil {
-		secret := &corev1.Secret{}
-		secret.Name = *resource.SecretName
-		secret.Namespace = slice.Namespace
-		err := r.Client.Get(ctx, client.ObjectKeyFromObject(secret), secret)
-		if err != nil {
-			return nil, fmt.Errorf("getting secret: %w", err)
-		}
-		if secret.StringData != nil {
-			manifest = secret.StringData["manifest"]
-		}
-	}
-
-	parsed := &unstructured.Unstructured{}
-	err := parsed.UnmarshalJSON([]byte(manifest))
-	if err != nil {
-		return nil, fmt.Errorf("invalid json: %w", err)
-	}
-
-	gr := &Resource{
-		Ref: &ResourceRef{
-			Namespace: parsed.GetNamespace(),
-			Name:      parsed.GetName(),
-			Kind:      parsed.GetKind(),
-		},
-		Manifest: resource.Manifest,
-		Object:   parsed,
-	}
-	if resource.ReconcileInterval != nil {
-		gr.ReconcileInterval = resource.ReconcileInterval.Duration
-	}
-	if gr.Ref.Name == "" || gr.Ref.Kind == "" {
-		return nil, fmt.Errorf("missing name or kind")
-	}
-	return gr, nil
-}
-
-func (r *reconstituter) purgeDanglingResources(ctx context.Context, nsn types.NamespacedName, comp *apiv1.Composition) {
-	logger := logr.FromContextOrDiscard(ctx)
-	r.mut.Lock()
-	defer r.mut.Unlock()
-
-	synGens := r.synthesesByComposition[nsn]
-	newGens := []int64{}
-	for _, gen := range synGens {
-		if comp != nil && ((comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == gen) || (comp.Status.PreviousState != nil && comp.Status.PreviousState.ObservedGeneration == gen)) {
-			newGens = append(newGens, gen)
-			continue // still referenced by the Generation
-		}
-
-		synKey := synthesisKey{
-			Namespace:             nsn.Namespace,
-			Name:                  nsn.Name,
-			CompositionGeneration: gen,
-		}
-
-		resources := r.resourcesBySynthesis[synKey]
-		for _, key := range resources {
-			delete(r.resources, key)
-		}
-
-		delete(r.resourcesBySynthesis, synKey)
-		logger.V(1).Info("purged synthesis from cache", "synthesisGen", gen)
-	}
-	if len(synGens) == 0 {
-		delete(r.synthesesByComposition, nsn)
-		logger.V(1).Info("no more synthesis exist for this composition - removing from cache")
-	} else {
-		r.synthesesByComposition[nsn] = newGens
-	}
 }

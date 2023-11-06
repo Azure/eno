@@ -2,6 +2,7 @@ package reconstitution
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -11,13 +12,15 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 )
 
+var ErrNotFound = errors.New("resource not found")
+
 type Reconciler interface {
 	Name() string
 	Reconcile(ctx context.Context, req *Request) (ctrl.Result, error)
 }
 
 type Client interface {
-	Get(ctx context.Context, gen int64, req *ResourceRef) (*Resource, error)
+	Get(gen int64, req *ResourceRef) (*Resource, bool)
 	PatchStatusAsync(ctx context.Context, req *ManifestRef, patchFn StatusPatchFn)
 }
 
@@ -51,14 +54,4 @@ func (r *Request) LogValues() []any {
 type ManifestRef struct {
 	Slice types.NamespacedName
 	Index int // position of this manifest within the slice
-}
-
-type resourceKey struct {
-	ResourceRef
-	CompositionGeneration int64
-}
-
-type synthesisKey struct {
-	Namespace, Name       string
-	CompositionGeneration int64
 }

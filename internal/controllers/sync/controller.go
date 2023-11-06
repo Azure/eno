@@ -2,7 +2,6 @@ package sync
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -47,25 +46,18 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 	currentGen := comp.Status.CurrentState.ObservedGeneration
 
-	resource, err := c.resourceClient.Get(ctx, currentGen, &req.ResourceRef)
-	if errors.Is(err, reconstitution.ErrNotFound) {
+	resource, found := c.resourceClient.Get(currentGen, &req.ResourceRef)
+	if !found {
 		logger.V(0).Info("resource not found - dropping")
 		return ctrl.Result{}, nil
-	}
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("getting current resource: %w", err)
 	}
 
 	var prev *reconstitution.Resource
 	if comp.Status.PreviousState != nil {
-		prev, err = c.resourceClient.Get(ctx, comp.Status.PreviousState.ObservedGeneration, &req.ResourceRef)
-		if errors.Is(err, reconstitution.ErrNotFound) {
+		prev, found = c.resourceClient.Get(comp.Status.PreviousState.ObservedGeneration, &req.ResourceRef)
+		if !found {
 			// TODO: This is incorrect. It should return an error because the cache may not have been filled yet. Composition status is canonical.
 			logger.V(1).Info("no previous resource manifest found")
-			err = nil
-		}
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("getting previous resource: %w", err)
 		}
 	} else {
 		logger.V(1).Info("no previous state given")

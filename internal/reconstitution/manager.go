@@ -5,8 +5,6 @@ import (
 	"strconv"
 	"time"
 
-	"k8s.io/apimachinery/pkg/types"
-
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -20,11 +18,9 @@ func New(mgr ctrl.Manager, writeBatchInterval time.Duration) (*Manager, error) {
 	m := &Manager{
 		Manager: mgr,
 		reconstituter: &reconstituter{
-			Client:                 mgr.GetClient(),
-			resources:              make(map[resourceKey]*Resource),
-			Logger:                 mgr.GetLogger().WithName("reconstituter"),
-			synthesesByComposition: make(map[types.NamespacedName][]int64),
-			resourcesBySynthesis:   map[synthesisKey][]resourceKey{},
+			cache:  newCache(mgr.GetClient()),
+			Client: mgr.GetClient(),
+			Logger: mgr.GetLogger().WithName("reconstituter"),
 		},
 	}
 	m.writeBuffer = newWriteBuffer(mgr.GetClient(), mgr.GetLogger(), writeBatchInterval)
