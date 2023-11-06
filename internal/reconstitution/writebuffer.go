@@ -100,7 +100,7 @@ func (w *writeBuffer) processQueueItem(ctx context.Context) bool {
 	// Put the updates back in the buffer to retry on the next attempt
 	logger.V(1).Info("update failed - adding updates back to the buffer")
 	w.mut.Lock()
-	w.state[sliceNSN] = append(w.state[sliceNSN], updates...)
+	w.state[sliceNSN] = append(updates, w.state[sliceNSN]...)
 	w.mut.Unlock()
 	w.queue.AddRateLimited(item)
 
