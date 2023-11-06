@@ -102,7 +102,6 @@ func (w *writeBuffer) processQueueItem(ctx context.Context) bool {
 	w.mut.Lock()
 	w.state[sliceNSN] = append(w.state[sliceNSN], updates...)
 	w.mut.Unlock()
-	w.queue.Forget(item)
 	w.queue.AddRateLimited(item)
 
 	return true
