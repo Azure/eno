@@ -22,8 +22,13 @@ type Resource struct {
 	Ref *ResourceRef
 
 	Manifest          string
-	Object            *unstructured.Unstructured
 	ReconcileInterval time.Duration
+	object            *unstructured.Unstructured
+}
+
+func (r *Resource) Object() *unstructured.Unstructured {
+	// don't allow callers to mutate the original
+	return r.object.DeepCopy()
 }
 
 // ResourceRef refers to a specific synthesized resource.

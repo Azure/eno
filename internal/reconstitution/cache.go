@@ -139,7 +139,7 @@ func (c *cache) buildResource(ctx context.Context, comp types.NamespacedName, sl
 			Kind:        parsed.GetKind(),
 		},
 		Manifest: manifest,
-		Object:   parsed,
+		object:   parsed,
 	}
 	if resource.ReconcileInterval != nil {
 		res.ReconcileInterval = resource.ReconcileInterval.Duration
