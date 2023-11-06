@@ -18,14 +18,16 @@ import (
 type cache struct {
 	client client.Client
 
-	mut       sync.Mutex
-	resources map[synthesisKey]map[resourceKey]*Resource
+	mut                    sync.Mutex
+	resources              map[synthesisKey]map[resourceKey]*Resource
+	synthesesByComposition map[types.NamespacedName][]int64
 }
 
 func newCache(client client.Client) *cache {
 	return &cache{
-		client:    client,
-		resources: make(map[synthesisKey]map[resourceKey]*Resource),
+		client:                 client,
+		resources:              make(map[synthesisKey]map[resourceKey]*Resource),
+		synthesesByComposition: make(map[types.NamespacedName][]int64),
 	}
 }
 
@@ -44,7 +46,6 @@ func (c *cache) Get(ctx context.Context, ref *ResourceRef, gen int64) (*Resource
 	return res, ok
 }
 
-// HasSynthesis returns true if the cache contains the resources generated as part of the given synthesis.
 func (c *cache) HasSynthesis(ctx context.Context, comp types.NamespacedName, synthesis *apiv1.Synthesis) bool {
 	key := synthesisKey{
 		Composition: comp,
@@ -73,6 +74,7 @@ func (c *cache) Fill(ctx context.Context, comp types.NamespacedName, synthesis *
 
 	synKey := synthesisKey{Composition: comp, Generation: synthesis.ObservedGeneration}
 	c.resources[synKey] = resources
+	c.synthesesByComposition[comp] = append(c.synthesesByComposition[comp], synKey.Generation)
 
 	logger.Info("cache filled")
 	return requests, nil
@@ -144,7 +146,7 @@ func (c *cache) buildResource(ctx context.Context, comp types.NamespacedName, sl
 	if resource.ReconcileInterval != nil {
 		gr.ReconcileInterval = resource.ReconcileInterval.Duration
 	}
-	if gr.Ref.Name == "" || gr.Ref.Kind == "" || parsed.GetAPIVersion() == "" {
+	if gr.Ref.Name == "" || parsed.GetAPIVersion() == "" {
 		return nil, fmt.Errorf("missing name, kind, or apiVersion")
 	}
 	return gr, nil
@@ -158,29 +160,18 @@ func (c *cache) Purge(ctx context.Context, compNSN types.NamespacedName, comp *a
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	// For simplicity we don't index syntheses by composition.
-	// Losing track of a deleted composition is rare enough we don't need to worry about perf here.
-	if comp == nil {
-		for key := range c.resources {
-			if key.Composition != compNSN {
-				continue
-			}
-			delete(c.resources, key)
-			break
-		}
-		return
-	}
-
-	// TODO(jordan): Consider an index here
-	for key := range c.resources {
-		if key.Composition != compNSN {
-			continue
-		}
-		if (comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == key.Generation) || (comp.Status.PreviousState != nil && comp.Status.PreviousState.ObservedGeneration == key.Generation) {
+	remainingSyns := []int64{}
+	for _, syn := range c.synthesesByComposition[compNSN] {
+		if comp != nil && ((comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == syn) || (comp.Status.PreviousState != nil && comp.Status.PreviousState.ObservedGeneration == syn)) {
+			remainingSyns = append(remainingSyns, syn)
 			continue // still referenced by the Generation
 		}
-		delete(c.resources, key)
+		delete(c.resources, synthesisKey{
+			Composition: compNSN,
+			Generation:  syn,
+		})
 	}
+	c.synthesesByComposition[compNSN] = remainingSyns
 }
 
 type synthesisKey struct {

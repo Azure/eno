@@ -123,6 +123,19 @@ func TestCacheInvalidManifest(t *testing.T) {
 	require.ErrorContains(t, err, "invalid json:")
 }
 
+func TestCacheManifestMissingName(t *testing.T) {
+	ctx := testutil.NewContext(t)
+
+	client := testutil.NewClient(t)
+	c := newCache(client)
+
+	comp, synth, resources, _ := newCacheTestFixtures(1, 1)
+	resources[0].Spec.Resources[0].Manifest = `{"kind":"ConfigMap"}`
+
+	_, err := c.Fill(ctx, comp, synth, resources)
+	require.ErrorContains(t, err, "missing name, kind, or apiVersion")
+}
+
 func TestCacheReconcileInterval(t *testing.T) {
 	ctx := testutil.NewContext(t)
 
@@ -188,6 +201,9 @@ func TestCachePartialPurge(t *testing.T) {
 	// Resource of the other composition are unaffected
 	_, exists = c.Get(ctx, toBePreserved, originalGen)
 	assert.True(t, exists)
+
+	// The cache should only be internally tracking the remaining synthesis of our test composition
+	assert.Len(t, c.synthesesByComposition[compNSN], 1)
 }
 
 func newCacheTestFixtures(sliceCount, resPerSliceCount int) (types.NamespacedName, *apiv1.Synthesis, []apiv1.ResourceSlice, []*Request) {
