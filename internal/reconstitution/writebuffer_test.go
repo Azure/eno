@@ -21,7 +21,7 @@ import (
 func TestWriteBufferBasics(t *testing.T) {
 	ctx := context.Background()
 	cli := testutil.NewClient(t)
-	w := newWriteBuffer(cli, testr.New(t), 0)
+	w := newWriteBuffer(cli, testr.New(t), 0, 1)
 
 	// One resource slice w/ len of 3
 	slice := &apiv1.ResourceSlice{}
@@ -57,7 +57,7 @@ func TestWriteBufferBatching(t *testing.T) {
 			return client.SubResource(subResourceName).Update(ctx, obj, opts...)
 		},
 	})
-	w := newWriteBuffer(cli, testr.New(t), time.Millisecond*2)
+	w := newWriteBuffer(cli, testr.New(t), time.Millisecond*2, 1)
 
 	// One resource slice w/ len of 3
 	slice := &apiv1.ResourceSlice{}
@@ -89,7 +89,7 @@ func TestWriteBufferBatching(t *testing.T) {
 func TestWriteBufferNoUpdates(t *testing.T) {
 	ctx := context.Background()
 	cli := testutil.NewClient(t)
-	w := newWriteBuffer(cli, testr.New(t), 0)
+	w := newWriteBuffer(cli, testr.New(t), 0, 1)
 
 	// One resource slice w/ len of 3
 	slice := &apiv1.ResourceSlice{}
@@ -115,7 +115,7 @@ func TestWriteBufferNoUpdates(t *testing.T) {
 func TestWriteBufferMissingSlice(t *testing.T) {
 	ctx := context.Background()
 	cli := testutil.NewClient(t)
-	w := newWriteBuffer(cli, testr.New(t), 0)
+	w := newWriteBuffer(cli, testr.New(t), 0, 1)
 
 	req := &ManifestRef{}
 	req.Slice.Name = "test-slice-1" // this doesn't exist
@@ -135,7 +135,7 @@ func TestWriteBufferNoChange(t *testing.T) {
 			return nil
 		},
 	})
-	w := newWriteBuffer(cli, testr.New(t), 0)
+	w := newWriteBuffer(cli, testr.New(t), 0, 1)
 
 	// One resource slice
 	slice := &apiv1.ResourceSlice{}
@@ -161,7 +161,7 @@ func TestWriteBufferUpdateError(t *testing.T) {
 			return errors.New("could be any error")
 		},
 	})
-	w := newWriteBuffer(cli, testr.New(t), 0)
+	w := newWriteBuffer(cli, testr.New(t), 0, 1)
 
 	// One resource slice w/ len of 3
 	slice := &apiv1.ResourceSlice{}

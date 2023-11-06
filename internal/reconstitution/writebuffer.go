@@ -34,13 +34,13 @@ type writeBuffer struct {
 	queue workqueue.RateLimitingInterface
 }
 
-func newWriteBuffer(cli client.Client, logger logr.Logger, batchInterval time.Duration) *writeBuffer {
+func newWriteBuffer(cli client.Client, logger logr.Logger, batchInterval time.Duration, burst int) *writeBuffer {
 	return &writeBuffer{
 		client: cli,
 		logger: logger.WithValues("controller", "writeBuffer"),
 		state:  make(map[types.NamespacedName][]*asyncStatusUpdate),
 		queue: workqueue.NewRateLimitingQueueWithConfig(
-			&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Every(batchInterval), 2)},
+			&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Every(batchInterval), burst)},
 			workqueue.RateLimitingQueueConfig{
 				Name: "writeBuffer",
 			}),
