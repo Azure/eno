@@ -54,6 +54,7 @@ func (w *writeBuffer) PatchStatusAsync(ctx context.Context, ref *ManifestRef, pa
 	logr.FromContextOrDiscard(ctx).V(1).Info("buffering status update")
 
 	key := ref.Slice
+	// TODO(jordan): Consider de-duping this slice to avoid potentially allocating a lot of memory if some bug causes churning of the control loop that ends up calling this.
 	w.state[key] = append(w.state[key], &asyncStatusUpdate{
 		SlicedResource: ref,
 		PatchFn:        patchFn,
