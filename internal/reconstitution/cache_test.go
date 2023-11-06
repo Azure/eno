@@ -41,14 +41,14 @@ func TestCacheBasics(t *testing.T) {
 
 	t.Run("get", func(t *testing.T) {
 		// positive
-		resource, exists := c.Get(ctx, comp, synth.ObservedGeneration, &expectedReqs[0].ResourceRef)
+		resource, exists := c.Get(ctx, &expectedReqs[0].ResourceRef, synth.ObservedGeneration)
 		require.True(t, exists)
 		assert.NotEmpty(t, resource.Manifest)
 		assert.Equal(t, "ConfigMap", resource.Object.GetKind())
 		assert.Equal(t, "slice-0-resource-0", resource.Object.GetName())
 
 		// negative
-		_, exists = c.Get(ctx, comp, 123, &expectedReqs[0].ResourceRef)
+		_, exists = c.Get(ctx, &expectedReqs[0].ResourceRef, 123)
 		assert.False(t, exists)
 	})
 
@@ -56,7 +56,7 @@ func TestCacheBasics(t *testing.T) {
 		c.Purge(ctx, comp, nil)
 
 		// confirm
-		_, exists := c.Get(ctx, comp, synth.ObservedGeneration, &expectedReqs[0].ResourceRef)
+		_, exists := c.Get(ctx, &expectedReqs[0].ResourceRef, synth.ObservedGeneration)
 		assert.False(t, exists)
 
 		assert.Len(t, c.resources, 0)
@@ -103,7 +103,7 @@ func TestCacheSecret(t *testing.T) {
 	assert.Equal(t, expectedReqs, reqs)
 
 	// Confirm cache was filled correctly
-	resource, exists := c.Get(ctx, comp, synth.ObservedGeneration, &expectedReqs[0].ResourceRef)
+	resource, exists := c.Get(ctx, &expectedReqs[0].ResourceRef, synth.ObservedGeneration)
 	require.True(t, exists)
 	assert.NotEmpty(t, resource.Manifest)
 	assert.Equal(t, "ConfigMap", resource.Object.GetKind())
@@ -137,7 +137,7 @@ func TestCacheReconcileInterval(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, expectedReqs, reqs)
 
-	resource, exists := c.Get(ctx, comp, synth.ObservedGeneration, &expectedReqs[0].ResourceRef)
+	resource, exists := c.Get(ctx, &expectedReqs[0].ResourceRef, synth.ObservedGeneration)
 	require.True(t, exists)
 	assert.Equal(t, interval, resource.ReconcileInterval)
 }
@@ -158,18 +158,17 @@ func TestCachePartialPurge(t *testing.T) {
 	_, _, resources, expectedReqs := newCacheTestFixtures(1, 1)
 	synth.ObservedGeneration++
 	resources[0].Spec.CompositionGeneration = synth.ObservedGeneration
+	expectedReqs[0].Composition = compNSN
 	_, err = c.Fill(ctx, compNSN, synth, resources)
 	require.NoError(t, err)
 
 	// Fill another composition - this one shouldn't be purged
 	var toBePreserved *ResourceRef
-	var untouchedComp types.NamespacedName
 	{
 		compNSN, synth, resources, expectedReqs := newCacheTestFixtures(3, 4)
 		_, err := c.Fill(ctx, compNSN, synth, resources)
 		require.NoError(t, err)
 		toBePreserved = &expectedReqs[0].ResourceRef
-		untouchedComp = compNSN
 	}
 
 	comp := &apiv1.Composition{}
@@ -179,15 +178,15 @@ func TestCachePartialPurge(t *testing.T) {
 	c.Purge(ctx, compNSN, comp)
 
 	// The newer resource should still exist
-	_, exists := c.Get(ctx, compNSN, synth.ObservedGeneration, &expectedReqs[0].ResourceRef)
+	_, exists := c.Get(ctx, &expectedReqs[0].ResourceRef, synth.ObservedGeneration)
 	assert.True(t, exists)
 
 	// The older resource is not referenced by the composition and should have been removed
-	_, exists = c.Get(ctx, compNSN, originalGen, &expectedReqs[0].ResourceRef)
+	_, exists = c.Get(ctx, &expectedReqs[0].ResourceRef, originalGen)
 	assert.False(t, exists)
 
 	// Resource of the other composition are unaffected
-	_, exists = c.Get(ctx, untouchedComp, originalGen, toBePreserved)
+	_, exists = c.Get(ctx, toBePreserved, originalGen)
 	assert.True(t, exists)
 }
 
@@ -217,11 +216,11 @@ func newCacheTestFixtures(sliceCount, resPerSliceCount int) (types.NamespacedNam
 			}
 			requests = append(requests, &Request{
 				ResourceRef: ResourceRef{
-					Name:      resource.Name,
-					Namespace: resource.Namespace,
-					Kind:      resource.Kind,
+					Composition: comp,
+					Name:        resource.Name,
+					Namespace:   resource.Namespace,
+					Kind:        resource.Kind,
 				},
-				Composition: comp,
 				Manifest: ManifestRef{
 					Slice: types.NamespacedName{
 						Name:      slice.Name,

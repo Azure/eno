@@ -20,7 +20,7 @@ type Reconciler interface {
 }
 
 type Client interface {
-	Get(ctx context.Context, comp types.NamespacedName, gen int64, ref *ResourceRef) (*Resource, bool)
+	Get(ctx context.Context, ref *ResourceRef, gen int64) (*Resource, bool)
 	PatchStatusAsync(ctx context.Context, req *ManifestRef, patchFn StatusPatchFn)
 }
 
@@ -28,6 +28,7 @@ type StatusPatchFn func(*apiv1.ResourceState) bool
 
 // ResourceRef refers to a specific synthesized resource.
 type ResourceRef struct {
+	Composition           types.NamespacedName
 	Name, Namespace, Kind string
 }
 
@@ -42,8 +43,7 @@ type Resource struct {
 
 type Request struct {
 	ResourceRef
-	Composition types.NamespacedName
-	Manifest    ManifestRef
+	Manifest ManifestRef
 }
 
 func (r *Request) LogValues() []any {

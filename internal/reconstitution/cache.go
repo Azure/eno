@@ -19,26 +19,28 @@ type cache struct {
 	client client.Client
 
 	mut       sync.Mutex
-	resources map[synthesisKey]map[ResourceRef]*Resource
+	resources map[synthesisKey]map[resourceKey]*Resource
 }
 
 func newCache(client client.Client) *cache {
 	return &cache{
 		client:    client,
-		resources: make(map[synthesisKey]map[ResourceRef]*Resource),
+		resources: make(map[synthesisKey]map[resourceKey]*Resource),
 	}
 }
 
-func (c *cache) Get(ctx context.Context, comp types.NamespacedName, gen int64, ref *ResourceRef) (*Resource, bool) {
+func (c *cache) Get(ctx context.Context, ref *ResourceRef, gen int64) (*Resource, bool) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	key := synthesisKey{Composition: comp, Generation: gen}
-	resources, ok := c.resources[key]
+	synKey := synthesisKey{Composition: ref.Composition, Generation: gen}
+	resources, ok := c.resources[synKey]
 	if !ok {
 		return nil, false
 	}
-	res, ok := resources[*ref]
+
+	resKey := resourceKey{Kind: ref.Kind, Namespace: ref.Namespace, Name: ref.Name}
+	res, ok := resources[resKey]
 	return res, ok
 }
 
@@ -76,8 +78,8 @@ func (c *cache) Fill(ctx context.Context, comp types.NamespacedName, synthesis *
 	return requests, nil
 }
 
-func (c *cache) buildResources(ctx context.Context, comp types.NamespacedName, items []apiv1.ResourceSlice) (map[ResourceRef]*Resource, []*Request, error) {
-	resources := map[ResourceRef]*Resource{}
+func (c *cache) buildResources(ctx context.Context, comp types.NamespacedName, items []apiv1.ResourceSlice) (map[resourceKey]*Resource, []*Request, error) {
+	resources := map[resourceKey]*Resource{}
 	requests := []*Request{}
 	for _, slice := range items {
 		slice := slice
@@ -86,17 +88,14 @@ func (c *cache) buildResources(ctx context.Context, comp types.NamespacedName, i
 
 		for i, resource := range slice.Spec.Resources {
 			resource := resource
-			gr, err := c.buildResource(ctx, &slice, &resource)
+			gr, err := c.buildResource(ctx, comp, &slice, &resource)
 			if err != nil {
 				return nil, nil, fmt.Errorf("building resource at index %d of slice %s: %w", i, slice.Name, err)
 			}
-			resources[*gr.Ref] = gr
+			key := resourceKey{Kind: gr.Ref.Kind, Namespace: gr.Ref.Namespace, Name: gr.Ref.Name}
+			resources[key] = gr
 			requests = append(requests, &Request{
 				ResourceRef: *gr.Ref,
-				Composition: types.NamespacedName{
-					Namespace: comp.Namespace,
-					Name:      comp.Name,
-				},
 				Manifest: ManifestRef{
 					Slice: types.NamespacedName{
 						Namespace: slice.Namespace,
@@ -111,7 +110,7 @@ func (c *cache) buildResources(ctx context.Context, comp types.NamespacedName, i
 	return resources, requests, nil
 }
 
-func (c *cache) buildResource(ctx context.Context, slice *apiv1.ResourceSlice, resource *apiv1.Manifest) (*Resource, error) {
+func (c *cache) buildResource(ctx context.Context, comp types.NamespacedName, slice *apiv1.ResourceSlice, resource *apiv1.Manifest) (*Resource, error) {
 	manifest := resource.Manifest
 	if resource.SecretName != nil {
 		secret := &corev1.Secret{}
@@ -134,9 +133,10 @@ func (c *cache) buildResource(ctx context.Context, slice *apiv1.ResourceSlice, r
 
 	gr := &Resource{
 		Ref: &ResourceRef{
-			Namespace: parsed.GetNamespace(),
-			Name:      parsed.GetName(),
-			Kind:      parsed.GetKind(),
+			Composition: comp,
+			Namespace:   parsed.GetNamespace(),
+			Name:        parsed.GetName(),
+			Kind:        parsed.GetKind(),
 		},
 		Manifest: manifest,
 		Object:   parsed,
@@ -186,4 +186,8 @@ func (c *cache) Purge(ctx context.Context, compNSN types.NamespacedName, comp *a
 type synthesisKey struct {
 	Composition types.NamespacedName
 	Generation  int64
+}
+
+type resourceKey struct {
+	Kind, Namespace, Name string
 }
