@@ -60,6 +60,7 @@ func (c *cache) HasSynthesis(ctx context.Context, comp types.NamespacedName, syn
 	return exists
 }
 
+// Fill populates the cache with all (or no) resources that are part of the given synthesis.
 func (c *cache) Fill(ctx context.Context, comp types.NamespacedName, synthesis *apiv1.Synthesis, items []apiv1.ResourceSlice) ([]*Request, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
