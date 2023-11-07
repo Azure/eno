@@ -1,15 +1,10 @@
 package reconstitution
 
 import (
-	"context"
-	"strconv"
 	"time"
 
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	apiv1 "github.com/Azure/eno/api/v1"
 )
 
 // New creates a new Manager, which is responsible for "reconstituting" resources
@@ -17,41 +12,12 @@ import (
 func New(mgr ctrl.Manager, writeBatchInterval time.Duration) (*Manager, error) {
 	m := &Manager{
 		Manager: mgr,
-		reconstituter: &reconstituter{
-			cache:  newCache(mgr.GetClient()),
-			Client: mgr.GetClient(),
-			Logger: mgr.GetLogger().WithName("reconstituter"),
-		},
 	}
 	m.writeBuffer = newWriteBuffer(mgr.GetClient(), mgr.GetLogger(), writeBatchInterval)
 	mgr.Add(m.writeBuffer)
 
-	err := mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, "spec.compositionGeneration", func(o client.Object) []string {
-		slice := o.(*apiv1.ResourceSlice)
-		return []string{strconv.FormatInt(slice.Spec.CompositionGeneration, 10)}
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, "metadata.ownerReferences.name", func(o client.Object) (keys []string) {
-		slice := o.(*apiv1.ResourceSlice)
-		for _, owner := range slice.OwnerReferences {
-			if owner.Kind == "Composition" {
-				keys = append(keys, owner.Name)
-			}
-		}
-		return keys
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = ctrl.NewControllerManagedBy(mgr).
-		Named("reconstituter").
-		For(&apiv1.Composition{}).
-		Owns(&apiv1.ResourceSlice{}).
-		Build(m.reconstituter)
+	var err error
+	m.reconstituter, err = newReconstituter(mgr)
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +46,6 @@ func (m *Manager) Add(rec Reconciler) error {
 		Handler: rec,
 		Logger:  m.Manager.GetLogger().WithValues("controller", rec.Name()),
 	}
-	m.reconstituter.Queues = append(m.reconstituter.Queues, qp.Queue)
+	m.reconstituter.AddQueue(queue)
 	return m.Manager.Add(qp)
 }
