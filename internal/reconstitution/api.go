@@ -1,15 +1,27 @@
 package reconstitution
 
 import (
+	"context"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 )
 
 type StatusPatchFn func(*apiv1.ResourceState) bool
+
+type Reconciler interface {
+	Name() string
+	Reconcile(ctx context.Context, req *Request) (ctrl.Result, error)
+}
+
+type Client interface {
+	Get(ctx context.Context, ref *ResourceRef, gen int64) (*Resource, bool)
+	PatchStatusAsync(ctx context.Context, req *ManifestRef, patchFn StatusPatchFn)
+}
 
 // ManifestRef references a particular resource manifest within a resource slice.
 type ManifestRef struct {
