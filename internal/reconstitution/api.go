@@ -13,11 +13,6 @@ import (
 
 type StatusPatchFn func(*apiv1.ResourceState) bool
 
-type Client interface {
-	Get(ctx context.Context, ref *ResourceRef, gen int64) (*Resource, bool)
-	PatchStatusAsync(ctx context.Context, req *ManifestRef, patchFn StatusPatchFn)
-}
-
 // ManifestRef references a particular resource manifest within a resource slice.
 type ManifestRef struct {
 	Slice types.NamespacedName
