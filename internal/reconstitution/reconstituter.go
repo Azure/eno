@@ -3,7 +3,6 @@ package reconstitution
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"sync/atomic"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -17,6 +16,8 @@ import (
 	"github.com/go-logr/logr"
 )
 
+const indexName = "versioned-owners"
+
 type reconstituter struct {
 	*cache  // embedded because caching is logically part of the reconstituter's functionality
 	client  client.Client
@@ -26,19 +27,12 @@ type reconstituter struct {
 }
 
 func newReconstituter(mgr ctrl.Manager) (*reconstituter, error) {
-	err := mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, "spec.compositionGeneration", func(o client.Object) []string {
-		slice := o.(*apiv1.ResourceSlice)
-		return []string{strconv.FormatInt(slice.Spec.CompositionGeneration, 10)}
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, "metadata.ownerReferences.name", func(o client.Object) (keys []string) {
+	err := mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, indexName, func(o client.Object) (keys []string) {
 		slice := o.(*apiv1.ResourceSlice)
 		for _, owner := range slice.OwnerReferences {
 			if owner.Kind == "Composition" {
-				keys = append(keys, owner.Name)
+				// keys will not collide because k8s doesn't allow slashes in names
+				keys = append(keys, fmt.Sprintf("%s/%d", owner.Name, slice.Spec.CompositionGeneration))
 			}
 		}
 		return keys
@@ -81,11 +75,11 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, fmt.Errorf("getting resource: %w", err)
 	}
 
+	// We populate the cache with both the previous and current syntheses
 	err = r.populateCache(ctx, comp, comp.Status.PreviousState)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("processing previous state: %w", err)
 	}
-
 	err = r.populateCache(ctx, comp, comp.Status.CurrentState)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("processing current state: %w", err)
@@ -112,9 +106,7 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 
 	slices := &apiv1.ResourceSliceList{}
 	err := r.client.List(ctx, slices, client.MatchingFields{
-		"spec.compositionGeneration": strconv.FormatInt(synthesis.ObservedGeneration, 10),
-		// TODO: Need to merge these selectors
-		// "metadata.ownerReferences.name": comp.Name,
+		indexName: fmt.Sprintf("%s/%d", comp.Name, synthesis.ObservedGeneration),
 	})
 	if err != nil {
 		return fmt.Errorf("listing resource slices: %w", err)
