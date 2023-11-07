@@ -38,6 +38,7 @@ type ResourceRef struct {
 }
 
 // Request is like controller-runtime reconcile.Request but for reconstituted resources.
+// https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/reconcile#Request
 type Request struct {
 	ResourceRef
 	Manifest ManifestRef
