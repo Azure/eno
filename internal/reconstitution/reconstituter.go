@@ -114,7 +114,7 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 		return fmt.Errorf("listing resource slices: %w", err)
 	}
 
-	logger.V(1).Info(fmt.Sprintf("found %d slices for synthesis %d of composition %s/%s", len(slices.Items), synthesis.ObservedGeneration, comp.Namespace, comp.Name))
+	logger.V(1).Info(fmt.Sprintf("found %d slices for this synthesis", len(slices.Items)))
 	if int64(len(slices.Items)) != synthesis.ResourceSliceCount {
 		logger.V(1).Info("stale informer - waiting for sync")
 		return nil
