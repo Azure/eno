@@ -4,6 +4,8 @@ on: [push]
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      KUBEBUILDER_ASSETS: /tmp/kubebuilder
     steps:
       - uses: actions/checkout@v3
       - name: Set up Go
@@ -11,7 +13,7 @@ jobs:
         with:
           go-version: '1.21'
       - name: Setup EnvTest
-        run: sudo go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use 1.28.x --bin-dir /usr/local/kubebuilder/bin
+        run: go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use 1.28.x --use-env
       - name: Test
         run: go test -v ./...
 
