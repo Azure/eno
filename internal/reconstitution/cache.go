@@ -164,6 +164,7 @@ func (c *cache) Purge(ctx context.Context, compNSN types.NamespacedName, comp *a
 
 	remainingSyns := []int64{}
 	for _, syn := range c.synthesesByComposition[compNSN] {
+		// Don't touch any syntheses still referenced by the composition
 		if comp != nil && ((comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == syn) || (comp.Status.PreviousState != nil && comp.Status.PreviousState.ObservedGeneration == syn)) {
 			remainingSyns = append(remainingSyns, syn)
 			continue // still referenced by the Generation
