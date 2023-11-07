@@ -46,6 +46,8 @@ func (c *cache) Get(ctx context.Context, ref *ResourceRef, gen int64) (*Resource
 	return res, ok
 }
 
+// HasSynthesis returns true when the cache contains the resulting resources of the given synthesis.
+// This should be called before Fill to determine if filling is necessary.
 func (c *cache) HasSynthesis(ctx context.Context, comp types.NamespacedName, synthesis *apiv1.Synthesis) bool {
 	key := synthesisKey{
 		Composition: comp,
