@@ -13,7 +13,7 @@ jobs:
         with:
           go-version: '1.21'
       - name: Setup EnvTest
-        run: go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use 1.28.x --use-env --print path && ls -l $KUBEBUILDER_ASSETS
+        run: go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest --use-env
       - name: Test
         run: go test -v ./...
 
