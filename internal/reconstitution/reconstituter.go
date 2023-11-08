@@ -6,8 +6,8 @@ import (
 	"sync/atomic"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -16,8 +16,10 @@ import (
 	"github.com/go-logr/logr"
 )
 
-const indexName = "versioned-owners"
+const indexName = ".metadata.owner"
 
+// reconstituter reconstitutes individual resources from resource slices.
+// Similar to an informer but with extra logic to handle expanding the slice resources.
 type reconstituter struct {
 	*cache  // embedded because caching is logically part of the reconstituter's functionality
 	client  client.Client
@@ -27,15 +29,14 @@ type reconstituter struct {
 }
 
 func newReconstituter(mgr ctrl.Manager) (*reconstituter, error) {
-	err := mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, indexName, func(o client.Object) (keys []string) {
+	err := mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, indexName, func(o client.Object) []string {
 		slice := o.(*apiv1.ResourceSlice)
-		for _, owner := range slice.OwnerReferences {
-			if owner.Kind == "Composition" {
-				// keys will not collide because k8s doesn't allow slashes in names
-				keys = append(keys, fmt.Sprintf("%s/%d", owner.Name, slice.Spec.CompositionGeneration))
-			}
+		owner := metav1.GetControllerOf(slice)
+		if owner == nil || owner.Kind != "Composition" {
+			return nil
 		}
-		return keys
+		// keys will not collide because k8s doesn't allow slashes in names
+		return []string{fmt.Sprintf("%s/%d", owner.Name, slice.Spec.CompositionGeneration)}
 	})
 	if err != nil {
 		return nil, err
@@ -105,14 +106,14 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 	}
 
 	slices := &apiv1.ResourceSliceList{}
-	err := r.client.List(ctx, slices, client.MatchingFields{
+	err := r.client.List(ctx, slices, client.InNamespace(comp.Namespace), client.MatchingFields{
 		indexName: fmt.Sprintf("%s/%d", comp.Name, synthesis.ObservedGeneration),
 	})
 	if err != nil {
 		return fmt.Errorf("listing resource slices: %w", err)
 	}
 
-	logger.V(1).Info(fmt.Sprintf("found %d slices", len(slices.Items)))
+	logger.V(1).Info(fmt.Sprintf("found %d slices for synthesis %d of composition %s/%s", len(slices.Items), synthesis.ObservedGeneration, comp.Namespace, comp.Name))
 	if int64(len(slices.Items)) != synthesis.ResourceSliceCount {
 		logger.V(1).Info("stale informer - waiting for sync")
 		return nil
