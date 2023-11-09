@@ -1,8 +1,6 @@
 package synthesis
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"strconv"
 
@@ -13,21 +11,21 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 )
 
-// TODO: Finish, add labels, etc.
+// TODO: Concurrency limit
 
 func newPod(cfg *Config, scheme *runtime.Scheme, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev1.Pod {
 	const wrapperVolumeName = "wrapper"
 
-	hash := sha256.New()
-	fmt.Fprintf(hash, "%s-%d-%s-%d", comp.Name, comp.Generation, syn.Name, syn.Generation) // TODO: Generate name?
-	hashStr := hex.EncodeToString(hash.Sum(nil))[:7]
-
 	pod := &corev1.Pod{}
-	pod.Name = "generate-" + hashStr
+	pod.GenerateName = "synthesis-"
 	pod.Namespace = comp.Namespace
+	pod.Labels = map[string]string{"app.kubernetes.io/managed-by": "eno"}
 	if err := controllerutil.SetControllerReference(comp, pod, scheme); err != nil {
 		panic(fmt.Sprintf("unable to set owner reference: %s", err))
 	}
+
+	userID := int64(1000)
+	yes := true
 	pod.Spec = corev1.PodSpec{
 		RestartPolicy: corev1.RestartPolicyOnFailure,
 		InitContainers: []corev1.Container{{
@@ -42,10 +40,17 @@ func newPod(cfg *Config, scheme *runtime.Scheme, comp *apiv1.Composition, syn *a
 			}},
 		}},
 		Containers: []corev1.Container{{
-			Name:  "generator",
+			Name:  "synthesizer",
 			Image: syn.Spec.Image,
 			Command: []string{
 				"/wrapper/eno-wrapper", "--generate",
+			},
+			SecurityContext: &corev1.SecurityContext{
+				Capabilities: &corev1.Capabilities{
+					Drop: []corev1.Capability{"ALL"},
+				},
+				RunAsUser:    &userID,
+				RunAsNonRoot: &yes,
 			},
 			VolumeMounts: []corev1.VolumeMount{{
 				Name:      wrapperVolumeName,
@@ -66,7 +71,7 @@ func newPod(cfg *Config, scheme *runtime.Scheme, comp *apiv1.Composition, syn *a
 					Value: strconv.FormatInt(comp.Generation, 10),
 				},
 				{
-					Name:  "GENERATOR_GENERATION",
+					Name:  "SYNTHESIZER_GENERATION",
 					Value: strconv.FormatInt(syn.Generation, 10),
 				},
 			},
