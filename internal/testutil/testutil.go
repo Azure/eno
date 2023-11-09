@@ -71,7 +71,7 @@ func NewManager(t *testing.T) *Manager {
 	cfg, err := env.Start()
 	require.NoError(t, err)
 
-	mgr, err := manager.New(cfg)
+	mgr, err := manager.New(cfg, logr.FromContextOrDiscard(NewContext(t)))
 	require.NoError(t, err)
 
 	return &Manager{

@@ -7,6 +7,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/manager"
 )
 
 type Config struct {
@@ -17,10 +18,6 @@ type Config struct {
 	RolloutCooldown time.Duration
 }
 
-// TODO: Central manager package
-
-// TODO: Set up log constructors
-
 // IMPORTANT: The manager's pod informer should be filtered on a label present on pods created by this controller to avoid caching all pods on the cluster
 func NewController(mgr ctrl.Manager, cfg *Config) error {
 	pcc := &podCreationController{
@@ -30,10 +27,13 @@ func NewController(mgr ctrl.Manager, cfg *Config) error {
 	_, err := ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
 		Watches(&apiv1.Synthesizer{}, &synthEventHandler{ctrl: pcc}).
+		WithLogConstructor(manager.NewLogConstructor(mgr, "podCreationController")).
 		Build(pcc)
 	if err != nil {
 		return err
 	}
+
+	// TODO: Separate constructors?
 
 	plc := &podLifecycleController{
 		config: cfg,
@@ -41,6 +41,7 @@ func NewController(mgr ctrl.Manager, cfg *Config) error {
 	}
 	_, err = ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Pod{}).
+		WithLogConstructor(manager.NewLogConstructor(mgr, "podLifecycleController")).
 		Build(plc)
 	return err
 }

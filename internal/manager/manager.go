@@ -4,14 +4,14 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/go-logr/zapr"
-	"go.uber.org/zap"
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 )
@@ -22,17 +22,11 @@ const (
 	IdxSlicesByCompositionGeneration = ".metadata.ownerReferences.compositionGen"
 )
 
-// TODO: Filter pods
-// TODO: Filter by namespace
+// TODO: Filter pod watch by label
 
-func New(cfg *rest.Config) (ctrl.Manager, error) {
-	zapLogger, err := zap.NewDevelopment()
-	if err != nil {
-		return nil, err
-	}
-
+func New(cfg *rest.Config, logger logr.Logger) (ctrl.Manager, error) {
 	mgr, err := ctrl.NewManager(cfg, manager.Options{
-		Logger: zapr.NewLogger(zapLogger),
+		Logger: logger,
 	})
 	if err != nil {
 		return nil, err
@@ -77,4 +71,15 @@ func New(cfg *rest.Config) (ctrl.Manager, error) {
 	}
 
 	return mgr, nil
+}
+
+// TODO: Use this everywhere
+func NewLogConstructor(mgr ctrl.Manager, controllerName string) func(*reconcile.Request) logr.Logger {
+	return func(req *reconcile.Request) logr.Logger {
+		l := mgr.GetLogger().WithValues("controller", controllerName)
+		if req != nil {
+			l.WithValues("requestName", req.Name, "requestNamespace", req.Namespace)
+		}
+		return l
+	}
 }

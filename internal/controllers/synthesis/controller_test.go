@@ -84,5 +84,12 @@ func TestControllerHappyPath(t *testing.T) {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
 		})
+
+		// The previous state is retained
+		if comp.Status.PreviousState == nil {
+			t.Error("state wasn't swapped to previous")
+		} else {
+			assert.Equal(t, comp.Generation-1, comp.Status.PreviousState.ObservedGeneration)
+		}
 	})
 }
