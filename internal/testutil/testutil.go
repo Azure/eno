@@ -50,7 +50,7 @@ func NewContext(t *testing.T) context.Context {
 	t.Cleanup(func() {
 		cancel()
 	})
-	return logr.NewContext(ctx, testr.NewWithOptions(t, testr.Options{Verbosity: 99}))
+	return logr.NewContext(ctx, testr.NewWithOptions(t, testr.Options{Verbosity: 2}))
 }
 
 func NewManager(t *testing.T) *Manager {
@@ -133,7 +133,7 @@ func NewPodController(t testing.TB, mgr ctrl.Manager) {
 			return reconcile.Result{}, err
 		}
 		if comp.Status.CurrentState == nil {
-			return reconcile.Result{}, errors.New("state hasn't been initialized")
+			return reconcile.Result{}, errors.New("waiting to write resourceSliceCount from fake pod controller until the current state is written by the controller")
 		}
 		if comp.Status.CurrentState.ResourceSliceCount == nil {
 			one := int64(1)

@@ -27,6 +27,7 @@ func NewController(mgr ctrl.Manager, cfg *Config) error {
 	_, err := ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
 		Watches(&apiv1.Synthesizer{}, &synthEventHandler{ctrl: pcc}).
+		Owns(&corev1.Pod{}).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "podCreationController")).
 		Build(pcc)
 	if err != nil {

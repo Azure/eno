@@ -89,7 +89,7 @@ func TestControllerHappyPath(t *testing.T) {
 		if comp.Status.PreviousState == nil {
 			t.Error("state wasn't swapped to previous")
 		} else {
-			assert.Equal(t, comp.Generation-1, comp.Status.PreviousState.ObservedGeneration)
+			assert.Equal(t, syn.Generation-1, comp.Status.PreviousState.ObservedSynthesizerGeneration)
 		}
 	})
 }

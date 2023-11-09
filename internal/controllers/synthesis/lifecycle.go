@@ -13,6 +13,8 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 )
 
+// TODO: Use finalizer to avoid weird state if outside deletion?
+
 type podLifecycleController struct {
 	config *Config
 	client client.Client
