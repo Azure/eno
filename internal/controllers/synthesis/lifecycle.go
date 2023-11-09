@@ -3,7 +3,6 @@ package synthesis
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -53,6 +52,8 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	logger = logger.WithValues("synthesizer", syn.Name, "synthesizerGeneration", syn.Generation)
 
+	// TODO: Need to read these values from the pod
+
 	// Populate the status of the active synthesis
 	if comp.Status.CurrentState == nil || comp.Status.CurrentState.ObservedGeneration != comp.Generation || comp.Status.CurrentState.ObservedSynthesizerGeneration != syn.Generation {
 		if comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSliceCount != nil {
@@ -72,33 +73,5 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	// Clean up if the pod is no longer needed
-	if pod.DeletionTimestamp == nil && c.shouldDeletePod(pod) {
-		err = c.client.Delete(ctx, pod)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("error deleting pod: %w", err)
-		}
-		logger.Info("deleted synthesis pod")
-		return ctrl.Result{}, nil
-	}
-
-	// At this point we know the pod is still running.
-	// Poll periodically to check if has timed out.
-	return ctrl.Result{RequeueAfter: c.config.Timeout}, nil
-}
-
-func (c *podLifecycleController) shouldDeletePod(pod *corev1.Pod) bool {
-	if time.Since(pod.CreationTimestamp.Time) > c.config.Timeout {
-		return true
-	}
-	for _, cont := range append(pod.Status.ContainerStatuses, pod.Status.InitContainerStatuses...) {
-		if cont.RestartCount > c.config.MaxRestarts {
-			return true
-		}
-
-		if cont.State.Terminated == nil || cont.State.Terminated.ExitCode != 0 {
-			return false // has not completed yet
-		}
-	}
-	return len(pod.Status.ContainerStatuses) > 0
+	return ctrl.Result{}, nil
 }

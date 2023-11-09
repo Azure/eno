@@ -92,4 +92,11 @@ func TestControllerHappyPath(t *testing.T) {
 			assert.Equal(t, syn.Generation-1, comp.Status.PreviousState.ObservedSynthesizerGeneration)
 		}
 	})
+
+	// The pod eventually completes and is deleted
+	testutil.Eventually(t, func() bool {
+		list := &corev1.PodList{}
+		require.NoError(t, cli.List(ctx, list))
+		return len(list.Items) == 0
+	})
 }

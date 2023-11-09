@@ -40,8 +40,7 @@ func (c *podCreationController) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 	logger = logger.WithValues("synthesizer", syn.Name, "synthesizerGeneration", syn.Generation)
 
-	// Delete any pods already synthesizing this composition if they are no longer needed
-	// i.e. the composition or synthesizer have been updated since their creation
+	// Delete any unnecessary pods
 	pods := &corev1.PodList{}
 	err = c.client.List(ctx, pods, client.MatchingFields{
 		manager.IdxPodsByComposition: comp.Name,
@@ -52,20 +51,23 @@ func (c *podCreationController) Reconcile(ctx context.Context, req ctrl.Request)
 	if len(pods.Items) > 0 {
 		for _, pod := range pods.Items {
 			if pod.DeletionTimestamp != nil {
-				logger.V(1).Info("pod is pending deletion - skipping", "podName", pod.Name)
-				continue
+				continue // already deleted
 			}
 
-			if true { // TODO: Compare with the current comp/synth
+			if !c.shouldDeletePod(&pod) { // TODO: Also compare with the current comp/synth
 				continue
 			}
 
 			if err := c.client.Delete(ctx, &pod); err != nil {
 				return ctrl.Result{}, fmt.Errorf("deleting old pod: %w", err)
 			}
-			logger.Info("delete useless pod", "podName", pod.Name)
+			logger.Info("deleted pod", "podName", pod.Name)
 		}
-		return ctrl.Result{}, nil
+
+		// The pod is still running.
+		// Poll periodically to check if has timed out.
+		logger.V(1).Info("pod already exists - skipping creation")
+		return ctrl.Result{RequeueAfter: c.config.Timeout}, nil
 	}
 
 	// Skip cases in which the GeneratedResources have already been created
@@ -123,4 +125,20 @@ func (c *podCreationController) shouldDeferForRollingUpdate(ctx context.Context,
 	}
 
 	return nil, nil
+}
+
+func (c *podCreationController) shouldDeletePod(pod *corev1.Pod) bool {
+	if time.Since(pod.CreationTimestamp.Time) > c.config.Timeout {
+		return true
+	}
+	for _, cont := range append(pod.Status.ContainerStatuses, pod.Status.InitContainerStatuses...) {
+		if cont.RestartCount > c.config.MaxRestarts {
+			return true
+		}
+
+		if cont.State.Terminated == nil || cont.State.Terminated.ExitCode != 0 {
+			return false // has not completed yet
+		}
+	}
+	return len(pod.Status.ContainerStatuses) > 0
 }
