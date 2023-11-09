@@ -135,27 +135,31 @@ func NewPodController(t testing.TB, mgr ctrl.Manager) {
 		if comp.Status.CurrentState == nil {
 			return reconcile.Result{}, errors.New("state hasn't been initialized")
 		}
-		one := int64(1)
-		comp.Status.CurrentState.ResourceSliceCount = &one
-		err = cli.Status().Update(ctx, comp)
-		if err != nil {
-			return reconcile.Result{}, err
+		if comp.Status.CurrentState.ResourceSliceCount == nil {
+			one := int64(1)
+			comp.Status.CurrentState.ResourceSliceCount = &one
+			err = cli.Status().Update(ctx, comp)
+			if err != nil {
+				return reconcile.Result{}, err
+			}
+			t.Logf("updated resource slice count for %s", pod.Name)
 		}
-		t.Logf("updated resource slice count for %s", pod.Name)
 
 		// Mark the pod as terminated to signal that synthesis is complete
-		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
-			State: corev1.ContainerState{
-				Terminated: &corev1.ContainerStateTerminated{
-					ExitCode: 0,
+		if len(pod.Status.ContainerStatuses) == 0 {
+			pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+				State: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						ExitCode: 0,
+					},
 				},
-			},
-		}}
-		err = cli.Status().Update(ctx, pod)
-		if err != nil {
-			return reconcile.Result{}, err
+			}}
+			err = cli.Status().Update(ctx, pod)
+			if err != nil {
+				return reconcile.Result{}, err
+			}
+			t.Logf("updated container status for %s", pod.Name)
 		}
-		t.Logf("updated container status for %s", pod.Name)
 
 		return reconcile.Result{}, nil
 	})

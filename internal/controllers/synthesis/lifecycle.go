@@ -19,7 +19,7 @@ type podLifecycleController struct {
 }
 
 func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := logr.FromContextOrDiscard(ctx).WithValues("pod", req)
+	logger := logr.FromContextOrDiscard(ctx).WithValues("podName", req.Name)
 
 	pod := &corev1.Pod{}
 	err := c.client.Get(ctx, req.NamespacedName, pod)
