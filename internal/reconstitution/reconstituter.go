@@ -93,7 +93,8 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis) error {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	if synthesis == nil {
+	if synthesis == nil || synthesis.ResourceSliceCount == nil {
+		// a nil resourceSliceCount means synthesis is still in progress
 		return nil
 	}
 	compNSN := types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}
@@ -114,7 +115,7 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 	}
 
 	logger.V(1).Info(fmt.Sprintf("found %d slices for synthesis %d of composition %s/%s", len(slices.Items), synthesis.ObservedGeneration, comp.Namespace, comp.Name))
-	if int64(len(slices.Items)) != synthesis.ResourceSliceCount {
+	if int64(len(slices.Items)) != *synthesis.ResourceSliceCount {
 		logger.V(1).Info("stale informer - waiting for sync")
 		return nil
 	}
