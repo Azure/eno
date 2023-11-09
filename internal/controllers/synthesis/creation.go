@@ -16,10 +16,11 @@ import (
 type podCreationController struct {
 	config *Config
 	client client.Client
-	logger logr.Logger
 }
 
 func (c *podCreationController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, req.NamespacedName, comp)
 	if err != nil {
@@ -28,6 +29,7 @@ func (c *podCreationController) Reconcile(ctx context.Context, req ctrl.Request)
 	if comp.Spec.Synthesizer.Name == "" {
 		return ctrl.Result{}, nil
 	}
+	logger = logger.WithValues("composition", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
 
 	syn := &apiv1.Synthesizer{}
 	syn.Name = comp.Spec.Synthesizer.Name
@@ -35,9 +37,10 @@ func (c *podCreationController) Reconcile(ctx context.Context, req ctrl.Request)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("getting synthesizer: %w", err)
 	}
+	logger = logger.WithValues("synthesizer", syn.Name, "synthesizerGeneration", syn.Generation)
 
-	logger := c.logger.WithValues("composition", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesizer", syn.Name, "synthesizerGeneration", syn.Generation)
-
+	// Delete any pods already synthesizing this composition if they are no longer needed
+	// i.e. the composition or synthesizer have been updated since their creation
 	pods := &corev1.PodList{}
 	err = c.client.List(ctx, pods, client.MatchingFields{
 		compByPodIndex: comp.Name,
@@ -48,7 +51,7 @@ func (c *podCreationController) Reconcile(ctx context.Context, req ctrl.Request)
 	if len(pods.Items) > 0 {
 		for _, pod := range pods.Items {
 			if pod.DeletionTimestamp != nil {
-				logger.V(1).Info("pod is pending deletion", "podName", pod.Name)
+				logger.V(1).Info("pod is pending deletion - skipping", "podName", pod.Name)
 				continue
 			}
 
@@ -84,6 +87,7 @@ func (c *podCreationController) Reconcile(ctx context.Context, req ctrl.Request)
 		logger.Info("re-synthesizing composition because the synthesizer configuration changed")
 	}
 
+	// If we made it this far it's safe to create a pod
 	pod := newPod(c.config, c.client.Scheme(), comp, syn)
 	err = c.client.Create(ctx, pod)
 	if err != nil {

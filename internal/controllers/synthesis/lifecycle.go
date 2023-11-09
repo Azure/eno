@@ -16,17 +16,18 @@ import (
 type podLifecycleController struct {
 	config *Config
 	client client.Client
-	logger logr.Logger
 }
 
 func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := logr.FromContextOrDiscard(ctx).WithValues("pod", req)
+
 	pod := &corev1.Pod{}
 	err := c.client.Get(ctx, req.NamespacedName, pod)
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("gettting pod: %w", err))
 	}
 	if len(pod.OwnerReferences) == 0 || pod.OwnerReferences[0].Kind != "Composition" {
-		// TODO: Log
+		logger.V(1).Info("skipping pod because it isn't owned by a composition")
 		return ctrl.Result{}, nil
 	}
 
@@ -40,6 +41,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	if comp.Spec.Synthesizer.Name == "" {
 		return ctrl.Result{}, nil
 	}
+	logger = logger.WithValues("composition", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
 
 	syn := &apiv1.Synthesizer{}
 	syn.Name = comp.Spec.Synthesizer.Name
@@ -47,8 +49,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("getting synthesizer: %w", err)
 	}
-
-	logger := c.logger.WithValues("composition", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesizer", syn.Name, "synthesizerGeneration", syn.Generation)
+	logger = logger.WithValues("synthesizer", syn.Name, "synthesizerGeneration", syn.Generation)
 
 	// Populate the status of the active synthesis
 	if comp.Status.CurrentState == nil || comp.Status.CurrentState.ObservedGeneration != comp.Generation || comp.Status.CurrentState.ObservedSynthesizerGeneration != syn.Generation {

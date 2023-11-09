@@ -25,6 +25,10 @@ type Config struct {
 	RolloutCooldown time.Duration
 }
 
+// TODO: Central manager package
+
+// TODO: Set up log constructors
+
 // IMPORTANT: The manager's pod informer should be filtered on a label present on pods created by this controller to avoid caching all pods on the cluster
 func NewController(mgr ctrl.Manager, cfg *Config) error {
 	err := mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.Composition{}, compBySynIndex, func(o client.Object) []string {
@@ -51,7 +55,6 @@ func NewController(mgr ctrl.Manager, cfg *Config) error {
 	pcc := &podCreationController{
 		config: cfg,
 		client: mgr.GetClient(),
-		logger: mgr.GetLogger(),
 	}
 	_, err = ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
@@ -64,7 +67,6 @@ func NewController(mgr ctrl.Manager, cfg *Config) error {
 	plc := &podLifecycleController{
 		config: cfg,
 		client: mgr.GetClient(),
-		logger: mgr.GetLogger(),
 	}
 	_, err = ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Pod{}).

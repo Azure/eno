@@ -11,8 +11,6 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 )
 
-// TODO: Concurrency limit
-
 func newPod(cfg *Config, scheme *runtime.Scheme, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev1.Pod {
 	const wrapperVolumeName = "wrapper"
 

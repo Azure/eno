@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/go-logr/logr"
 )
 
 // synthEventHandler enqueues an event for every composition that references an incoming synthesizer.
@@ -42,7 +43,6 @@ func (h *synthEventHandler) Update(ctx context.Context, evt event.UpdateEvent, q
 
 func (h *synthEventHandler) handle(ctx context.Context, obj client.Object, q workqueue.RateLimitingInterface) {
 	if obj == nil {
-		h.ctrl.logger.Info("synthHandler got nil object")
 		return
 	}
 
@@ -52,7 +52,7 @@ func (h *synthEventHandler) handle(ctx context.Context, obj client.Object, q wor
 	})
 	if err != nil {
 		// this should be impossible since we're reading from the informer cache
-		h.ctrl.logger.Error(err, "error while listing compositions to be enqueued")
+		logr.FromContextOrDiscard(ctx).Error(err, "error while listing compositions to be enqueued")
 		return
 	}
 
