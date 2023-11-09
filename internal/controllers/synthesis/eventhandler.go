@@ -2,6 +2,7 @@ package synthesis
 
 import (
 	"context"
+	"math/rand"
 
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
@@ -12,6 +13,7 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 )
 
+// synthEventHandler enqueues an event for every composition that references an incoming synthesizer.
 type synthEventHandler struct {
 	ctrl *Controller
 }
@@ -44,22 +46,23 @@ func (h *synthEventHandler) handle(ctx context.Context, obj client.Object, q wor
 		return
 	}
 
-	// TODO: Randomize list order?
-
 	list := &apiv1.CompositionList{}
-	err := h.ctrl.client.List(ctx, list)
+	err := h.ctrl.client.List(ctx, list, client.MatchingFields{
+		compBySynIndex: obj.GetName(),
+	})
 	if err != nil {
 		// this should be impossible since we're reading from the informer cache
 		h.ctrl.logger.Error(err, "error while listing compositions to be enqueued")
 		return
 	}
-	// TODO: Index
+
+	// Randomize order that we dispatch events in to avoid favoring certain compositions
+	rand.Shuffle(len(list.Items), func(i, j int) { list.Items[i] = list.Items[j] })
+
 	for _, item := range list.Items {
-		if item.Spec.Synthesizer.Name != "" && item.Spec.Synthesizer.Name == obj.GetName() {
-			q.Add(reconcile.Request{NamespacedName: types.NamespacedName{
-				Name:      item.GetName(),
-				Namespace: item.GetNamespace(),
-			}})
-		}
+		q.Add(reconcile.Request{NamespacedName: types.NamespacedName{
+			Name:      item.GetName(),
+			Namespace: item.GetNamespace(),
+		}})
 	}
 }
