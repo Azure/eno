@@ -24,7 +24,6 @@ type reconstituter struct {
 	*cache  // embedded because caching is logically part of the reconstituter's functionality
 	client  client.Client
 	queues  []workqueue.Interface
-	logger  logr.Logger
 	started atomic.Bool
 }
 
@@ -46,7 +45,6 @@ func newReconstituter(mgr ctrl.Manager) (*reconstituter, error) {
 	r := &reconstituter{
 		cache:  newCache(mgr.GetClient()),
 		client: mgr.GetClient(),
-		logger: mgr.GetLogger(),
 	}
 	_, err = ctrl.NewControllerManagedBy(mgr).
 		Named("reconstituter").
@@ -65,7 +63,8 @@ func (r *reconstituter) AddQueue(queue workqueue.Interface) {
 
 func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	r.started.Store(true)
-	r.logger.V(1).WithValues("composition", req).Info("caching composition")
+	logger := logr.FromContextOrDiscard(ctx)
+	logger.V(1).WithValues("composition", req).Info("caching composition")
 
 	comp := &apiv1.Composition{}
 	err := r.client.Get(ctx, req.NamespacedName, comp)
