@@ -17,7 +17,12 @@ func newPod(cfg *Config, scheme *runtime.Scheme, comp *apiv1.Composition, syn *a
 	pod := &corev1.Pod{}
 	pod.GenerateName = "synthesis-"
 	pod.Namespace = comp.Namespace
+	pod.Finalizers = []string{"eno.azure.io/cleanup"}
 	pod.Labels = map[string]string{"app.kubernetes.io/managed-by": "eno"}
+	pod.Annotations = map[string]string{
+		"eno.azure.io/composition-generation": strconv.FormatInt(comp.Generation, 10),
+		"eno.azure.io/synthesizer-generation": strconv.FormatInt(syn.Generation, 10),
+	}
 	if err := controllerutil.SetControllerReference(comp, pod, scheme); err != nil {
 		panic(fmt.Sprintf("unable to set owner reference: %s", err))
 	}
@@ -85,4 +90,16 @@ func newPod(cfg *Config, scheme *runtime.Scheme, comp *apiv1.Composition, syn *a
 	}
 
 	return pod
+}
+
+func podDerivedFrom(comp *apiv1.Composition, syn *apiv1.Synthesizer, pod *corev1.Pod) bool {
+	if pod.Annotations == nil {
+		return false
+	}
+	var (
+		compGen, _ = strconv.ParseInt(pod.Annotations["eno.azure.io/composition-generation"], 10, 0)
+		synGen, _  = strconv.ParseInt(pod.Annotations["eno.azure.io/synthesizer-generation"], 10, 0)
+	)
+
+	return compGen == comp.Generation && synGen == syn.Generation
 }

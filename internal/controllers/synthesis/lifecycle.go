@@ -54,19 +54,18 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 				continue // already deleted
 			}
 
-			if !c.shouldDeletePod(&pod) { // TODO: Also compare with the current comp/synth
-				continue
+			if podDerivedFrom(comp, syn, &pod) && !c.shouldDeletePod(&pod) {
+				continue // still running
 			}
 
 			if err := c.client.Delete(ctx, &pod); err != nil {
-				return ctrl.Result{}, fmt.Errorf("deleting old pod: %w", err)
+				return ctrl.Result{}, fmt.Errorf("deleting pod: %w", err)
 			}
 			logger.Info("deleted pod", "podName", pod.Name)
 		}
 
 		// The pod is still running.
 		// Poll periodically to check if has timed out.
-		logger.V(1).Info("pod already exists - skipping creation")
 		return ctrl.Result{RequeueAfter: c.config.Timeout}, nil
 	}
 
@@ -74,7 +73,8 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	compInSync := comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == comp.Generation
 	synthInSync := comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
 	if compInSync && synthInSync {
-		return ctrl.Result{}, nil // already in sync
+		logger.V(1).Info("synthesis has completed - skipping creation")
+		return ctrl.Result{}, nil
 	}
 
 	// Slow-roll synthesizer changes across referencing compositions only when the composition itself hasn't changed
