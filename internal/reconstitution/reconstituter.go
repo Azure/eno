@@ -5,18 +5,16 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	"github.com/go-logr/logr"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/go-logr/logr"
+	"github.com/Azure/eno/internal/manager"
 )
-
-const indexName = ".metadata.owner"
 
 // reconstituter reconstitutes individual resources from resource slices.
 // Similar to an informer but with extra logic to handle expanding the slice resources.
@@ -29,25 +27,12 @@ type reconstituter struct {
 }
 
 func newReconstituter(mgr ctrl.Manager) (*reconstituter, error) {
-	err := mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, indexName, func(o client.Object) []string {
-		slice := o.(*apiv1.ResourceSlice)
-		owner := metav1.GetControllerOf(slice)
-		if owner == nil || owner.Kind != "Composition" {
-			return nil
-		}
-		// keys will not collide because k8s doesn't allow slashes in names
-		return []string{fmt.Sprintf("%s/%d", owner.Name, slice.Spec.CompositionGeneration)}
-	})
-	if err != nil {
-		return nil, err
-	}
-
 	r := &reconstituter{
 		cache:  newCache(mgr.GetClient()),
 		client: mgr.GetClient(),
 		logger: mgr.GetLogger(),
 	}
-	_, err = ctrl.NewControllerManagedBy(mgr).
+	_, err := ctrl.NewControllerManagedBy(mgr).
 		Named("reconstituter").
 		For(&apiv1.Composition{}).
 		Owns(&apiv1.ResourceSlice{}).
@@ -108,7 +93,7 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 
 	slices := &apiv1.ResourceSliceList{}
 	err := r.client.List(ctx, slices, client.InNamespace(comp.Namespace), client.MatchingFields{
-		indexName: fmt.Sprintf("%s/%d", comp.Name, synthesis.ObservedGeneration),
+		manager.IdxSlicesByCompositionGeneration: fmt.Sprintf("%s/%d", comp.Name, synthesis.ObservedGeneration),
 	})
 	if err != nil {
 		return fmt.Errorf("listing resource slices: %w", err)

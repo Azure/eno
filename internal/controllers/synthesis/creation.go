@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/manager"
 )
 
 type podCreationController struct {
@@ -43,7 +44,7 @@ func (c *podCreationController) Reconcile(ctx context.Context, req ctrl.Request)
 	// i.e. the composition or synthesizer have been updated since their creation
 	pods := &corev1.PodList{}
 	err = c.client.List(ctx, pods, client.MatchingFields{
-		compByPodIndex: comp.Name,
+		manager.IdxPodsByComposition: comp.Name,
 	})
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("listing pods: %w", err)
@@ -101,7 +102,7 @@ func (c *podCreationController) Reconcile(ctx context.Context, req ctrl.Request)
 func (c *podCreationController) shouldDeferForRollingUpdate(ctx context.Context, comp *apiv1.Composition, syn *apiv1.Synthesizer) (*ctrl.Result, error) {
 	list := &apiv1.CompositionList{}
 	if err := c.client.List(ctx, list, client.MatchingFields{
-		compBySynIndex: syn.Name,
+		manager.IdxCompositionsBySynthesizer: syn.Name,
 	}); err != nil {
 		return nil, err
 	}

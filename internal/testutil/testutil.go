@@ -19,10 +19,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/manager"
 )
 
 func NewClient(t testing.TB) client.Client {
@@ -71,13 +71,7 @@ func NewManager(t *testing.T) *Manager {
 	cfg, err := env.Start()
 	require.NoError(t, err)
 
-	mgr, err := ctrl.NewManager(cfg, manager.Options{
-		Logger:      testr.New(t),
-		BaseContext: func() context.Context { return NewContext(t) },
-	})
-	require.NoError(t, err)
-
-	err = apiv1.SchemeBuilder.AddToScheme(mgr.GetScheme())
+	mgr, err := manager.New(cfg)
 	require.NoError(t, err)
 
 	return &Manager{

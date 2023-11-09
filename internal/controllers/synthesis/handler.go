@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/manager"
 	"github.com/go-logr/logr"
 )
 
@@ -48,7 +49,7 @@ func (h *synthEventHandler) handle(ctx context.Context, obj client.Object, q wor
 
 	list := &apiv1.CompositionList{}
 	err := h.ctrl.client.List(ctx, list, client.MatchingFields{
-		compBySynIndex: obj.GetName(),
+		manager.IdxCompositionsBySynthesizer: obj.GetName(),
 	})
 	if err != nil {
 		// this should be impossible since we're reading from the informer cache
