@@ -12,9 +12,10 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 )
 
-const compBySynIndex = ".spec.synthesizer"
-
-const compByPodIndex = ".metadata.composition"
+const (
+	compBySynIndex = ".spec.synthesizer"
+	compByPodIndex = ".metadata.ownerReferences.composition"
+)
 
 type Config struct {
 	WrapperImage    string
