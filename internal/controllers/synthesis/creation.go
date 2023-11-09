@@ -13,13 +13,13 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 )
 
-type podSpawnController struct {
+type podCreationController struct {
 	config *Config
 	client client.Client
 	logger logr.Logger
 }
 
-func (c *podSpawnController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (c *podCreationController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, req.NamespacedName, comp)
 	if err != nil {
@@ -82,7 +82,7 @@ func (c *podSpawnController) Reconcile(ctx context.Context, req ctrl.Request) (c
 	return ctrl.Result{}, nil
 }
 
-func (c *podSpawnController) shouldDeferForRollingUpdate(ctx context.Context, comp *apiv1.Composition, syn *apiv1.Synthesizer) (*ctrl.Result, error) {
+func (c *podCreationController) shouldDeferForRollingUpdate(ctx context.Context, comp *apiv1.Composition, syn *apiv1.Synthesizer) (*ctrl.Result, error) {
 	list := &apiv1.CompositionList{}
 	if err := c.client.List(ctx, list, client.MatchingFields{
 		compBySynIndex: syn.Name,

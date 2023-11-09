@@ -13,13 +13,13 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 )
 
-type lifecycleController struct {
+type podLifecycleController struct {
 	config *Config
 	client client.Client
 	logger logr.Logger
 }
 
-func (c *lifecycleController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	pod := &corev1.Pod{}
 	err := c.client.Get(ctx, req.NamespacedName, pod)
 	if err != nil {
@@ -83,7 +83,7 @@ func (c *lifecycleController) Reconcile(ctx context.Context, req ctrl.Request) (
 	return ctrl.Result{RequeueAfter: c.config.Timeout}, nil
 }
 
-func (c *lifecycleController) shouldDeletePod(pod *corev1.Pod) bool {
+func (c *podLifecycleController) shouldDeletePod(pod *corev1.Pod) bool {
 	if time.Since(pod.CreationTimestamp.Time) > c.config.Timeout {
 		return true
 	}

@@ -47,26 +47,26 @@ func NewController(mgr ctrl.Manager, cfg *Config) error {
 		return err
 	}
 
-	psc := &podSpawnController{
+	pcc := &podCreationController{
 		config: cfg,
 		client: mgr.GetClient(),
 		logger: mgr.GetLogger(),
 	}
 	_, err = ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
-		Watches(&apiv1.Synthesizer{}, &synthEventHandler{ctrl: psc}).
-		Build(psc)
+		Watches(&apiv1.Synthesizer{}, &synthEventHandler{ctrl: pcc}).
+		Build(pcc)
 	if err != nil {
 		return err
 	}
 
-	lc := &lifecycleController{
+	plc := &podLifecycleController{
 		config: cfg,
 		client: mgr.GetClient(),
 		logger: mgr.GetLogger(),
 	}
 	_, err = ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Pod{}).
-		Build(lc)
+		Build(plc)
 	return err
 }
