@@ -14,9 +14,31 @@ import (
 	"github.com/Azure/eno/internal/manager"
 )
 
+type Config struct {
+	WrapperImage    string
+	JobSA           string
+	MaxRestarts     int32
+	Timeout         time.Duration
+	RolloutCooldown time.Duration
+}
+
 type podLifecycleController struct {
 	config *Config
 	client client.Client
+}
+
+// NewPodLifecycleController is responsible for creating and deleting pods as needed to synthesize compositions.
+func NewPodLifecycleController(mgr ctrl.Manager, cfg *Config) error {
+	c := &podLifecycleController{
+		config: cfg,
+		client: mgr.GetClient(),
+	}
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&apiv1.Composition{}).
+		Watches(&apiv1.Synthesizer{}, &synthEventHandler{ctrl: c}).
+		Owns(&corev1.Pod{}).
+		WithLogConstructor(manager.NewLogConstructor(mgr, "podLifecycleController")).
+		Complete(c)
 }
 
 func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -54,6 +76,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 				continue // already deleted
 			}
 
+			// TODO: What if multiple correctly-derived pods are running?
 			if podDerivedFrom(comp, syn, &pod) && !c.shouldDeletePod(&pod) {
 				continue // still running
 			}
@@ -62,6 +85,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 				return ctrl.Result{}, fmt.Errorf("deleting pod: %w", err)
 			}
 			logger.Info("deleted pod", "podName", pod.Name)
+			return ctrl.Result{}, nil
 		}
 
 		// The pod is still running.

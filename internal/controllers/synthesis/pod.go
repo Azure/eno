@@ -96,6 +96,7 @@ func podDerivedFrom(comp *apiv1.Composition, syn *apiv1.Synthesizer, pod *corev1
 	if pod.Annotations == nil {
 		return false
 	}
+
 	var (
 		compGen, _ = strconv.ParseInt(pod.Annotations["eno.azure.io/composition-generation"], 10, 0)
 		synGen, _  = strconv.ParseInt(pod.Annotations["eno.azure.io/synthesizer-generation"], 10, 0)

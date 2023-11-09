@@ -12,11 +12,21 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/manager"
 )
 
 type statusController struct {
-	config *Config
 	client client.Client
+}
+
+// NewStatusController updates composition statuses as pods transition through states.
+func NewStatusController(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&corev1.Pod{}).
+		WithLogConstructor(manager.NewLogConstructor(mgr, "statusController")).
+		Complete(&statusController{
+			client: mgr.GetClient(),
+		})
 }
 
 func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

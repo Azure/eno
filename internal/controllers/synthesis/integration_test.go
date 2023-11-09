@@ -20,14 +20,18 @@ var minimalTestConfig = &Config{
 	RolloutCooldown: time.Millisecond * 10,
 }
 
+// TODO: Test fast updates to both resources
+
+// TODO: Test rollout throttling
+
 func TestControllerHappyPath(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	testutil.NewPodController(t, mgr.Manager)
 	cli := mgr.GetClient()
 
-	err := NewController(mgr.Manager, minimalTestConfig)
-	require.NoError(t, err)
+	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
+	require.NoError(t, NewStatusController(mgr.Manager))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
