@@ -3,6 +3,7 @@ package synthesis
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -10,9 +11,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/manager"
 )
-
-// TODO: Use finalizer to avoid weird state if outside deletion?
 
 type podLifecycleController struct {
 	config *Config
@@ -20,22 +20,10 @@ type podLifecycleController struct {
 }
 
 func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := logr.FromContextOrDiscard(ctx).WithValues("podName", req.Name)
-
-	pod := &corev1.Pod{}
-	err := c.client.Get(ctx, req.NamespacedName, pod)
-	if err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("gettting pod: %w", err))
-	}
-	if len(pod.OwnerReferences) == 0 || pod.OwnerReferences[0].Kind != "Composition" {
-		logger.V(1).Info("skipping pod because it isn't owned by a composition")
-		return ctrl.Result{}, nil
-	}
+	logger := logr.FromContextOrDiscard(ctx)
 
 	comp := &apiv1.Composition{}
-	comp.Name = pod.OwnerReferences[0].Name
-	comp.Namespace = pod.Namespace
-	err = c.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+	err := c.client.Get(ctx, req.NamespacedName, comp)
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition resource: %w", err))
 	}
@@ -52,26 +40,105 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	logger = logger.WithValues("synthesizer", syn.Name, "synthesizerGeneration", syn.Generation)
 
-	// TODO: Need to read these values from the pod
+	// Delete any unnecessary pods
+	pods := &corev1.PodList{}
+	err = c.client.List(ctx, pods, client.MatchingFields{
+		manager.IdxPodsByComposition: comp.Name,
+	})
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("listing pods: %w", err)
+	}
+	if len(pods.Items) > 0 {
+		for _, pod := range pods.Items {
+			if pod.DeletionTimestamp != nil {
+				continue // already deleted
+			}
 
-	// Populate the status of the active synthesis
-	if comp.Status.CurrentState == nil || comp.Status.CurrentState.ObservedGeneration != comp.Generation || comp.Status.CurrentState.ObservedSynthesizerGeneration != syn.Generation {
-		if comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSliceCount != nil {
-			// Only swap current->previous when the current synthesis has completed
-			// This avoids losing the prior state during rapid updates to the composition
-			comp.Status.PreviousState = comp.Status.CurrentState
+			if !c.shouldDeletePod(&pod) { // TODO: Also compare with the current comp/synth
+				continue
+			}
+
+			if err := c.client.Delete(ctx, &pod); err != nil {
+				return ctrl.Result{}, fmt.Errorf("deleting old pod: %w", err)
+			}
+			logger.Info("deleted pod", "podName", pod.Name)
 		}
-		comp.Status.CurrentState = &apiv1.Synthesis{
-			ObservedGeneration:            comp.Generation,
-			ObservedSynthesizerGeneration: syn.Generation,
-			PodCreation:                   pod.CreationTimestamp,
-		}
-		if err := c.client.Status().Update(ctx, comp); err != nil {
-			return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
-		}
-		logger.V(1).Info("added this synthesis to the composition status")
-		return ctrl.Result{}, nil
+
+		// The pod is still running.
+		// Poll periodically to check if has timed out.
+		logger.V(1).Info("pod already exists - skipping creation")
+		return ctrl.Result{RequeueAfter: c.config.Timeout}, nil
 	}
 
+	// Skip cases in which the GeneratedResources have already been created
+	compInSync := comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == comp.Generation
+	synthInSync := comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
+	if compInSync && synthInSync {
+		return ctrl.Result{}, nil // already in sync
+	}
+
+	// Slow-roll synthesizer changes across referencing compositions only when the composition itself hasn't changed
+	if compInSync && !synthInSync {
+		res, err := c.shouldDeferForRollingUpdate(ctx, comp, syn)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if res != nil {
+			logger.Info(fmt.Sprintf("deferring synthesis for %s because another composition is within the cooldown window", res.RequeueAfter))
+			return *res, nil
+		}
+		logger.Info("re-synthesizing composition because the synthesizer configuration changed")
+	}
+
+	// If we made it this far it's safe to create a pod
+	pod := newPod(c.config, c.client.Scheme(), comp, syn)
+	err = c.client.Create(ctx, pod)
+	if err != nil {
+		return ctrl.Result{}, client.IgnoreAlreadyExists(fmt.Errorf("creating pod: %w", err))
+	}
+	logger.Info("created pod", "podName", pod.Name)
+
 	return ctrl.Result{}, nil
+}
+
+func (c *podLifecycleController) shouldDeferForRollingUpdate(ctx context.Context, comp *apiv1.Composition, syn *apiv1.Synthesizer) (*ctrl.Result, error) {
+	list := &apiv1.CompositionList{}
+	if err := c.client.List(ctx, list, client.MatchingFields{
+		manager.IdxCompositionsBySynthesizer: syn.Name,
+	}); err != nil {
+		return nil, err
+	}
+
+	for _, item := range list.Items {
+		if item.Name == comp.Name && item.Namespace == comp.Namespace {
+			continue
+		}
+		// We can safely ignore compositions that don't have status yet since they will be reconciled soon
+		if item.Status.CurrentState == nil {
+			continue
+		}
+		sinceLastGeneration := time.Since(item.Status.CurrentState.PodCreation.Time)
+		remainingCooldown := c.config.RolloutCooldown - sinceLastGeneration
+		if remainingCooldown > 0 {
+			return &ctrl.Result{Requeue: true, RequeueAfter: remainingCooldown}, nil
+		}
+	}
+
+	return nil, nil
+}
+
+func (c *podLifecycleController) shouldDeletePod(pod *corev1.Pod) bool {
+	if time.Since(pod.CreationTimestamp.Time) > c.config.Timeout {
+		return true
+	}
+	for _, cont := range append(pod.Status.ContainerStatuses, pod.Status.InitContainerStatuses...) {
+		if cont.RestartCount > c.config.MaxRestarts {
+			return true
+		}
+
+		if cont.State.Terminated == nil || cont.State.Terminated.ExitCode != 0 {
+			return false // has not completed yet
+		}
+	}
+	return len(pod.Status.ContainerStatuses) > 0
 }

@@ -18,31 +18,30 @@ type Config struct {
 	RolloutCooldown time.Duration
 }
 
-// IMPORTANT: The manager's pod informer should be filtered on a label present on pods created by this controller to avoid caching all pods on the cluster
 func NewController(mgr ctrl.Manager, cfg *Config) error {
-	pcc := &podCreationController{
+	plc := &podLifecycleController{
 		config: cfg,
 		client: mgr.GetClient(),
 	}
 	_, err := ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
-		Watches(&apiv1.Synthesizer{}, &synthEventHandler{ctrl: pcc}).
+		Watches(&apiv1.Synthesizer{}, &synthEventHandler{ctrl: plc}).
 		Owns(&corev1.Pod{}).
-		WithLogConstructor(manager.NewLogConstructor(mgr, "podCreationController")).
-		Build(pcc)
+		WithLogConstructor(manager.NewLogConstructor(mgr, "podLifecycleController")).
+		Build(plc)
 	if err != nil {
 		return err
 	}
 
 	// TODO: Separate constructors?
 
-	plc := &podLifecycleController{
+	sc := &statusController{
 		config: cfg,
 		client: mgr.GetClient(),
 	}
 	_, err = ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Pod{}).
-		WithLogConstructor(manager.NewLogConstructor(mgr, "podLifecycleController")).
-		Build(plc)
+		WithLogConstructor(manager.NewLogConstructor(mgr, "statusController")).
+		Build(sc)
 	return err
 }

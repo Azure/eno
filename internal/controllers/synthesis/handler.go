@@ -17,7 +17,7 @@ import (
 
 // synthEventHandler enqueues an event for every composition that references an incoming synthesizer.
 type synthEventHandler struct {
-	ctrl *podCreationController
+	ctrl *podLifecycleController
 }
 
 func (h *synthEventHandler) Generic(ctx context.Context, evt event.GenericEvent, q workqueue.RateLimitingInterface) {
