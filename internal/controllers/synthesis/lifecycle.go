@@ -76,6 +76,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, fmt.Errorf("error deleting pod: %w", err)
 		}
 		logger.Info("deleted synthesis pod")
+		return ctrl.Result{}, nil
 	}
 
 	// At this point we know the pod is still running.

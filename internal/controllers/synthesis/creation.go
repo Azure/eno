@@ -46,11 +46,23 @@ func (c *podCreationController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, fmt.Errorf("listing pods: %w", err)
 	}
 	if len(pods.Items) > 0 {
-		// TODO: Log here
+		for _, pod := range pods.Items {
+			if pod.DeletionTimestamp != nil {
+				logger.V(1).Info("pod is pending deletion", "podName", pod.Name)
+				continue
+			}
+
+			if true { // TODO: Compare with the current comp/synth
+				continue
+			}
+
+			if err := c.client.Delete(ctx, &pod); err != nil {
+				return ctrl.Result{}, fmt.Errorf("deleting old pod: %w", err)
+			}
+			logger.Info("delete useless pod", "podName", pod.Name)
+		}
 		return ctrl.Result{}, nil
 	}
-
-	// TODO: Clean up leaked pods
 
 	// Skip cases in which the GeneratedResources have already been created
 	compInSync := comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == comp.Generation
@@ -77,8 +89,8 @@ func (c *podCreationController) Reconcile(ctx context.Context, req ctrl.Request)
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreAlreadyExists(fmt.Errorf("creating pod: %w", err))
 	}
+	logger.Info("created pod", "podName", pod.Name)
 
-	// TODO: Log
 	return ctrl.Result{}, nil
 }
 
