@@ -2,8 +2,8 @@ package testutil
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"math/rand"
 	"path/filepath"
 	goruntime "runtime"
 	"testing"
@@ -110,31 +110,32 @@ func Eventually(t testing.TB, fn func() bool) {
 
 // NewPodController adds a controller to the manager that simulates the behavior of a synthesis pod.
 // Useful for integration testing without kcm/kubelet.
-func NewPodController(t testing.TB, mgr ctrl.Manager) {
+func NewPodController(t testing.TB, mgr ctrl.Manager, maxJitterMS int64) {
 	cli := mgr.GetClient()
 	podCtrl := reconcile.Func(func(ctx context.Context, r reconcile.Request) (reconcile.Result, error) {
-		pod := &corev1.Pod{}
-		err := cli.Get(ctx, r.NamespacedName, pod)
-		if err != nil {
-			return reconcile.Result{}, client.IgnoreNotFound(err)
-		}
-		owners := pod.OwnerReferences
-		if len(owners) == 0 {
-			t.Logf("got a pod that isn't owned by anything")
-			return reconcile.Result{}, nil // can't be our pod (shouldn't be possible)
-		}
-
-		// Add resource slice count - the wrapper will do this in the real world
 		comp := &apiv1.Composition{}
-		comp.Name = owners[0].Name
-		comp.Namespace = pod.Namespace
-		err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		err := cli.Get(ctx, r.NamespacedName, comp)
 		if err != nil {
 			return reconcile.Result{}, err
 		}
 		if comp.Status.CurrentState == nil {
-			return reconcile.Result{}, errors.New("waiting to write resourceSliceCount from fake pod controller until the current state is written by the controller")
+			return reconcile.Result{}, nil // wait for controller to write initial status
 		}
+
+		// Inject some jitter into the system similar to real pods (but still quite a bit faster)
+		time.Sleep(time.Millisecond * time.Duration(rand.Int63n(maxJitterMS)))
+
+		pods := &corev1.PodList{}
+		err = cli.List(ctx, pods)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+		if len(pods.Items) == 0 {
+			return reconcile.Result{}, nil // no pods yet
+		}
+
+		// Add resource slice count - the wrapper will do this in the real world
+		pod := pods.Items[0]
 		if comp.Status.CurrentState.ResourceSliceCount == nil {
 			one := int64(1)
 			comp.Status.CurrentState.ResourceSliceCount = &one
@@ -143,6 +144,7 @@ func NewPodController(t testing.TB, mgr ctrl.Manager) {
 				return reconcile.Result{}, err
 			}
 			t.Logf("updated resource slice count for %s", pod.Name)
+			return reconcile.Result{}, nil
 		}
 
 		// Mark the pod as terminated to signal that synthesis is complete
@@ -154,18 +156,20 @@ func NewPodController(t testing.TB, mgr ctrl.Manager) {
 					},
 				},
 			}}
-			err = cli.Status().Update(ctx, pod)
+			err = cli.Status().Update(ctx, &pod)
 			if err != nil {
 				return reconcile.Result{}, err
 			}
 			t.Logf("updated container status for %s", pod.Name)
+			return reconcile.Result{}, nil
 		}
 
 		return reconcile.Result{}, nil
 	})
 
 	_, err := ctrl.NewControllerManagedBy(mgr).
-		For(&corev1.Pod{}).
+		For(&apiv1.Composition{}).
+		Owns(&corev1.Pod{}).
 		Build(podCtrl)
 	require.NoError(t, err)
 }

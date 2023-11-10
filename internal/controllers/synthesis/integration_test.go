@@ -1,12 +1,14 @@
 package synthesis
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -20,14 +22,12 @@ var minimalTestConfig = &Config{
 	RolloutCooldown: time.Millisecond * 10,
 }
 
-// TODO: Test fast updates to both resources
-
 // TODO: Test rollout throttling
 
 func TestControllerHappyPath(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
-	testutil.NewPodController(t, mgr.Manager)
+	testutil.NewPodController(t, mgr.Manager, 0)
 	cli := mgr.GetClient()
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
@@ -102,5 +102,48 @@ func TestControllerHappyPath(t *testing.T) {
 		list := &corev1.PodList{}
 		require.NoError(t, cli.List(ctx, list))
 		return len(list.Items) == 0
+	})
+}
+
+func TestControllerFastCompositionUpdates(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	testutil.NewPodController(t, mgr.Manager, 500)
+	cli := mgr.GetClient()
+
+	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
+	require.NoError(t, NewStatusController(mgr.Manager))
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "test-syn-image"
+	require.NoError(t, cli.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	// Send a bunch of updates in a row
+	for i := 0; i < 10; i++ {
+		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+			if client.IgnoreNotFound(err) != nil {
+				return err
+			}
+			comp.Spec.Inputs = []apiv1.InputRef{{
+				Name: fmt.Sprintf("some-unique-value-%d", i),
+			}}
+			return cli.Update(ctx, comp)
+		})
+		require.NoError(t, err)
+	}
+
+	// It should eventually converge even though pods did not terminate in order (due to jitter in testutil.NewPodController)
+	testutil.Eventually(t, func() bool {
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == comp.Generation
 	})
 }

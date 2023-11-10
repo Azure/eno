@@ -71,8 +71,12 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, fmt.Errorf("listing pods: %w", err)
 	}
 	if len(pods.Items) > 0 {
+		var pendingDeletion bool
 		for _, pod := range pods.Items {
 			if pod.DeletionTimestamp != nil {
+				if podDerivedFrom(comp, syn, &pod) {
+					pendingDeletion = true
+				}
 				continue // already deleted
 			}
 
@@ -89,13 +93,22 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 			if isLatest && comp.Status.CurrentState != nil {
 				logger = logger.WithValues("latency", time.Since(comp.Status.CurrentState.PodCreation.Time).Milliseconds())
 			}
-			logger.Info("deleted pod", "podName", pod.Name, "reason", reason)
+			if shouldDelete {
+				logger = logger.WithValues("reason", reason)
+			}
+			if !isLatest {
+				logger = logger.WithValues("reason", "Superseded")
+			}
+			logger.Info("deleted pod", "podName", pod.Name)
 			return ctrl.Result{}, nil
 		}
-
 		// The pod is still running.
 		// Poll periodically to check if has timed out.
-		return ctrl.Result{RequeueAfter: c.config.Timeout}, nil
+		// We allow creation of a new pod while the old one is terminating.
+		// K8s is expected to provide any necessary backpressure.
+		if !pendingDeletion {
+			return ctrl.Result{RequeueAfter: c.config.Timeout}, nil
+		}
 	}
 
 	// Skip cases in which the GeneratedResources have already been created
