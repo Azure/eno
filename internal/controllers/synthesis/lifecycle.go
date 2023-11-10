@@ -94,12 +94,12 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Slow-roll synthesizer changes across referencing compositions only when the composition itself hasn't changed
 	if compInSync && !synthInSync {
-		res, err := c.shouldDeferForRollingUpdate(ctx, comp, syn)
+		res, err := c.shouldDeferRollingUpdate(ctx, comp, syn)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 		if res != nil {
-			logger.Info(fmt.Sprintf("deferring synthesis for %s because another composition is within the cooldown window", res.RequeueAfter))
+			logger.Info("deferring synthesis because another composition is within the cooldown window", "latency", res.RequeueAfter.Milliseconds())
 			return *res, nil
 		}
 		logger.Info("re-synthesizing composition because the synthesizer configuration changed")
@@ -116,7 +116,10 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	return ctrl.Result{}, nil
 }
 
-func (c *podLifecycleController) shouldDeferForRollingUpdate(ctx context.Context, comp *apiv1.Composition, syn *apiv1.Synthesizer) (*ctrl.Result, error) {
+func (c *podLifecycleController) shouldDeferRollingUpdate(ctx context.Context, comp *apiv1.Composition, syn *apiv1.Synthesizer) (*ctrl.Result, error) {
+	// TODO: Don't sync until the previous write is available in the cache
+	time.Sleep(time.Millisecond * 100)
+
 	list := &apiv1.CompositionList{}
 	if err := c.client.List(ctx, list, client.MatchingFields{
 		manager.IdxCompositionsBySynthesizer: syn.Name,
@@ -126,12 +129,12 @@ func (c *podLifecycleController) shouldDeferForRollingUpdate(ctx context.Context
 
 	for _, item := range list.Items {
 		if item.Name == comp.Name && item.Namespace == comp.Namespace {
-			continue
+			continue // don't count the composition being reconciled
 		}
-		// We can safely ignore compositions that don't have status yet since they will be reconciled soon
-		if item.Status.CurrentState == nil {
-			continue
+		if item.Status.CurrentState == nil || item.Status.CurrentState.ObservedSynthesizerGeneration != syn.Generation {
+			continue // not a relevant composition
 		}
+
 		sinceLastGeneration := time.Since(item.Status.CurrentState.PodCreation.Time)
 		remainingCooldown := c.config.RolloutCooldown - sinceLastGeneration
 		if remainingCooldown > 0 {

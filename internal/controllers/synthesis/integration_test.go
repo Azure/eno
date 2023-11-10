@@ -188,3 +188,63 @@ func TestControllerFastSynthesizerUpdates(t *testing.T) {
 		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == comp.Generation
 	})
 }
+
+func TestControllerSynthesizerRollout(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	testutil.NewPodController(t, mgr.Manager, 0)
+	cli := mgr.GetClient()
+
+	// Rollout should not continue during this test
+	conf := *minimalTestConfig
+	conf.RolloutCooldown = time.Hour * 24
+
+	require.NoError(t, NewPodLifecycleController(mgr.Manager, &conf))
+	require.NoError(t, NewStatusController(mgr.Manager))
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "test-syn-image"
+	require.NoError(t, cli.Create(ctx, syn))
+
+	comp1 := &apiv1.Composition{}
+	comp1.Name = "test-comp-1"
+	comp1.Namespace = "default"
+	comp1.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, cli.Create(ctx, comp1))
+
+	comp2 := &apiv1.Composition{}
+	comp2.Name = "test-comp-2"
+	comp2.Namespace = "default"
+	comp2.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, cli.Create(ctx, comp2))
+
+	// Wait for initial sync
+	testutil.Eventually(t, func() bool {
+		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp1), comp1)))
+		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp2), comp2)))
+		inSync1 := comp1.Status.CurrentState != nil && comp1.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
+		inSync2 := comp2.Status.CurrentState != nil && comp2.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
+		return inSync1 && inSync2
+	})
+
+	syn.Spec.Image = "updated-image"
+	require.NoError(t, cli.Update(ctx, syn))
+
+	// One of the compositions should be updated but not the other because we set a RolloutCooldown of 1hr
+	assertRolloutPending := func() {
+		testutil.Eventually(t, func() bool {
+			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp1), comp1)))
+			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp2), comp2)))
+			inSync1 := comp1.Status.CurrentState != nil && comp1.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
+			inSync2 := comp2.Status.CurrentState != nil && comp2.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
+			return (inSync1 && !inSync2) || (!inSync1 && inSync2)
+		})
+	}
+
+	// Make sure the state persists
+	assertRolloutPending()
+	time.Sleep(time.Millisecond * 50)
+	assertRolloutPending()
+}

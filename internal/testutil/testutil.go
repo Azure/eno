@@ -128,7 +128,9 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, maxJitterMS int64) {
 		}
 
 		pods := &corev1.PodList{}
-		err = cli.List(ctx, pods)
+		err = cli.List(ctx, pods, client.MatchingFields{
+			manager.IdxPodsByComposition: comp.Name,
+		})
 		if err != nil {
 			return reconcile.Result{}, err
 		}
