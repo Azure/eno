@@ -117,8 +117,8 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 }
 
 func (c *podLifecycleController) shouldDeferRollingUpdate(ctx context.Context, comp *apiv1.Composition, syn *apiv1.Synthesizer) (*ctrl.Result, error) {
-	// TODO: Don't sync until the previous write is available in the cache
-	time.Sleep(time.Millisecond * 100)
+	// TODO: Need a better mechanism here
+	time.Sleep(time.Millisecond * 25)
 
 	list := &apiv1.CompositionList{}
 	if err := c.client.List(ctx, list, client.MatchingFields{
