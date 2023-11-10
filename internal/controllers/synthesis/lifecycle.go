@@ -77,14 +77,19 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 			}
 
 			// TODO: What if multiple correctly-derived pods are running?
-			if podDerivedFrom(comp, syn, &pod) && !c.shouldDeletePod(&pod) {
+			reason, shouldDelete := c.shouldDeletePod(&pod)
+			isLatest := podDerivedFrom(comp, syn, &pod)
+			if isLatest && !shouldDelete {
 				continue // still running
 			}
 
 			if err := c.client.Delete(ctx, &pod); err != nil {
 				return ctrl.Result{}, fmt.Errorf("deleting pod: %w", err)
 			}
-			logger.Info("deleted pod", "podName", pod.Name)
+			if isLatest && comp.Status.CurrentState != nil {
+				logger = logger.WithValues("latency", time.Since(comp.Status.CurrentState.PodCreation.Time).Milliseconds())
+			}
+			logger.Info("deleted pod", "podName", pod.Name, "reason", reason)
 			return ctrl.Result{}, nil
 		}
 
@@ -151,18 +156,23 @@ func (c *podLifecycleController) shouldDeferForRollingUpdate(ctx context.Context
 	return nil, nil
 }
 
-func (c *podLifecycleController) shouldDeletePod(pod *corev1.Pod) bool {
+func (c *podLifecycleController) shouldDeletePod(pod *corev1.Pod) (string, bool) {
 	if time.Since(pod.CreationTimestamp.Time) > c.config.Timeout {
-		return true
+		return "Timeout", true
 	}
 	for _, cont := range append(pod.Status.ContainerStatuses, pod.Status.InitContainerStatuses...) {
 		if cont.RestartCount > c.config.MaxRestarts {
-			return true
+			return "MaxRestartsExceeded", true
 		}
-
+		if cont.State.Terminated != nil && cont.State.Terminated.ExitCode == 0 {
+			return "Succeeded", true
+		}
 		if cont.State.Terminated == nil || cont.State.Terminated.ExitCode != 0 {
-			return false // has not completed yet
+			return "", false // has not completed yet
 		}
 	}
-	return len(pod.Status.ContainerStatuses) > 0
+	if len(pod.Status.ContainerStatuses) > 0 {
+		return "Unknown", true // shouldn't be possible
+	}
+	return "", false // status not initialized yet
 }
