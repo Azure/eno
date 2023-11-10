@@ -108,7 +108,7 @@ func TestControllerHappyPath(t *testing.T) {
 func TestControllerFastCompositionUpdates(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
-	testutil.NewPodController(t, mgr.Manager, 500)
+	testutil.NewPodController(t, mgr.Manager, 300)
 	cli := mgr.GetClient()
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
@@ -137,6 +137,47 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 				Name: fmt.Sprintf("some-unique-value-%d", i),
 			}}
 			return cli.Update(ctx, comp)
+		})
+		require.NoError(t, err)
+	}
+
+	// It should eventually converge even though pods did not terminate in order (due to jitter in testutil.NewPodController)
+	testutil.Eventually(t, func() bool {
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == comp.Generation
+	})
+}
+
+func TestControllerFastSynthesizerUpdates(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	testutil.NewPodController(t, mgr.Manager, 500)
+	cli := mgr.GetClient()
+
+	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
+	require.NoError(t, NewStatusController(mgr.Manager))
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "test-syn-image"
+	require.NoError(t, cli.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	// Send a bunch of updates in a row
+	for i := 0; i < 10; i++ {
+		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			err := cli.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+			if client.IgnoreNotFound(err) != nil {
+				return err
+			}
+			syn.Spec.Image = fmt.Sprintf("some-unique-value-%d", i)
+			return cli.Update(ctx, syn)
 		})
 		require.NoError(t, err)
 	}
