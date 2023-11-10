@@ -70,52 +70,25 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("listing pods: %w", err)
 	}
-	if len(pods.Items) > 0 {
-		var pendingDeletion bool
-		for _, pod := range pods.Items {
-			if pod.DeletionTimestamp != nil {
-				if podDerivedFrom(comp, syn, &pod) {
-					pendingDeletion = true
-				}
-				continue // already deleted
-			}
-
-			// TODO: What if multiple correctly-derived pods are running?
-			reason, shouldDelete := c.shouldDeletePod(&pod)
-			isLatest := podDerivedFrom(comp, syn, &pod)
-			if isLatest && !shouldDelete {
-				continue // still running
-			}
-
-			if err := c.client.Delete(ctx, &pod); err != nil {
-				return ctrl.Result{}, fmt.Errorf("deleting pod: %w", err)
-			}
-			if isLatest && comp.Status.CurrentState != nil {
-				logger = logger.WithValues("latency", time.Since(comp.Status.CurrentState.PodCreation.Time).Milliseconds())
-			}
-			if shouldDelete {
-				logger = logger.WithValues("reason", reason)
-			}
-			if !isLatest {
-				logger = logger.WithValues("reason", "Superseded")
-			}
-			logger.Info("deleted pod", "podName", pod.Name)
-			return ctrl.Result{}, nil
-		}
+	logger, toDelete, ok := c.shouldDeletePod(logger, comp, syn, pods)
+	if !ok && toDelete == nil {
 		// The pod is still running.
 		// Poll periodically to check if has timed out.
-		// We allow creation of a new pod while the old one is terminating.
-		// K8s is expected to provide any necessary backpressure.
-		if !pendingDeletion {
-			return ctrl.Result{RequeueAfter: c.config.Timeout}, nil
+		return ctrl.Result{RequeueAfter: c.config.Timeout}, nil
+	}
+	if !ok && toDelete != nil {
+		if err := c.client.Delete(ctx, toDelete); err != nil {
+			return ctrl.Result{}, fmt.Errorf("deleting pod: %w", err)
 		}
+		logger.Info("deleted pod", "podName", toDelete.Name)
+		return ctrl.Result{}, nil
 	}
 
-	// Skip cases in which the GeneratedResources have already been created
+	// No need to create a pod if the composition's status reflects a successful synthesis and it represents the current version of the composition and synthesizer
 	compInSync := comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == comp.Generation
 	synthInSync := comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
 	if compInSync && synthInSync {
-		logger.V(1).Info("synthesis has completed - skipping creation")
+		logger.V(1).Info("synthesis is in sync - skipping creation")
 		return ctrl.Result{}, nil
 	}
 
@@ -169,7 +142,62 @@ func (c *podLifecycleController) shouldDeferForRollingUpdate(ctx context.Context
 	return nil, nil
 }
 
-func (c *podLifecycleController) shouldDeletePod(pod *corev1.Pod) (string, bool) {
+func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Synthesizer, pods *corev1.PodList) (logr.Logger, *corev1.Pod, bool) {
+	if len(pods.Items) == 0 {
+		return logger, nil, true
+	}
+
+	// Just in case we somehow created more than one pod (stale informer cache, etc.) - delete duplicates
+	var activeLatest bool
+	for _, pod := range pods.Items {
+		pod := pod
+		if pod.DeletionTimestamp != nil || !podDerivedFrom(comp, syn, &pod) {
+			continue
+		}
+		if activeLatest {
+			logger = logger.WithValues("reason", "Duplicate")
+			return logger, &pod, false
+		}
+		activeLatest = true
+	}
+
+	// Only create pods when the previous one is deleting or non-existant
+	for _, pod := range pods.Items {
+		pod := pod
+		reason, shouldDelete := c.podStatusTerminal(&pod)
+		isCurrent := podDerivedFrom(comp, syn, &pod)
+
+		// If the current pod is being deleted it's safe to create a new one if needed
+		// Avoid getting stuck by pods that fail to delete
+		if pod.DeletionTimestamp != nil && isCurrent {
+			return logger, nil, true
+		}
+
+		// Pod exists but still has work to do
+		if isCurrent && !shouldDelete {
+			continue
+		}
+
+		// Don't delete pods again
+		if pod.DeletionTimestamp != nil {
+			continue // already deleted
+		}
+
+		if isCurrent && comp.Status.CurrentState != nil {
+			logger = logger.WithValues("latency", time.Since(comp.Status.CurrentState.PodCreation.Time).Milliseconds())
+		}
+		if shouldDelete {
+			logger = logger.WithValues("reason", reason)
+		}
+		if !isCurrent {
+			logger = logger.WithValues("reason", "Superseded")
+		}
+		return logger, &pod, false
+	}
+	return logger, nil, false
+}
+
+func (c *podLifecycleController) podStatusTerminal(pod *corev1.Pod) (string, bool) {
 	if time.Since(pod.CreationTimestamp.Time) > c.config.Timeout {
 		return "Timeout", true
 	}

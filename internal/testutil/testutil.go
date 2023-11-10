@@ -123,7 +123,9 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, maxJitterMS int64) {
 		}
 
 		// Inject some jitter into the system similar to real pods (but still quite a bit faster)
-		time.Sleep(time.Millisecond * time.Duration(rand.Int63n(maxJitterMS)))
+		if maxJitterMS > 0 {
+			time.Sleep(time.Millisecond * time.Duration(rand.Int63n(maxJitterMS)))
+		}
 
 		pods := &corev1.PodList{}
 		err = cli.List(ctx, pods)
