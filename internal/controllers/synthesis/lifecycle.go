@@ -2,9 +2,7 @@ package synthesis
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -27,8 +25,6 @@ type Config struct {
 type podLifecycleController struct {
 	config *Config
 	client client.Client
-
-	lastPodCreation atomic.Pointer[cacheTrackingMetadata]
 }
 
 // NewPodLifecycleController is responsible for creating and deleting pods as needed to synthesize compositions.
@@ -98,11 +94,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Slow-roll synthesizer changes across referencing compositions only when the composition itself hasn't changed
 	if compInSync && !synthInSync {
-		ctx = logr.NewContext(ctx, logger)
 		res, err := c.shouldDeferRollingUpdate(ctx, comp, syn)
-		if errors.Is(err, ErrStaleCache) {
-			return ctrl.Result{}, nil // wait for next event
-		}
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -119,21 +111,14 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreAlreadyExists(fmt.Errorf("creating pod: %w", err))
 	}
-	c.lastPodCreation.Store(&cacheTrackingMetadata{
-		Time:                  time.Now(),
-		CompositionName:       comp.Name,
-		CompositionGeneration: comp.Generation,
-		SynthesizerGeneration: syn.Generation,
-	})
 	logger.Info("created pod", "podName", pod.Name)
 
 	return ctrl.Result{}, nil
 }
 
-var ErrStaleCache = errors.New("cache is not warm enough to determine rolling synthesizer update eligibility")
-
 func (c *podLifecycleController) shouldDeferRollingUpdate(ctx context.Context, comp *apiv1.Composition, syn *apiv1.Synthesizer) (*ctrl.Result, error) {
-	logger := logr.FromContextOrDiscard(ctx)
+	// TODO: Don't sync until the previous write is available in the cache
+	time.Sleep(time.Millisecond * 100)
 
 	list := &apiv1.CompositionList{}
 	if err := c.client.List(ctx, list, client.MatchingFields{
@@ -141,26 +126,6 @@ func (c *podLifecycleController) shouldDeferRollingUpdate(ctx context.Context, c
 	}); err != nil {
 		return nil, err
 	}
-
-	// Make sure the composition list reflects our last known pod creation.
-	// Otherwise it's possible to advance the rollout too quickly while waiting for the status controller or informer caches to catch up.
-	// In case the pod is deleted before the composition's status can be updated, we also time out after 1s.
-	lpc := c.lastPodCreation.Load()
-	var cacheIsWarm bool
-	if lpc != nil {
-		for _, item := range list.Items {
-			if state := item.Status.CurrentState; item.Name == lpc.CompositionName && state != nil &&
-				state.ObservedGeneration == lpc.CompositionGeneration && state.ObservedSynthesizerGeneration == lpc.SynthesizerGeneration {
-				cacheIsWarm = true
-			}
-		}
-	}
-	if !cacheIsWarm && time.Since(lpc.Time) > time.Second {
-		logger.Info("WARNING the previously created pod wasn't reflected in the composition status after 1s - it may have been deleted or informers are very stale")
-	} else if !cacheIsWarm {
-		return nil, ErrStaleCache
-	}
-	c.lastPodCreation.Store(nil)
 
 	for _, item := range list.Items {
 		if item.Name == comp.Name && item.Namespace == comp.Namespace {
@@ -254,11 +219,4 @@ func (c *podLifecycleController) podStatusTerminal(pod *corev1.Pod) (string, boo
 		return "Unknown", true // shouldn't be possible
 	}
 	return "", false // status not initialized yet
-}
-
-type cacheTrackingMetadata struct {
-	Time                  time.Time
-	CompositionName       string
-	CompositionGeneration int64
-	SynthesizerGeneration int64
 }
