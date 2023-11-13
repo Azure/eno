@@ -82,6 +82,16 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
+	// Swap the state to prepare for resynthesis if the composition has changed
+	if comp.Status.CurrentState == nil || comp.Status.CurrentState.ObservedGeneration != comp.Generation {
+		swapStates(syn, comp)
+		if err := c.client.Status().Update(ctx, comp); err != nil {
+			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
+		}
+		logger.Info("swapped composition state because composition was modified since last synthesis")
+		return ctrl.Result{}, nil
+	}
+
 	// No need to create a pod if everything is in sync
 	if comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSliceCount != nil {
 		logger.V(1).Info("synthesis is complete - skipping creation")

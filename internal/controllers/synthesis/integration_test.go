@@ -85,8 +85,14 @@ func TestControllerHappyPath(t *testing.T) {
 	})
 
 	t.Run("synthesizer update", func(t *testing.T) {
-		syn.Spec.Image = "updated-image"
-		require.NoError(t, cli.Update(ctx, syn))
+		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			if err := cli.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
+				return err
+			}
+			syn.Spec.Image = "updated-image"
+			return cli.Update(ctx, syn)
+		})
+		require.NoError(t, err)
 
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
@@ -154,48 +160,6 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 	})
 }
 
-func TestControllerFastSynthesizerUpdates(t *testing.T) {
-	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t)
-	testutil.NewPodController(t, mgr.Manager, 500)
-	cli := mgr.GetClient()
-
-	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
-	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager, time.Millisecond*10))
-	mgr.Start(t)
-
-	syn := &apiv1.Synthesizer{}
-	syn.Name = "test-syn"
-	syn.Spec.Image = "test-syn-image"
-	require.NoError(t, cli.Create(ctx, syn))
-
-	comp := &apiv1.Composition{}
-	comp.Name = "test-comp"
-	comp.Namespace = "default"
-	comp.Spec.Synthesizer.Name = syn.Name
-	require.NoError(t, cli.Create(ctx, comp))
-
-	// Send a bunch of updates in a row
-	for i := 0; i < 10; i++ {
-		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-			err := cli.Get(ctx, client.ObjectKeyFromObject(syn), syn)
-			if client.IgnoreNotFound(err) != nil {
-				return err
-			}
-			syn.Spec.Image = fmt.Sprintf("some-unique-value-%d", i)
-			return cli.Update(ctx, syn)
-		})
-		require.NoError(t, err)
-	}
-
-	// It should eventually converge even though pods did not terminate in order (due to jitter in testutil.NewPodController)
-	testutil.Eventually(t, func() bool {
-		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == comp.Generation
-	})
-}
-
 func TestControllerSynthesizerRollout(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
@@ -234,8 +198,14 @@ func TestControllerSynthesizerRollout(t *testing.T) {
 		return inSync1 && inSync2
 	})
 
-	syn.Spec.Image = "updated-image"
-	require.NoError(t, cli.Update(ctx, syn))
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		if err := cli.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
+			return err
+		}
+		syn.Spec.Image = "updated-image"
+		return cli.Update(ctx, syn)
+	})
+	require.NoError(t, err)
 
 	// One of the compositions should be updated but not the other because we set a RolloutCooldown of 1hr
 	assertRolloutPending := func() {

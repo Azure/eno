@@ -3,6 +3,7 @@ package synthesis
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -18,7 +19,7 @@ type rolloutController struct {
 	cooldown time.Duration
 }
 
-// NewRolloutController updates composition statuses as pods transition through states.
+// NewRolloutController re-synthesizes compositions when their synthesizer has changed while honoring a cooldown period.
 func NewRolloutController(mgr ctrl.Manager, cooldownPeriod time.Duration) error {
 	c := &rolloutController{
 		client:   mgr.GetClient(),
@@ -40,6 +41,14 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("gettting synthesizer: %w", err))
 	}
 
+	if syn.Status.LastRolloutTime != nil {
+		remainingCooldown := c.cooldown - time.Since(syn.Status.LastRolloutTime.Time)
+		if remainingCooldown > 0 {
+			logger.V(1).Info("waiting to roll out a synthesizer change until the cooldown period has passed", "latency", remainingCooldown.Milliseconds())
+			return ctrl.Result{RequeueAfter: remainingCooldown}, nil
+		}
+	}
+
 	compList := &apiv1.CompositionList{}
 	err = c.client.List(ctx, compList, client.MatchingFields{
 		manager.IdxCompositionsBySynthesizer: syn.Name,
@@ -48,35 +57,34 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 	}
 
-	waitForCooldown := syn.Status.LastRolloutTime != nil && time.Since(syn.Status.LastRolloutTime.Time) < c.cooldown
+	// randomize list to avoid always rolling out changes in the same order
+	rand.Shuffle(len(compList.Items), func(i, j int) { compList.Items[i] = compList.Items[j] })
+
 	for _, comp := range compList.Items {
 		comp := comp
 		logger := logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
 
-		// - Always re-synthesize when the composition has changed
-		// - Slow roll synthesizer changes across their compositions
-		compHasChanged := compositionChangedSinceLastSynthesis(&comp)
-		synHasChanged := synthesizerChangedSinceLastSynthesis(syn, &comp)
-		if compHasChanged || (synHasChanged && !waitForCooldown) {
-			if compHasChanged {
-				logger.Info("synthesizing composition because it has changed since last synthesis")
-			} else if synHasChanged && !waitForCooldown {
-				logger.Info("waiting for cooldown before updating composition to latest synthesizer")
-			} else if synHasChanged {
-				logger.Info("synthesizing composition because its synthesizer has changed since last synthesis")
-			}
-
-			swapStates(syn, &comp)
-			return ctrl.Result{}, c.client.Status().Update(ctx, &comp)
+		if !synthesizerChangedSinceLastSynthesis(syn, &comp) {
+			continue
 		}
-		if synHasChanged && waitForCooldown {
-			logger.Info("synthesizer has changed but is still in its rollout cooldown period")
+		swapStates(syn, &comp)
+		if err := c.client.Status().Update(ctx, &comp); err != nil {
+			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
 		}
+		logger.Info("synthesizing composition because its synthesizer has changed since last synthesis")
+		return ctrl.Result{RequeueAfter: c.cooldown}, nil
 	}
 
-	if syn.Status.LastRolloutTime != nil {
-		return ctrl.Result{RequeueAfter: time.Since(syn.Status.LastRolloutTime.Time)}, nil
+	// Update the status to reflect the completed rollout
+	if syn.Status.CurrentGeneration != syn.Generation {
+		syn.Status.CurrentGeneration = syn.Generation
+		if err := c.client.Status().Update(ctx, syn); err != nil {
+			return ctrl.Result{}, fmt.Errorf("updating synthesizer's current generation: %w", err)
+		}
+		logger.Info("rollout is complete - updated synthesizer's current generation")
+		return ctrl.Result{}, nil
 	}
+
 	return ctrl.Result{}, nil
 }
 
@@ -90,10 +98,6 @@ func swapStates(syn *apiv1.Synthesizer, comp *apiv1.Composition) {
 	comp.Status.CurrentState = &apiv1.Synthesis{
 		ObservedGeneration: comp.Generation,
 	}
-}
-
-func compositionChangedSinceLastSynthesis(comp *apiv1.Composition) bool {
-	return comp.Status.CurrentState == nil || comp.Status.CurrentState.ObservedGeneration != comp.Generation
 }
 
 func synthesizerChangedSinceLastSynthesis(syn *apiv1.Synthesizer, comp *apiv1.Composition) bool {
