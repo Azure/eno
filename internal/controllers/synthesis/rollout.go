@@ -34,9 +34,6 @@ func NewRolloutController(mgr ctrl.Manager, cooldownPeriod time.Duration) error 
 func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	// TODO: We can only sync the watch event's composition - not the whole set
-	time.Sleep(time.Millisecond * 100) // TODO
-
 	syn := &apiv1.Synthesizer{}
 	err := c.client.Get(ctx, req.NamespacedName, syn)
 	if err != nil {
@@ -51,6 +48,7 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 	}
 
+	waitForCooldown := syn.Status.LastRolloutTime != nil && time.Since(syn.Status.LastRolloutTime.Time) < c.cooldown
 	for _, comp := range compList.Items {
 		comp := comp
 		logger := logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
@@ -59,11 +57,10 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		// - Slow roll synthesizer changes across their compositions
 		compHasChanged := compositionChangedSinceLastSynthesis(&comp)
 		synHasChanged := synthesizerChangedSinceLastSynthesis(syn, &comp)
-		wait := waitForCooldown(syn, &comp, compList, c.cooldown)
-		if compHasChanged || (synHasChanged && !wait) {
+		if compHasChanged || (synHasChanged && !waitForCooldown) {
 			if compHasChanged {
 				logger.Info("synthesizing composition because it has changed since last synthesis")
-			} else if synHasChanged && !wait {
+			} else if synHasChanged && !waitForCooldown {
 				logger.Info("waiting for cooldown before updating composition to latest synthesizer")
 			} else if synHasChanged {
 				logger.Info("synthesizing composition because its synthesizer has changed since last synthesis")
@@ -72,15 +69,13 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			swapStates(syn, &comp)
 			return ctrl.Result{}, c.client.Status().Update(ctx, &comp)
 		}
-		if synHasChanged && wait {
+		if synHasChanged && waitForCooldown {
 			logger.Info("synthesizer has changed but is still in its rollout cooldown period")
 		}
 	}
 
-	cTime, ok := findLastPodCreation(syn, nil, compList)
-	if ok {
-		// TODO: Think about times when this shouldn't happen?
-		return ctrl.Result{RequeueAfter: time.Since(cTime)}, nil
+	if syn.Status.LastRolloutTime != nil {
+		return ctrl.Result{RequeueAfter: time.Since(syn.Status.LastRolloutTime.Time)}, nil
 	}
 	return ctrl.Result{}, nil
 }
@@ -105,25 +100,4 @@ func synthesizerChangedSinceLastSynthesis(syn *apiv1.Synthesizer, comp *apiv1.Co
 	return comp.Status.CurrentState != nil &&
 		comp.Status.CurrentState.ObservedSynthesizerGeneration != nil &&
 		*comp.Status.CurrentState.ObservedSynthesizerGeneration != syn.Generation
-}
-
-func waitForCooldown(syn *apiv1.Synthesizer, current *apiv1.Composition, compList *apiv1.CompositionList, cooldown time.Duration) bool {
-	lastCreation, ok := findLastPodCreation(syn, current, compList)
-	t := time.Since(lastCreation)
-	return ok && t < cooldown
-}
-
-func findLastPodCreation(syn *apiv1.Synthesizer, current *apiv1.Composition, compList *apiv1.CompositionList) (t time.Time, ok bool) {
-	for _, item := range compList.Items {
-		if current != nil && (item.Name == current.Name && item.Namespace == current.Namespace) {
-			continue
-		}
-		if item.Status.CurrentState != nil &&
-			item.Status.CurrentState.ObservedSynthesizerGeneration != nil && *item.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation &&
-			item.Status.CurrentState.PodCreation != nil && item.Status.CurrentState.PodCreation.Time.After(t) {
-			t = item.Status.CurrentState.PodCreation.Time
-			ok = true
-		}
-	}
-	return t, ok
 }

@@ -75,6 +75,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		comp.Status.CurrentState.PodCreation == nil ||
 		(comp.Status.CurrentState.ObservedSynthesizerGeneration == nil || *comp.Status.CurrentState.ObservedSynthesizerGeneration != synGen)
 
+		// TODO: Refactor
 	if comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == compGen && statusIsOutOfSync {
 		comp.Status.CurrentState.PodCreation = &pod.CreationTimestamp
 		comp.Status.CurrentState.ObservedSynthesizerGeneration = &synGen
@@ -86,12 +87,26 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, nil
 	}
 
+	// Update the synthesizer rollout state only if this synthesis was caused by a change to the synthesizer
+	if comp.Status.PreviousState != nil && comp.Status.CurrentState != nil &&
+		comp.Status.PreviousState.ObservedSynthesizerGeneration != nil &&
+		comp.Status.CurrentState.ObservedSynthesizerGeneration != nil &&
+		*comp.Status.CurrentState.ObservedSynthesizerGeneration != *comp.Status.PreviousState.ObservedSynthesizerGeneration &&
+		(syn.Status.LastRolloutTime == nil || syn.Status.LastRolloutTime.After(comp.Status.CurrentState.PodCreation.Time)) {
+		syn.Status.LastRolloutTime = comp.Status.CurrentState.PodCreation
+		if err := c.client.Status().Update(ctx, syn); err != nil {
+			return ctrl.Result{Requeue: true}, fmt.Errorf("updating synthesizer rollout time: %w", err)
+		}
+		logger.Info("updated synthesizer rollout time")
+		return ctrl.Result{Requeue: true}, nil
+	}
+
 	// Remove the finalizer
 	if controllerutil.RemoveFinalizer(pod, "eno.azure.io/cleanup") {
-		logger.Info("removed pod finalizer")
 		if err := c.client.Update(ctx, pod); err != nil {
 			return ctrl.Result{}, fmt.Errorf("removing pod finalizer: %w", err)
 		}
+		logger.Info("removed pod finalizer")
 		return ctrl.Result{}, nil
 	}
 
