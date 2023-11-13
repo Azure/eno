@@ -117,7 +117,10 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 }
 
 func (c *podLifecycleController) shouldDeferRollingUpdate(ctx context.Context, comp *apiv1.Composition, syn *apiv1.Synthesizer) (*ctrl.Result, error) {
-	// TODO: Need a better mechanism here
+	// TODO: Wait for the composition status update resulting from our last pod creation
+	// - Update composition status first, then create pod
+	// - Somehow defer this check until after the next status has been written
+	//   - Always re-enqueue for every composition that uses the synth and isn't on its latest gen (with index)
 	time.Sleep(time.Millisecond * 25)
 
 	list := &apiv1.CompositionList{}
