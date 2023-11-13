@@ -16,10 +16,9 @@ import (
 )
 
 var minimalTestConfig = &Config{
-	WrapperImage:    "test-wrapper-image",
-	MaxRestarts:     3,
-	Timeout:         time.Second * 2,
-	RolloutCooldown: time.Millisecond * 10,
+	WrapperImage: "test-wrapper-image",
+	MaxRestarts:  3,
+	Timeout:      time.Second * 2,
 }
 
 func TestControllerHappyPath(t *testing.T) {
@@ -30,7 +29,7 @@ func TestControllerHappyPath(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager))
+	require.NoError(t, NewRolloutController(mgr.Manager, time.Millisecond*10))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -113,7 +112,7 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager))
+	require.NoError(t, NewRolloutController(mgr.Manager, time.Millisecond*10))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -157,7 +156,7 @@ func TestControllerFastSynthesizerUpdates(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager))
+	require.NoError(t, NewRolloutController(mgr.Manager, time.Millisecond*10))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -197,13 +196,9 @@ func TestControllerSynthesizerRollout(t *testing.T) {
 	testutil.NewPodController(t, mgr.Manager, 0)
 	cli := mgr.GetClient()
 
-	// Rollout should not continue during this test
-	conf := *minimalTestConfig
-	conf.RolloutCooldown = time.Hour * 24
-
-	require.NoError(t, NewPodLifecycleController(mgr.Manager, &conf))
+	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager))
+	require.NoError(t, NewRolloutController(mgr.Manager, time.Hour*24)) // Rollout should not continue during this test
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}

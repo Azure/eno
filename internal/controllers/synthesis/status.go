@@ -75,14 +75,14 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		comp.Status.CurrentState.PodCreation == nil ||
 		(comp.Status.CurrentState.ObservedSynthesizerGeneration == nil || *comp.Status.CurrentState.ObservedSynthesizerGeneration != synGen)
 
-	if comp.Status.CurrentState.ObservedGeneration == compGen && statusIsOutOfSync {
+	if comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == compGen && statusIsOutOfSync {
 		comp.Status.CurrentState.PodCreation = &pod.CreationTimestamp
 		comp.Status.CurrentState.ObservedSynthesizerGeneration = &synGen
 
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 		}
-		logger.Info("updated synthesis status")
+		logger.Info("populated synthesis status to reflect pod")
 		return ctrl.Result{}, nil
 	}
 

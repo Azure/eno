@@ -14,13 +14,15 @@ import (
 )
 
 type rolloutController struct {
-	client client.Client
+	client   client.Client
+	cooldown time.Duration
 }
 
 // NewRolloutController updates composition statuses as pods transition through states.
-func NewRolloutController(mgr ctrl.Manager) error {
+func NewRolloutController(mgr ctrl.Manager, cooldownPeriod time.Duration) error {
 	c := &rolloutController{
-		client: mgr.GetClient(),
+		client:   mgr.GetClient(),
+		cooldown: cooldownPeriod,
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Synthesizer{}).
@@ -46,7 +48,7 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 	}
 
-	cooldown, wait := waitForCooldown(syn, compList, time.Millisecond) // TODO: Configure
+	cooldown, wait := waitForCooldown(syn, compList, c.cooldown)
 	for _, comp := range compList.Items {
 		comp := comp
 		logger := logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)

@@ -15,11 +15,10 @@ import (
 )
 
 type Config struct {
-	WrapperImage    string
-	JobSA           string
-	MaxRestarts     int32
-	Timeout         time.Duration
-	RolloutCooldown time.Duration
+	WrapperImage string
+	JobSA        string
+	MaxRestarts  int32
+	Timeout      time.Duration
 }
 
 type podLifecycleController struct {
@@ -33,7 +32,6 @@ func NewPodLifecycleController(mgr ctrl.Manager, cfg *Config) error {
 		config: cfg,
 		client: mgr.GetClient(),
 	}
-	// TODO: Should only need to watch compositions?
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
 		Owns(&corev1.Pod{}).
@@ -86,7 +84,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 
 	// No need to create a pod if everything is in sync
 	if comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSliceCount != nil {
-		logger.V(1).Info("synthesis is in sync - skipping creation")
+		logger.V(1).Info("synthesis is complete - skipping creation")
 		return ctrl.Result{}, nil
 	}
 
