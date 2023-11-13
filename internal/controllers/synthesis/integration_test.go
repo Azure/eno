@@ -57,6 +57,12 @@ func TestControllerHappyPath(t *testing.T) {
 			require.NoError(t, cli.List(ctx, list))
 			return len(list.Items) == 0
 		})
+
+		// The pod eventually writes a resource slice count to the status
+		testutil.Eventually(t, func() bool {
+			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSliceCount != nil
+		})
 	})
 
 	t.Run("composition update", func(t *testing.T) {
