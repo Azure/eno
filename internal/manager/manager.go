@@ -19,7 +19,7 @@ import (
 const (
 	IdxCompositionsBySynthesizer     = ".spec.synthesizer"
 	IdxPodsByComposition             = ".metadata.ownerReferences.composition"
-	IdxSlicesByCompositionGeneration = ".metadata.ownerReferences.compositionGen"
+	IdxSlicesByCompositionGeneration = ".metadata.ownerReferences.compositionGen" // see: NewSlicesByCompositionGenerationKey
 )
 
 // TODO: Filter pod watch by label
@@ -63,8 +63,7 @@ func New(cfg *rest.Config, logger logr.Logger) (ctrl.Manager, error) {
 		if owner == nil || owner.Kind != "Composition" {
 			return nil
 		}
-		// keys will not collide because k8s doesn't allow slashes in names
-		return []string{fmt.Sprintf("%s/%d", owner.Name, slice.Spec.CompositionGeneration)}
+		return []string{NewSlicesByCompositionGenerationKey(owner.Name, slice.Spec.CompositionGeneration)}
 	})
 	if err != nil {
 		return nil, err
@@ -82,4 +81,11 @@ func NewLogConstructor(mgr ctrl.Manager, controllerName string) func(*reconcile.
 		}
 		return l
 	}
+}
+
+// TODO: USE
+// NewSlicesByCompositionGenerationKey documents the key structure used by IdxSlicesByCompositionGeneration.
+func NewSlicesByCompositionGenerationKey(compName string, compGeneration int64) string {
+	// keys will not collide because k8s doesn't allow slashes in names
+	return fmt.Sprintf("%s/%d", compName, compGeneration)
 }
