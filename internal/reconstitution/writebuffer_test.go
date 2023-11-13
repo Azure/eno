@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-logr/logr/testr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/types"
@@ -19,9 +18,9 @@ import (
 )
 
 func TestWriteBufferBasics(t *testing.T) {
-	ctx := context.Background()
+	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
-	w := newWriteBuffer(cli, testr.New(t), 0, 1)
+	w := newWriteBuffer(cli, 0, 1)
 
 	// One resource slice w/ len of 3
 	slice := &apiv1.ResourceSlice{}
@@ -49,7 +48,7 @@ func TestWriteBufferBasics(t *testing.T) {
 }
 
 func TestWriteBufferBatching(t *testing.T) {
-	ctx := context.Background()
+	ctx := testutil.NewContext(t)
 	var updateCalls atomic.Int32
 	cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
 		SubResourceUpdate: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
@@ -57,7 +56,7 @@ func TestWriteBufferBatching(t *testing.T) {
 			return client.SubResource(subResourceName).Update(ctx, obj, opts...)
 		},
 	})
-	w := newWriteBuffer(cli, testr.New(t), time.Millisecond*2, 1)
+	w := newWriteBuffer(cli, time.Millisecond*2, 1)
 
 	// One resource slice w/ len of 3
 	slice := &apiv1.ResourceSlice{}
@@ -87,9 +86,9 @@ func TestWriteBufferBatching(t *testing.T) {
 }
 
 func TestWriteBufferNoUpdates(t *testing.T) {
-	ctx := context.Background()
+	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
-	w := newWriteBuffer(cli, testr.New(t), 0, 1)
+	w := newWriteBuffer(cli, 0, 1)
 
 	// One resource slice w/ len of 3
 	slice := &apiv1.ResourceSlice{}
@@ -113,9 +112,9 @@ func TestWriteBufferNoUpdates(t *testing.T) {
 }
 
 func TestWriteBufferMissingSlice(t *testing.T) {
-	ctx := context.Background()
+	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
-	w := newWriteBuffer(cli, testr.New(t), 0, 1)
+	w := newWriteBuffer(cli, 0, 1)
 
 	req := &ManifestRef{}
 	req.Slice.Name = "test-slice-1" // this doesn't exist
@@ -128,14 +127,14 @@ func TestWriteBufferMissingSlice(t *testing.T) {
 }
 
 func TestWriteBufferNoChange(t *testing.T) {
-	ctx := context.Background()
+	ctx := testutil.NewContext(t)
 	cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
 		SubResourceUpdate: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
 			t.Fatal("should not have sent any status updates")
 			return nil
 		},
 	})
-	w := newWriteBuffer(cli, testr.New(t), 0, 1)
+	w := newWriteBuffer(cli, 0, 1)
 
 	// One resource slice
 	slice := &apiv1.ResourceSlice{}
@@ -155,13 +154,13 @@ func TestWriteBufferNoChange(t *testing.T) {
 }
 
 func TestWriteBufferUpdateError(t *testing.T) {
-	ctx := context.Background()
+	ctx := testutil.NewContext(t)
 	cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
 		SubResourceUpdate: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
 			return errors.New("could be any error")
 		},
 	})
-	w := newWriteBuffer(cli, testr.New(t), 0, 1)
+	w := newWriteBuffer(cli, 0, 1)
 
 	// One resource slice w/ len of 3
 	slice := &apiv1.ResourceSlice{}
