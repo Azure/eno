@@ -60,12 +60,12 @@ type Synthesis struct {
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// metadata.generation of the Synthesizer at the time of synthesis.
-	ObservedSynthesizerGeneration int64 `json:"observedSynthesizerGeneration,omitempty"`
+	ObservedSynthesizerGeneration *int64 `json:"observedSynthesizerGeneration,omitempty"`
 
 	// Number of resulting resource slices. Since they are immutable, this provides adequate timing signal to avoid stale informer caches.
 	ResourceSliceCount *int64 `json:"resourceSliceCount,omitempty"`
 
-	Ready       bool        `json:"ready,omitempty"`
-	Synced      bool        `json:"synced,omitempty"`
-	PodCreation metav1.Time `json:"podCreation,omitempty"`
+	Ready       bool         `json:"ready,omitempty"`
+	Synced      bool         `json:"synced,omitempty"`
+	PodCreation *metav1.Time `json:"podCreation,omitempty"`
 }

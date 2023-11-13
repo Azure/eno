@@ -2,7 +2,6 @@ package synthesis
 
 import (
 	"context"
-	"math/rand"
 
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
@@ -11,28 +10,29 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/manager"
-	"github.com/go-logr/logr"
 )
 
-// synthEventHandler enqueues an event for every composition that references an incoming synthesizer.
-type synthEventHandler struct {
-	ctrl *podLifecycleController
+type compToSynHandler struct {
+	client client.Client
 }
 
-func (h *synthEventHandler) Generic(ctx context.Context, evt event.GenericEvent, q workqueue.RateLimitingInterface) {
+func enqueueSynthesizerFromCompositions(client client.Client) *compToSynHandler {
+	return &compToSynHandler{client: client}
+}
+
+func (h *compToSynHandler) Generic(ctx context.Context, evt event.GenericEvent, q workqueue.RateLimitingInterface) {
 	h.handle(ctx, evt.Object, q)
 }
 
-func (h *synthEventHandler) Create(ctx context.Context, evt event.CreateEvent, q workqueue.RateLimitingInterface) {
+func (h *compToSynHandler) Create(ctx context.Context, evt event.CreateEvent, q workqueue.RateLimitingInterface) {
 	h.handle(ctx, evt.Object, q)
 }
 
-func (h *synthEventHandler) Delete(ctx context.Context, evt event.DeleteEvent, q workqueue.RateLimitingInterface) {
+func (h *compToSynHandler) Delete(ctx context.Context, evt event.DeleteEvent, q workqueue.RateLimitingInterface) {
 	h.handle(ctx, evt.Object, q)
 }
 
-func (h *synthEventHandler) Update(ctx context.Context, evt event.UpdateEvent, q workqueue.RateLimitingInterface) {
+func (h *compToSynHandler) Update(ctx context.Context, evt event.UpdateEvent, q workqueue.RateLimitingInterface) {
 	switch {
 	case evt.ObjectNew != nil:
 		h.handle(ctx, evt.ObjectNew, q)
@@ -42,28 +42,13 @@ func (h *synthEventHandler) Update(ctx context.Context, evt event.UpdateEvent, q
 	}
 }
 
-func (h *synthEventHandler) handle(ctx context.Context, obj client.Object, q workqueue.RateLimitingInterface) {
-	if obj == nil {
+func (h *compToSynHandler) handle(ctx context.Context, obj client.Object, q workqueue.RateLimitingInterface) {
+	comp, ok := obj.(*apiv1.Composition)
+	if obj == nil || !ok || comp.Spec.Synthesizer.Name == "" {
 		return
 	}
 
-	list := &apiv1.CompositionList{}
-	err := h.ctrl.client.List(ctx, list, client.MatchingFields{
-		manager.IdxCompositionsBySynthesizer: obj.GetName(),
-	})
-	if err != nil {
-		// this should be impossible since we're reading from the informer cache
-		logr.FromContextOrDiscard(ctx).Error(err, "error while listing compositions to be enqueued")
-		return
-	}
-
-	// Randomize order that we dispatch events in to avoid favoring certain compositions
-	rand.Shuffle(len(list.Items), func(i, j int) { list.Items[i] = list.Items[j] })
-
-	for _, item := range list.Items {
-		q.Add(reconcile.Request{NamespacedName: types.NamespacedName{
-			Name:      item.GetName(),
-			Namespace: item.GetNamespace(),
-		}})
-	}
+	q.Add(reconcile.Request{NamespacedName: types.NamespacedName{
+		Name: comp.Spec.Synthesizer.Name,
+	}})
 }

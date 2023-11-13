@@ -33,9 +33,9 @@ func NewPodLifecycleController(mgr ctrl.Manager, cfg *Config) error {
 		config: cfg,
 		client: mgr.GetClient(),
 	}
+	// TODO: Should only need to watch compositions?
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
-		Watches(&apiv1.Synthesizer{}, &synthEventHandler{ctrl: c}).
 		Owns(&corev1.Pod{}).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "podLifecycleController")).
 		Complete(c)
@@ -84,25 +84,10 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	// No need to create a pod if the composition's status reflects a successful synthesis and it represents the current version of the composition and synthesizer
-	compInSync := comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == comp.Generation
-	synthInSync := comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
-	if compInSync && synthInSync {
+	// No need to create a pod if everything is in sync
+	if comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSliceCount != nil {
 		logger.V(1).Info("synthesis is in sync - skipping creation")
 		return ctrl.Result{}, nil
-	}
-
-	// Slow-roll synthesizer changes across referencing compositions only when the composition itself hasn't changed
-	if compInSync && !synthInSync {
-		res, err := c.shouldDeferRollingUpdate(ctx, comp, syn)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		if res != nil {
-			logger.Info("deferring synthesis because another composition is within the cooldown window", "latency", res.RequeueAfter.Milliseconds())
-			return *res, nil
-		}
-		logger.Info("re-synthesizing composition because the synthesizer configuration changed")
 	}
 
 	// If we made it this far it's safe to create a pod
@@ -114,38 +99,6 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	logger.Info("created pod", "podName", pod.Name)
 
 	return ctrl.Result{}, nil
-}
-
-func (c *podLifecycleController) shouldDeferRollingUpdate(ctx context.Context, comp *apiv1.Composition, syn *apiv1.Synthesizer) (*ctrl.Result, error) {
-	// TODO: Wait for the composition status update resulting from our last pod creation
-	// - Update composition status first, then create pod
-	// - Somehow defer this check until after the next status has been written
-	//   - Always re-enqueue for every composition that uses the synth and isn't on its latest gen (with index)
-	time.Sleep(time.Millisecond * 25)
-
-	list := &apiv1.CompositionList{}
-	if err := c.client.List(ctx, list, client.MatchingFields{
-		manager.IdxCompositionsBySynthesizer: syn.Name,
-	}); err != nil {
-		return nil, err
-	}
-
-	for _, item := range list.Items {
-		if item.Name == comp.Name && item.Namespace == comp.Namespace {
-			continue // don't count the composition being reconciled
-		}
-		if item.Status.CurrentState == nil || item.Status.CurrentState.ObservedSynthesizerGeneration != syn.Generation {
-			continue // not a relevant composition
-		}
-
-		sinceLastGeneration := time.Since(item.Status.CurrentState.PodCreation.Time)
-		remainingCooldown := c.config.RolloutCooldown - sinceLastGeneration
-		if remainingCooldown > 0 {
-			return &ctrl.Result{Requeue: true, RequeueAfter: remainingCooldown}, nil
-		}
-	}
-
-	return nil, nil
 }
 
 func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Synthesizer, pods *corev1.PodList) (logr.Logger, *corev1.Pod, bool) {
@@ -189,7 +142,7 @@ func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1
 			continue // already deleted
 		}
 
-		if isCurrent && comp.Status.CurrentState != nil {
+		if isCurrent && comp.Status.CurrentState != nil && comp.Status.CurrentState.PodCreation != nil {
 			logger = logger.WithValues("latency", time.Since(comp.Status.CurrentState.PodCreation.Time).Milliseconds())
 		}
 		if shouldDelete {

@@ -30,7 +30,7 @@ func NewStatusController(mgr ctrl.Manager) error {
 }
 
 func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := logr.FromContextOrDiscard(ctx).WithValues("podName", req.Name)
+	logger := logr.FromContextOrDiscard(ctx)
 
 	pod := &corev1.Pod{}
 	err := c.client.Get(ctx, req.NamespacedName, pod)
@@ -69,22 +69,16 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	var (
 		compGen, _ = strconv.ParseInt(pod.Annotations["eno.azure.io/composition-generation"], 10, 0)
 		synGen, _  = strconv.ParseInt(pod.Annotations["eno.azure.io/synthesizer-generation"], 10, 0)
-
-		podIsLatest           = comp.Generation == compGen && syn.Generation == synGen
-		statusIsOutOfSync     = (comp.Status.CurrentState == nil || comp.Status.CurrentState.ObservedGeneration != compGen || comp.Status.CurrentState.ObservedSynthesizerGeneration != synGen)
-		resourceSliceCountSet = comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSliceCount != nil
 	)
-	if podIsLatest && statusIsOutOfSync {
-		if resourceSliceCountSet {
-			// Only swap current->previous when the current synthesis has completed
-			// This avoids losing the prior state during rapid updates to the composition
-			comp.Status.PreviousState = comp.Status.CurrentState
-		}
-		comp.Status.CurrentState = &apiv1.Synthesis{
-			ObservedGeneration:            compGen,
-			ObservedSynthesizerGeneration: synGen,
-			PodCreation:                   pod.CreationTimestamp,
-		}
+
+	statusIsOutOfSync := comp.Status.CurrentState == nil ||
+		comp.Status.CurrentState.PodCreation == nil ||
+		(comp.Status.CurrentState.ObservedSynthesizerGeneration == nil || *comp.Status.CurrentState.ObservedSynthesizerGeneration != synGen)
+
+	if comp.Status.CurrentState.ObservedGeneration == compGen && statusIsOutOfSync {
+		comp.Status.CurrentState.PodCreation = &pod.CreationTimestamp
+		comp.Status.CurrentState.ObservedSynthesizerGeneration = &synGen
+
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 		}
