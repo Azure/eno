@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"path/filepath"
 	goruntime "runtime"
+	"strconv"
 	"testing"
 	"time"
 
@@ -141,8 +142,21 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, maxJitterMS int64) {
 		// Add resource slice count - the wrapper will do this in the real world
 		pod := pods.Items[0]
 		if comp.Status.CurrentState.ResourceSliceCount == nil {
-			one := int64(1)
-			comp.Status.CurrentState.ResourceSliceCount = &one
+			syn := &apiv1.Synthesizer{}
+			syn.Name = comp.Spec.Synthesizer.Name
+			err = cli.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+			if err != nil {
+				return reconcile.Result{}, err
+			}
+
+			// Support a magic annotation to set the resourceSliceCount property.
+			// This allows tests to reliably determine _which_ synthesizer was used in a given synthesis.
+			count := int64(1)
+			if syn.Annotations != nil && syn.Annotations["test-resource-slice-count"] != "" {
+				count, _ = strconv.ParseInt(syn.Annotations["test-resource-slice-count"], 10, 0)
+			}
+
+			comp.Status.CurrentState.ResourceSliceCount = &count
 			err = cli.Status().Update(ctx, comp)
 			if err != nil {
 				return reconcile.Result{}, err

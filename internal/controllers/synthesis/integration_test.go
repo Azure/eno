@@ -223,3 +223,56 @@ func TestControllerSynthesizerRollout(t *testing.T) {
 	time.Sleep(time.Millisecond * 50)
 	assertRolloutPending()
 }
+
+func TestControllerSwitchingSynthesizers(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	testutil.NewPodController(t, mgr.Manager, 0)
+	cli := mgr.GetClient()
+
+	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
+	require.NoError(t, NewStatusController(mgr.Manager))
+	require.NoError(t, NewRolloutController(mgr.Manager, time.Millisecond*10))
+	mgr.Start(t)
+
+	syn1 := &apiv1.Synthesizer{}
+	syn1.Name = "test-syn-1"
+	syn1.Spec.Image = "test-syn-image"
+	syn1.Annotations = map[string]string{"test-resource-slice-count": "1"}
+	require.NoError(t, cli.Create(ctx, syn1))
+
+	syn2 := &apiv1.Synthesizer{}
+	syn2.Name = "test-syn-2"
+	syn2.Spec.Image = "initial-image"
+	syn2.Annotations = map[string]string{"test-resource-slice-count": "2"}
+	require.NoError(t, cli.Create(ctx, syn2))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn1.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	t.Run("initial creation", func(t *testing.T) {
+		testutil.Eventually(t, func() bool {
+			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSliceCount != nil && *comp.Status.CurrentState.ResourceSliceCount == 1
+		})
+	})
+
+	t.Run("update synthesizer name", func(t *testing.T) {
+		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			if err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp); err != nil {
+				return err
+			}
+			comp.Spec.Synthesizer.Name = syn2.Name
+			return cli.Update(ctx, comp)
+		})
+		require.NoError(t, err)
+
+		testutil.Eventually(t, func() bool {
+			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSliceCount != nil && *comp.Status.CurrentState.ResourceSliceCount == 2
+		})
+	})
+}
