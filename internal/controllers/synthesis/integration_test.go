@@ -255,7 +255,7 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 
 	t.Run("initial creation", func(t *testing.T) {
 		testutil.Eventually(t, func() bool {
-			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
 			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSliceCount != nil && *comp.Status.CurrentState.ResourceSliceCount == 1
 		})
 	})
