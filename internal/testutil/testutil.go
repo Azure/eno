@@ -3,10 +3,8 @@ package testutil
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"path/filepath"
 	goruntime "runtime"
-	"strconv"
 	"testing"
 	"time"
 
@@ -111,7 +109,7 @@ func Eventually(t testing.TB, fn func() bool) {
 
 // NewPodController adds a controller to the manager that simulates the behavior of a synthesis pod.
 // Useful for integration testing without kcm/kubelet.
-func NewPodController(t testing.TB, mgr ctrl.Manager, maxJitterMS int64) {
+func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition, *apiv1.Synthesizer) []*apiv1.ResourceSlice) {
 	cli := mgr.GetClient()
 	podCtrl := reconcile.Func(func(ctx context.Context, r reconcile.Request) (reconcile.Result, error) {
 		comp := &apiv1.Composition{}
@@ -123,9 +121,21 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, maxJitterMS int64) {
 			return reconcile.Result{}, nil // wait for controller to write initial status
 		}
 
-		// Inject some jitter into the system similar to real pods (but still quite a bit faster)
-		if maxJitterMS > 0 {
-			time.Sleep(time.Millisecond * time.Duration(rand.Int63n(maxJitterMS)))
+		syn := &apiv1.Synthesizer{}
+		syn.Name = comp.Spec.Synthesizer.Name
+		err = cli.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+
+		var slices []*apiv1.ResourceSlice
+		if fn != nil {
+			slices = fn(comp, syn)
+			for _, slice := range slices {
+				if err := cli.Create(ctx, slice); err != nil {
+					return reconcile.Result{}, err
+				}
+			}
 		}
 
 		pods := &corev1.PodList{}
@@ -142,20 +152,7 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, maxJitterMS int64) {
 		// Add resource slice count - the wrapper will do this in the real world
 		pod := pods.Items[0]
 		if comp.Status.CurrentState.ResourceSliceCount == nil {
-			syn := &apiv1.Synthesizer{}
-			syn.Name = comp.Spec.Synthesizer.Name
-			err = cli.Get(ctx, client.ObjectKeyFromObject(syn), syn)
-			if err != nil {
-				return reconcile.Result{}, err
-			}
-
-			// Support a magic annotation to set the resourceSliceCount property.
-			// This allows tests to reliably determine _which_ synthesizer was used in a given synthesis.
-			count := int64(1)
-			if syn.Annotations != nil && syn.Annotations["test-resource-slice-count"] != "" {
-				count, _ = strconv.ParseInt(syn.Annotations["test-resource-slice-count"], 10, 0)
-			}
-
+			count := int64(len(slices))
 			comp.Status.CurrentState.ResourceSliceCount = &count
 			err = cli.Status().Update(ctx, comp)
 			if err != nil {

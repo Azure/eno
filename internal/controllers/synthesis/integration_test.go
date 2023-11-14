@@ -2,6 +2,7 @@ package synthesis
 
 import (
 	"fmt"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -24,7 +25,7 @@ var minimalTestConfig = &Config{
 func TestControllerHappyPath(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
-	testutil.NewPodController(t, mgr.Manager, 0)
+	testutil.NewPodController(t, mgr.Manager, nil)
 	cli := mgr.GetClient()
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
@@ -119,8 +120,12 @@ func TestControllerHappyPath(t *testing.T) {
 func TestControllerFastCompositionUpdates(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
-	testutil.NewPodController(t, mgr.Manager, 300)
 	cli := mgr.GetClient()
+	testutil.NewPodController(t, mgr.Manager, func(c *apiv1.Composition, s *apiv1.Synthesizer) []*apiv1.ResourceSlice {
+		// simulate real pods taking some random amount of time to generation
+		time.Sleep(time.Millisecond * time.Duration(rand.Int63n(300)))
+		return nil
+	})
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
@@ -163,7 +168,7 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 func TestControllerSynthesizerRollout(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
-	testutil.NewPodController(t, mgr.Manager, 0)
+	testutil.NewPodController(t, mgr.Manager, nil)
 	cli := mgr.GetClient()
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
@@ -227,8 +232,18 @@ func TestControllerSynthesizerRollout(t *testing.T) {
 func TestControllerSwitchingSynthesizers(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
-	testutil.NewPodController(t, mgr.Manager, 0)
 	cli := mgr.GetClient()
+	testutil.NewPodController(t, mgr.Manager, func(c *apiv1.Composition, s *apiv1.Synthesizer) []*apiv1.ResourceSlice {
+		emptySlice := &apiv1.ResourceSlice{}
+		emptySlice.GenerateName = "test-"
+		emptySlice.Namespace = "default"
+
+		// return two slices for the second test synthesizer, we'll assert on that later
+		if s.Name == "test-syn-2" {
+			return []*apiv1.ResourceSlice{emptySlice.DeepCopy(), emptySlice.DeepCopy()}
+		}
+		return []*apiv1.ResourceSlice{emptySlice.DeepCopy()}
+	})
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
@@ -238,13 +253,11 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 	syn1 := &apiv1.Synthesizer{}
 	syn1.Name = "test-syn-1"
 	syn1.Spec.Image = "test-syn-image"
-	syn1.Annotations = map[string]string{"test-resource-slice-count": "1"}
 	require.NoError(t, cli.Create(ctx, syn1))
 
 	syn2 := &apiv1.Synthesizer{}
 	syn2.Name = "test-syn-2"
 	syn2.Spec.Image = "initial-image"
-	syn2.Annotations = map[string]string{"test-resource-slice-count": "2"}
 	require.NoError(t, cli.Create(ctx, syn2))
 
 	comp := &apiv1.Composition{}
