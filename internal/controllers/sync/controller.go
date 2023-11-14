@@ -15,8 +15,6 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// TODO: How to add log fields to error messages?
-
 type Controller struct {
 	client, upstreamClient client.Client
 	resourceClient         reconstitution.Client
@@ -56,8 +54,8 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	if comp.Status.PreviousState != nil {
 		prev, found = c.resourceClient.Get(ctx, &req.ResourceRef, comp.Status.PreviousState.ObservedGeneration)
 		if !found {
-			// TODO: This is incorrect. It should return an error because the cache may not have been filled yet. Composition status is canonical.
-			logger.V(1).Info("no previous resource manifest found")
+			logger.V(1).Info("no previous resource manifest found - waiting for cache to catch up")
+			return ctrl.Result{}, nil
 		}
 	} else {
 		logger.V(1).Info("no previous state given")
@@ -78,7 +76,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	if err := c.reconcileResource(ctx, prev, resource, current); err != nil {
 		return ctrl.Result{}, err
 	}
-	logger.V(0).Info("sync'd resource")
+	logger.V(1).Info("sync'd resource")
 
 	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) bool {
 		if rs.Reconciled {
