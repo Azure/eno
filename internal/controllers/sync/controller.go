@@ -52,11 +52,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	var prev *reconstitution.Resource
 	if comp.Status.PreviousState != nil {
-		prev, found = c.resourceClient.Get(ctx, &req.ResourceRef, comp.Status.PreviousState.ObservedGeneration)
-		if !found {
-			logger.V(1).Info("no previous resource manifest found - waiting for cache to catch up")
-			return ctrl.Result{}, nil
-		}
+		prev, _ = c.resourceClient.Get(ctx, &req.ResourceRef, comp.Status.PreviousState.ObservedGeneration)
 	} else {
 		logger.V(1).Info("no previous state given")
 	}
@@ -93,8 +89,8 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 	logger := logr.FromContextOrDiscard(ctx)
 
 	// Delete
-	if resource == nil {
-		if current.GetResourceVersion() == "" {
+	if prev == nil {
+		if current.GetResourceVersion() == "" || current.GetDeletionTimestamp() != nil {
 			return nil // already deleted
 		}
 
