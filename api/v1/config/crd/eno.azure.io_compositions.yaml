@@ -61,6 +61,9 @@ spec:
                 description: Compositions are synthesized by a Synthesizer.
                 properties:
                   minGeneration:
+                    description: Compositions will be resynthesized if their status.currentState.observedSynthesizerGeneration
+                      is < the referenced synthesizer's generation. Used to slowly
+                      roll out synthesizer updates across compositions.
                     format: int64
                     type: integer
                   name:
