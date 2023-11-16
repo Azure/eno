@@ -4,6 +4,9 @@ on: [push]
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        version: ["1.28.x", "1.18.x"] # TODO: Expand version matrix
     steps:
       - uses: actions/checkout@v3
       - name: Set up Go
@@ -11,5 +14,5 @@ jobs:
         with:
           go-version: '1.21'
       - name: Test
-        run: KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path 1.28.x) go test -v ./...
+        run: KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path ${{ matrix.version }}) go test -v ./...
 
