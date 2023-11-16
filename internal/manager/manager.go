@@ -10,6 +10,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -19,9 +20,19 @@ const (
 	IdxSlicesByCompositionGeneration = ".metadata.ownerReferences.compositionGen" // see: NewSlicesByCompositionGenerationKey
 )
 
-func New(cfg *rest.Config, logger logr.Logger) (ctrl.Manager, error) {
-	mgr, err := ctrl.NewManager(cfg, manager.Options{
-		Logger: logger,
+type Options struct {
+	Rest            *rest.Config
+	HealthProbeAddr string
+	MetricsAddr     string
+}
+
+func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
+	mgr, err := ctrl.NewManager(opts.Rest, manager.Options{
+		Logger:                 logger,
+		HealthProbeBindAddress: opts.HealthProbeAddr,
+		Metrics: server.Options{
+			BindAddress: opts.MetricsAddr,
+		},
 	})
 	if err != nil {
 		return nil, err
