@@ -41,4 +41,8 @@ type SynthesizerStatus struct {
 type SynthesizerRef struct {
 	// +required
 	Name string `json:"name,omitempty"`
+
+	// Compositions will be resynthesized if their status.currentState.observedSynthesizerGeneration is < the referenced synthesizer's generation.
+	// Used to slowly roll out synthesizer updates across compositions.
+	MinGeneration int64 `json:"minGeneration,omitempty"`
 }
