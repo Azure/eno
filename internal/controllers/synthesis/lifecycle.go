@@ -82,7 +82,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	// Swap the state to prepare for resynthesis if the composition has changed
+	// Swap the state to prepare for resynthesis if needed
 	if comp.Status.CurrentState == nil || comp.Status.CurrentState.ObservedGeneration != comp.Generation {
 		swapStates(syn, comp)
 		if err := c.client.Status().Update(ctx, comp); err != nil {
@@ -183,4 +183,16 @@ func (c *podLifecycleController) podStatusTerminal(pod *corev1.Pod) (string, boo
 		return "Unknown", true // shouldn't be possible
 	}
 	return "", false // status not initialized yet
+}
+
+func swapStates(syn *apiv1.Synthesizer, comp *apiv1.Composition) {
+	// Only swap current->previous when the current synthesis has completed
+	// This avoids losing the prior state during rapid updates to the composition
+	resourceSliceCountSet := comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSliceCount != nil
+	if resourceSliceCountSet {
+		comp.Status.PreviousState = comp.Status.CurrentState
+	}
+	comp.Status.CurrentState = &apiv1.Synthesis{
+		ObservedGeneration: comp.Generation,
+	}
 }

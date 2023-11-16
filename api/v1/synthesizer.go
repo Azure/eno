@@ -41,4 +41,6 @@ type SynthesizerStatus struct {
 type SynthesizerRef struct {
 	// +required
 	Name string `json:"name,omitempty"`
+
+	MinGeneration int64 `json:"minGeneration,omitempty"`
 }

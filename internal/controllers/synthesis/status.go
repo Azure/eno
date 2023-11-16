@@ -37,6 +37,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("gettting pod: %w", err))
 	}
+	// TODO: Make this an event filter
 	if len(pod.OwnerReferences) == 0 || pod.OwnerReferences[0].Kind != "Composition" {
 		logger.V(1).Info("skipping pod because it isn't owned by a composition")
 		return ctrl.Result{}, nil
@@ -72,23 +73,13 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	)
 	if statusIsOutOfSync(comp, compGen, synGen) {
 		comp.Status.CurrentState.PodCreation = &pod.CreationTimestamp
-		comp.Status.CurrentState.ObservedSynthesizerGeneration = &synGen
+		comp.Status.CurrentState.ObservedSynthesizerGeneration = synGen
 
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 		}
 		logger.Info("populated synthesis status to reflect pod")
 		return ctrl.Result{}, nil
-	}
-
-	// Update the synthesizer rollout state only if this synthesis was caused by a change to the synthesizer
-	if shouldCountAgainstSynthesizerCooldown(comp, syn) {
-		syn.Status.LastRolloutTime = comp.Status.CurrentState.PodCreation
-		if err := c.client.Status().Update(ctx, syn); err != nil {
-			return ctrl.Result{Requeue: true}, fmt.Errorf("updating synthesizer rollout time: %w", err)
-		}
-		logger.Info("updated synthesizer rollout time")
-		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Remove the finalizer
@@ -106,13 +97,5 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 func statusIsOutOfSync(comp *apiv1.Composition, podCompGen, podSynGen int64) bool {
 	// TODO: Unit tests, make sure to cover the pod creation latching logic
 	return (comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == podCompGen) &&
-		(comp.Status.CurrentState.PodCreation == nil || comp.Status.CurrentState.ObservedSynthesizerGeneration == nil || *comp.Status.CurrentState.ObservedSynthesizerGeneration != podSynGen)
-}
-
-func shouldCountAgainstSynthesizerCooldown(comp *apiv1.Composition, syn *apiv1.Synthesizer) bool {
-	return comp.Status.PreviousState != nil && comp.Status.CurrentState != nil &&
-		comp.Status.PreviousState.ObservedSynthesizerGeneration != nil &&
-		comp.Status.CurrentState.ObservedSynthesizerGeneration != nil &&
-		*comp.Status.CurrentState.ObservedSynthesizerGeneration != *comp.Status.PreviousState.ObservedSynthesizerGeneration &&
-		(syn.Status.LastRolloutTime == nil || syn.Status.LastRolloutTime.After(comp.Status.CurrentState.PodCreation.Time))
+		(comp.Status.CurrentState.PodCreation == nil || comp.Status.CurrentState.ObservedSynthesizerGeneration != podSynGen)
 }

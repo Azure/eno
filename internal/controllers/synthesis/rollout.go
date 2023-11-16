@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -27,7 +29,6 @@ func NewRolloutController(mgr ctrl.Manager, cooldownPeriod time.Duration) error 
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Synthesizer{}).
-		Watches(&apiv1.Composition{}, enqueueSynthesizerFromCompositions(c.client)).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "rolloutController")).
 		Complete(c)
 }
@@ -64,11 +65,25 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		comp := comp
 		logger := logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
 
-		if !synthesizerChangedSinceLastSynthesis(syn, &comp) {
+		if comp.Spec.Synthesizer.MinGeneration >= syn.Generation {
 			continue
 		}
-		swapStates(syn, &comp)
-		if err := c.client.Status().Update(ctx, &comp); err != nil {
+
+		now := metav1.Now()
+		syn.Status.LastRolloutTime = &now
+		if err := c.client.Status().Update(ctx, syn); err != nil {
+			return ctrl.Result{}, fmt.Errorf("advancing last rollout time: %w", err)
+		}
+		logger.V(1).Info("advanced last rollout time")
+
+		err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			if err := c.client.Get(ctx, client.ObjectKeyFromObject(&comp), &comp); err != nil {
+				return err
+			}
+			comp.Spec.Synthesizer.MinGeneration = syn.Generation
+			return c.client.Update(ctx, &comp)
+		})
+		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
 		}
 		logger.Info("synthesizing composition because its synthesizer has changed since last synthesis")
@@ -86,22 +101,4 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	return ctrl.Result{}, nil
-}
-
-func swapStates(syn *apiv1.Synthesizer, comp *apiv1.Composition) {
-	// Only swap current->previous when the current synthesis has completed
-	// This avoids losing the prior state during rapid updates to the composition
-	resourceSliceCountSet := comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSliceCount != nil
-	if resourceSliceCountSet {
-		comp.Status.PreviousState = comp.Status.CurrentState
-	}
-	comp.Status.CurrentState = &apiv1.Synthesis{
-		ObservedGeneration: comp.Generation,
-	}
-}
-
-func synthesizerChangedSinceLastSynthesis(syn *apiv1.Synthesizer, comp *apiv1.Composition) bool {
-	return comp.Status.CurrentState != nil &&
-		comp.Status.CurrentState.ObservedSynthesizerGeneration != nil &&
-		*comp.Status.CurrentState.ObservedSynthesizerGeneration != syn.Generation
 }

@@ -68,13 +68,17 @@ func TestControllerHappyPath(t *testing.T) {
 
 	t.Run("composition update", func(t *testing.T) {
 		// Updating the composition should cause re-synthesis
-		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-		comp.Spec.Inputs = []apiv1.InputRef{{Name: "anything"}}
-		require.NoError(t, cli.Update(ctx, comp))
+		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+			comp.Spec.Inputs = []apiv1.InputRef{{Name: "anything"}}
+			return cli.Update(ctx, comp)
+		})
+		require.NoError(t, err)
 
+		latest := comp.Generation
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == comp.Generation
+			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == latest
 		})
 
 		// The previous state is retained
@@ -98,14 +102,14 @@ func TestControllerHappyPath(t *testing.T) {
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 			// TODO: Helper
-			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedSynthesizerGeneration != nil && *comp.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
+			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
 		})
 
 		// The previous state is retained
 		if comp.Status.PreviousState == nil {
 			t.Error("state wasn't swapped to previous")
 		} else {
-			assert.Equal(t, syn.Generation-1, *comp.Status.PreviousState.ObservedSynthesizerGeneration)
+			assert.Equal(t, syn.Generation-1, comp.Status.PreviousState.ObservedSynthesizerGeneration)
 		}
 	})
 
@@ -159,9 +163,10 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 	}
 
 	// It should eventually converge even though pods did not terminate in order (due to jitter in testutil.NewPodController)
+	latest := comp.Generation
 	testutil.Eventually(t, func() bool {
 		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == comp.Generation
+		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == latest
 	})
 }
 
@@ -198,8 +203,8 @@ func TestControllerSynthesizerRollout(t *testing.T) {
 		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp1), comp1)))
 		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp2), comp2)))
 		// TODO: Helper func
-		inSync1 := comp1.Status.CurrentState != nil && comp1.Status.CurrentState.ObservedSynthesizerGeneration != nil && *comp1.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
-		inSync2 := comp2.Status.CurrentState != nil && comp2.Status.CurrentState.ObservedSynthesizerGeneration != nil && *comp2.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
+		inSync1 := comp1.Status.CurrentState != nil && comp1.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
+		inSync2 := comp2.Status.CurrentState != nil && comp2.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
 		return inSync1 && inSync2
 	})
 
@@ -217,8 +222,8 @@ func TestControllerSynthesizerRollout(t *testing.T) {
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp1), comp1)))
 			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp2), comp2)))
-			inSync1 := comp1.Status.CurrentState != nil && comp1.Status.CurrentState.ObservedSynthesizerGeneration != nil && *comp1.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
-			inSync2 := comp2.Status.CurrentState != nil && comp2.Status.CurrentState.ObservedSynthesizerGeneration != nil && *comp2.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
+			inSync1 := comp1.Status.CurrentState != nil && comp1.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
+			inSync2 := comp2.Status.CurrentState != nil && comp2.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
 			return (inSync1 && !inSync2) || (!inSync1 && inSync2)
 		})
 	}

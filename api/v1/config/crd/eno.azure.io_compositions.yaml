@@ -60,6 +60,9 @@ spec:
               synthesizer:
                 description: Compositions are synthesized by a Synthesizer.
                 properties:
+                  minGeneration:
+                    format: int64
+                    type: integer
                   name:
                     type: string
                 type: object
