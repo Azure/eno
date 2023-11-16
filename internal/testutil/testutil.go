@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -108,7 +109,8 @@ func Eventually(t testing.TB, fn func() bool) {
 }
 
 // NewPodController adds a controller to the manager that simulates the behavior of a synthesis pod.
-// Useful for integration testing without kcm/kubelet.
+// Useful for integration testing without kcm/kubelet. Slices returned from the given function will
+// be associated with the composition by this function.
 func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition, *apiv1.Synthesizer) []*apiv1.ResourceSlice) {
 	cli := mgr.GetClient()
 	podCtrl := reconcile.Func(func(ctx context.Context, r reconcile.Request) (reconcile.Result, error) {
@@ -132,7 +134,12 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 		if fn != nil {
 			slices = fn(comp, syn)
 			for _, slice := range slices {
-				if err := cli.Create(ctx, slice); err != nil {
+				cp := slice.DeepCopy()
+				cp.Spec.CompositionGeneration = comp.Generation
+				if err := controllerutil.SetControllerReference(comp, cp, cli.Scheme()); err != nil {
+					return reconcile.Result{}, err
+				}
+				if err := cli.Create(ctx, cp); err != nil {
 					return reconcile.Result{}, err
 				}
 			}

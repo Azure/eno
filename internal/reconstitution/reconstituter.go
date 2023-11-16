@@ -49,7 +49,7 @@ func (r *reconstituter) AddQueue(queue workqueue.Interface) {
 
 func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	r.started.Store(true)
-	r.logger.V(1).WithValues("composition", req).Info("caching composition")
+	r.logger.V(1).Info("caching composition")
 
 	comp := &apiv1.Composition{}
 	err := r.client.Get(ctx, req.NamespacedName, comp)
@@ -93,13 +93,13 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 
 	slices := &apiv1.ResourceSliceList{}
 	err := r.client.List(ctx, slices, client.InNamespace(comp.Namespace), client.MatchingFields{
-		manager.IdxSlicesByCompositionGeneration: fmt.Sprintf("%s/%d", comp.Name, synthesis.ObservedGeneration),
+		manager.IdxSlicesByCompositionGeneration: manager.NewSlicesByCompositionGenerationKey(comp.Name, synthesis.ObservedGeneration),
 	})
 	if err != nil {
 		return fmt.Errorf("listing resource slices: %w", err)
 	}
 
-	logger.V(1).Info(fmt.Sprintf("found %d slices for synthesis %d of composition %s/%s", len(slices.Items), synthesis.ObservedGeneration, comp.Namespace, comp.Name))
+	logger.V(1).Info(fmt.Sprintf("found %d resource slices", len(slices.Items)))
 	if int64(len(slices.Items)) != *synthesis.ResourceSliceCount {
 		logger.V(1).Info("stale informer - waiting for sync")
 		return nil
