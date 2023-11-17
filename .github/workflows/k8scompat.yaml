@@ -16,9 +16,10 @@ jobs:
         with:
           go-version: '1.21'
 
-      - id: build
+      - name: Generate test matrix using setup-envtest
+        id: build
         run: |
-          echo "matrix=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest -p env list | awk '/)/ {print $2}' | awk -F'.' '{print $2}' | jq --slurp 'map(tostring)')" >> $GITHUB_OUTPUT 
+          echo "matrix=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest -p env list | awk '/)/ {print $2}' | awk -F'.' '{print $2}' | jq -c --slurp 'map(tostring)')" >> $GITHUB_OUTPUT 
 
   test:
     name: Kubernetes 1.${{ matrix.downstreamApiserverMinorVersion }}
