@@ -1,8 +1,11 @@
 name: Kubernetes Version Compatibility Tests
-on: [push]
+on:
+  push:
+  workflow_dispatch:
 
 jobs:
   test:
+    name: Kubernetes 1.${{ matrix.downstreamApiserverMinorVersion }}
     runs-on: ubuntu-latest
     env:
       upstreamApiserverVersion: 1.28.x
@@ -44,5 +47,4 @@ jobs:
       - name: Run tests
         run: go test -v ./internal/controllers/reconciliation
         env:
-          KUBEBUILDER_ATTACH_CONTROL_PLANE_OUTPUT: "true"
           DOWNSTREAM_VERSION_MINOR: "${{ matrix.downstreamApiserverMinorVersion }}"
