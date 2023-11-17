@@ -89,17 +89,18 @@ func NewManager(t *testing.T) *Manager {
 	// Support starting a second apiserver if requested by the environment.
 	// Allows matrix testing against different versions of the upstream control plane.
 	if dir := os.Getenv("UPSTREAM_KUBEBUILDER_ASSETS"); dir != "" {
-		env := &envtest.Environment{
+		upstreamEnv := &envtest.Environment{
 			CRDDirectoryPaths:     []string{filepath.Join(root, "api", "v1", "config", "crd")},
 			ErrorIfCRDPathMissing: true,
+			BinaryAssetsDirectory: dir,
 		}
 		t.Cleanup(func() {
-			err := env.Stop()
+			err := upstreamEnv.Stop()
 			if err != nil {
 				panic(err)
 			}
 		})
-		m.UpstreamRestConfig, err = env.Start()
+		m.UpstreamRestConfig, err = upstreamEnv.Start()
 		require.NoError(t, err)
 
 		disc, err := discovery.NewDiscoveryClientForConfig(m.UpstreamRestConfig)
