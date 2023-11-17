@@ -63,6 +63,10 @@ func NewManager(t *testing.T) *Manager {
 	env := &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join(root, "api", "v1", "config", "crd")},
 		ErrorIfCRDPathMissing: true,
+
+		// We can't use KUBEBUILDER_ASSETS when also setting UPSTREAM_KUBEBUILDER_ASSETS
+		// because the envvar overrides BinaryAssetsDirectory
+		BinaryAssetsDirectory: os.Getenv("DOWNSTREAM_KUBEBUILDER_ASSETS"),
 	}
 	t.Cleanup(func() {
 		err := env.Stop()

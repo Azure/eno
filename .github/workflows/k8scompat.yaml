@@ -37,7 +37,7 @@ jobs:
 
       - name: Download kubebuilder assets
         run: |
-          echo "KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path $APISERVER_VERSION)" >> $GITHUB_ENV
+          echo "DOWNSTREAM_KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path $APISERVER_VERSION)" >> $GITHUB_ENV
           echo "UPSTREAM_KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path ${{ matrix.upstreamApiserverVersion }})" >> $GITHUB_ENV
 
       - name: Run tests
