@@ -36,25 +36,21 @@ jobs:
           go-version: '1.21'
 
       - name: Download kubebuilder assets
-        id: kubebuilder-assets
         run: |
-          echo "dir=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path $APISERVER_VERSION)" >> $GITHUB_OUTPUT
-          echo "upstream-dir=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path ${{ matrix.upstreamApiserverVersion }})" >> $GITHUB_OUTPUT
+          echo "KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path $APISERVER_VERSION)" >> $GITHUB_ENV
+          echo "UPSTREAM_KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path ${{ matrix.upstreamApiserverVersion }})" >> $GITHUB_ENV
 
       - name: Cache kubebuilder assets
         uses: actions/cache@v2
         with:
-          path: ${{ steps.kubebuilder-assets.dir }}
+          path: ${{ env.KUBEBUILDER_ASSETS }}
           key: ${{ env.APISERVER_VERSION }}
 
       - name: Cache upstream kubebuilder assets
         uses: actions/cache@v2
         with:
-          path: ${{ steps.kubebuilder-assets.upstream-dir }}
+          path: ${{ env.UPSTREAM_KUBEBUILDER_ASSETS }}
           key: ${{ matrix.upstreamApiserverVersion }}
 
       - name: Run tests
         run: go test -v ./internal/controllers/reconciliation
-        env:
-          KUBEBUILDER_ASSETS: ${{ steps.kubebuilder-assets.dir }}
-          UPSTREAM_KUBEBUILDER_ASSETS: ${{ steps.kubebuilder-assets.upstream-dir }}
