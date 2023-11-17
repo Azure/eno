@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -100,6 +101,14 @@ func NewManager(t *testing.T) *Manager {
 		})
 		m.UpstreamRestConfig, err = env.Start()
 		require.NoError(t, err)
+
+		disc, err := discovery.NewDiscoveryClientForConfig(m.UpstreamRestConfig)
+		if err == nil {
+			version, err := disc.ServerVersion()
+			if err == nil {
+				t.Logf("upstream control plane version: %s", version.String())
+			}
+		}
 	}
 
 	return m

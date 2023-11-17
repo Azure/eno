@@ -12,21 +12,21 @@ jobs:
         - "1.28.x"
         - "1.27.x"
         - "1.26.x"
-        # - "1.25.x"
-        # - "1.24.x"
-        # - "1.23.x"
-        # - "1.22.x"
-        # - "1.21.x"
-        # - "1.20.x"
-        # - "1.19.x"
-        # - "1.17.x"
-        # - "1.16.x"
-        # - "1.15.x"
-        # - "1.14.x"
-        # - "1.13.x"
-        # - "1.12.x"
-        # - "1.11.x"
-        # - "1.10.x"
+        - "1.25.x"
+        - "1.24.x"
+        - "1.23.x"
+        - "1.22.x"
+        - "1.21.x"
+        - "1.20.x"
+        - "1.19.x"
+        - "1.17.x"
+        - "1.16.x"
+        - "1.15.x"
+        - "1.14.x"
+        - "1.13.x"
+        - "1.12.x"
+        - "1.11.x"
+        - "1.10.x"
     steps:
       - uses: actions/checkout@v3
 
@@ -39,18 +39,6 @@ jobs:
         run: |
           echo "KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path $APISERVER_VERSION)" >> $GITHUB_ENV
           echo "UPSTREAM_KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path ${{ matrix.upstreamApiserverVersion }})" >> $GITHUB_ENV
-
-      - name: Cache kubebuilder assets
-        uses: actions/cache@v2
-        with:
-          path: ${{ env.KUBEBUILDER_ASSETS }}
-          key: ${{ env.APISERVER_VERSION }}
-
-      - name: Cache upstream kubebuilder assets
-        uses: actions/cache@v2
-        with:
-          path: ${{ env.UPSTREAM_KUBEBUILDER_ASSETS }}
-          key: ${{ matrix.upstreamApiserverVersion }}
 
       - name: Run tests
         run: go test -v ./internal/controllers/reconciliation
