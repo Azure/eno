@@ -6,6 +6,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
@@ -20,10 +21,10 @@ import (
 
 type Controller struct {
 	client         client.Client
+	resourceClient reconstitution.Client
+
 	upstreamClient client.Client
 	openapi        openapi.Resources
-	discovery      discovery.DiscoveryInterface
-	resourceClient reconstitution.Client
 }
 
 func New(mgr *reconstitution.Manager, upstream *rest.Config) error {
@@ -50,10 +51,9 @@ func New(mgr *reconstitution.Manager, upstream *rest.Config) error {
 
 	return mgr.Add(&Controller{
 		client:         mgr.Manager.GetClient(),
+		resourceClient: mgr.GetClient(),
 		upstreamClient: upstreamClient,
 		openapi:        resources,
-		discovery:      disc,
-		resourceClient: mgr.GetClient(),
 	})
 }
 
@@ -118,6 +118,7 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 	logger := logr.FromContextOrDiscard(ctx)
 
 	// TODO
+	//
 	// Delete
 	// if prev == nil {
 	// 	if current.GetResourceVersion() == "" || current.GetDeletionTimestamp() != nil {
@@ -142,36 +143,16 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 		return nil
 	}
 
-	var prevManifest []byte
-	if prev != nil {
-		prevManifest = []byte(prev.Manifest)
-	}
-
 	// Patch
-	model := c.openapi.LookupResource(resource.Object.GroupVersionKind())
-	if model == nil {
-		// TODO: Fall back to non-strategic merge
-		// patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(prevManifest, []byte(resource.Manifest), desiredJS)
-		// if err != nil {
-		// 	return fmt.Errorf("building jsonpatch: %w", err)
-		// }
-		return fmt.Errorf("resource GVK was not found in the openapi spec")
-	}
-	patchmeta := strategicpatch.NewPatchMetaFromOpenAPI(model)
-
-	desiredJS, err := current.MarshalJSON()
+	patch, err := c.buildPatch(ctx, prev, resource, current)
 	if err != nil {
-		return fmt.Errorf("building json representation of desired state: %w", err)
+		return fmt.Errorf("building patch: %w", err)
 	}
-	patch, err := strategicpatch.CreateThreeWayMergePatch([]byte(prevManifest), []byte(resource.Manifest), desiredJS, patchmeta, true)
-	if err != nil {
-		return fmt.Errorf("building json representation of desired state: %w", err)
-	}
-
 	if string(patch) == "{}" {
 		logger.V(1).Info("skipping empty patch")
 		return nil
 	}
+
 	logger.V(0).Info("patching resource")
 	err = c.upstreamClient.Patch(ctx, current, client.RawPatch(types.MergePatchType, patch))
 	if err != nil {
@@ -179,4 +160,25 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 	}
 
 	return nil
+}
+
+func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) ([]byte, error) {
+	var prevManifest []byte
+	if prev != nil {
+		prevManifest = []byte(prev.Manifest)
+	}
+
+	desiredJS, err := current.MarshalJSON()
+	if err != nil {
+		return nil, fmt.Errorf("building json representation of desired state: %w", err)
+	}
+
+	model := c.openapi.LookupResource(resource.Object.GroupVersionKind())
+	if model == nil {
+		// Fall back to non-strategic merge
+		return jsonmergepatch.CreateThreeWayJSONMergePatch(prevManifest, []byte(resource.Manifest), desiredJS)
+	}
+
+	patchmeta := strategicpatch.NewPatchMetaFromOpenAPI(model)
+	return strategicpatch.CreateThreeWayMergePatch([]byte(prevManifest), []byte(resource.Manifest), desiredJS, patchmeta, true)
 }
