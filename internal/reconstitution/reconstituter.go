@@ -6,13 +6,13 @@ import (
 	"sync/atomic"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/manager"
 	"github.com/go-logr/logr"
 )
 
@@ -28,30 +28,16 @@ type reconstituter struct {
 }
 
 func newReconstituter(mgr ctrl.Manager) (*reconstituter, error) {
-	// Index resource slices by the specific synthesis they originate from
-	err := mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, indexName, func(o client.Object) []string {
-		slice := o.(*apiv1.ResourceSlice)
-		owner := metav1.GetControllerOf(slice)
-		if owner == nil || owner.Kind != "Composition" {
-			return nil
-		}
-		// keys will not collide because k8s doesn't allow slashes in names
-		return []string{fmt.Sprintf("%s/%d", owner.Name, slice.Spec.CompositionGeneration)}
-	})
-	if err != nil {
-		return nil, err
-	}
-
 	r := &reconstituter{
 		cache:  newCache(mgr.GetClient()),
 		client: mgr.GetClient(),
 	}
-	_, err = ctrl.NewControllerManagedBy(mgr).
+	return r, ctrl.NewControllerManagedBy(mgr).
 		Named("reconstituter").
 		For(&apiv1.Composition{}).
 		Owns(&apiv1.ResourceSlice{}).
-		Build(r)
-	return r, err
+		WithLogConstructor(manager.NewLogConstructor(mgr, "reconstituter")).
+		Complete(r)
 }
 
 func (r *reconstituter) AddQueue(queue workqueue.Interface) {
@@ -96,9 +82,13 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 	if synthesis == nil {
 		return nil
 	}
+	if synthesis.ResourceSliceCount == nil {
+		logger.V(1).Info("resource synthesis is not complete - waiting to fill cache")
+		return nil
+	}
 	compNSN := types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}
 
-	logger = logger.WithValues("synthesisGen", synthesis.ObservedGeneration)
+	logger = logger.WithValues("synthesisGen", synthesis.ObservedCompositionGeneration)
 	ctx = logr.NewContext(ctx, logger)
 	if r.cache.HasSynthesis(ctx, compNSN, synthesis) {
 		logger.V(1).Info("this synthesis has already been cached")
@@ -107,14 +97,14 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 
 	slices := &apiv1.ResourceSliceList{}
 	err := r.client.List(ctx, slices, client.InNamespace(comp.Namespace), client.MatchingFields{
-		indexName: fmt.Sprintf("%s/%d", comp.Name, synthesis.ObservedGeneration),
+		manager.IdxSlicesByCompositionGeneration: manager.NewSlicesByCompositionGenerationKey(comp.Name, synthesis.ObservedCompositionGeneration),
 	})
 	if err != nil {
 		return fmt.Errorf("listing resource slices: %w", err)
 	}
 
 	logger.V(1).Info(fmt.Sprintf("found %d slices for this synthesis", len(slices.Items)))
-	if int64(len(slices.Items)) != synthesis.ResourceSliceCount {
+	if int64(len(slices.Items)) != *synthesis.ResourceSliceCount {
 		logger.V(1).Info("stale informer - waiting for sync")
 		return nil
 	}

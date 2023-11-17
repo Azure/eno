@@ -45,6 +45,12 @@ spec:
                   complete.
                 format: int64
                 type: integer
+              lastRolloutTime:
+                description: LastRolloutTime is the timestamp of the last pod creation
+                  caused by a change to this resource. Should not be updated due to
+                  Composotion changes. Used to calculate rollout cooldown period.
+                format: date-time
+                type: string
             type: object
         type: object
     served: true

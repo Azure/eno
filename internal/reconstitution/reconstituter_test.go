@@ -30,9 +30,10 @@ func TestReconstituterIntegration(t *testing.T) {
 	comp.Namespace = "default"
 	require.NoError(t, client.Create(ctx, comp))
 
+	one := int64(1)
 	comp.Status.CurrentState = &apiv1.Synthesis{
-		ObservedGeneration: comp.Generation,
-		ResourceSliceCount: 1,
+		ObservedCompositionGeneration: comp.Generation,
+		ResourceSliceCount:            &one,
 	}
 	require.NoError(t, client.Status().Update(ctx, comp))
 

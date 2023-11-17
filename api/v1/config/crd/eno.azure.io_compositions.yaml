@@ -60,6 +60,12 @@ spec:
               synthesizer:
                 description: Compositions are synthesized by a Synthesizer.
                 properties:
+                  minGeneration:
+                    description: Compositions will be resynthesized if their status.currentState.observedSynthesizerGeneration
+                      is < the referenced synthesizer's generation. Used to slowly
+                      roll out synthesizer updates across compositions.
+                    format: int64
+                    type: integer
                   name:
                     type: string
                 type: object
@@ -70,9 +76,10 @@ spec:
                 description: Synthesis represents a Synthesizer's specific synthesis
                   of a given Composition.
                 properties:
-                  observedGeneration:
-                    description: metadata.generation of the Composition at the time
-                      of synthesis.
+                  observedCompositionGeneration:
+                    format: int64
+                    type: integer
+                  observedSynthesizerGeneration:
                     format: int64
                     type: integer
                   podCreation:
@@ -93,9 +100,10 @@ spec:
                 description: Synthesis represents a Synthesizer's specific synthesis
                   of a given Composition.
                 properties:
-                  observedGeneration:
-                    description: metadata.generation of the Composition at the time
-                      of synthesis.
+                  observedCompositionGeneration:
+                    format: int64
+                    type: integer
+                  observedSynthesizerGeneration:
                     format: int64
                     type: integer
                   podCreation:

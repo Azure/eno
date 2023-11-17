@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	goruntime "runtime"
 	"testing"
 	"time"
 
@@ -17,9 +18,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/manager"
 )
 
 func NewClient(t testing.TB) client.Client {
@@ -47,12 +48,16 @@ func NewContext(t *testing.T) context.Context {
 	t.Cleanup(func() {
 		cancel()
 	})
-	return logr.NewContext(ctx, testr.NewWithOptions(t, testr.Options{Verbosity: 99}))
+	return logr.NewContext(ctx, testr.NewWithOptions(t, testr.Options{Verbosity: 2}))
 }
 
 func NewManager(t *testing.T) *Manager {
+	_, b, _, _ := goruntime.Caller(0)
+	root := filepath.Join(filepath.Dir(b), "..", "..")
+
 	env := &envtest.Environment{
-		CRDDirectoryPaths: []string{filepath.Join("..", "..", "api", "v1", "config", "crd")},
+		CRDDirectoryPaths:     []string{filepath.Join(root, "api", "v1", "config", "crd")},
+		ErrorIfCRDPathMissing: true,
 	}
 	t.Cleanup(func() {
 		err := env.Stop()
@@ -64,13 +69,11 @@ func NewManager(t *testing.T) *Manager {
 	cfg, err := env.Start()
 	require.NoError(t, err)
 
-	mgr, err := ctrl.NewManager(cfg, manager.Options{
-		Logger:      testr.New(t),
-		BaseContext: func() context.Context { return NewContext(t) },
+	mgr, err := manager.New(logr.FromContextOrDiscard(NewContext(t)), &manager.Options{
+		Rest:            cfg,
+		HealthProbeAddr: "127.0.0.1:0",
+		MetricsAddr:     "127.0.0.1:0",
 	})
-	require.NoError(t, err)
-
-	err = apiv1.SchemeBuilder.AddToScheme(mgr.GetScheme())
 	require.NoError(t, err)
 
 	return &Manager{

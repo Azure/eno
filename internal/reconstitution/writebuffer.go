@@ -25,7 +25,6 @@ type asyncStatusUpdate struct {
 // updates over a short period of time and applying them in a single update request.
 type writeBuffer struct {
 	client client.Client
-	logger logr.Logger
 
 	// queue items are per-slice.
 	// the state map collects multiple updates per slice to be dispatched by next queue item.
@@ -34,10 +33,9 @@ type writeBuffer struct {
 	queue workqueue.RateLimitingInterface
 }
 
-func newWriteBuffer(cli client.Client, logger logr.Logger, batchInterval time.Duration, burst int) *writeBuffer {
+func newWriteBuffer(cli client.Client, batchInterval time.Duration, burst int) *writeBuffer {
 	return &writeBuffer{
 		client: cli,
-		logger: logger.WithValues("controller", "writeBuffer"),
 		state:  make(map[types.NamespacedName][]*asyncStatusUpdate),
 		queue: workqueue.NewRateLimitingQueueWithConfig(
 			&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Every(batchInterval), burst)},
@@ -80,13 +78,13 @@ func (w *writeBuffer) processQueueItem(ctx context.Context) bool {
 	defer w.queue.Done(item)
 	sliceNSN := item.(types.NamespacedName)
 
+	logger := logr.FromContextOrDiscard(ctx).WithValues("slice", sliceNSN, "controller", "writeBuffer")
+	ctx = logr.NewContext(ctx, logger)
+
 	w.mut.Lock()
 	updates := w.state[sliceNSN]
 	delete(w.state, sliceNSN)
 	w.mut.Unlock()
-
-	logger := w.logger.WithValues("slice", sliceNSN)
-	ctx = logr.NewContext(ctx, logger)
 
 	if len(updates) == 0 {
 		logger.V(0).Info("dropping queue item because no updates were found for this slice (this is suspicious)")

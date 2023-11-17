@@ -1,6 +1,8 @@
 package v1
 
-import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
 
 // +kubebuilder:object:root=true
 type SynthesizerList struct {
@@ -29,9 +31,18 @@ type SynthesizerStatus struct {
 	// The metadata.generation of this resource at the oldest version currently used by any Generations.
 	// This will equal the current generation when slow rollout of an update to the Generations is complete.
 	CurrentGeneration int64 `json:"currentGeneration,omitempty"`
+
+	// LastRolloutTime is the timestamp of the last pod creation caused by a change to this resource.
+	// Should not be updated due to Composotion changes.
+	// Used to calculate rollout cooldown period.
+	LastRolloutTime *metav1.Time `json:"lastRolloutTime,omitempty"`
 }
 
 type SynthesizerRef struct {
 	// +required
 	Name string `json:"name,omitempty"`
+
+	// Compositions will be resynthesized if their status.currentState.observedSynthesizerGeneration is < the referenced synthesizer's generation.
+	// Used to slowly roll out synthesizer updates across compositions.
+	MinGeneration int64 `json:"minGeneration,omitempty"`
 }
