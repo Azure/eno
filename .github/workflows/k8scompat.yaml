@@ -38,8 +38,8 @@ jobs:
       - name: Download kubebuilder assets
         id: kubebuilder-assets
         run: |
-          echo "::set-output name=dir::$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path $APISERVER_VERSION)"
-          echo "::set-output name=upstream-dir::$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path ${{ matrix.upstreamApiserverVersion }})"
+          echo "name=dir::$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path $APISERVER_VERSION)" >> $GITHUB_OUTPUT
+          echo "name=upstream-dir::$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path ${{ matrix.upstreamApiserverVersion }})" >> $GITHUB_OUTPUT
 
       - name: Cache kubebuilder assets
         uses: actions/cache@v2
