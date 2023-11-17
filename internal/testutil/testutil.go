@@ -94,9 +94,13 @@ func NewManager(t *testing.T) *Manager {
 	// Allows matrix testing against different versions of the upstream control plane.
 	if dir := os.Getenv("DOWNSTREAM_KUBEBUILDER_ASSETS"); dir != "" {
 		downstreamEnv := &envtest.Environment{
-			ErrorIfCRDPathMissing: true,
 			BinaryAssetsDirectory: dir,
 		}
+
+		// k8s <1.12 requires this flag
+		conf := downstreamEnv.ControlPlane.GetAPIServer().Configure()
+		conf.Append("service-account-api-audiences", "anything")
+
 		t.Cleanup(func() {
 			err := downstreamEnv.Stop()
 			if err != nil {
