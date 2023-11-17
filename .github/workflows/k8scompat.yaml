@@ -9,25 +9,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        downstreamApiserverVersion:
-        - "1.28.x"
-        - "1.27.x"
-        - "1.26.x"
-        - "1.25.x"
-        - "1.24.x"
-        - "1.23.x"
-        - "1.22.x"
-        - "1.21.x"
-        - "1.20.x"
-        - "1.19.x"
-        - "1.17.x"
-        - "1.16.x"
-        - "1.15.x"
-        - "1.14.x"
-        - "1.13.x"
-        - "1.12.x"
-        - "1.11.x"
-        - "1.10.x"
+        downstreamApiserverMinorVersion:
+        - "28"
+        - "27"
+        - "26"
+        - "25"
+        - "24"
+        - "23"
+        - "22"
+        - "21"
+        - "20"
+        - "19"
+        - "17"
+        - "16"
+        - "15"
+        - "14"
+        - "13"
+        - "12"
+        - "11"
+        - "10"
     steps:
       - uses: actions/checkout@v3
 
@@ -39,9 +39,10 @@ jobs:
       - name: Download kubebuilder assets
         run: |
           echo "UPSTREAM_KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path ${{ env.upstreamApiserverVersion }})" >> $GITHUB_ENV
-          echo "DOWNSTREAM_KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path ${{ matrix.downstreamApiserverVersion }})" >> $GITHUB_ENV
+          echo "DOWNSTREAM_KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path 1.${{ matrix.downstreamApiserverMinorVersion }}).x" >> $GITHUB_ENV
 
       - name: Run tests
         run: go test -v ./internal/controllers/reconciliation
         env:
           KUBEBUILDER_ATTACH_CONTROL_PLANE_OUTPUT: "true"
+          DOWNSTREAM_VERSION_MINOR: "${{ matrix.downstreamApiserverMinorVersion }}"

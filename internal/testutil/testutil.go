@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"strconv"
 	"testing"
 	"time"
 
@@ -56,6 +57,9 @@ func NewContext(t *testing.T) context.Context {
 	return logr.NewContext(ctx, testr.NewWithOptions(t, testr.Options{Verbosity: 2}))
 }
 
+// NewManager starts one or two envtest environments depending on the configuration of the env.
+// This should work seamlessly when run locally assuming some binaries have been fetched with setup-envtest.
+// In CI the second environment is used to compatibility test against a matrix of k8s versions.
 func NewManager(t *testing.T) *Manager {
 	_, b, _, _ := goruntime.Caller(0)
 	root := filepath.Join(filepath.Dir(b), "..", "..")
@@ -90,16 +94,18 @@ func NewManager(t *testing.T) *Manager {
 		DownstreamRestConfig: cfg, // possible override below
 	}
 
-	// Support starting a second apiserver if requested by the environment.
-	// Allows matrix testing against different versions of the upstream control plane.
 	if dir := os.Getenv("DOWNSTREAM_KUBEBUILDER_ASSETS"); dir != "" {
 		downstreamEnv := &envtest.Environment{
 			BinaryAssetsDirectory: dir,
 		}
 
-		// k8s <1.12 requires this flag
-		conf := downstreamEnv.ControlPlane.GetAPIServer().Configure()
-		conf.Append("service-account-api-audiences", "anything")
+		// k8s <1.13 will not start if these flags are set
+		version, _ := strconv.Atoi(os.Getenv("DOWNSTREAM_VERSION_MINOR"))
+		if version < 13 {
+			conf := downstreamEnv.ControlPlane.GetAPIServer().Configure()
+			conf.Disable("service-account-signing-key-file")
+			conf.Disable("service-account-issuer")
+		}
 
 		t.Cleanup(func() {
 			err := downstreamEnv.Stop()
