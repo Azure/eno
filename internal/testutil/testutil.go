@@ -94,34 +94,37 @@ func NewManager(t *testing.T) *Manager {
 		DownstreamRestConfig: cfg, // possible override below
 	}
 
-	if dir := os.Getenv("DOWNSTREAM_KUBEBUILDER_ASSETS"); dir != "" {
-		downstreamEnv := &envtest.Environment{
-			BinaryAssetsDirectory: dir,
+	dir := os.Getenv("DOWNSTREAM_KUBEBUILDER_ASSETS")
+	if dir == "" {
+		return m // only one env needed
+	}
+
+	downstreamEnv := &envtest.Environment{
+		BinaryAssetsDirectory: dir,
+	}
+
+	// k8s <1.13 will not start if these flags are set
+	version, _ := strconv.Atoi(os.Getenv("DOWNSTREAM_VERSION_MINOR"))
+	if version < 13 {
+		conf := downstreamEnv.ControlPlane.GetAPIServer().Configure()
+		conf.Disable("service-account-signing-key-file")
+		conf.Disable("service-account-issuer")
+	}
+
+	t.Cleanup(func() {
+		err := downstreamEnv.Stop()
+		if err != nil {
+			panic(err)
 		}
+	})
+	m.DownstreamRestConfig, err = downstreamEnv.Start()
+	require.NoError(t, err)
 
-		// k8s <1.13 will not start if these flags are set
-		version, _ := strconv.Atoi(os.Getenv("DOWNSTREAM_VERSION_MINOR"))
-		if version < 13 {
-			conf := downstreamEnv.ControlPlane.GetAPIServer().Configure()
-			conf.Disable("service-account-signing-key-file")
-			conf.Disable("service-account-issuer")
-		}
-
-		t.Cleanup(func() {
-			err := downstreamEnv.Stop()
-			if err != nil {
-				panic(err)
-			}
-		})
-		m.DownstreamRestConfig, err = downstreamEnv.Start()
-		require.NoError(t, err)
-
-		disc, err := discovery.NewDiscoveryClientForConfig(m.DownstreamRestConfig)
+	disc, err := discovery.NewDiscoveryClientForConfig(m.DownstreamRestConfig)
+	if err == nil {
+		version, err := disc.ServerVersion()
 		if err == nil {
-			version, err := disc.ServerVersion()
-			if err == nil {
-				t.Logf("downstream control plane version: %s", version.String())
-			}
+			t.Logf("downstream control plane version: %s", version.String())
 		}
 	}
 
