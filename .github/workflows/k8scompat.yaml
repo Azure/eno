@@ -38,8 +38,8 @@ jobs:
 
       - name: Download kubebuilder assets
         run: |
-          echo "UPSTREAM_KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path '${{ env.upstreamApiserverVersion }})'" >> $GITHUB_ENV
-          echo "DOWNSTREAM_KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path '1.${{ matrix.downstreamApiserverMinorVersion }}.x')" >> $GITHUB_ENV
+          echo "UPSTREAM_KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path ${{ env.upstreamApiserverVersion }})" >> $GITHUB_ENV
+          echo "DOWNSTREAM_KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path 1.${{ matrix.downstreamApiserverMinorVersion }}.x)" >> $GITHUB_ENV
 
       - name: Run tests
         run: go test -v ./internal/controllers/reconciliation
