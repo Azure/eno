@@ -55,6 +55,6 @@ jobs:
 
       - name: Run tests
         run: go test -v ./internal/controllers/reconciliation
-        with:
+        env:
           KUBEBUILDER_ASSETS: ${{ steps.kubebuilder-assets.dir }}
           UPSTREAM_KUBEBUILDER_ASSETS: ${{ steps.kubebuilder-assets.upstream-dir }}
