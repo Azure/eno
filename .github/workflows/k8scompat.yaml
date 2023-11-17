@@ -10,6 +10,7 @@ env:
 
 jobs:
   buildMatrix:
+    name: Generate Matrix
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.build.outputs.matrix }}
