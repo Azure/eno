@@ -78,14 +78,14 @@ func TestControllerHappyPath(t *testing.T) {
 		latest := comp.Generation
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == latest
+			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration == latest
 		})
 
 		// The previous state is retained
 		if comp.Status.PreviousState == nil {
 			t.Error("state wasn't swapped to previous")
 		} else {
-			assert.Equal(t, comp.Generation-1, comp.Status.PreviousState.ObservedGeneration)
+			assert.Equal(t, comp.Generation-1, comp.Status.PreviousState.ObservedCompositionGeneration)
 		}
 	})
 
@@ -166,7 +166,7 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 	latest := comp.Generation
 	testutil.Eventually(t, func() bool {
 		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == latest
+		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration == latest
 	})
 }
 

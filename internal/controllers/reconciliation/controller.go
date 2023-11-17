@@ -71,7 +71,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		logger.V(1).Info("composition has not yet been synthesized")
 		return ctrl.Result{}, nil
 	}
-	currentGen := comp.Status.CurrentState.ObservedGeneration
+	currentGen := comp.Status.CurrentState.ObservedCompositionGeneration
 
 	// Find the current and (optionally) previous desired states in the cache
 	resource, found := c.resourceClient.Get(ctx, &req.ResourceRef, currentGen)
@@ -82,7 +82,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	var prev *reconstitution.Resource
 	if comp.Status.PreviousState != nil {
-		prev, _ = c.resourceClient.Get(ctx, &req.ResourceRef, comp.Status.PreviousState.ObservedGeneration)
+		prev, _ = c.resourceClient.Get(ctx, &req.ResourceRef, comp.Status.PreviousState.ObservedCompositionGeneration)
 	} else {
 		logger.V(1).Info("no previous state given")
 	}
