@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -79,12 +80,14 @@ func NewManager(t *testing.T) *Manager {
 	require.NoError(t, err)
 
 	return &Manager{
-		Manager: mgr,
+		Manager:    mgr,
+		RestConfig: cfg,
 	}
 }
 
 type Manager struct {
 	ctrl.Manager
+	RestConfig *rest.Config
 }
 
 func (m *Manager) Start(t *testing.T) {

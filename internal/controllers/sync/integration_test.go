@@ -68,7 +68,7 @@ func TestControllerBasics(t *testing.T) {
 		return []*apiv1.ResourceSlice{slice}
 	})
 
-	require.NoError(t, New(rm, mgr.GetClient()))
+	require.NoError(t, New(rm, mgr.RestConfig))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}

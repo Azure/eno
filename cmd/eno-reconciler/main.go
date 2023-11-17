@@ -79,7 +79,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if err := sync.New(reMgr, mgr.GetClient()); err != nil {
+	if err := sync.New(reMgr, nil); err != nil { // TODO
 		return err
 	}
 

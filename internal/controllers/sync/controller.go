@@ -6,7 +6,10 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
+	"k8s.io/apimachinery/pkg/util/strategicpatch"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/rest"
+	"k8s.io/kubectl/pkg/util/openapi"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -15,15 +18,43 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// TODO: Rename
+
 type Controller struct {
-	client, upstreamClient client.Client
-	resourceClient         reconstitution.Client
+	client         client.Client
+	upstreamClient client.Client
+	openapi        openapi.Resources
+	discovery      discovery.DiscoveryInterface
+	resourceClient reconstitution.Client
 }
 
-func New(mgr *reconstitution.Manager, upstream client.Client) error {
+func New(mgr *reconstitution.Manager, upstream *rest.Config) error {
+	upstreamClient, err := client.New(upstream, client.Options{})
+	if err != nil {
+		return err
+	}
+
+	disc, err := discovery.NewDiscoveryClientForConfig(upstream)
+	if err != nil {
+		return err
+	}
+	disc.UseLegacyDiscovery = true // don't bother with aggregated APIs since they may be unavailable
+
+	// TODO: Refresh sometimes?
+	doc, err := disc.OpenAPISchema()
+	if err != nil {
+		return err
+	}
+	resources, err := openapi.NewOpenAPIData(doc)
+	if err != nil {
+		return err
+	}
+
 	return mgr.Add(&Controller{
 		client:         mgr.Manager.GetClient(),
-		upstreamClient: upstream,
+		upstreamClient: upstreamClient,
+		openapi:        resources,
+		discovery:      disc,
 		resourceClient: mgr.GetClient(),
 	})
 }
@@ -88,19 +119,20 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) error {
 	logger := logr.FromContextOrDiscard(ctx)
 
+	// TODO
 	// Delete
-	if prev == nil {
-		if current.GetResourceVersion() == "" || current.GetDeletionTimestamp() != nil {
-			return nil // already deleted
-		}
+	// if prev == nil {
+	// 	if current.GetResourceVersion() == "" || current.GetDeletionTimestamp() != nil {
+	// 		return nil // already deleted
+	// 	}
 
-		logger.V(0).Info("deleting resource")
-		err := c.upstreamClient.Delete(ctx, resource.Object)
-		if err != nil {
-			return fmt.Errorf("deleting resource: %w", err)
-		}
-		return nil
-	}
+	// 	logger.V(0).Info("deleting resource")
+	// 	err := c.upstreamClient.Delete(ctx, resource.Object)
+	// 	if err != nil {
+	// 		return fmt.Errorf("deleting resource: %w", err)
+	// 	}
+	// 	return nil
+	// }
 
 	// Create
 	if current.GetResourceVersion() == "" {
@@ -112,27 +144,36 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 		return nil
 	}
 
-	// TODO: Support strategic patch where supported
-
 	var prevManifest []byte
 	if prev != nil {
 		prevManifest = []byte(prev.Manifest)
 	}
 
 	// Patch
+	model := c.openapi.LookupResource(resource.Object.GroupVersionKind())
+	if model == nil {
+		// TODO: Fall back to non-strategic merge
+		// patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(prevManifest, []byte(resource.Manifest), desiredJS)
+		// if err != nil {
+		// 	return fmt.Errorf("building jsonpatch: %w", err)
+		// }
+		return fmt.Errorf("resource GVK was not found in the openapi spec")
+	}
+	patchmeta := strategicpatch.NewPatchMetaFromOpenAPI(model)
+
 	desiredJS, err := current.MarshalJSON()
 	if err != nil {
 		return fmt.Errorf("building json representation of desired state: %w", err)
 	}
-	patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(prevManifest, []byte(resource.Manifest), desiredJS)
+	patch, err := strategicpatch.CreateThreeWayMergePatch([]byte(prevManifest), []byte(resource.Manifest), desiredJS, patchmeta, true)
 	if err != nil {
-		return fmt.Errorf("building jsonpatch: %w", err)
+		return fmt.Errorf("building json representation of desired state: %w", err)
 	}
+
 	if string(patch) == "{}" {
 		logger.V(1).Info("skipping empty patch")
 		return nil
 	}
-
 	logger.V(0).Info("patching resource")
 	err = c.upstreamClient.Patch(ctx, current, client.RawPatch(types.MergePatchType, patch))
 	if err != nil {
