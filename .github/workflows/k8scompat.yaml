@@ -4,9 +4,11 @@ on: [push]
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      APISERVER_VERSION: 1.28.x
     strategy:
       matrix:
-        version:
+        upstreamApiserverVersion:
         - "1.28.x"
         - "1.27.x"
         - "1.26.x"
@@ -27,9 +29,32 @@ jobs:
         # - "1.10.x"
     steps:
       - uses: actions/checkout@v3
+
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
           go-version: '1.21'
-      - name: Test
-        run: UPSTREAM_KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path ${{ matrix.version }}) KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path 1.28.x) go test -v ./internal/controllers/reconciliation
+
+      - name: Download kubebuilder assets
+        id: kubebuilder-assets
+        run: |
+          echo "::set-output name=dir::$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path $APISERVER_VERSION)"
+          echo "::set-output name=upstream-dir::$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path ${{ matrix.upstreamApiserverVersion }})"
+
+      - name: Cache kubebuilder assets
+        uses: actions/cache@v2
+        with:
+          path: ${{ steps.kubebuilder-assets.dir }}
+          key: ${{ env.APISERVER_VERSION }}
+
+      - name: Cache upstream kubebuilder assets
+        uses: actions/cache@v2
+        with:
+          path: ${{ steps.kubebuilder-assets.upstream-dir }}
+          key: ${{ matrix.upstreamApiserverVersion }}
+
+      - name: Run tests
+        run: go test -v ./internal/controllers/reconciliation
+        with:
+          KUBEBUILDER_ASSETS: ${{ steps.kubebuilder-assets.dir }}
+          UPSTREAM_KUBEBUILDER_ASSETS: ${{ steps.kubebuilder-assets.upstream-dir }}
