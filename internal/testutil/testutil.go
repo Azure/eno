@@ -57,9 +57,10 @@ func NewContext(t *testing.T) context.Context {
 	return logr.NewContext(ctx, testr.NewWithOptions(t, testr.Options{Verbosity: 2}))
 }
 
-// NewManager starts one or two envtest environments depending on the configuration of the env.
-// This should work seamlessly when run locally assuming some binaries have been fetched with setup-envtest.
+// NewManager starts one or two envtest environments depending on the env.
+// This should work seamlessly when run locally assuming binaries have been fetched with setup-envtest.
 // In CI the second environment is used to compatibility test against a matrix of k8s versions.
+// This compatibility testing is tightly coupled to the github action and not expected to work locally.
 func NewManager(t *testing.T) *Manager {
 	_, b, _, _ := goruntime.Caller(0)
 	root := filepath.Join(filepath.Dir(b), "..", "..")
