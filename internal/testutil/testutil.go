@@ -3,6 +3,7 @@ package testutil
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	goruntime "runtime"
 	"testing"
@@ -68,7 +69,6 @@ func NewManager(t *testing.T) *Manager {
 			panic(err)
 		}
 	})
-
 	cfg, err := env.Start()
 	require.NoError(t, err)
 
@@ -79,15 +79,36 @@ func NewManager(t *testing.T) *Manager {
 	})
 	require.NoError(t, err)
 
-	return &Manager{
-		Manager:    mgr,
-		RestConfig: cfg,
+	m := &Manager{
+		Manager:            mgr,
+		RestConfig:         cfg,
+		UpstreamRestConfig: cfg, // possible override below
 	}
+
+	// Support starting a second apiserver if requested by the environment.
+	// Allows matrix testing against different versions of the upstream control plane.
+	if dir := os.Getenv("UPSTREAM_KUBEBUILDER_ASSETS"); dir != "" {
+		env := &envtest.Environment{
+			CRDDirectoryPaths:     []string{filepath.Join(root, "api", "v1", "config", "crd")},
+			ErrorIfCRDPathMissing: true,
+		}
+		t.Cleanup(func() {
+			err := env.Stop()
+			if err != nil {
+				panic(err)
+			}
+		})
+		m.UpstreamRestConfig, err = env.Start()
+		require.NoError(t, err)
+	}
+
+	return m
 }
 
 type Manager struct {
 	ctrl.Manager
-	RestConfig *rest.Config
+	RestConfig         *rest.Config
+	UpstreamRestConfig *rest.Config // may or may not == RestConfig
 }
 
 func (m *Manager) Start(t *testing.T) {
