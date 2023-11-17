@@ -1,4 +1,4 @@
-package sync
+package reconciliation
 
 import (
 	"context"
@@ -17,8 +17,6 @@ import (
 	"github.com/Azure/eno/internal/reconstitution"
 	"github.com/go-logr/logr"
 )
-
-// TODO: Rename
 
 type Controller struct {
 	client         client.Client

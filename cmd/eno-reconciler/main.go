@@ -21,7 +21,7 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/controllers/sync"
+	"github.com/Azure/eno/internal/controllers/reconciliation"
 	"github.com/Azure/eno/internal/reconstitution"
 )
 
@@ -79,7 +79,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if err := sync.New(reMgr, nil); err != nil { // TODO
+	if err := reconciliation.New(reMgr, nil); err != nil { // TODO
 		return err
 	}
 
