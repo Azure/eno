@@ -73,6 +73,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 	currentGen := comp.Status.CurrentState.ObservedGeneration
 
+	// Find the current and (optionally) previous desired states in the cache
 	resource, found := c.resourceClient.Get(ctx, &req.ResourceRef, currentGen)
 	if !found {
 		logger.V(0).Info("resource not found - dropping")
@@ -176,6 +177,7 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 	model := c.openapi.LookupResource(resource.Object.GroupVersionKind())
 	if model == nil {
 		// Fall back to non-strategic merge
+		logr.FromContextOrDiscard(ctx).Info("falling back to non-strategic merge patch because resource was not found in openapi spec")
 		return jsonmergepatch.CreateThreeWayJSONMergePatch(prevManifest, []byte(resource.Manifest), desiredJS)
 	}
 
