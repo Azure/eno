@@ -64,9 +64,9 @@ func NewManager(t *testing.T) *Manager {
 		CRDDirectoryPaths:     []string{filepath.Join(root, "api", "v1", "config", "crd")},
 		ErrorIfCRDPathMissing: true,
 
-		// We can't use KUBEBUILDER_ASSETS when also setting UPSTREAM_KUBEBUILDER_ASSETS
+		// We can't use KUBEBUILDER_ASSETS when also setting DOWNSTREAM_KUBEBUILDER_ASSETS
 		// because the envvar overrides BinaryAssetsDirectory
-		BinaryAssetsDirectory: os.Getenv("DOWNSTREAM_KUBEBUILDER_ASSETS"),
+		BinaryAssetsDirectory: os.Getenv("UPSTREAM_KUBEBUILDER_ASSETS"),
 	}
 	t.Cleanup(func() {
 		err := env.Stop()
@@ -85,33 +85,32 @@ func NewManager(t *testing.T) *Manager {
 	require.NoError(t, err)
 
 	m := &Manager{
-		Manager:            mgr,
-		RestConfig:         cfg,
-		UpstreamRestConfig: cfg, // possible override below
+		Manager:              mgr,
+		RestConfig:           cfg,
+		DownstreamRestConfig: cfg, // possible override below
 	}
 
 	// Support starting a second apiserver if requested by the environment.
 	// Allows matrix testing against different versions of the upstream control plane.
-	if dir := os.Getenv("UPSTREAM_KUBEBUILDER_ASSETS"); dir != "" {
-		upstreamEnv := &envtest.Environment{
-			CRDDirectoryPaths:     []string{filepath.Join(root, "api", "v1", "config", "crd")},
+	if dir := os.Getenv("DOWNSTREAM_KUBEBUILDER_ASSETS"); dir != "" {
+		downstreamEnv := &envtest.Environment{
 			ErrorIfCRDPathMissing: true,
 			BinaryAssetsDirectory: dir,
 		}
 		t.Cleanup(func() {
-			err := upstreamEnv.Stop()
+			err := downstreamEnv.Stop()
 			if err != nil {
 				panic(err)
 			}
 		})
-		m.UpstreamRestConfig, err = upstreamEnv.Start()
+		m.DownstreamRestConfig, err = downstreamEnv.Start()
 		require.NoError(t, err)
 
-		disc, err := discovery.NewDiscoveryClientForConfig(m.UpstreamRestConfig)
+		disc, err := discovery.NewDiscoveryClientForConfig(m.DownstreamRestConfig)
 		if err == nil {
 			version, err := disc.ServerVersion()
 			if err == nil {
-				t.Logf("upstream control plane version: %s", version.String())
+				t.Logf("downstream control plane version: %s", version.String())
 			}
 		}
 	}
@@ -121,8 +120,8 @@ func NewManager(t *testing.T) *Manager {
 
 type Manager struct {
 	ctrl.Manager
-	RestConfig         *rest.Config
-	UpstreamRestConfig *rest.Config // may or may not == RestConfig
+	RestConfig           *rest.Config
+	DownstreamRestConfig *rest.Config // may or may not == RestConfig
 }
 
 func (m *Manager) Start(t *testing.T) {
