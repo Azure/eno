@@ -56,10 +56,7 @@ type CompositionStatus struct {
 
 // Synthesis represents a Synthesizer's specific synthesis of a given Composition.
 type Synthesis struct {
-	// metadata.generation of the Composition at the time of synthesis.
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-
-	// metadata.generation of the Synthesizer at the time of synthesis.
+	ObservedCompositionGeneration int64 `json:"observedCompositionGeneration,omitempty"`
 	ObservedSynthesizerGeneration int64 `json:"observedSynthesizerGeneration,omitempty"`
 
 	// Number of resulting resource slices. Since they are immutable, this provides adequate timing signal to avoid stale informer caches.
