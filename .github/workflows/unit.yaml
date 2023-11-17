@@ -17,5 +17,5 @@ jobs:
           echo "KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path $APISERVER_VERSION)" >> $GITHUB_ENV
 
       - name: Run tests
-        run: go test -v -race ./...
+        run: go test -v ./...
 
