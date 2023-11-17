@@ -6,33 +6,30 @@ on:
     - cron: 0 0 * * *
 
 jobs:
+  buildMatrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.build.outputs.matrix }}
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - id: build
+        run: |
+          echo "matrix=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest -p env list | awk '/)/ {print $2}' | awk -F'.' '{print $2}' | jq --slurp 'map(tostring)')" >> $GITHUB_OUTPUT 
+
   test:
     name: Kubernetes 1.${{ matrix.downstreamApiserverMinorVersion }}
+    needs: buildMatrix
     runs-on: ubuntu-latest
     env:
       upstreamApiserverVersion: 1.28.x
     strategy:
       fail-fast: false
       matrix:
-        downstreamApiserverMinorVersion:
-        - "28"
-        - "27"
-        - "26"
-        - "25"
-        - "24"
-        - "23"
-        - "22"
-        - "21"
-        - "20"
-        - "19"
-        - "17"
-        - "16"
-        - "15"
-        - "14"
-        - "13"
-        - "12"
-        - "11"
-        - "10"
+        downstreamApiserverMinorVersion: ${{ fromJson(needs.buildMatrix.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v3
 
