@@ -51,7 +51,7 @@ func (c *cache) Get(ctx context.Context, ref *ResourceRef, gen int64) (*Resource
 func (c *cache) HasSynthesis(ctx context.Context, comp types.NamespacedName, synthesis *apiv1.Synthesis) bool {
 	key := synthesisKey{
 		Composition: comp,
-		Generation:  synthesis.ObservedGeneration,
+		Generation:  synthesis.ObservedCompositionGeneration,
 	}
 
 	c.mut.Lock()
@@ -74,7 +74,7 @@ func (c *cache) Fill(ctx context.Context, comp types.NamespacedName, synthesis *
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	synKey := synthesisKey{Composition: comp, Generation: synthesis.ObservedGeneration}
+	synKey := synthesisKey{Composition: comp, Generation: synthesis.ObservedCompositionGeneration}
 	c.resources[synKey] = resources
 	c.synthesesByComposition[comp] = append(c.synthesesByComposition[comp], synKey.Generation)
 
@@ -165,7 +165,7 @@ func (c *cache) Purge(ctx context.Context, compNSN types.NamespacedName, comp *a
 	remainingSyns := []int64{}
 	for _, syn := range c.synthesesByComposition[compNSN] {
 		// Don't touch any syntheses still referenced by the composition
-		if comp != nil && ((comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedGeneration == syn) || (comp.Status.PreviousState != nil && comp.Status.PreviousState.ObservedGeneration == syn)) {
+		if comp != nil && ((comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration == syn) || (comp.Status.PreviousState != nil && comp.Status.PreviousState.ObservedCompositionGeneration == syn)) {
 			remainingSyns = append(remainingSyns, syn)
 			continue // still referenced by the Generation
 		}

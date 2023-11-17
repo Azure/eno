@@ -32,8 +32,8 @@ func TestReconstituterIntegration(t *testing.T) {
 
 	one := int64(1)
 	comp.Status.CurrentState = &apiv1.Synthesis{
-		ObservedGeneration: comp.Generation,
-		ResourceSliceCount: &one,
+		ObservedCompositionGeneration: comp.Generation,
+		ResourceSliceCount:            &one,
 	}
 	require.NoError(t, client.Status().Update(ctx, comp))
 

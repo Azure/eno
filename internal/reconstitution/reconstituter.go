@@ -88,7 +88,7 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 	}
 	compNSN := types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}
 
-	logger = logger.WithValues("synthesisGen", synthesis.ObservedGeneration)
+	logger = logger.WithValues("synthesisGen", synthesis.ObservedCompositionGeneration)
 	ctx = logr.NewContext(ctx, logger)
 	if r.cache.HasSynthesis(ctx, compNSN, synthesis) {
 		logger.V(1).Info("this synthesis has already been cached")
@@ -97,7 +97,7 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 
 	slices := &apiv1.ResourceSliceList{}
 	err := r.client.List(ctx, slices, client.InNamespace(comp.Namespace), client.MatchingFields{
-		manager.IdxSlicesByCompositionGeneration: manager.NewSlicesByCompositionGenerationKey(comp.Name, synthesis.ObservedGeneration),
+		manager.IdxSlicesByCompositionGeneration: manager.NewSlicesByCompositionGenerationKey(comp.Name, synthesis.ObservedCompositionGeneration),
 	})
 	if err != nil {
 		return fmt.Errorf("listing resource slices: %w", err)
