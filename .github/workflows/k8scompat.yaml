@@ -7,6 +7,7 @@ jobs:
     env:
       upstreamApiserverVersion: 1.28.x
     strategy:
+      fail-fast: false
       matrix:
         downstreamApiserverVersion:
         - "1.28.x"
@@ -42,3 +43,5 @@ jobs:
 
       - name: Run tests
         run: go test -v ./internal/controllers/reconciliation
+        env:
+          KUBEBUILDER_ATTACH_CONTROL_PLANE_OUTPUT: "true"
