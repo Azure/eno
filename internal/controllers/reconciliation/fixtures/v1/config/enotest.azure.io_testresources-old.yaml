@@ -8,6 +8,7 @@ metadata:
   name: testresources.enotest.azure.io
 spec:
   group: enotest.azure.io
+  version: v1
   names:
     kind: TestResource
     listKind: TestResourceList
