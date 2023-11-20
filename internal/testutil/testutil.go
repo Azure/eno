@@ -107,13 +107,18 @@ func NewManager(t *testing.T) *Manager {
 	if dir == "" {
 		return m // only one env needed
 	}
+	version, _ := strconv.Atoi(os.Getenv("DOWNSTREAM_VERSION_MINOR"))
 
 	downstreamEnv := &envtest.Environment{
 		BinaryAssetsDirectory: dir,
+		ErrorIfCRDPathMissing: true,
+	}
+	if version >= 21 {
+		t.Logf("managing downstream cluster CRDs with envtest because version >= 21")
+		downstreamEnv.CRDDirectoryPaths = append(downstreamEnv.CRDDirectoryPaths, testCrdDir)
 	}
 
 	// k8s <1.13 will not start if these flags are set
-	version, _ := strconv.Atoi(os.Getenv("DOWNSTREAM_VERSION_MINOR"))
 	if version < 13 {
 		conf := downstreamEnv.ControlPlane.GetAPIServer().Configure()
 		conf.Disable("service-account-signing-key-file")
@@ -140,19 +145,22 @@ func NewManager(t *testing.T) *Manager {
 
 	// Install CRDs
 	// This is required because older k8s versions don't have apiextensions v1, which envtest uses
-	crds, err := os.ReadDir(testCrdDir)
-	require.NoError(t, err)
-
-	for _, crdFile := range crds {
-		raw, err := os.ReadFile(filepath.Join(testCrdDir, crdFile.Name()))
+	if version < 21 {
+		t.Logf("managing downstream cluster CRDs ourselves (not with envtest) because version < 21")
+		crds, err := os.ReadDir(testCrdDir)
 		require.NoError(t, err)
 
-		res := &unstructured.Unstructured{}
-		require.NoError(t, yaml.Unmarshal(raw, res))
+		for _, crdFile := range crds {
+			raw, err := os.ReadFile(filepath.Join(testCrdDir, crdFile.Name()))
+			require.NoError(t, err)
 
-		cli, err := client.New(m.DownstreamRestConfig, client.Options{})
-		require.NoError(t, err)
-		require.NoError(t, cli.Create(context.Background(), res))
+			res := &unstructured.Unstructured{}
+			require.NoError(t, yaml.Unmarshal(raw, res))
+
+			cli, err := client.New(m.DownstreamRestConfig, client.Options{})
+			require.NoError(t, err)
+			require.NoError(t, cli.Create(context.Background(), res))
+		}
 	}
 
 	return m

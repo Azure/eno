@@ -8,7 +8,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
 
-// TODO: Sed
+// When re-generating also update any *-old.yaml files (see their comments for details)
 //go:generate controller-gen object crd rbac:roleName=resourceprovider paths=./...
 
 var (
