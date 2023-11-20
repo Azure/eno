@@ -6,7 +6,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
@@ -39,7 +38,6 @@ func New(mgr *reconstitution.Manager, upstream *rest.Config) error {
 	}
 	disc.UseLegacyDiscovery = true // don't bother with aggregated APIs since they may be unavailable
 
-	// TODO: Refresh sometimes?
 	doc, err := disc.OpenAPISchema()
 	if err != nil {
 		return err
@@ -176,10 +174,7 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 
 	model := c.openapi.LookupResource(resource.Object.GroupVersionKind())
 	if model == nil {
-		// TODO: Remove?
-		// Fall back to non-strategic merge
-		logr.FromContextOrDiscard(ctx).Info("falling back to non-strategic merge patch because resource was not found in openapi spec")
-		return jsonmergepatch.CreateThreeWayJSONMergePatch(prevManifest, []byte(resource.Manifest), desiredJS)
+		return nil, fmt.Errorf("resource is not known") // TODO: Refresh cache?
 	}
 
 	patchmeta := strategicpatch.NewPatchMetaFromOpenAPI(model)
