@@ -114,7 +114,7 @@ func NewManager(t *testing.T) *Manager {
 		ErrorIfCRDPathMissing: true,
 	}
 	if version >= 21 {
-		t.Logf("managing downstream cluster CRDs with envtest because version >= 21")
+		t.Logf("managing downstream cluster CRD with envtest because version >= 21")
 		downstreamEnv.CRDDirectoryPaths = append(downstreamEnv.CRDDirectoryPaths, testCrdDir)
 	}
 
@@ -146,21 +146,16 @@ func NewManager(t *testing.T) *Manager {
 	// Install CRDs
 	// This is required because older k8s versions don't have apiextensions v1, which envtest uses
 	if version < 21 {
-		t.Logf("managing downstream cluster CRDs ourselves (not with envtest) because version < 21")
-		crds, err := os.ReadDir(testCrdDir)
+		t.Logf("managing downstream cluster CRD ourselves (not with envtest) because version < 21")
+		raw, err := os.ReadFile(filepath.Join(testCrdDir, "internal", "controllers", "reconciliation", "fixtures", "v1", "config", "enotest.azure.io_testresources-old.yaml"))
 		require.NoError(t, err)
 
-		for _, crdFile := range crds {
-			raw, err := os.ReadFile(filepath.Join(testCrdDir, crdFile.Name()))
-			require.NoError(t, err)
+		res := &unstructured.Unstructured{}
+		require.NoError(t, yaml.Unmarshal(raw, res))
 
-			res := &unstructured.Unstructured{}
-			require.NoError(t, yaml.Unmarshal(raw, res))
-
-			cli, err := client.New(m.DownstreamRestConfig, client.Options{})
-			require.NoError(t, err)
-			require.NoError(t, cli.Create(context.Background(), res))
-		}
+		cli, err := client.New(m.DownstreamRestConfig, client.Options{})
+		require.NoError(t, err)
+		require.NoError(t, cli.Create(context.Background(), res))
 	}
 
 	return m
