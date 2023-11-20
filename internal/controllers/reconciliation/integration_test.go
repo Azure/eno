@@ -37,6 +37,7 @@ func TestControllerPodBasics(t *testing.T) {
 		slice.GenerateName = "test-"
 		slice.Namespace = "default"
 		slice.Spec.CompositionGeneration = c.Generation
+		// TODO: This should use multiple containers
 		switch s.Spec.Image {
 		case "create":
 			slice.Spec.Resources = []apiv1.Manifest{{

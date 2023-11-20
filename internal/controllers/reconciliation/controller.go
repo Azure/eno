@@ -7,9 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
-	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
-	"k8s.io/kubectl/pkg/util/openapi"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -23,26 +21,16 @@ type Controller struct {
 	resourceClient reconstitution.Client
 
 	upstreamClient client.Client
-	openapi        openapi.Resources
+	discovery      *discoveryCache
 }
 
-func New(mgr *reconstitution.Manager, upstream *rest.Config) error {
-	upstreamClient, err := client.New(upstream, client.Options{})
+func New(mgr *reconstitution.Manager, downstream *rest.Config) error {
+	upstreamClient, err := client.New(downstream, client.Options{})
 	if err != nil {
 		return err
 	}
 
-	disc, err := discovery.NewDiscoveryClientForConfig(upstream)
-	if err != nil {
-		return err
-	}
-	disc.UseLegacyDiscovery = true // don't bother with aggregated APIs since they may be unavailable
-
-	doc, err := disc.OpenAPISchema()
-	if err != nil {
-		return err
-	}
-	resources, err := openapi.NewOpenAPIData(doc)
+	disc, err := newDicoveryCache(downstream, 1) // TODO: Expose
 	if err != nil {
 		return err
 	}
@@ -51,7 +39,7 @@ func New(mgr *reconstitution.Manager, upstream *rest.Config) error {
 		client:         mgr.Manager.GetClient(),
 		resourceClient: mgr.GetClient(),
 		upstreamClient: upstreamClient,
-		openapi:        resources,
+		discovery:      disc,
 	})
 }
 
@@ -172,9 +160,9 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 		return nil, fmt.Errorf("building json representation of desired state: %w", err)
 	}
 
-	model := c.openapi.LookupResource(resource.Object.GroupVersionKind())
-	if model == nil {
-		return nil, fmt.Errorf("resource is not known") // TODO: Refresh cache?
+	model, err := c.discovery.Get(ctx, resource.Object.GroupVersionKind())
+	if err != nil {
+		return nil, fmt.Errorf("getting merge metadata: %w", err)
 	}
 
 	patchmeta := strategicpatch.NewPatchMetaFromOpenAPI(model)
