@@ -16,6 +16,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -147,7 +148,7 @@ func NewManager(t *testing.T) *Manager {
 		require.NoError(t, err)
 
 		res := &unstructured.Unstructured{}
-		require.NoError(t, res.UnmarshalJSON(raw))
+		require.NoError(t, yaml.Unmarshal(raw, res))
 
 		cli, err := client.New(m.DownstreamRestConfig, client.Options{})
 		require.NoError(t, err)
