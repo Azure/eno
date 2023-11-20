@@ -1,13 +1,27 @@
 package reconstitution
 
 import (
+	"context"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 )
+
+// Reconciler is implemented by types that can reconcile individual, reconstituted resources.
+type Reconciler interface {
+	Name() string
+	Reconcile(ctx context.Context, req *Request) (ctrl.Result, error)
+}
+
+// Client provides read/write access to a collection of reconstituted resources.
+type Client interface {
+	Get(ctx context.Context, ref *ResourceRef, gen int64) (*Resource, bool)
+	PatchStatusAsync(ctx context.Context, req *ManifestRef, patchFn StatusPatchFn)
+}
 
 type StatusPatchFn func(*apiv1.ResourceState) bool
 
