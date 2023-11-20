@@ -79,7 +79,7 @@ func TestControllerPodBasics(t *testing.T) {
 		return []*apiv1.ResourceSlice{slice}
 	})
 
-	require.NoError(t, New(rm, mgr.RestConfig))
+	require.NoError(t, New(rm, mgr.DownstreamRestConfig))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
