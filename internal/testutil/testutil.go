@@ -14,6 +14,7 @@ import (
 	"github.com/go-logr/logr/testr"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
@@ -66,10 +67,11 @@ func NewManager(t *testing.T) *Manager {
 	_, b, _, _ := goruntime.Caller(0)
 	root := filepath.Join(filepath.Dir(b), "..", "..")
 
+	testCrdDir := filepath.Join(root, "internal", "controllers", "reconciliation", "fixtures", "v1", "config", "crd")
 	env := &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			filepath.Join(root, "api", "v1", "config", "crd"),
-			filepath.Join(root, "internal", "controllers", "reconciliation", "fixtures", "v1", "config", "crd"),
+			testCrdDir,
 		},
 		ErrorIfCRDPathMissing: true,
 
@@ -107,10 +109,6 @@ func NewManager(t *testing.T) *Manager {
 
 	downstreamEnv := &envtest.Environment{
 		BinaryAssetsDirectory: dir,
-		CRDDirectoryPaths: []string{
-			filepath.Join(root, "internal", "controllers", "reconciliation", "fixtures", "v1", "config", "crd"),
-		},
-		ErrorIfCRDPathMissing: true,
 	}
 
 	// k8s <1.13 will not start if these flags are set
@@ -130,12 +128,30 @@ func NewManager(t *testing.T) *Manager {
 	m.DownstreamRestConfig, err = downstreamEnv.Start()
 	require.NoError(t, err)
 
+	// Log apiserver version
 	disc, err := discovery.NewDiscoveryClientForConfig(m.DownstreamRestConfig)
 	if err == nil {
 		version, err := disc.ServerVersion()
 		if err == nil {
 			t.Logf("downstream control plane version: %s", version.String())
 		}
+	}
+
+	// Install CRDs
+	// This is required because older k8s versions don't have apiextensions v1, which envtest uses
+	crds, err := os.ReadDir(testCrdDir)
+	require.NoError(t, err)
+
+	for _, crdFile := range crds {
+		raw, err := os.ReadFile(filepath.Join(testCrdDir, crdFile.Name()))
+		require.NoError(t, err)
+
+		res := &unstructured.Unstructured{}
+		require.NoError(t, res.UnmarshalJSON(raw))
+
+		cli, err := client.New(m.DownstreamRestConfig, client.Options{})
+		require.NoError(t, err)
+		require.NoError(t, cli.Create(context.Background(), res))
 	}
 
 	return m
