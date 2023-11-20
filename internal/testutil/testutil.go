@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
 	"github.com/Azure/eno/internal/manager"
 )
 
@@ -66,7 +67,10 @@ func NewManager(t *testing.T) *Manager {
 	root := filepath.Join(filepath.Dir(b), "..", "..")
 
 	env := &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join(root, "api", "v1", "config", "crd")},
+		CRDDirectoryPaths: []string{
+			filepath.Join(root, "api", "v1", "config", "crd"),
+			filepath.Join(root, "internal", "controllers", "reconciliation", "fixtures", "v1", "config", "crd"),
+		},
 		ErrorIfCRDPathMissing: true,
 
 		// We can't use KUBEBUILDER_ASSETS when also setting DOWNSTREAM_KUBEBUILDER_ASSETS
@@ -88,6 +92,7 @@ func NewManager(t *testing.T) *Manager {
 		MetricsAddr:     "127.0.0.1:0",
 	})
 	require.NoError(t, err)
+	require.NoError(t, testv1.SchemeBuilder.AddToScheme(mgr.GetScheme())) // test-specific CRDs
 
 	m := &Manager{
 		Manager:              mgr,
@@ -102,6 +107,10 @@ func NewManager(t *testing.T) *Manager {
 
 	downstreamEnv := &envtest.Environment{
 		BinaryAssetsDirectory: dir,
+		CRDDirectoryPaths: []string{
+			filepath.Join(root, "internal", "controllers", "reconciliation", "fixtures", "v1", "config", "crd"),
+		},
+		ErrorIfCRDPathMissing: true,
 	}
 
 	// k8s <1.13 will not start if these flags are set

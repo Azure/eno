@@ -57,7 +57,7 @@ func New(mgr *reconstitution.Manager, upstream *rest.Config) error {
 	})
 }
 
-func (c *Controller) Name() string { return "syncController" }
+func (c *Controller) Name() string { return "reconciliationController" }
 
 func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx)
@@ -176,6 +176,7 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 
 	model := c.openapi.LookupResource(resource.Object.GroupVersionKind())
 	if model == nil {
+		// TODO: Remove?
 		// Fall back to non-strategic merge
 		logr.FromContextOrDiscard(ctx).Info("falling back to non-strategic merge patch because resource was not found in openapi spec")
 		return jsonmergepatch.CreateThreeWayJSONMergePatch(prevManifest, []byte(resource.Manifest), desiredJS)
