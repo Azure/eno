@@ -8,6 +8,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
 
+// TODO: Sed
 //go:generate controller-gen object crd rbac:roleName=resourceprovider paths=./...
 
 var (
