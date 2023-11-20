@@ -113,6 +113,8 @@ func NewManager(t *testing.T) *Manager {
 		BinaryAssetsDirectory: dir,
 		ErrorIfCRDPathMissing: true,
 	}
+
+	// Only newer clusters can use envtest to install CRDs
 	if version >= 21 {
 		t.Logf("managing downstream cluster CRD with envtest because version >= 21")
 		downstreamEnv.CRDDirectoryPaths = append(downstreamEnv.CRDDirectoryPaths, testCrdDir)
@@ -143,11 +145,10 @@ func NewManager(t *testing.T) *Manager {
 		}
 	}
 
-	// Install CRDs
-	// This is required because older k8s versions don't have apiextensions v1, which envtest uses
+	// We install old (v1beta1) CRDs ourselves because envtest assumes v1
 	if version < 21 {
 		t.Logf("managing downstream cluster CRD ourselves (not with envtest) because version < 21")
-		raw, err := os.ReadFile(filepath.Join(testCrdDir, "internal", "controllers", "reconciliation", "fixtures", "v1", "config", "enotest.azure.io_testresources-old.yaml"))
+		raw, err := os.ReadFile(filepath.Join(root, "internal", "controllers", "reconciliation", "fixtures", "v1", "config", "enotest.azure.io_testresources-old.yaml"))
 		require.NoError(t, err)
 
 		res := &unstructured.Unstructured{}
