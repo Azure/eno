@@ -19,7 +19,8 @@ import (
 func TestControllerPodBasics(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
-	cli := mgr.GetClient()
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
 
 	require.NoError(t, synthesis.NewRolloutController(mgr.Manager, time.Millisecond))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
@@ -85,31 +86,31 @@ func TestControllerPodBasics(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "create"
-	require.NoError(t, cli.Create(ctx, syn))
+	require.NoError(t, upstream.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}
 	comp.Name = "test-comp"
 	comp.Namespace = "default"
 	comp.Spec.Synthesizer.Name = syn.Name
-	require.NoError(t, cli.Create(ctx, comp))
+	require.NoError(t, upstream.Create(ctx, comp))
 
 	t.Run("creation", func(t *testing.T) {
 		testutil.Eventually(t, func() bool {
 			pod := &corev1.Pod{}
 			pod.Name = "test-pod"
 			pod.Namespace = "default"
-			return cli.Get(ctx, client.ObjectKeyFromObject(pod), pod) == nil
+			return downstream.Get(ctx, client.ObjectKeyFromObject(pod), pod) == nil
 		})
 	})
 
 	// we expect this to use strategic merge
 	t.Run("update", func(t *testing.T) {
 		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-			if err := cli.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
+			if err := downstream.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
 				return err
 			}
 			syn.Spec.Image = "update"
-			return cli.Update(ctx, syn)
+			return downstream.Update(ctx, syn)
 		})
 		require.NoError(t, err)
 
@@ -117,7 +118,7 @@ func TestControllerPodBasics(t *testing.T) {
 			pod := &corev1.Pod{}
 			pod.Name = "test-pod"
 			pod.Namespace = "default"
-			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(pod), pod))
+			require.NoError(t, downstream.Get(ctx, client.ObjectKeyFromObject(pod), pod))
 			return pod.Spec.Containers[0].Image == "test-image-2"
 		})
 	})
@@ -126,7 +127,8 @@ func TestControllerPodBasics(t *testing.T) {
 func TestControllerCRBasics(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
-	cli := mgr.GetClient()
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
 
 	require.NoError(t, synthesis.NewRolloutController(mgr.Manager, time.Millisecond))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
@@ -179,37 +181,37 @@ func TestControllerCRBasics(t *testing.T) {
 		return []*apiv1.ResourceSlice{slice}
 	})
 
-	require.NoError(t, New(rm, mgr.RestConfig))
+	require.NoError(t, New(rm, mgr.DownstreamRestConfig))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "create"
-	require.NoError(t, cli.Create(ctx, syn))
+	require.NoError(t, upstream.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}
 	comp.Name = "test-comp"
 	comp.Namespace = "default"
 	comp.Spec.Synthesizer.Name = syn.Name
-	require.NoError(t, cli.Create(ctx, comp))
+	require.NoError(t, upstream.Create(ctx, comp))
 
 	t.Run("creation", func(t *testing.T) {
 		testutil.Eventually(t, func() bool {
 			cr := &testv1.TestResource{}
 			cr.Name = "test-resource"
 			cr.Namespace = "default"
-			return cli.Get(ctx, client.ObjectKeyFromObject(cr), cr) == nil
+			return downstream.Get(ctx, client.ObjectKeyFromObject(cr), cr) == nil
 		})
 	})
 
 	// we do not expect this to use strategic merge because CRs do not support it
 	t.Run("update", func(t *testing.T) {
 		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-			if err := cli.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
+			if err := downstream.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
 				return err
 			}
 			syn.Spec.Image = "update"
-			return cli.Update(ctx, syn)
+			return downstream.Update(ctx, syn)
 		})
 		require.NoError(t, err)
 
@@ -217,7 +219,7 @@ func TestControllerCRBasics(t *testing.T) {
 			cr := &testv1.TestResource{}
 			cr.Name = "test-resource"
 			cr.Namespace = "default"
-			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(cr), cr))
+			require.NoError(t, downstream.Get(ctx, client.ObjectKeyFromObject(cr), cr))
 			return len(cr.Spec.Values) == 2 && cr.Spec.Values[0].Int == 234 && cr.Spec.Values[1].Int == 345
 		})
 	})

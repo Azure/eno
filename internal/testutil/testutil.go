@@ -101,6 +101,7 @@ func NewManager(t *testing.T) *Manager {
 		Manager:              mgr,
 		RestConfig:           cfg,
 		DownstreamRestConfig: cfg, // possible override below
+		DownstreamClient:     mgr.GetClient(),
 	}
 
 	dir := os.Getenv("DOWNSTREAM_KUBEBUILDER_ASSETS")
@@ -136,6 +137,9 @@ func NewManager(t *testing.T) *Manager {
 	m.DownstreamRestConfig, err = downstreamEnv.Start()
 	require.NoError(t, err)
 
+	m.DownstreamClient, err = client.New(m.DownstreamRestConfig, client.Options{})
+	require.NoError(t, err)
+
 	// Log apiserver version
 	disc, err := discovery.NewDiscoveryClientForConfig(m.DownstreamRestConfig)
 	if err == nil {
@@ -165,7 +169,8 @@ func NewManager(t *testing.T) *Manager {
 type Manager struct {
 	ctrl.Manager
 	RestConfig           *rest.Config
-	DownstreamRestConfig *rest.Config // may or may not == RestConfig
+	DownstreamRestConfig *rest.Config  // may or may not == RestConfig
+	DownstreamClient     client.Client // may or may not == Manager.GetClient()
 }
 
 func (m *Manager) Start(t *testing.T) {
