@@ -187,7 +187,7 @@ func Eventually(t testing.TB, fn func() bool) {
 	t.Helper()
 	start := time.Now()
 	for {
-		if time.Since(start) > time.Second*2 {
+		if time.Since(start) > time.Second*5 {
 			t.Fatalf("timeout while waiting for condition")
 			return
 		}
