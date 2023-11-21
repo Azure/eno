@@ -20,6 +20,8 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 )
 
+// TODO: Fix, add CR test
+
 func TestControllerBasics(t *testing.T) {
 	tests := []struct {
 		Name                         string
@@ -27,7 +29,7 @@ func TestControllerBasics(t *testing.T) {
 		AssertCreated, AssertUpdated func(t *testing.T, obj client.Object)
 	}{
 		{
-			Name:  "corev1",
+			Name:  "strategic-merge",
 			Empty: &corev1.Service{},
 			Initial: &corev1.Service{
 				ObjectMeta: metav1.ObjectMeta{
@@ -38,12 +40,14 @@ func TestControllerBasics(t *testing.T) {
 					Type: corev1.ServiceTypeNodePort,
 					Ports: []corev1.ServicePort{
 						{
+							Name:     "port-1",
 							Port:     1,
-							NodePort: 10,
+							NodePort: 30010,
 						},
 						{
+							Name:     "port-2",
 							Port:     2,
-							NodePort: 20,
+							NodePort: 30020,
 						},
 					},
 				},
@@ -51,12 +55,14 @@ func TestControllerBasics(t *testing.T) {
 			AssertCreated: func(t *testing.T, obj client.Object) {
 				expected := []corev1.ServicePort{
 					{
+						Name:     "port-1",
 						Port:     1,
-						NodePort: 10,
+						NodePort: 30010,
 					},
 					{
+						Name:     "port-2",
 						Port:     2,
-						NodePort: 20,
+						NodePort: 30020,
 					},
 				}
 				svc := obj.(*corev1.Service)
@@ -71,12 +77,14 @@ func TestControllerBasics(t *testing.T) {
 					Type: corev1.ServiceTypeNodePort,
 					Ports: []corev1.ServicePort{
 						{
-							Port:     2,
-							NodePort: 21,
+							Name:     "port-1",
+							Port:     1,
+							NodePort: 30010,
 						},
 						{
-							Port:     1,
-							NodePort: 10,
+							Name:     "port-2",
+							Port:     2,
+							NodePort: 30021, // updated
 						},
 					},
 				},
@@ -84,12 +92,14 @@ func TestControllerBasics(t *testing.T) {
 			AssertUpdated: func(t *testing.T, obj client.Object) {
 				expected := []corev1.ServicePort{
 					{
+						Name:     "port-1",
 						Port:     1,
-						NodePort: 10,
+						NodePort: 30010,
 					},
 					{
+						Name:     "port-2",
 						Port:     2,
-						NodePort: 21,
+						NodePort: 30021,
 					},
 				}
 				svc := obj.(*corev1.Service)

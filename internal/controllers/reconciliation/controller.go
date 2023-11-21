@@ -144,7 +144,7 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 		return nil
 	}
 
-	logger.V(0).Info("patching resource")
+	logger.V(0).Info("patching resource", "patch", string(patch)) // TODO: Remove
 	err = c.upstreamClient.Patch(ctx, current, client.RawPatch(types.MergePatchType, patch))
 	if err != nil {
 		return fmt.Errorf("applying patch: %w", err)
@@ -159,7 +159,7 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 		prevManifest = []byte(prev.Manifest)
 	}
 
-	desiredJS, err := current.MarshalJSON()
+	currentJS, err := current.MarshalJSON()
 	if err != nil {
 		return nil, fmt.Errorf("building json representation of desired state: %w", err)
 	}
@@ -169,9 +169,9 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 		return nil, fmt.Errorf("getting merge metadata: %w", err)
 	}
 	if model == nil {
-		return jsonmergepatch.CreateThreeWayJSONMergePatch([]byte(prevManifest), []byte(resource.Manifest), desiredJS)
+		return jsonmergepatch.CreateThreeWayJSONMergePatch([]byte(prevManifest), []byte(resource.Manifest), currentJS)
 	}
 
 	patchmeta := strategicpatch.NewPatchMetaFromOpenAPI(model)
-	return strategicpatch.CreateThreeWayMergePatch([]byte(prevManifest), []byte(resource.Manifest), desiredJS, patchmeta, true)
+	return strategicpatch.CreateThreeWayMergePatch([]byte(prevManifest), []byte(resource.Manifest), currentJS, patchmeta, true)
 }
