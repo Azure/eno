@@ -38,6 +38,7 @@ func newDicoveryCache(rc *rest.Config, qps float32, fillWhenNotFound bool) (*dis
 }
 
 func (d *discoveryCache) Get(ctx context.Context, gvk schema.GroupVersionKind) (proto.Schema, error) {
+	logger := logr.FromContextOrDiscard(ctx)
 	d.mut.Lock()
 	defer d.mut.Unlock()
 
@@ -52,12 +53,11 @@ func (d *discoveryCache) Get(ctx context.Context, gvk schema.GroupVersionKind) (
 		return d.checkSupportUnlocked(ctx, gvk, model)
 	}
 
-	// Don't invalidate the cache when configured not to
 	if !d.fillWhenNotFound {
+		logger.V(1).Info("type not found in openapi schema")
 		return nil, nil
 	}
 
-	// Get fresh schema and try again
 	if err := d.fillUnlocked(ctx); err != nil {
 		return nil, err
 	}

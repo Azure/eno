@@ -168,7 +168,6 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 		return nil, fmt.Errorf("getting merge metadata: %w", err)
 	}
 	if model == nil {
-		logr.FromContextOrDiscard(ctx).V(1).Info("falling back to non-stategic patch because no patch metadata was found for this type in the openapi spec")
 		return jsonmergepatch.CreateThreeWayJSONMergePatch([]byte(prevManifest), []byte(resource.Manifest), desiredJS)
 	}
 
