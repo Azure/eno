@@ -27,13 +27,13 @@ type Controller struct {
 	discovery      *discoveryCache
 }
 
-func New(mgr *reconstitution.Manager, downstream *rest.Config) error {
+func New(mgr *reconstitution.Manager, downstream *rest.Config, discoveryRPS float32, rediscoverWhenNotFound bool) error {
 	upstreamClient, err := client.New(downstream, client.Options{})
 	if err != nil {
 		return err
 	}
 
-	disc, err := newDicoveryCache(downstream, 1, true) // TODO: Expose
+	disc, err := newDicoveryCache(downstream, discoveryRPS, rediscoverWhenNotFound)
 	if err != nil {
 		return err
 	}
