@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
@@ -17,8 +18,6 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// TODO: Is scheme used?
-
 type Controller struct {
 	client         client.Client
 	resourceClient reconstitution.Client
@@ -28,7 +27,9 @@ type Controller struct {
 }
 
 func New(mgr *reconstitution.Manager, downstream *rest.Config, discoveryRPS float32, rediscoverWhenNotFound bool) error {
-	upstreamClient, err := client.New(downstream, client.Options{})
+	upstreamClient, err := client.New(downstream, client.Options{
+		Scheme: runtime.NewScheme(), // empty scheme since we shouldn't rely on compile-time types
+	})
 	if err != nil {
 		return err
 	}
