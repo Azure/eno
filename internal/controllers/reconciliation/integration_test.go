@@ -106,11 +106,11 @@ func TestControllerPodBasics(t *testing.T) {
 	// we expect this to use strategic merge
 	t.Run("update", func(t *testing.T) {
 		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-			if err := downstream.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
+			if err := upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
 				return err
 			}
 			syn.Spec.Image = "update"
-			return downstream.Update(ctx, syn)
+			return upstream.Update(ctx, syn)
 		})
 		require.NoError(t, err)
 
@@ -207,11 +207,11 @@ func TestControllerCRBasics(t *testing.T) {
 	// we do not expect this to use strategic merge because CRs do not support it
 	t.Run("update", func(t *testing.T) {
 		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-			if err := downstream.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
+			if err := upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
 				return err
 			}
 			syn.Spec.Image = "update"
-			return downstream.Update(ctx, syn)
+			return upstream.Update(ctx, syn)
 		})
 		require.NoError(t, err)
 
