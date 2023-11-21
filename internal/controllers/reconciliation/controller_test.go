@@ -27,71 +27,73 @@ func TestControllerBasics(t *testing.T) {
 		AssertCreated, AssertUpdated func(t *testing.T, obj client.Object)
 	}{
 		{
-			Name:  "pod",
-			Empty: &corev1.Pod{},
-			Initial: &corev1.Pod{
+			Name:  "corev1",
+			Empty: &corev1.Service{},
+			Initial: &corev1.Service{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pod",
+					Name:      "test-obj",
 					Namespace: "default",
 				},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
+				Spec: corev1.ServiceSpec{
+					Type: corev1.ServiceTypeNodePort,
+					Ports: []corev1.ServicePort{
 						{
-							Name:  "container-1",
-							Image: "image-1",
+							Port:     1,
+							NodePort: 10,
 						},
 						{
-							Name:  "container-2",
-							Image: "image-2",
+							Port:     2,
+							NodePort: 20,
 						},
 					},
 				},
 			},
 			AssertCreated: func(t *testing.T, obj client.Object) {
-				expected := []corev1.Container{
+				expected := []corev1.ServicePort{
 					{
-						Name:  "container-1",
-						Image: "image-1",
+						Port:     1,
+						NodePort: 10,
 					},
 					{
-						Name:  "container-2",
-						Image: "image-2",
+						Port:     2,
+						NodePort: 20,
 					},
 				}
-				pod := obj.(*corev1.Pod)
-				assert.Equal(t, expected, pod.Spec.Containers)
+				svc := obj.(*corev1.Service)
+				assert.Equal(t, expected, svc.Spec.Ports)
 			},
-			Updated: &corev1.Pod{
+			Updated: &corev1.Service{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pod",
+					Name:      "test-obj",
 					Namespace: "default",
 				},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
+				Spec: corev1.ServiceSpec{
+					Type: corev1.ServiceTypeNodePort,
+					Ports: []corev1.ServicePort{
 						{
-							Name:  "container-2",
-							Image: "image-3",
+							Port:     2,
+							NodePort: 21,
 						},
 						{
-							Name:  "container-1",
-							Image: "image-1",
+							Port:     1,
+							NodePort: 10,
 						},
 					},
 				},
 			},
 			AssertUpdated: func(t *testing.T, obj client.Object) {
-				expected := []corev1.Container{
+				expected := []corev1.ServicePort{
 					{
-						Name:  "container-1",
-						Image: "image-1",
+						Port:     1,
+						NodePort: 10,
 					},
 					{
-						Name:  "container-2",
-						Image: "image-3",
+						Port:     2,
+						NodePort: 21,
 					},
 				}
-				pod := obj.(*corev1.Pod)
-				assert.Equal(t, expected, pod.Spec.Containers)
+				svc := obj.(*corev1.Service)
+				assert.Equal(t, expected, svc.Spec.Ports)
 			},
 		},
 	}
@@ -138,6 +140,7 @@ func TestControllerBasics(t *testing.T) {
 
 				js, err := json.Marshal(obj)
 				require.NoError(t, err)
+				t.Logf("resource json %s", js)
 
 				slice := &apiv1.ResourceSlice{}
 				slice.GenerateName = "test-"
