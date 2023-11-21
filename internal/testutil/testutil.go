@@ -285,3 +285,13 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 		Build(podCtrl)
 	require.NoError(t, err)
 }
+
+func AtLeastVersion(t *testing.T, minor int) bool {
+	versionStr := os.Getenv("DOWNSTREAM_VERSION_MINOR")
+	if versionStr == "" {
+		return true // fail open for local dev
+	}
+
+	version, _ := strconv.Atoi(versionStr)
+	return version >= minor
+}

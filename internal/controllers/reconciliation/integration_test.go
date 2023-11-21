@@ -80,7 +80,7 @@ func TestControllerPodBasics(t *testing.T) {
 		return []*apiv1.ResourceSlice{slice}
 	})
 
-	require.NoError(t, New(rm, mgr.DownstreamRestConfig, 5, true))
+	require.NoError(t, New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15)))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -181,7 +181,7 @@ func TestControllerCRBasics(t *testing.T) {
 		return []*apiv1.ResourceSlice{slice}
 	})
 
-	require.NoError(t, New(rm, mgr.DownstreamRestConfig, 5, true))
+	require.NoError(t, New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15)))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
