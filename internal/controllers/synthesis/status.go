@@ -37,8 +37,8 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("gettting pod: %w", err))
 	}
-	// TODO: Make this an event filter
 	if len(pod.OwnerReferences) == 0 || pod.OwnerReferences[0].Kind != "Composition" {
+		// This shouldn't be common as the informer watch filters on Eno-managed pods using a selector
 		logger.V(1).Info("skipping pod because it isn't owned by a composition")
 		return ctrl.Result{}, nil
 	}

@@ -2,7 +2,6 @@ package reconciliation
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"github.com/go-logr/logr"
@@ -13,6 +12,8 @@ import (
 	"k8s.io/kube-openapi/pkg/util/proto"
 	"k8s.io/kubectl/pkg/util/openapi"
 )
+
+// TODO: Refresh at interval instead
 
 // discoveryCache is useful to prevent excessive QPS to the discovery APIs while
 // still allowing dynamic refresh of the openapi spec on cache misses.
@@ -47,16 +48,6 @@ func (d *discoveryCache) Get(ctx context.Context, gvk schema.GroupVersionKind) (
 	}
 
 	model := d.current.LookupResource(gvk)
-	if model == nil {
-		if err := d.fillUnlocked(ctx); err != nil {
-			return nil, err
-		}
-		model = d.current.LookupResource(gvk)
-		if model == nil {
-			return nil, fmt.Errorf("resource was not found in openapi spec")
-		}
-	}
-
 	return model, nil
 }
 

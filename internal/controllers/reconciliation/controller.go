@@ -6,6 +6,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -163,6 +164,10 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 	model, err := c.discovery.Get(ctx, resource.Object.GroupVersionKind())
 	if err != nil {
 		return nil, fmt.Errorf("getting merge metadata: %w", err)
+	}
+	if model == nil {
+		logr.FromContextOrDiscard(ctx).V(1).Info("falling back to non-stategic patch because no patch metadata was found for this type in the openapi spec")
+		return jsonmergepatch.CreateThreeWayJSONMergePatch([]byte(prevManifest), []byte(resource.Manifest), desiredJS)
 	}
 
 	patchmeta := strategicpatch.NewPatchMetaFromOpenAPI(model)
