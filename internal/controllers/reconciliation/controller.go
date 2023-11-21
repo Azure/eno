@@ -17,6 +17,8 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// TODO: Is scheme used?
+
 type Controller struct {
 	client         client.Client
 	resourceClient reconstitution.Client
@@ -31,7 +33,7 @@ func New(mgr *reconstitution.Manager, downstream *rest.Config) error {
 		return err
 	}
 
-	disc, err := newDicoveryCache(downstream, 1) // TODO: Expose
+	disc, err := newDicoveryCache(downstream, 1, true) // TODO: Expose
 	if err != nil {
 		return err
 	}

@@ -2,7 +2,6 @@ package reconciliation
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"github.com/go-logr/logr"
@@ -18,12 +17,13 @@ import (
 // discoveryCache is useful to prevent excessive QPS to the discovery APIs while
 // still allowing dynamic refresh of the openapi spec on cache misses.
 type discoveryCache struct {
-	mut     sync.Mutex
-	client  discovery.DiscoveryInterface
-	current openapi.Resources
+	mut              sync.Mutex
+	client           discovery.DiscoveryInterface
+	fillWhenNotFound bool
+	current          openapi.Resources
 }
 
-func newDicoveryCache(rc *rest.Config, qps float32) (*discoveryCache, error) {
+func newDicoveryCache(rc *rest.Config, qps float32, fillWhenNotFound bool) (*discoveryCache, error) {
 	conf := rest.CopyConfig(rc)
 	conf.RateLimiter = flowcontrol.NewTokenBucketRateLimiter(qps, 1)
 
@@ -33,7 +33,7 @@ func newDicoveryCache(rc *rest.Config, qps float32) (*discoveryCache, error) {
 	}
 	disc.UseLegacyDiscovery = true // don't bother with aggregated APIs since they may be unavailable
 
-	d := &discoveryCache{client: disc}
+	d := &discoveryCache{client: disc, fillWhenNotFound: fillWhenNotFound}
 	return d, nil
 }
 
@@ -48,14 +48,20 @@ func (d *discoveryCache) Get(ctx context.Context, gvk schema.GroupVersionKind) (
 	}
 
 	model := d.current.LookupResource(gvk)
-	if model == nil {
-		if err := d.fillUnlocked(ctx); err != nil {
-			return nil, err
-		}
-		return d.getUnlocked(ctx, gvk)
+	if model != nil {
+		return d.checkSupportUnlocked(ctx, gvk, model)
 	}
 
-	return d.getUnlocked(ctx, gvk)
+	// Don't invalidate the cache when configured not to
+	if !d.fillWhenNotFound {
+		return nil, nil
+	}
+
+	// Get fresh schema and try again
+	if err := d.fillUnlocked(ctx); err != nil {
+		return nil, err
+	}
+	return d.checkSupportUnlocked(ctx, gvk, d.current.LookupResource(gvk))
 }
 
 func (d *discoveryCache) fillUnlocked(ctx context.Context) error {
@@ -73,11 +79,15 @@ func (d *discoveryCache) fillUnlocked(ctx context.Context) error {
 	return nil
 }
 
-func (d *discoveryCache) getUnlocked(ctx context.Context, gvk schema.GroupVersionKind) (proto.Schema, error) {
+func (d *discoveryCache) checkSupportUnlocked(ctx context.Context, gvk schema.GroupVersionKind, model proto.Schema) (proto.Schema, error) {
 	logger := logr.FromContextOrDiscard(ctx)
-	model := d.current.LookupResource(gvk)
 	if model == nil {
-		return nil, fmt.Errorf("model not found in openapi spec")
+		if d.fillWhenNotFound {
+			logger.V(0).Info("type not found in openapi schema after refresh - this is unexpected and suspicious")
+		} else {
+			logger.V(1).Info("type not found in openapi schema")
+		}
+		return nil, nil
 	}
 
 	for _, c := range d.current.GetConsumes(gvk, "PATCH") {
