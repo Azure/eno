@@ -16,8 +16,6 @@ import (
 	"github.com/go-logr/logr"
 )
 
-const indexName = ".metadata.owner"
-
 // reconstituter reconstitutes individual resources out of resource slices.
 // Similar to an informer but with extra logic to handle expanding the slice resources.
 type reconstituter struct {
