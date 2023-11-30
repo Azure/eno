@@ -18,6 +18,8 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// TODO: Minimal retries for validation error
+
 type Controller struct {
 	client         client.Client
 	resourceClient reconstitution.Client
@@ -172,6 +174,7 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 		return jsonmergepatch.CreateThreeWayJSONMergePatch([]byte(prevManifest), []byte(resource.Manifest), currentJS)
 	}
 
+	println("TODO PREV", string(prevManifest))
 	patchmeta := strategicpatch.NewPatchMetaFromOpenAPI(model)
 	return strategicpatch.CreateThreeWayMergePatch([]byte(prevManifest), []byte(resource.Manifest), currentJS, patchmeta, true)
 }

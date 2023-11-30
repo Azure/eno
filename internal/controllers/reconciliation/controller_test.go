@@ -20,7 +20,7 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 )
 
-// TODO: Fix, add CR test
+// TODO: Add CR test
 
 func TestControllerBasics(t *testing.T) {
 	tests := []struct {
@@ -37,36 +37,17 @@ func TestControllerBasics(t *testing.T) {
 					Namespace: "default",
 				},
 				Spec: corev1.ServiceSpec{
-					Type: corev1.ServiceTypeNodePort,
-					Ports: []corev1.ServicePort{
-						{
-							Name:     "port-1",
-							Port:     1,
-							NodePort: 30010,
-						},
-						{
-							Name:     "port-2",
-							Port:     2,
-							NodePort: 30020,
-						},
-					},
+					Ports: []corev1.ServicePort{{
+						Name: "test",
+						Port: 1234,
+					}},
+					Selector: map[string]string{"foo": "bar"},
 				},
 			},
 			AssertCreated: func(t *testing.T, obj client.Object) {
-				expected := []corev1.ServicePort{
-					{
-						Name:     "port-1",
-						Port:     1,
-						NodePort: 30010,
-					},
-					{
-						Name:     "port-2",
-						Port:     2,
-						NodePort: 30020,
-					},
-				}
+				// TODO
 				svc := obj.(*corev1.Service)
-				assert.Equal(t, expected, svc.Spec.Ports)
+				assert.Equal(t, nil, svc.Spec)
 			},
 			Updated: &corev1.Service{
 				ObjectMeta: metav1.ObjectMeta{
@@ -74,36 +55,17 @@ func TestControllerBasics(t *testing.T) {
 					Namespace: "default",
 				},
 				Spec: corev1.ServiceSpec{
-					Type: corev1.ServiceTypeNodePort,
-					Ports: []corev1.ServicePort{
-						{
-							Name:     "port-1",
-							Port:     1,
-							NodePort: 30010,
-						},
-						{
-							Name:     "port-2",
-							Port:     2,
-							NodePort: 30021, // updated
-						},
-					},
+					Ports: []corev1.ServicePort{{
+						Name: "test",
+						Port: 1234,
+					}},
+					Selector: map[string]string{"bar": "baz"},
 				},
 			},
 			AssertUpdated: func(t *testing.T, obj client.Object) {
-				expected := []corev1.ServicePort{
-					{
-						Name:     "port-1",
-						Port:     1,
-						NodePort: 30010,
-					},
-					{
-						Name:     "port-2",
-						Port:     2,
-						NodePort: 30021,
-					},
-				}
+				// TODO
 				svc := obj.(*corev1.Service)
-				assert.Equal(t, expected, svc.Spec.Ports)
+				assert.Equal(t, nil, svc.Spec)
 			},
 		},
 	}
