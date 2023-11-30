@@ -47,22 +47,22 @@ func (m *reconcilerManager) Add(rec Reconciler) error {
 		Name: rec.Name(),
 	})
 	qp := &queueProcessor{
-		Client:  m.Manager.GetClient(),
-		Queue:   queue,
-		Recon:   m.reconstituter,
-		Handler: rec,
-		Logger:  m.Manager.GetLogger().WithValues("controller", rec.Name()),
+		Client:        m.Manager.GetClient(),
+		Queue:         queue,
+		Reconstituter: m.reconstituter,
+		Handler:       rec,
+		Logger:        m.Manager.GetLogger().WithValues("controller", rec.Name()),
 	}
 	m.reconstituter.AddQueue(queue)
 	return m.Manager.Add(qp)
 }
 
 type queueProcessor struct {
-	Client  client.Client
-	Queue   workqueue.RateLimitingInterface
-	Recon   *reconstituter
-	Handler Reconciler
-	Logger  logr.Logger
+	Client        client.Client
+	Queue         workqueue.RateLimitingInterface
+	Reconstituter *reconstituter
+	Handler       Reconciler
+	Logger        logr.Logger
 }
 
 func (q *queueProcessor) Start(ctx context.Context) error {
@@ -82,7 +82,12 @@ func (q *queueProcessor) processQueueItem(ctx context.Context) bool {
 	}
 	defer q.Queue.Done(item)
 
-	req := item.(*Request)
+	req, ok := item.(*Request)
+	if !ok {
+		q.Logger.Error(nil, "failed type assertion in queue processor")
+		return false
+	}
+
 	logger := q.Logger.WithValues("compositionName", req.Composition.Name, "compositionNamespace", req.Composition.Namespace, "resourceKind", req.ResourceRef.Kind, "resourceName", req.ResourceRef.Name, "resourceNamespace", req.ResourceRef.Namespace)
 	ctx = logr.NewContext(ctx, logger)
 
