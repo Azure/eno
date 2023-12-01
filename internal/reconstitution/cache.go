@@ -43,7 +43,12 @@ func (c *cache) Get(ctx context.Context, ref *ResourceRef, gen int64) (*Resource
 
 	resKey := resourceKey{Kind: ref.Kind, Namespace: ref.Namespace, Name: ref.Name}
 	res, ok := resources[resKey]
-	return res, ok
+	return &Resource{
+		Ref:               ref,
+		Manifest:          res.Manifest,
+		Object:            res.Object.DeepCopy(),
+		ReconcileInterval: res.ReconcileInterval,
+	}, ok
 }
 
 func (c *cache) HasSynthesis(ctx context.Context, comp types.NamespacedName, synthesis *apiv1.Synthesis) bool {

@@ -2,6 +2,7 @@ package reconciliation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -18,6 +19,8 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// TODO: Minimal retries for validation error
+
 type Controller struct {
 	client         client.Client
 	resourceClient reconstitution.Client
@@ -26,25 +29,26 @@ type Controller struct {
 	discovery      *discoveryCache
 }
 
-func New(mgr *reconstitution.Manager, downstream *rest.Config, discoveryRPS float32, rediscoverWhenNotFound bool) error {
+func New(mgr *reconstitution.Manager, downstream *rest.Config, discoveryRPS float32, rediscoverWhenNotFound bool) (*Controller, error) {
 	upstreamClient, err := client.New(downstream, client.Options{
 		Scheme: runtime.NewScheme(), // empty scheme since we shouldn't rely on compile-time types
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	disc, err := newDicoveryCache(downstream, discoveryRPS, rediscoverWhenNotFound)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return mgr.Add(&Controller{
+	c := &Controller{
 		client:         mgr.Manager.GetClient(),
 		resourceClient: mgr.GetClient(),
 		upstreamClient: upstreamClient,
 		discovery:      disc,
-	})
+	}
+	return c, mgr.Add(c)
 }
 
 func (c *Controller) Name() string { return "reconciliationController" }
@@ -72,7 +76,12 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	var prev *reconstitution.Resource
 	if comp.Status.PreviousState != nil {
-		prev, _ = c.resourceClient.Get(ctx, &req.ResourceRef, comp.Status.PreviousState.ObservedCompositionGeneration)
+		var ok bool
+		prev, ok = c.resourceClient.Get(ctx, &req.ResourceRef, comp.Status.PreviousState.ObservedCompositionGeneration)
+		if !ok {
+			logger.V(0).Info("previous resource not found - dropping") // TODO: error?
+			return ctrl.Result{}, nil
+		}
 	} else {
 		logger.V(1).Info("no previous state given")
 	}
@@ -135,7 +144,10 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 	}
 
 	// Patch
-	patch, err := c.buildPatch(ctx, prev, resource, current)
+	if prev == nil {
+		return errors.New("TODO do a put instead?")
+	}
+	patch, patchType, err := c.buildPatch(ctx, prev, resource, current)
 	if err != nil {
 		return fmt.Errorf("building patch: %w", err)
 	}
@@ -144,8 +156,8 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 		return nil
 	}
 
-	logger.V(0).Info("patching resource", "patch", string(patch)) // TODO: Remove
-	err = c.upstreamClient.Patch(ctx, current, client.RawPatch(types.MergePatchType, patch))
+	logger.V(0).Info("patching resource", "patch", string(patch), "patchType", string(patchType), "currentResourceVersion", current.GetResourceVersion())
+	err = c.upstreamClient.Patch(ctx, current, client.RawPatch(patchType, patch))
 	if err != nil {
 		return fmt.Errorf("applying patch: %w", err)
 	}
@@ -153,25 +165,36 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 	return nil
 }
 
-func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) ([]byte, error) {
-	var prevManifest []byte
-	if prev != nil {
-		prevManifest = []byte(prev.Manifest)
-	}
-
+func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) ([]byte, types.PatchType, error) {
 	currentJS, err := current.MarshalJSON()
 	if err != nil {
-		return nil, fmt.Errorf("building json representation of desired state: %w", err)
+		return nil, "", fmt.Errorf("building json representation of desired state: %w", err)
 	}
 
-	model, err := c.discovery.Get(ctx, resource.Object.GroupVersionKind())
+	prev.Object.SetResourceVersion(current.GetResourceVersion())
+	prevJS, err := prev.Object.MarshalJSON()
 	if err != nil {
-		return nil, fmt.Errorf("getting merge metadata: %w", err)
+		panic(err) // TODO
+	}
+
+	resource.Object.SetResourceVersion(current.GetResourceVersion())
+	resourceJS, err := resource.Object.MarshalJSON()
+	if err != nil {
+		panic(err) // TODO
+	}
+
+	model, err := c.discovery.Get(ctx, current.GroupVersionKind()) // TODO: Change back?
+	if err != nil {
+		return nil, "", fmt.Errorf("getting merge metadata: %w", err)
 	}
 	if model == nil {
-		return jsonmergepatch.CreateThreeWayJSONMergePatch([]byte(prevManifest), []byte(resource.Manifest), currentJS)
+		patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch([]byte(prev.Manifest), []byte(resource.Manifest), currentJS)
+		return patch, types.MergePatchType, err
 	}
 
+	println("TODO PATCH META", string(prevJS), string(resourceJS), string(currentJS))
+
 	patchmeta := strategicpatch.NewPatchMetaFromOpenAPI(model)
-	return strategicpatch.CreateThreeWayMergePatch([]byte(prevManifest), []byte(resource.Manifest), currentJS, patchmeta, true)
+	patch, err := strategicpatch.CreateThreeWayMergePatch([]byte(prevJS), []byte(resourceJS), currentJS, patchmeta, true)
+	return patch, types.StrategicMergePatchType, err
 }
