@@ -79,7 +79,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if err := reconciliation.New(reMgr, nil, 1, true); err != nil { // TODO
+	if _, err := reconciliation.New(reMgr, nil, 1, true); err != nil { // TODO
 		return err
 	}
 

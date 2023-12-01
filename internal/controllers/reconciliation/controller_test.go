@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/util/retry"
@@ -22,60 +21,7 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 )
 
-// https://github.com/kubernetes/kubectl/blob/eb3138bd9f8c0a4ec3dece5d431ba21be9c0bcf1/pkg/cmd/apply/patcher.go#L187
-
 // TODO: Add CR test
-
-func TestTEMP(t *testing.T) { // TODO
-	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t)
-
-	// Register supporting controllers
-	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
-	require.NoError(t, err)
-
-	c, err := New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15))
-	require.NoError(t, err)
-	mgr.Start(t)
-
-	svc := &corev1.Service{}
-	svc.Name = "test-service"
-	svc.Namespace = "default"
-	svc.APIVersion = "v1"
-	svc.Kind = "Service"
-	svc.Spec.Ports = []corev1.ServicePort{{
-		Name: "foo",
-		Port: 123,
-	}}
-	require.NoError(t, mgr.DownstreamClient.Create(ctx, svc))
-	prevMani, _ := json.Marshal(svc)
-	svc.APIVersion = "v1" // ?
-	svc.Kind = "Service"
-
-	copy := svc.DeepCopy()
-	copy.Spec.Ports = append(copy.Spec.Ports, corev1.ServicePort{
-		Name: "external",
-		Port: 234,
-	})
-	require.NoError(t, mgr.DownstreamClient.Update(ctx, copy))
-	currentMani, _ := json.Marshal(copy)
-
-	svc.Spec.Ports = append(svc.Spec.Ports, corev1.ServicePort{
-		Name: "bar",
-		Port: 234,
-	})
-	nextMani, _ := json.Marshal(svc)
-
-	prev := &reconstitution.Resource{Manifest: string(prevMani)}
-	next := &reconstitution.Resource{Manifest: string(nextMani)}
-	current := &unstructured.Unstructured{Object: map[string]interface{}{}}
-	require.NoError(t, current.UnmarshalJSON([]byte(currentMani)))
-
-	patch, _, err := c.buildPatch(ctx, prev, next, current)
-	require.NoError(t, err)
-
-	t.Errorf("PATCH: %s", patch)
-}
 
 func TestControllerBasics(t *testing.T) {
 	tests := []struct {
