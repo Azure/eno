@@ -78,7 +78,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 		}
-		logger.Info("populated synthesis status to reflect pod")
+		logger.Info("added synthesizer pod status to its composition resource")
 		return ctrl.Result{}, nil
 	}
 

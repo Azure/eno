@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -29,26 +31,25 @@ type Controller struct {
 	discovery      *discoveryCache
 }
 
-func New(mgr *reconstitution.Manager, downstream *rest.Config, discoveryRPS float32, rediscoverWhenNotFound bool) (*Controller, error) { // TODO: REmove return
+func New(mgr *reconstitution.Manager, downstream *rest.Config, discoveryRPS float32, rediscoverWhenNotFound bool) error {
 	upstreamClient, err := client.New(downstream, client.Options{
 		Scheme: runtime.NewScheme(), // empty scheme since we shouldn't rely on compile-time types
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	disc, err := newDicoveryCache(downstream, discoveryRPS, rediscoverWhenNotFound)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	c := &Controller{
+	return mgr.Add(&Controller{
 		client:         mgr.Manager.GetClient(),
 		resourceClient: mgr.GetClient(),
 		upstreamClient: upstreamClient,
 		discovery:      disc,
-	}
-	return c, mgr.Add(c)
+	})
 }
 
 func (c *Controller) Name() string { return "reconciliationController" }
@@ -62,15 +63,15 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 
 	if comp.Status.CurrentState == nil {
-		logger.V(1).Info("composition has not yet been synthesized")
+		// we don't log here because it would be too noisy
 		return ctrl.Result{}, nil
 	}
-	currentGen := comp.Status.CurrentState.ObservedCompositionGeneration
 
 	// Find the current and (optionally) previous desired states in the cache
+	currentGen := comp.Status.CurrentState.ObservedCompositionGeneration
 	resource, found := c.resourceClient.Get(ctx, &req.ResourceRef, currentGen)
 	if !found {
-		logger.V(0).Info("resource not found - dropping")
+		logger.V(1).Info("resource not found - waiting for cache to be filled")
 		return ctrl.Result{}, nil
 	}
 
@@ -79,7 +80,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		var ok bool
 		prev, ok = c.resourceClient.Get(ctx, &req.ResourceRef, comp.Status.PreviousState.ObservedCompositionGeneration)
 		if !ok {
-			logger.V(0).Info("previous resource not found - dropping") // TODO: error?
+			logger.V(1).Info("previous resource not found - waiting for cache to be filled")
 			return ctrl.Result{}, nil
 		}
 	} else {
@@ -133,20 +134,22 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 	// 	return nil
 	// }
 
-	// Create
+	// Always create the resource when it doesn't exist
 	if current.GetResourceVersion() == "" {
-		logger.V(0).Info("creating resource")
 		err := c.upstreamClient.Create(ctx, resource.Object)
 		if err != nil {
 			return fmt.Errorf("creating resource: %w", err)
 		}
+		logger.V(0).Info("created resource")
 		return nil
 	}
 
-	// Patch
+	// Replace the entire resource when a previous state isn't provided since we can't compute a merge patch without it
 	if prev == nil {
-		return errors.New("TODO do a put instead?")
+		return errors.New("TODO IMPLEMENT ME")
 	}
+
+	// Compute a merge patch
 	patch, patchType, err := c.buildPatch(ctx, prev, resource, current)
 	if err != nil {
 		return fmt.Errorf("building patch: %w", err)
@@ -155,35 +158,26 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 		logger.V(1).Info("skipping empty patch")
 		return nil
 	}
-
-	logger.V(0).Info("patching resource", "patch", string(patch), "patchType", string(patchType), "currentResourceVersion", current.GetResourceVersion())
 	err = c.upstreamClient.Patch(ctx, current, client.RawPatch(patchType, patch))
 	if err != nil {
 		return fmt.Errorf("applying patch: %w", err)
 	}
+	logger.V(0).Info("patched resource", "patch", string(patch), "patchType", string(patchType), "resourceVersion", current.GetResourceVersion())
 
 	return nil
 }
 
 func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) ([]byte, types.PatchType, error) {
+	// We need to remove the creation timestamp since the other versions of the resource we're merging against won't have it.
+	// It's safe to mutate in this case because resource has already been copied by the cache.
+	current.SetCreationTimestamp(metav1.NewTime(time.Time{}))
+
 	currentJS, err := current.MarshalJSON()
 	if err != nil {
 		return nil, "", fmt.Errorf("building json representation of desired state: %w", err)
 	}
 
-	prev.Object.SetResourceVersion(current.GetResourceVersion())
-	prevJS, err := prev.Object.MarshalJSON()
-	if err != nil {
-		panic(err) // TODO
-	}
-
-	resource.Object.SetResourceVersion(current.GetResourceVersion())
-	resourceJS, err := resource.Object.MarshalJSON()
-	if err != nil {
-		panic(err) // TODO
-	}
-
-	model, err := c.discovery.Get(ctx, current.GroupVersionKind()) // TODO: Change back?
+	model, err := c.discovery.Get(ctx, resource.Object.GroupVersionKind())
 	if err != nil {
 		return nil, "", fmt.Errorf("getting merge metadata: %w", err)
 	}
@@ -192,9 +186,7 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 		return patch, types.MergePatchType, err
 	}
 
-	println("TODO PATCH META", string(prevJS), string(resourceJS), string(currentJS))
-
 	patchmeta := strategicpatch.NewPatchMetaFromOpenAPI(model)
-	patch, err := strategicpatch.CreateThreeWayMergePatch([]byte(prevJS), []byte(resourceJS), currentJS, patchmeta, true)
+	patch, err := strategicpatch.CreateThreeWayMergePatch([]byte(prev.Manifest), []byte(resource.Manifest), currentJS, patchmeta, true)
 	return patch, types.StrategicMergePatchType, err
 }

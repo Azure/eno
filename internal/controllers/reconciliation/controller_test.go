@@ -40,10 +40,9 @@ func TestControllerBasics(t *testing.T) {
 				},
 				Spec: corev1.ServiceSpec{
 					Ports: []corev1.ServicePort{{
-						Name:       "first",
-						Port:       1234,
-						Protocol:   corev1.ProtocolTCP,
-						TargetPort: intstr.FromInt(1234), // TODO: Shouldn't be necessary
+						Name:     "first",
+						Port:     1234,
+						Protocol: corev1.ProtocolTCP,
 					}},
 				},
 			},
@@ -59,10 +58,9 @@ func TestControllerBasics(t *testing.T) {
 			ApplyExternalUpdate: func(t *testing.T, obj client.Object) client.Object {
 				svc := obj.(*corev1.Service).DeepCopy()
 				svc.Spec.Ports = []corev1.ServicePort{{
-					Name:       "second",
-					Port:       2345,
-					Protocol:   corev1.ProtocolTCP,
-					TargetPort: intstr.FromInt(2345),
+					Name:     "second",
+					Port:     2345,
+					Protocol: corev1.ProtocolTCP,
 				}}
 				return svc
 			},
@@ -73,10 +71,9 @@ func TestControllerBasics(t *testing.T) {
 				},
 				Spec: corev1.ServiceSpec{
 					Ports: []corev1.ServicePort{{
-						Name:       "third",
-						Port:       3456,
-						Protocol:   corev1.ProtocolTCP,
-						TargetPort: intstr.FromInt(3456),
+						Name:     "third",
+						Port:     3456,
+						Protocol: corev1.ProtocolTCP,
 					}},
 				},
 			},
@@ -142,7 +139,6 @@ func TestControllerBasics(t *testing.T) {
 
 				js, err := json.Marshal(obj)
 				require.NoError(t, err)
-				t.Logf("resource json %s", js)
 
 				slice := &apiv1.ResourceSlice{}
 				slice.GenerateName = "test-"
@@ -154,7 +150,7 @@ func TestControllerBasics(t *testing.T) {
 
 			// Test subject
 			// Only enable rediscoverWhenNotFound on k8s versions that can support it.
-			_, err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15))
+			err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15))
 			require.NoError(t, err)
 			mgr.Start(t)
 
