@@ -131,14 +131,10 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 
 	var dirty bool
 	for _, update := range updates {
-		logger := logger.WithValues("slicedResource", update.SlicedResource)
 		statusPtr := &slice.Status.Resources[update.SlicedResource.Index]
 
 		if update.PatchFn(statusPtr) {
-			logger.V(1).Info("patch caused status to change")
 			dirty = true
-		} else {
-			logger.V(1).Info("patch did not cause status to change")
 		}
 	}
 	if !dirty {

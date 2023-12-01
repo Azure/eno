@@ -49,7 +49,6 @@ func (r *reconstituter) AddQueue(queue workqueue.Interface) {
 
 func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	r.started.Store(true)
-	r.logger.V(1).Info("caching composition")
 
 	comp := &apiv1.Composition{}
 	err := r.client.Get(ctx, req.NamespacedName, comp)
