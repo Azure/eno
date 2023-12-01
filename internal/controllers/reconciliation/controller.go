@@ -2,7 +2,6 @@ package reconciliation
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -144,11 +143,6 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 		return nil
 	}
 
-	// Replace the entire resource when a previous state isn't provided since we can't compute a merge patch without it
-	if prev == nil {
-		return errors.New("TODO IMPLEMENT ME")
-	}
-
 	// Compute a merge patch
 	patch, patchType, err := c.buildPatch(ctx, prev, resource, current)
 	if err != nil {
@@ -162,7 +156,7 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 	if err != nil {
 		return fmt.Errorf("applying patch: %w", err)
 	}
-	logger.V(0).Info("patched resource", "patch", string(patch), "patchType", string(patchType), "resourceVersion", current.GetResourceVersion())
+	logger.V(0).Info("patched resource", "patchType", string(patchType), "resourceVersion", current.GetResourceVersion())
 
 	return nil
 }
@@ -171,6 +165,11 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 	// We need to remove the creation timestamp since the other versions of the resource we're merging against won't have it.
 	// It's safe to mutate in this case because resource has already been copied by the cache.
 	current.SetCreationTimestamp(metav1.NewTime(time.Time{}))
+
+	var prevManifest []byte
+	if prev != nil {
+		prevManifest = []byte(prev.Manifest)
+	}
 
 	currentJS, err := current.MarshalJSON()
 	if err != nil {
@@ -182,11 +181,11 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 		return nil, "", fmt.Errorf("getting merge metadata: %w", err)
 	}
 	if model == nil {
-		patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch([]byte(prev.Manifest), []byte(resource.Manifest), currentJS)
+		patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(prevManifest, []byte(resource.Manifest), currentJS)
 		return patch, types.MergePatchType, err
 	}
 
 	patchmeta := strategicpatch.NewPatchMetaFromOpenAPI(model)
-	patch, err := strategicpatch.CreateThreeWayMergePatch([]byte(prev.Manifest), []byte(resource.Manifest), currentJS, patchmeta, true)
+	patch, err := strategicpatch.CreateThreeWayMergePatch(prevManifest, []byte(resource.Manifest), currentJS, patchmeta, true)
 	return patch, types.StrategicMergePatchType, err
 }

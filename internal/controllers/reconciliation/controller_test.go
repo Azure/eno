@@ -1,6 +1,7 @@
 package reconciliation
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -23,85 +24,87 @@ import (
 
 // TODO: Add CR test
 
-func TestControllerBasics(t *testing.T) {
-	tests := []struct {
-		Name                         string
-		Empty, Initial, Updated      client.Object
-		AssertCreated, AssertUpdated func(t *testing.T, obj client.Object)
-		ApplyExternalUpdate          func(t *testing.T, obj client.Object) client.Object
-	}{
-		{
-			Name:  "strategic-merge", // this test covers list merge logic and will fail if non-strategic merge is used
-			Empty: &corev1.Service{},
-			Initial: &corev1.Service{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-obj",
-					Namespace: "default",
-				},
-				Spec: corev1.ServiceSpec{
-					Ports: []corev1.ServicePort{{
-						Name:     "first",
-						Port:     1234,
-						Protocol: corev1.ProtocolTCP,
-					}},
-				},
+type crudTestCase struct {
+	Name                         string
+	Empty, Initial, Updated      client.Object
+	AssertCreated, AssertUpdated func(t *testing.T, obj client.Object)
+	ApplyExternalUpdate          func(t *testing.T, obj client.Object) client.Object
+}
+
+var crudTests = []crudTestCase{
+	{
+		Name:  "strategic-merge", // will fail if non-strategic merge is used
+		Empty: &corev1.Service{},
+		Initial: &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-obj",
+				Namespace: "default",
 			},
-			AssertCreated: func(t *testing.T, obj client.Object) {
-				svc := obj.(*corev1.Service).Spec
-				assert.Equal(t, []corev1.ServicePort{{
-					Name:       "first",
-					Port:       1234,
-					Protocol:   corev1.ProtocolTCP,
-					TargetPort: intstr.FromInt(1234),
-				}}, svc.Ports)
-			},
-			ApplyExternalUpdate: func(t *testing.T, obj client.Object) client.Object {
-				svc := obj.(*corev1.Service).DeepCopy()
-				svc.Spec.Ports = []corev1.ServicePort{{
-					Name:     "second",
-					Port:     2345,
+			Spec: corev1.ServiceSpec{
+				Ports: []corev1.ServicePort{{
+					Name:     "first",
+					Port:     1234,
 					Protocol: corev1.ProtocolTCP,
-				}}
-				return svc
-			},
-			Updated: &corev1.Service{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-obj",
-					Namespace: "default",
-				},
-				Spec: corev1.ServiceSpec{
-					Ports: []corev1.ServicePort{{
-						Name:     "third",
-						Port:     3456,
-						Protocol: corev1.ProtocolTCP,
-					}},
-				},
-			},
-			AssertUpdated: func(t *testing.T, obj client.Object) {
-				svc := obj.(*corev1.Service).Spec
-				assert.Equal(t, []corev1.ServicePort{
-					{
-						Name:       "third",
-						Port:       3456,
-						Protocol:   corev1.ProtocolTCP,
-						TargetPort: intstr.FromInt(3456),
-					},
-					{
-						Name:       "second",
-						Port:       2345,
-						Protocol:   corev1.ProtocolTCP,
-						TargetPort: intstr.FromInt(2345),
-					},
-				}, svc.Ports)
+				}},
 			},
 		},
-	}
+		AssertCreated: func(t *testing.T, obj client.Object) {
+			svc := obj.(*corev1.Service).Spec
+			assert.Equal(t, []corev1.ServicePort{{
+				Name:       "first",
+				Port:       1234,
+				Protocol:   corev1.ProtocolTCP,
+				TargetPort: intstr.FromInt(1234),
+			}}, svc.Ports)
+		},
+		ApplyExternalUpdate: func(t *testing.T, obj client.Object) client.Object {
+			svc := obj.(*corev1.Service).DeepCopy()
+			svc.Spec.Ports = []corev1.ServicePort{{
+				Name:     "second",
+				Port:     2345,
+				Protocol: corev1.ProtocolTCP,
+			}}
+			return svc
+		},
+		Updated: &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-obj",
+				Namespace: "default",
+			},
+			Spec: corev1.ServiceSpec{
+				Ports: []corev1.ServicePort{{
+					Name:     "third",
+					Port:     3456,
+					Protocol: corev1.ProtocolTCP,
+				}},
+			},
+		},
+		AssertUpdated: func(t *testing.T, obj client.Object) {
+			svc := obj.(*corev1.Service).Spec
+			assert.Equal(t, []corev1.ServicePort{
+				{
+					Name:       "third",
+					Port:       3456,
+					Protocol:   corev1.ProtocolTCP,
+					TargetPort: intstr.FromInt(3456),
+				},
+				{
+					Name:       "second",
+					Port:       2345,
+					Protocol:   corev1.ProtocolTCP,
+					TargetPort: intstr.FromInt(2345),
+				},
+			}, svc.Ports)
+		},
+	},
+}
 
+func TestCRUD(t *testing.T) {
 	scheme := runtime.NewScheme()
 	corev1.SchemeBuilder.AddToScheme(scheme)
 	testv1.SchemeBuilder.AddToScheme(scheme)
 
-	for _, test := range tests {
+	for _, test := range crudTests {
 		test := test
 		t.Run(test.Name, func(t *testing.T) {
 			t.Parallel()
@@ -122,31 +125,7 @@ func TestControllerBasics(t *testing.T) {
 			}))
 
 			// Simulate synthesis of our test composition into the resources specified by the test case
-			testutil.NewPodController(t, mgr.Manager, func(c *apiv1.Composition, s *apiv1.Synthesizer) []*apiv1.ResourceSlice {
-				var obj client.Object
-				switch s.Spec.Image {
-				case "create":
-					obj = test.Initial.DeepCopyObject().(client.Object)
-				case "update":
-					obj = test.Updated.DeepCopyObject().(client.Object)
-				default:
-					t.Fatalf("unknown pseudo-image: %s", s.Spec.Image)
-				}
-
-				gvks, _, err := scheme.ObjectKinds(obj)
-				require.NoError(t, err)
-				obj.GetObjectKind().SetGroupVersionKind(gvks[0])
-
-				js, err := json.Marshal(obj)
-				require.NoError(t, err)
-
-				slice := &apiv1.ResourceSlice{}
-				slice.GenerateName = "test-"
-				slice.Namespace = "default"
-				slice.Spec.CompositionGeneration = c.Generation
-				slice.Spec.Resources = []apiv1.Manifest{{Manifest: string(js)}}
-				return []*apiv1.ResourceSlice{slice}
-			})
+			testutil.NewPodController(t, mgr.Manager, newSliceBuilder(t, scheme, &test))
 
 			// Test subject
 			// Only enable rediscoverWhenNotFound on k8s versions that can support it.
@@ -168,30 +147,20 @@ func TestControllerBasics(t *testing.T) {
 
 			var lastResourceVersion string
 			t.Run("creation", func(t *testing.T) {
-				obj := test.Empty.DeepCopyObject().(client.Object)
-				obj.SetName(test.Initial.GetName())
-				obj.SetNamespace(test.Initial.GetNamespace())
+				var obj client.Object
 				testutil.Eventually(t, func() bool {
-					return downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj) == nil
+					obj, err = test.Get(downstream)
+					return err == nil
 				})
 				test.AssertCreated(t, obj)
 				lastResourceVersion = obj.GetResourceVersion()
-
-				// wait for the initial patch to hit the informer
-				testutil.Eventually(t, func() bool {
-					return downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj) == nil && obj.GetResourceVersion() == lastResourceVersion
-				})
 			})
 
 			if test.ApplyExternalUpdate != nil {
 				t.Run("external update", func(t *testing.T) {
 					err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-						obj := test.Empty.DeepCopyObject().(client.Object)
-						obj.SetName(test.Initial.GetName())
-						obj.SetNamespace(test.Initial.GetNamespace())
-						if err := downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
-							return err
-						}
+						obj, err := test.Get(downstream)
+						require.NoError(t, err)
 
 						updatedObj := test.ApplyExternalUpdate(t, obj)
 						if err := downstream.Update(ctx, updatedObj); err != nil {
@@ -205,34 +174,73 @@ func TestControllerBasics(t *testing.T) {
 					require.NoError(t, err)
 
 					// wait for this write to hit the informer cache
-					obj := test.Empty.DeepCopyObject().(client.Object)
-					obj.SetName(test.Initial.GetName())
-					obj.SetNamespace(test.Initial.GetNamespace())
 					testutil.Eventually(t, func() bool {
-						return downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj) == nil && obj.GetResourceVersion() == lastResourceVersion
+						obj, err := test.Get(downstream)
+						if err != nil || obj.GetResourceVersion() != lastResourceVersion {
+							return false
+						}
+						lastResourceVersion = obj.GetResourceVersion()
+						return true
 					})
-					lastResourceVersion = obj.GetResourceVersion()
 				})
 			}
 
 			t.Run("update", func(t *testing.T) {
-				err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-					if err := upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
-						return err
-					}
-					syn.Spec.Image = "update"
-					return upstream.Update(ctx, syn)
-				})
-				require.NoError(t, err)
+				setSynImage(t, upstream, syn, "update")
 
-				obj := test.Empty.DeepCopyObject().(client.Object)
-				obj.SetName(test.Initial.GetName())
-				obj.SetNamespace(test.Initial.GetNamespace())
+				var obj client.Object
 				testutil.Eventually(t, func() bool {
-					return downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj) == nil && obj.GetResourceVersion() != lastResourceVersion
+					obj, err = test.Get(downstream)
+					return err == nil && obj.GetResourceVersion() != lastResourceVersion
 				})
 				test.AssertUpdated(t, obj)
 			})
 		})
+	}
+}
+
+func (c *crudTestCase) Get(downstream client.Client) (client.Object, error) {
+	obj := c.Empty.DeepCopyObject().(client.Object)
+	obj.SetName(c.Initial.GetName())
+	obj.SetNamespace(c.Initial.GetNamespace())
+	return obj, downstream.Get(context.Background(), client.ObjectKeyFromObject(obj), obj)
+}
+
+func setSynImage(t *testing.T, upstream client.Client, syn *apiv1.Synthesizer, image string) {
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		if err := upstream.Get(context.Background(), client.ObjectKeyFromObject(syn), syn); err != nil {
+			return err
+		}
+		syn.Spec.Image = "update"
+		return upstream.Update(context.Background(), syn)
+	})
+	require.NoError(t, err)
+}
+
+func newSliceBuilder(t *testing.T, scheme *runtime.Scheme, test *crudTestCase) func(c *apiv1.Composition, s *apiv1.Synthesizer) []*apiv1.ResourceSlice {
+	return func(c *apiv1.Composition, s *apiv1.Synthesizer) []*apiv1.ResourceSlice {
+		var obj client.Object
+		switch s.Spec.Image {
+		case "create":
+			obj = test.Initial.DeepCopyObject().(client.Object)
+		case "update":
+			obj = test.Updated.DeepCopyObject().(client.Object)
+		default:
+			t.Fatalf("unknown pseudo-image: %s", s.Spec.Image)
+		}
+
+		gvks, _, err := scheme.ObjectKinds(obj)
+		require.NoError(t, err)
+		obj.GetObjectKind().SetGroupVersionKind(gvks[0])
+
+		js, err := json.Marshal(obj)
+		require.NoError(t, err)
+
+		slice := &apiv1.ResourceSlice{}
+		slice.GenerateName = "test-"
+		slice.Namespace = "default"
+		slice.Spec.CompositionGeneration = c.Generation
+		slice.Spec.Resources = []apiv1.Manifest{{Manifest: string(js)}}
+		return []*apiv1.ResourceSlice{slice}
 	}
 }
