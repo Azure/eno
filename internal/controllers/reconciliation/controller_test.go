@@ -22,7 +22,7 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 )
 
-// TODO: Add CR test
+// TODO: Cover no-op update, assert on exact k8s api requests
 
 type crudTestCase struct {
 	Name                         string
@@ -33,6 +33,7 @@ type crudTestCase struct {
 
 var crudTests = []crudTestCase{
 	{
+		// TODO: This test has a rare race condition I think
 		Name:  "strategic-merge", // will fail if non-strategic merge is used
 		Empty: &corev1.Service{},
 		Initial: &corev1.Service{
@@ -95,6 +96,36 @@ var crudTests = []crudTestCase{
 					TargetPort: intstr.FromInt(2345),
 				},
 			}, svc.Ports)
+		},
+	},
+	{
+		Name:  "cr-basics",
+		Empty: &testv1.TestResource{},
+		Initial: &testv1.TestResource{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-cr",
+				Namespace: "default",
+			},
+			Spec: testv1.TestResourceSpec{
+				Values: []*testv1.TestValue{{Int: 1}, {Int: 2}},
+			},
+		},
+		AssertCreated: func(t *testing.T, obj client.Object) {
+			tr := obj.(*testv1.TestResource)
+			assert.Equal(t, []*testv1.TestValue{{Int: 1}, {Int: 2}}, tr.Spec.Values)
+		},
+		Updated: &testv1.TestResource{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-cr",
+				Namespace: "default",
+			},
+			Spec: testv1.TestResourceSpec{
+				Values: []*testv1.TestValue{{Int: 2}},
+			},
+		},
+		AssertUpdated: func(t *testing.T, obj client.Object) {
+			tr := obj.(*testv1.TestResource)
+			assert.Equal(t, []*testv1.TestValue{{Int: 2}}, tr.Spec.Values)
 		},
 	},
 }
