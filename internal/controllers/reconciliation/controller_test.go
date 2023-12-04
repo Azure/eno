@@ -24,6 +24,8 @@ import (
 
 // TODO: Cover no-op update, assert on exact k8s api requests
 
+// TODO: Why are we sending strategic patches for CRs? Why does it work?
+
 type crudTestCase struct {
 	Name                         string
 	Empty, Initial, Updated      client.Object

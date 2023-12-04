@@ -11,10 +11,9 @@ import (
 	"k8s.io/client-go/discovery/fake"
 )
 
-func TestDiscoveryCacheTypeMissingInitially(t *testing.T) {
-	t.Skip("TODO")
+func TestDiscoveryCacheRefill(t *testing.T) {
 	client := &fakeDiscovery{}
-	d := &discoveryCache{client: client}
+	d := &discoveryCache{client: client, fillWhenNotFound: true}
 
 	gvk := schema.GroupVersionKind{
 		Group:   "test-group",
@@ -22,33 +21,45 @@ func TestDiscoveryCacheTypeMissingInitially(t *testing.T) {
 		Kind:    "TestKind1",
 	}
 
-	t.Run("missing from spec", func(t *testing.T) {
-		s, err := d.Get(context.Background(), gvk)
-		require.EqualError(t, err, "resource was not found in openapi spec")
-		assert.Nil(t, s)
-	})
+	s, err := d.Get(context.Background(), gvk)
+	require.NoError(t, err)
+	assert.Nil(t, s)
 
-	t.Run("added to spec after initial cache fill", func(t *testing.T) {
-		client.Schema = &openapi_v2.Document{} // TODO
+	s, err = d.Get(context.Background(), gvk)
+	require.NoError(t, err)
+	assert.Nil(t, s)
 
-		s, err := d.Get(context.Background(), gvk)
-		require.NoError(t, err)
-		assert.NotNil(t, s)
-	})
+	assert.Equal(t, 4, client.Calls)
+}
 
-	t.Run("cache hit", func(t *testing.T) {
-		s, err := d.Get(context.Background(), gvk)
-		require.NoError(t, err)
-		assert.NotNil(t, s)
-	})
+func TestDiscoveryCacheRefillDisabled(t *testing.T) {
+	client := &fakeDiscovery{}
+	d := &discoveryCache{client: client, fillWhenNotFound: false}
+
+	gvk := schema.GroupVersionKind{
+		Group:   "test-group",
+		Version: "test-version",
+		Kind:    "TestKind1",
+	}
+
+	s, err := d.Get(context.Background(), gvk)
+	require.NoError(t, err)
+	assert.Nil(t, s)
+
+	s, err = d.Get(context.Background(), gvk)
+	require.NoError(t, err)
+	assert.Nil(t, s)
+
+	assert.Equal(t, 1, client.Calls)
 }
 
 // the fake.FakeDiscovery doesn't allow fake OpenAPISchema return values.
 type fakeDiscovery struct {
 	fake.FakeDiscovery
-	Schema *openapi_v2.Document
+	Calls int
 }
 
 func (f *fakeDiscovery) OpenAPISchema() (*openapi_v2.Document, error) {
-	return f.Schema, nil
+	f.Calls++
+	return &openapi_v2.Document{}, nil
 }

@@ -42,31 +42,25 @@ func (d *discoveryCache) Get(ctx context.Context, gvk schema.GroupVersionKind) (
 	d.mut.Lock()
 	defer d.mut.Unlock()
 
-	if d.current == nil {
-		if err := d.fillUnlocked(ctx); err != nil {
-			return nil, err
+	for i := 0; i < 2; i++ {
+		if d.current == nil {
+			logger.V(1).Info("filling discovery cache")
+			if err := d.fillUnlocked(ctx); err != nil {
+				return nil, err
+			}
 		}
-	}
 
-	model := d.current.LookupResource(gvk)
-	if model != nil {
+		model := d.current.LookupResource(gvk)
+		if model == nil && d.fillWhenNotFound {
+			d.current = nil
+			continue
+		}
 		return d.checkSupportUnlocked(ctx, gvk, model)
 	}
-
-	if !d.fillWhenNotFound {
-		logger.V(1).Info("type not found in openapi schema")
-		return nil, nil
-	}
-
-	if err := d.fillUnlocked(ctx); err != nil {
-		return nil, err
-	}
-	return d.checkSupportUnlocked(ctx, gvk, d.current.LookupResource(gvk))
+	return nil, nil
 }
 
 func (d *discoveryCache) fillUnlocked(ctx context.Context) error {
-	logr.FromContextOrDiscard(ctx).V(1).Info("filling discovery cache")
-
 	doc, err := d.client.OpenAPISchema()
 	if err != nil {
 		return err
@@ -82,11 +76,7 @@ func (d *discoveryCache) fillUnlocked(ctx context.Context) error {
 func (d *discoveryCache) checkSupportUnlocked(ctx context.Context, gvk schema.GroupVersionKind, model proto.Schema) (proto.Schema, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 	if model == nil {
-		if d.fillWhenNotFound {
-			logger.V(0).Info("type not found in openapi schema after refresh - this is unexpected and suspicious")
-		} else {
-			logger.V(1).Info("type not found in openapi schema")
-		}
+		logger.V(1).Info("type not found in openapi schema")
 		return nil, nil
 	}
 
