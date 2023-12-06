@@ -84,7 +84,10 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Swap the state to prepare for resynthesis if needed
 	if comp.Status.CurrentState == nil || comp.Status.CurrentState.ObservedCompositionGeneration != comp.Generation {
-		swapStates(syn, comp)
+		if !swapStates(syn, comp) {
+			logger.V(1).Info("not swapping states because the previous one hasn't been sync'd") // TODO: We shouldn't block forever in case of unreconcilable resources
+			return ctrl.Result{}, nil
+		}
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
 		}
@@ -184,14 +187,16 @@ func (c *podLifecycleController) podStatusTerminal(pod *corev1.Pod) (string, boo
 	return "", false // status not initialized yet
 }
 
-func swapStates(syn *apiv1.Synthesizer, comp *apiv1.Composition) {
-	// Only swap current->previous when the current synthesis has completed
+func swapStates(syn *apiv1.Synthesizer, comp *apiv1.Composition) bool {
+	// Only swap previous=current after the current synthesis has been applied
 	// This avoids losing the prior state during rapid updates to the composition
-	resourceSliceCountSet := comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSliceCount != nil
-	if resourceSliceCountSet {
-		comp.Status.PreviousState = comp.Status.CurrentState
+	if comp.Status.CurrentState != nil && !comp.Status.CurrentState.Synced {
+		// When should we block the swap? When previous hasn't been applied?
+		return false
 	}
+	comp.Status.PreviousState = comp.Status.CurrentState
 	comp.Status.CurrentState = &apiv1.Synthesis{
 		ObservedCompositionGeneration: comp.Generation,
 	}
+	return true
 }
