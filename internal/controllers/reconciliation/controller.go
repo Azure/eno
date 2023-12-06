@@ -68,22 +68,21 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	// Find the current and (optionally) previous desired states in the cache
 	currentGen := comp.Status.CurrentState.ObservedCompositionGeneration
-	resource, found := c.resourceClient.Get(ctx, &req.ResourceRef, currentGen)
-	if !found {
-		logger.V(1).Info("resource not found - waiting for cache to be filled")
-		return ctrl.Result{}, nil
-	}
+	resource, _ := c.resourceClient.Get(ctx, &req.ResourceRef, currentGen)
 
 	var prev *reconstitution.Resource
 	if comp.Status.PreviousState != nil {
-		var ok bool
-		prev, ok = c.resourceClient.Get(ctx, &req.ResourceRef, comp.Status.PreviousState.ObservedCompositionGeneration)
-		if !ok {
-			logger.V(1).Info("previous resource not found - waiting for cache to be filled")
-			return ctrl.Result{}, nil
-		}
+		prev, _ = c.resourceClient.Get(ctx, &req.ResourceRef, comp.Status.PreviousState.ObservedCompositionGeneration)
 	} else {
 		logger.V(1).Info("no previous state given")
+	}
+
+	// TODO: This probably isn't a good solution. Maybe include in queue msg?
+	var apiVersion string
+	if resource != nil {
+		apiVersion = resource.Object.GetAPIVersion()
+	} else if prev != nil {
+		apiVersion = prev.Object.GetAPIVersion()
 	}
 
 	// Fetch the current resource
@@ -91,7 +90,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	current.SetName(req.Name)
 	current.SetNamespace(req.Namespace)
 	current.SetKind(req.Kind)
-	current.SetAPIVersion(resource.Object.GetAPIVersion())
+	current.SetAPIVersion(apiVersion)
 	err = c.upstreamClient.Get(ctx, client.ObjectKeyFromObject(current), current)
 	if client.IgnoreNotFound(err) != nil {
 		return ctrl.Result{}, fmt.Errorf("getting current state: %w", err)
@@ -111,27 +110,28 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		return true
 	})
 
-	return ctrl.Result{RequeueAfter: resource.ReconcileInterval}, nil
+	if resource != nil {
+		return ctrl.Result{RequeueAfter: resource.ReconcileInterval}, nil
+	}
+	return ctrl.Result{}, nil
 }
 
 func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) error {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	// TODO
-	//
 	// Delete
-	// if prev == nil {
-	// 	if current.GetResourceVersion() == "" || current.GetDeletionTimestamp() != nil {
-	// 		return nil // already deleted
-	// 	}
+	if resource == nil && prev != nil {
+		if current.GetResourceVersion() == "" || current.GetDeletionTimestamp() != nil {
+			return nil // already deleted
+		}
 
-	// 	logger.V(0).Info("deleting resource")
-	// 	err := c.upstreamClient.Delete(ctx, resource.Object)
-	// 	if err != nil {
-	// 		return fmt.Errorf("deleting resource: %w", err)
-	// 	}
-	// 	return nil
-	// }
+		logger.V(0).Info("deleting resource")
+		err := c.upstreamClient.Delete(ctx, prev.Object)
+		if err != nil {
+			return fmt.Errorf("deleting resource: %w", err)
+		}
+		return nil
+	}
 
 	// Always create the resource when it doesn't exist
 	if current.GetResourceVersion() == "" {

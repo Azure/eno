@@ -255,7 +255,7 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 			if err != nil {
 				return reconcile.Result{}, err
 			}
-			t.Logf("updated resource slice count for %s", pod.Name)
+			t.Logf("updated resource slice count for %s (image %s)", pod.Name, pod.Spec.Containers[0].Image)
 			return reconcile.Result{}, nil
 		}
 

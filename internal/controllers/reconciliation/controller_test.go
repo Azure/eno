@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -25,6 +26,12 @@ import (
 // TODO: Cover no-op update, assert on exact k8s api requests
 
 // TODO: Why are we sending strategic patches for CRs? Why does it work?
+
+// TODO: Test what happens if the resource already exists but we have no previous record of it
+
+// TODO: Assert on status
+
+// TODO: Test renaming
 
 type crudTestCase struct {
 	Name                         string
@@ -228,6 +235,15 @@ func TestCRUD(t *testing.T) {
 				})
 				test.AssertUpdated(t, obj)
 			})
+
+			t.Run("delete", func(t *testing.T) {
+				setSynImage(t, upstream, syn, "delete")
+
+				testutil.Eventually(t, func() bool {
+					_, err = test.Get(downstream)
+					return errors.IsNotFound(err)
+				})
+			})
 		})
 	}
 }
@@ -244,7 +260,7 @@ func setSynImage(t *testing.T, upstream client.Client, syn *apiv1.Synthesizer, i
 		if err := upstream.Get(context.Background(), client.ObjectKeyFromObject(syn), syn); err != nil {
 			return err
 		}
-		syn.Spec.Image = "update"
+		syn.Spec.Image = image
 		return upstream.Update(context.Background(), syn)
 	})
 	require.NoError(t, err)
@@ -252,12 +268,19 @@ func setSynImage(t *testing.T, upstream client.Client, syn *apiv1.Synthesizer, i
 
 func newSliceBuilder(t *testing.T, scheme *runtime.Scheme, test *crudTestCase) func(c *apiv1.Composition, s *apiv1.Synthesizer) []*apiv1.ResourceSlice {
 	return func(c *apiv1.Composition, s *apiv1.Synthesizer) []*apiv1.ResourceSlice {
+		slice := &apiv1.ResourceSlice{}
+		slice.GenerateName = "test-"
+		slice.Namespace = "default"
+		slice.Spec.CompositionGeneration = c.Generation
+
 		var obj client.Object
 		switch s.Spec.Image {
 		case "create":
 			obj = test.Initial.DeepCopyObject().(client.Object)
 		case "update":
 			obj = test.Updated.DeepCopyObject().(client.Object)
+		case "delete":
+			return []*apiv1.ResourceSlice{slice}
 		default:
 			t.Fatalf("unknown pseudo-image: %s", s.Spec.Image)
 		}
@@ -269,10 +292,6 @@ func newSliceBuilder(t *testing.T, scheme *runtime.Scheme, test *crudTestCase) f
 		js, err := json.Marshal(obj)
 		require.NoError(t, err)
 
-		slice := &apiv1.ResourceSlice{}
-		slice.GenerateName = "test-"
-		slice.Namespace = "default"
-		slice.Spec.CompositionGeneration = c.Generation
 		slice.Spec.Resources = []apiv1.Manifest{{Manifest: string(js)}}
 		return []*apiv1.ResourceSlice{slice}
 	}

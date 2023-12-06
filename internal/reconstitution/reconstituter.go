@@ -16,6 +16,8 @@ import (
 	"github.com/Azure/eno/internal/manager"
 )
 
+// TODO: This is fucked because we don't check both the comp/syn gen - only comp (I think)
+
 // reconstituter reconstitutes individual resources from resource slices.
 // Similar to an informer but with extra logic to handle expanding the slice resources.
 type reconstituter struct {
@@ -61,11 +63,15 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	}
 
 	// We populate the cache with both the previous and current syntheses
-	err = r.populateCache(ctx, comp, comp.Status.PreviousState)
+	var compGen int64 = -1
+	if comp.Status.CurrentState != nil {
+		compGen = comp.Status.CurrentState.ObservedCompositionGeneration
+	}
+	err = r.populateCache(ctx, comp, comp.Status.PreviousState, compGen)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("processing previous state: %w", err)
 	}
-	err = r.populateCache(ctx, comp, comp.Status.CurrentState)
+	err = r.populateCache(ctx, comp, comp.Status.CurrentState, -1)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("processing current state: %w", err)
 	}
@@ -74,7 +80,7 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	return ctrl.Result{}, nil
 }
 
-func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis) error {
+func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis, nextGen int64) error {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	if synthesis == nil || synthesis.ResourceSliceCount == nil {
@@ -113,5 +119,19 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 		}
 	}
 
+	// Also enqueue work queue items for resources that have been deleted
+	// TODO: Move up?
+	if nextGen == -1 {
+		return nil
+	}
+	for _, req := range reqs {
+		_, ok := r.cache.Get(ctx, &req.ResourceRef, nextGen)
+		if ok {
+			continue // still exists
+		}
+		for _, queue := range r.queues {
+			queue.Add(req)
+		}
+	}
 	return nil
 }
