@@ -17,7 +17,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
@@ -108,4 +110,92 @@ func Eventually(t testing.TB, fn func() bool) {
 		}
 		time.Sleep(time.Millisecond * 10)
 	}
+}
+
+// NewPodController adds a controller to the manager that simulates the behavior of a synthesis pod.
+// Useful for integration testing without kcm/kubelet. Slices returned from the given function will
+// be associated with the composition by this function.
+func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition, *apiv1.Synthesizer) []*apiv1.ResourceSlice) {
+	cli := mgr.GetClient()
+	podCtrl := reconcile.Func(func(ctx context.Context, r reconcile.Request) (reconcile.Result, error) {
+		comp := &apiv1.Composition{}
+		err := cli.Get(ctx, r.NamespacedName, comp)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+		if comp.Status.CurrentState == nil {
+			return reconcile.Result{}, nil // wait for controller to write initial status
+		}
+
+		syn := &apiv1.Synthesizer{}
+		syn.Name = comp.Spec.Synthesizer.Name
+		err = cli.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+
+		var slices []*apiv1.ResourceSlice
+		if fn != nil {
+			slices = fn(comp, syn)
+			for _, slice := range slices {
+				cp := slice.DeepCopy()
+				cp.Spec.CompositionGeneration = comp.Generation
+				if err := controllerutil.SetControllerReference(comp, cp, cli.Scheme()); err != nil {
+					return reconcile.Result{}, err
+				}
+				if err := cli.Create(ctx, cp); err != nil {
+					return reconcile.Result{}, err
+				}
+			}
+		}
+
+		pods := &corev1.PodList{}
+		err = cli.List(ctx, pods, client.MatchingFields{
+			manager.IdxPodsByComposition: comp.Name,
+		})
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+		if len(pods.Items) == 0 {
+			return reconcile.Result{}, nil // no pods yet
+		}
+
+		// Add resource slice count - the wrapper will do this in the real world
+		pod := pods.Items[0]
+		if comp.Status.CurrentState.ResourceSliceCount == nil {
+			count := int64(len(slices))
+			comp.Status.CurrentState.ResourceSliceCount = &count
+			err = cli.Status().Update(ctx, comp)
+			if err != nil {
+				return reconcile.Result{}, err
+			}
+			t.Logf("updated resource slice count for %s", pod.Name)
+			return reconcile.Result{}, nil
+		}
+
+		// Mark the pod as terminated to signal that synthesis is complete
+		if len(pod.Status.ContainerStatuses) == 0 {
+			pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+				State: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						ExitCode: 0,
+					},
+				},
+			}}
+			err = cli.Status().Update(ctx, &pod)
+			if err != nil {
+				return reconcile.Result{}, err
+			}
+			t.Logf("updated container status for %s", pod.Name)
+			return reconcile.Result{}, nil
+		}
+
+		return reconcile.Result{}, nil
+	})
+
+	_, err := ctrl.NewControllerManagedBy(mgr).
+		For(&apiv1.Composition{}).
+		Owns(&corev1.Pod{}).
+		Build(podCtrl)
+	require.NoError(t, err)
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -18,6 +19,8 @@ import (
 
 const (
 	IdxSlicesByCompositionGeneration = ".metadata.ownerReferences.compositionGen" // see: NewSlicesByCompositionGenerationKey
+	IdxPodsByComposition             = ".metadata.ownerReferences.composition"
+	IdxCompositionsBySynthesizer     = ".spec.synthesizer"
 )
 
 type Options struct {
@@ -50,6 +53,26 @@ func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
 			return nil
 		}
 		return []string{NewSlicesByCompositionGenerationKey(owner.Name, slice.Spec.CompositionGeneration)}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	err = mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Pod{}, IdxPodsByComposition, func(o client.Object) []string {
+		pod := o.(*corev1.Pod)
+		owner := metav1.GetControllerOf(pod)
+		if owner == nil || owner.Kind != "Composition" {
+			return nil
+		}
+		return []string{owner.Name}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.Composition{}, IdxCompositionsBySynthesizer, func(o client.Object) []string {
+		comp := o.(*apiv1.Composition)
+		return []string{comp.Spec.Synthesizer.Name}
 	})
 	if err != nil {
 		return nil, err
