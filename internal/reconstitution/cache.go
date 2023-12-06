@@ -14,6 +14,8 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// TODO: Is it possible for resynthesization to ocurr without an update to the composition spec?
+
 // cache maintains a fast index of (ResourceRef + Composition + Synthesis) -> Resource.
 type cache struct {
 	client client.Client

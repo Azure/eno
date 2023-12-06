@@ -248,7 +248,7 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 
 		// Add resource slice count - the wrapper will do this in the real world
 		pod := pods.Items[0]
-		if comp.Status.CurrentState.ResourceSliceCount == nil {
+		if comp.Status.CurrentState.ResourceSliceCount == nil || comp.Status.CurrentState.ObservedCompositionGeneration != comp.Generation || comp.Status.CurrentState.ObservedSynthesizerGeneration != syn.Generation {
 			count := int64(len(slices))
 			comp.Status.CurrentState.ResourceSliceCount = &count
 			err = cli.Status().Update(ctx, comp)
