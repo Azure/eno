@@ -16,8 +16,6 @@ import (
 	"github.com/Azure/eno/internal/manager"
 )
 
-// TODO: This is fucked because we don't check both the comp/syn gen - only comp (I think)
-
 // reconstituter reconstitutes individual resources from resource slices.
 // Similar to an informer but with extra logic to handle expanding the slice resources.
 type reconstituter struct {

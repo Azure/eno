@@ -45,6 +45,9 @@ func (c *cache) Get(ctx context.Context, ref *ResourceRef, gen int64) (*Resource
 
 	resKey := resourceKey{Kind: ref.Kind, Namespace: ref.Namespace, Name: ref.Name}
 	res, ok := resources[resKey]
+	if !ok {
+		return nil, false
+	}
 	return &Resource{
 		Ref:               ref,
 		Manifest:          res.Manifest,
