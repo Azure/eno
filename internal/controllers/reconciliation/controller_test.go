@@ -23,8 +23,6 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 )
 
-// TODO: Theory: the syntheis status is getting swapped before the previous has been applied
-
 // TODO: Cover no-op update, assert on exact k8s api requests
 
 // TODO: Why are we sending strategic patches for CRs? Why does it work?
@@ -173,7 +171,6 @@ func TestCRUD(t *testing.T) {
 			// Only enable rediscoverWhenNotFound on k8s versions that can support it.
 			err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15))
 			require.NoError(t, err)
-			require.NoError(t, NewStatusAggregationController(mgr.Manager))
 			mgr.Start(t)
 
 			// Any syn/comp will do since we faked out the synthesizer pod
