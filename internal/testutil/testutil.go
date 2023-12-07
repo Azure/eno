@@ -210,8 +210,10 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 		if err != nil {
 			return reconcile.Result{}, err
 		}
+
+		// The state is populated async with pod creation so it may not exist at this point
 		if comp.Status.CurrentState == nil {
-			return reconcile.Result{}, nil // wait for controller to write initial status
+			return reconcile.Result{}, nil
 		}
 
 		syn := &apiv1.Synthesizer{}
@@ -228,12 +230,11 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 		if err != nil {
 			return reconcile.Result{}, err
 		}
-		if len(pods.Items) == 0 {
-			return reconcile.Result{}, nil // no pods yet
-		}
 
 		for _, pod := range pods.Items {
 			pod := pod
+
+			// The real pod controller will ignore outdated (probably deleting) pods
 			compGen, _ := strconv.ParseInt(pod.Annotations["eno.azure.io/composition-generation"], 10, 0)
 			synGen, _ := strconv.ParseInt(pod.Annotations["eno.azure.io/synthesizer-generation"], 10, 0)
 			if synGen < syn.Generation || compGen < comp.Generation {
@@ -241,10 +242,14 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 				continue
 			}
 
+			// nil func == 0 slices
 			var slices []*apiv1.ResourceSlice
 			if fn != nil {
 				slices = fn(comp, syn)
 			}
+
+			// Write all of the resource slices, update the resource slice count accordingly
+			// TODO: We need a controller to remove failed/outdated resource slice writes
 			if comp.Status.CurrentState.ResourceSliceCount == nil {
 				for _, slice := range slices {
 					cp := slice.DeepCopy()
@@ -258,7 +263,6 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 					t.Logf("created resource slice: %s", cp.Name)
 				}
 
-				// Add resource slice count - the wrapper will do this in the real world
 				err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 					err := cli.Get(ctx, r.NamespacedName, comp)
 					if err != nil {
