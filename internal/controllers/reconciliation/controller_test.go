@@ -146,7 +146,6 @@ func TestCRUD(t *testing.T) {
 	for _, test := range crudTests {
 		test := test
 		t.Run(test.Name, func(t *testing.T) {
-			t.Parallel()
 			ctx := testutil.NewContext(t)
 			mgr := testutil.NewManager(t)
 			upstream := mgr.GetClient()
