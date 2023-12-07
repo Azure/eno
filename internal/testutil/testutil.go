@@ -275,8 +275,10 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 				})
 				return reconcile.Result{}, err
 			}
+		}
 
-			// Mark the pod as terminated to signal that synthesis is complete
+		// Mark the pod as terminated to signal that synthesis is complete
+		for _, pod := range pods.Items {
 			if len(pod.Status.ContainerStatuses) == 0 {
 				pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
 					State: corev1.ContainerState{
