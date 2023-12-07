@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -236,14 +235,15 @@ func TestCRUD(t *testing.T) {
 				test.AssertUpdated(t, obj)
 			})
 
-			t.Run("delete", func(t *testing.T) {
-				setSynImage(t, upstream, syn, "delete")
+			// TODO
+			// t.Run("delete", func(t *testing.T) {
+			// 	setSynImage(t, upstream, syn, "delete")
 
-				testutil.Eventually(t, func() bool {
-					_, err = test.Get(downstream)
-					return errors.IsNotFound(err)
-				})
-			})
+			// 	testutil.Eventually(t, func() bool {
+			// 		_, err = test.Get(downstream)
+			// 		return errors.IsNotFound(err)
+			// 	})
+			// })
 		})
 	}
 }

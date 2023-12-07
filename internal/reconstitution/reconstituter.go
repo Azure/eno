@@ -95,14 +95,14 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 
 	slices := &apiv1.ResourceSliceList{}
 	err := r.client.List(ctx, slices, client.InNamespace(comp.Namespace), client.MatchingFields{
-		manager.IdxSlicesByCompositionGeneration: manager.NewSlicesByCompositionGenerationKey(comp.Name, synthesis.ObservedCompositionGeneration),
+		manager.IdxSlicesByCompositionGeneration: manager.NewSlicesByCompositionGenerationKey(comp.Name, synthesis.ObservedCompositionGeneration), // TODO: probably needs to consider synth version too
 	})
 	if err != nil {
 		return fmt.Errorf("listing resource slices: %w", err)
 	}
 
 	logger.V(1).Info(fmt.Sprintf("found %d resource slices", len(slices.Items)))
-	if int64(len(slices.Items)) < *synthesis.ResourceSliceCount {
+	if int64(len(slices.Items)) != *synthesis.ResourceSliceCount {
 		logger.V(1).Info("stale informer - waiting for sync")
 		return nil
 	}

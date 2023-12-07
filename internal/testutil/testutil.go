@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -220,21 +221,6 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 			return reconcile.Result{}, err
 		}
 
-		var slices []*apiv1.ResourceSlice
-		if fn != nil {
-			slices = fn(comp, syn)
-			for _, slice := range slices {
-				cp := slice.DeepCopy()
-				cp.Spec.CompositionGeneration = comp.Generation
-				if err := controllerutil.SetControllerReference(comp, cp, cli.Scheme()); err != nil {
-					return reconcile.Result{}, err
-				}
-				if err := cli.Create(ctx, cp); err != nil {
-					return reconcile.Result{}, err
-				}
-			}
-		}
-
 		pods := &corev1.PodList{}
 		err = cli.List(ctx, pods, client.MatchingFields{
 			manager.IdxPodsByComposition: comp.Name,
@@ -246,34 +232,66 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 			return reconcile.Result{}, nil // no pods yet
 		}
 
-		// Add resource slice count - the wrapper will do this in the real world
-		pod := pods.Items[0]
-		if comp.Status.CurrentState.ResourceSliceCount == nil || comp.Status.CurrentState.ObservedCompositionGeneration != comp.Generation || comp.Status.CurrentState.ObservedSynthesizerGeneration != syn.Generation {
-			count := int64(len(slices))
-			comp.Status.CurrentState.ResourceSliceCount = &count
-			err = cli.Status().Update(ctx, comp)
-			if err != nil {
-				return reconcile.Result{}, err
+		for _, pod := range pods.Items {
+			pod := pod
+			compGen, _ := strconv.ParseInt(pod.Annotations["eno.azure.io/composition-generation"], 10, 0)
+			synGen, _ := strconv.ParseInt(pod.Annotations["eno.azure.io/synthesizer-generation"], 10, 0)
+			if synGen < syn.Generation || compGen < comp.Generation {
+				t.Logf("skipping pod %s because it's out of date (%d < %d || %d < %d)", pod.Name, synGen, syn.Generation, compGen, comp.Generation)
+				continue
 			}
-			t.Logf("updated resource slice count for %s (image %s)", pod.Name, pod.Spec.Containers[0].Image)
-			return reconcile.Result{}, nil
-		}
 
-		// Mark the pod as terminated to signal that synthesis is complete
-		if len(pod.Status.ContainerStatuses) == 0 {
-			pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
-				State: corev1.ContainerState{
-					Terminated: &corev1.ContainerStateTerminated{
-						ExitCode: 0,
-					},
-				},
-			}}
-			err = cli.Status().Update(ctx, &pod)
-			if err != nil {
+			var slices []*apiv1.ResourceSlice
+			if fn != nil {
+				slices = fn(comp, syn)
+			}
+			if comp.Status.CurrentState.ResourceSliceCount == nil {
+				for _, slice := range slices {
+					cp := slice.DeepCopy()
+					cp.Spec.CompositionGeneration = comp.Generation
+					if err := controllerutil.SetControllerReference(comp, cp, cli.Scheme()); err != nil {
+						return reconcile.Result{}, err
+					}
+					if err := cli.Create(ctx, cp); err != nil {
+						return reconcile.Result{}, err // TODO: we can't recover from this
+					}
+					t.Logf("created resource slice: %s", cp.Name)
+				}
+
+				// Add resource slice count - the wrapper will do this in the real world
+				err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+					err := cli.Get(ctx, r.NamespacedName, comp)
+					if err != nil {
+						return err
+					}
+					count := int64(len(slices))
+					comp.Status.CurrentState.ResourceSliceCount = &count
+					err = cli.Status().Update(ctx, comp)
+					if err != nil {
+						return err
+					}
+					t.Logf("updated resource slice count for %s (image %s)", pod.Name, pod.Spec.Containers[0].Image)
+					return nil
+				})
 				return reconcile.Result{}, err
 			}
-			t.Logf("updated container status for %s", pod.Name)
-			return reconcile.Result{}, nil
+
+			// Mark the pod as terminated to signal that synthesis is complete
+			if len(pod.Status.ContainerStatuses) == 0 {
+				pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+					State: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							ExitCode: 0,
+						},
+					},
+				}}
+				err = cli.Status().Update(ctx, &pod)
+				if err != nil {
+					return reconcile.Result{}, err
+				}
+				t.Logf("updated container status for %s", pod.Name)
+				return reconcile.Result{}, nil
+			}
 		}
 
 		return reconcile.Result{}, nil
