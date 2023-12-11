@@ -18,12 +18,10 @@ import (
 )
 
 const (
-	IdxCompositionsBySynthesizer     = ".spec.synthesizer"
-	IdxPodsByComposition             = ".metadata.ownerReferences.composition"
 	IdxSlicesByCompositionGeneration = ".metadata.ownerReferences.compositionGen" // see: NewSlicesByCompositionGenerationKey
+	IdxPodsByComposition             = ".metadata.ownerReferences.composition"
+	IdxCompositionsBySynthesizer     = ".spec.synthesizer"
 )
-
-// TODO: Filter pod watch by label
 
 type Options struct {
 	Rest            *rest.Config
@@ -48,9 +46,13 @@ func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
 		return nil, err
 	}
 
-	err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.Composition{}, IdxCompositionsBySynthesizer, func(o client.Object) []string {
-		comp := o.(*apiv1.Composition)
-		return []string{comp.Spec.Synthesizer.Name}
+	err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, IdxSlicesByCompositionGeneration, func(o client.Object) []string {
+		slice := o.(*apiv1.ResourceSlice)
+		owner := metav1.GetControllerOf(slice)
+		if owner == nil || owner.Kind != "Composition" {
+			return nil
+		}
+		return []string{NewSlicesByCompositionGenerationKey(owner.Name, slice.Spec.CompositionGeneration)}
 	})
 	if err != nil {
 		return nil, err
@@ -68,13 +70,9 @@ func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
 		return nil, err
 	}
 
-	err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, IdxSlicesByCompositionGeneration, func(o client.Object) []string {
-		slice := o.(*apiv1.ResourceSlice)
-		owner := metav1.GetControllerOf(slice)
-		if owner == nil || owner.Kind != "Composition" {
-			return nil
-		}
-		return []string{NewSlicesByCompositionGenerationKey(owner.Name, slice.Spec.CompositionGeneration)}
+	err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.Composition{}, IdxCompositionsBySynthesizer, func(o client.Object) []string {
+		comp := o.(*apiv1.Composition)
+		return []string{comp.Spec.Synthesizer.Name}
 	})
 	if err != nil {
 		return nil, err
@@ -83,7 +81,6 @@ func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
 	return mgr, nil
 }
 
-// TODO: Use this everywhere
 func NewLogConstructor(mgr ctrl.Manager, controllerName string) func(*reconcile.Request) logr.Logger {
 	return func(req *reconcile.Request) logr.Logger {
 		l := mgr.GetLogger().WithValues("controller", controllerName)
@@ -94,7 +91,6 @@ func NewLogConstructor(mgr ctrl.Manager, controllerName string) func(*reconcile.
 	}
 }
 
-// TODO: USE
 // NewSlicesByCompositionGenerationKey documents the key structure used by IdxSlicesByCompositionGeneration.
 func NewSlicesByCompositionGenerationKey(compName string, compGeneration int64) string {
 	// keys will not collide because k8s doesn't allow slashes in names
