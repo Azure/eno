@@ -37,12 +37,7 @@ type Resource struct {
 
 	Manifest          string
 	ReconcileInterval time.Duration
-	object            *unstructured.Unstructured
-}
-
-func (r *Resource) Object() *unstructured.Unstructured {
-	// don't allow callers to mutate the original
-	return r.object.DeepCopy()
+	Object            *unstructured.Unstructured
 }
 
 // ResourceRef refers to a specific synthesized resource.
