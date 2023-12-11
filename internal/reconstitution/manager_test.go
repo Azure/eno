@@ -57,7 +57,7 @@ func TestManagerBasics(t *testing.T) {
 }
 
 type testReconciler struct {
-	mgr          Manager
+	mgr          *Manager
 	lastResource atomic.Pointer[Resource]
 }
 

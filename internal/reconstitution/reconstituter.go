@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	"github.com/go-logr/logr"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
@@ -13,10 +14,9 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
-	"github.com/go-logr/logr"
 )
 
-// reconstituter reconstitutes individual resources out of resource slices.
+// reconstituter reconstitutes individual resources from resource slices.
 // Similar to an informer but with extra logic to handle expanding the slice resources.
 type reconstituter struct {
 	*cache  // embedded because caching is logically part of the reconstituter's functionality
@@ -47,8 +47,6 @@ func (r *reconstituter) AddQueue(queue workqueue.Interface) {
 
 func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	r.started.Store(true)
-	logger := logr.FromContextOrDiscard(ctx)
-	logger.V(1).WithValues("composition", req).Info("caching composition")
 
 	comp := &apiv1.Composition{}
 	err := r.client.Get(ctx, req.NamespacedName, comp)
@@ -77,11 +75,8 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis) error {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	if synthesis == nil {
-		return nil
-	}
-	if synthesis.ResourceSliceCount == nil {
-		logger.V(1).Info("resource synthesis is not complete - waiting to fill cache")
+	if synthesis == nil || synthesis.ResourceSliceCount == nil {
+		// a nil resourceSliceCount means synthesis is still in progress
 		return nil
 	}
 	compNSN := types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}
@@ -89,13 +84,12 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 	logger = logger.WithValues("synthesisGen", synthesis.ObservedCompositionGeneration)
 	ctx = logr.NewContext(ctx, logger)
 	if r.cache.HasSynthesis(ctx, compNSN, synthesis) {
-		logger.V(1).Info("this synthesis has already been cached")
 		return nil
 	}
 
 	slices := &apiv1.ResourceSliceList{}
 	err := r.client.List(ctx, slices, client.InNamespace(comp.Namespace), client.MatchingFields{
-		manager.IdxSlicesByCompositionGeneration: manager.NewSlicesByCompositionGenerationKey(comp.Name, synthesis.ObservedCompositionGeneration),
+		manager.IdxSlicesByCompositionGeneration: manager.NewSlicesByCompositionGenerationKey(comp.Name, synthesis.ObservedCompositionGeneration), // TODO: probably needs to consider synth version too
 	})
 	if err != nil {
 		return fmt.Errorf("listing resource slices: %w", err)

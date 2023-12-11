@@ -44,8 +44,8 @@ func TestCacheBasics(t *testing.T) {
 		resource, exists := c.Get(ctx, &expectedReqs[0].ResourceRef, synth.ObservedCompositionGeneration)
 		require.True(t, exists)
 		assert.NotEmpty(t, resource.Manifest)
-		assert.Equal(t, "ConfigMap", resource.Object().GetKind())
-		assert.Equal(t, "slice-0-resource-0", resource.Object().GetName())
+		assert.Equal(t, "ConfigMap", resource.Object.GetKind())
+		assert.Equal(t, "slice-0-resource-0", resource.Object.GetName())
 
 		// negative
 		_, exists = c.Get(ctx, &expectedReqs[0].ResourceRef, 123)
@@ -106,8 +106,8 @@ func TestCacheSecret(t *testing.T) {
 	resource, exists := c.Get(ctx, &expectedReqs[0].ResourceRef, synth.ObservedCompositionGeneration)
 	require.True(t, exists)
 	assert.NotEmpty(t, resource.Manifest)
-	assert.Equal(t, "ConfigMap", resource.Object().GetKind())
-	assert.Equal(t, "slice-0-resource-0", resource.Object().GetName())
+	assert.Equal(t, "ConfigMap", resource.Object.GetKind())
+	assert.Equal(t, "slice-0-resource-0", resource.Object.GetName())
 }
 
 func TestCacheInvalidManifest(t *testing.T) {

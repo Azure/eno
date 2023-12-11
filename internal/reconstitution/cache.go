@@ -43,7 +43,17 @@ func (c *cache) Get(ctx context.Context, ref *ResourceRef, gen int64) (*Resource
 
 	resKey := resourceKey{Kind: ref.Kind, Namespace: ref.Namespace, Name: ref.Name}
 	res, ok := resources[resKey]
-	return res, ok
+	if !ok {
+		return nil, false
+	}
+
+	// Copy the resource so it's safe for callers to mutate
+	return &Resource{
+		Ref:               ref,
+		Manifest:          res.Manifest,
+		Object:            res.Object.DeepCopy(),
+		ReconcileInterval: res.ReconcileInterval,
+	}, ok
 }
 
 // HasSynthesis returns true when the cache contains the resulting resources of the given synthesis.
@@ -143,7 +153,7 @@ func (c *cache) buildResource(ctx context.Context, comp types.NamespacedName, sl
 			Kind:        parsed.GetKind(),
 		},
 		Manifest: manifest,
-		object:   parsed,
+		Object:   parsed,
 	}
 	if resource.ReconcileInterval != nil {
 		res.ReconcileInterval = resource.ReconcileInterval.Duration
