@@ -20,6 +20,10 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// TODO: Implement tombstones
+// - Synthesis collection controller diffs against previous state, creates tombstones
+// - Any tombstones present and not yet reconciled in the previous state are passed on to the next
+
 // TODO: Minimal retries for validation error
 
 type Controller struct {

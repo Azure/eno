@@ -16,6 +16,8 @@ import (
 	"github.com/Azure/eno/internal/manager"
 )
 
+// TODO: Does controller-runtime add jitter to requeue intervals automatically?
+
 type rolloutController struct {
 	client   client.Client
 	cooldown time.Duration

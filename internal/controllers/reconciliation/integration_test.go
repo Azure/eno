@@ -224,7 +224,7 @@ func TestCRUD(t *testing.T) {
 			}
 
 			t.Run("update", func(t *testing.T) {
-				setSynImage(t, upstream, syn, "update")
+				setSynImage(t, upstream, syn, comp, "update")
 
 				var obj client.Object
 				testutil.Eventually(t, func() bool {
@@ -254,13 +254,25 @@ func (c *crudTestCase) Get(downstream client.Client) (client.Object, error) {
 	return obj, downstream.Get(context.Background(), client.ObjectKeyFromObject(obj), obj)
 }
 
-func setSynImage(t *testing.T, upstream client.Client, syn *apiv1.Synthesizer, image string) {
+func setSynImage(t *testing.T, upstream client.Client, syn *apiv1.Synthesizer, comp *apiv1.Composition, image string) {
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		if err := upstream.Get(context.Background(), client.ObjectKeyFromObject(syn), syn); err != nil {
 			return err
 		}
 		syn.Spec.Image = image
 		return upstream.Update(context.Background(), syn)
+	})
+	require.NoError(t, err)
+
+	// Also pin the composition to >= this synthesizer version.
+	// This is necessary to avoid deadlock in cases where incoherent cache causes the composition not to be updated on this tick of the rollout loop.
+	// It isn't a problem in production because we don't expect serialized behavior from the rollout controller.
+	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		if err := upstream.Get(context.Background(), client.ObjectKeyFromObject(comp), comp); err != nil {
+			return err
+		}
+		comp.Spec.Synthesizer.MinGeneration = syn.Generation
+		return upstream.Update(context.Background(), comp)
 	})
 	require.NoError(t, err)
 }
