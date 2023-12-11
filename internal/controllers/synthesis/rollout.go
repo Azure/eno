@@ -41,6 +41,7 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("gettting synthesizer: %w", err))
 	}
+	logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerNamespace", syn.Namespace, "synthesizerGeneration", syn.Generation)
 
 	if syn.Status.LastRolloutTime != nil {
 		remainingCooldown := c.cooldown - time.Since(syn.Status.LastRolloutTime.Time)
@@ -65,7 +66,7 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		comp := comp
 		logger := logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
 
-		if comp.Spec.Synthesizer.MinGeneration >= syn.Generation {
+		if comp.Spec.Synthesizer.MinGeneration >= syn.Generation || comp.Status.CurrentState == nil || comp.Status.CurrentState.ObservedSynthesizerGeneration >= syn.Generation {
 			continue
 		}
 
