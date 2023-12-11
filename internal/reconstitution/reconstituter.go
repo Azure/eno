@@ -74,6 +74,7 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 
 func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis) error {
 	logger := logr.FromContextOrDiscard(ctx)
+	logger.Info(fmt.Sprintf("TODO CACHING SYNTH %s", comp.Name))
 
 	if synthesis == nil || synthesis.ResourceSliceCount == nil {
 		// a nil resourceSliceCount means synthesis is still in progress
