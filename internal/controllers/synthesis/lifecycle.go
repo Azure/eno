@@ -185,6 +185,8 @@ func (c *podLifecycleController) podStatusTerminal(pod *corev1.Pod) (string, boo
 }
 
 func swapStates(syn *apiv1.Synthesizer, comp *apiv1.Composition) {
+	// TODO: Block swapping prev->current if the any resources present in prev but absent in current have not yet been reconciled
+	// This will ensure that we don't orphan resources
 	comp.Status.PreviousState = comp.Status.CurrentState
 	comp.Status.CurrentState = &apiv1.Synthesis{
 		ObservedCompositionGeneration: comp.Generation,
