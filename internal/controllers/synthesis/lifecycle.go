@@ -94,7 +94,6 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 
 	// No need to create a pod if everything is in sync
 	if comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSliceCount != nil {
-		logger.V(1).Info("synthesis is complete - skipping creation")
 		return ctrl.Result{}, nil
 	}
 
@@ -186,12 +185,9 @@ func (c *podLifecycleController) podStatusTerminal(pod *corev1.Pod) (string, boo
 }
 
 func swapStates(syn *apiv1.Synthesizer, comp *apiv1.Composition) {
-	// Only swap current->previous when the current synthesis has completed
-	// This avoids losing the prior state during rapid updates to the composition
-	resourceSliceCountSet := comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSliceCount != nil
-	if resourceSliceCountSet {
-		comp.Status.PreviousState = comp.Status.CurrentState
-	}
+	// TODO: Block swapping prev->current if the any resources present in prev but absent in current have not yet been reconciled
+	// This will ensure that we don't orphan resources
+	comp.Status.PreviousState = comp.Status.CurrentState
 	comp.Status.CurrentState = &apiv1.Synthesis{
 		ObservedCompositionGeneration: comp.Generation,
 	}
