@@ -98,7 +98,7 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, fmt.Errorf("updating synthesizer's current generation: %w", err)
 		}
 		logger.Info("rollout is complete - updated synthesizer's current generation")
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, nil // TODO: Consider leaving this loop open in case new compositions fell through the cracks earlier
 	}
 
 	return ctrl.Result{}, nil
