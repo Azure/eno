@@ -25,7 +25,6 @@ type asyncStatusUpdate struct {
 // updates over a short period of time and applying them in a single update request.
 type writeBuffer struct {
 	client client.Client
-	logger logr.Logger
 
 	// queue items are per-slice.
 	// the state map collects multiple updates per slice to be dispatched by next queue item.
@@ -34,13 +33,12 @@ type writeBuffer struct {
 	queue workqueue.RateLimitingInterface
 }
 
-func newWriteBuffer(cli client.Client, logger logr.Logger, batchInterval time.Duration) *writeBuffer {
+func newWriteBuffer(cli client.Client, batchInterval time.Duration, burst int) *writeBuffer {
 	return &writeBuffer{
 		client: cli,
-		logger: logger.WithValues("controller", "writeBuffer"),
 		state:  make(map[types.NamespacedName][]*asyncStatusUpdate),
 		queue: workqueue.NewRateLimitingQueueWithConfig(
-			&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Every(batchInterval), 2)},
+			&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Every(batchInterval), burst)},
 			workqueue.RateLimitingQueueConfig{
 				Name: "writeBuffer",
 			}),
@@ -54,6 +52,7 @@ func (w *writeBuffer) PatchStatusAsync(ctx context.Context, ref *ManifestRef, pa
 	logr.FromContextOrDiscard(ctx).V(1).Info("buffering status update")
 
 	key := ref.Slice
+	// TODO(jordan): Consider de-duping this slice to avoid potentially allocating a lot of memory if some bug causes churning of the control loop that ends up calling this.
 	w.state[key] = append(w.state[key], &asyncStatusUpdate{
 		SlicedResource: ref,
 		PatchFn:        patchFn,
@@ -79,18 +78,16 @@ func (w *writeBuffer) processQueueItem(ctx context.Context) bool {
 	defer w.queue.Done(item)
 	sliceNSN := item.(types.NamespacedName)
 
+	logger := logr.FromContextOrDiscard(ctx).WithValues("slice", sliceNSN, "controller", "writeBuffer")
+	ctx = logr.NewContext(ctx, logger)
+
 	w.mut.Lock()
 	updates := w.state[sliceNSN]
 	delete(w.state, sliceNSN)
 	w.mut.Unlock()
 
-	logger := w.logger.WithValues("slice", sliceNSN)
-	ctx = logr.NewContext(ctx, logger)
-
 	if len(updates) == 0 {
 		logger.V(0).Info("dropping queue item because no updates were found for this slice (this is suspicious)")
-		w.queue.Forget(item)
-		return true
 	}
 
 	if w.updateSlice(ctx, sliceNSN, updates) {
@@ -101,9 +98,8 @@ func (w *writeBuffer) processQueueItem(ctx context.Context) bool {
 	// Put the updates back in the buffer to retry on the next attempt
 	logger.V(1).Info("update failed - adding updates back to the buffer")
 	w.mut.Lock()
-	w.state[sliceNSN] = append(w.state[sliceNSN], updates...)
+	w.state[sliceNSN] = append(updates, w.state[sliceNSN]...)
 	w.mut.Unlock()
-	w.queue.Forget(item)
 	w.queue.AddRateLimited(item)
 
 	return true
@@ -131,10 +127,14 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 
 	var dirty bool
 	for _, update := range updates {
+		logger := logger.WithValues("slicedResource", update.SlicedResource)
 		statusPtr := &slice.Status.Resources[update.SlicedResource.Index]
 
 		if update.PatchFn(statusPtr) {
+			logger.V(1).Info("patch caused status to change")
 			dirty = true
+		} else {
+			logger.V(1).Info("patch did not cause status to change")
 		}
 	}
 	if !dirty {

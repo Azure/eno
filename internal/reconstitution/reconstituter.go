@@ -22,7 +22,6 @@ type reconstituter struct {
 	*cache  // embedded because caching is logically part of the reconstituter's functionality
 	client  client.Client
 	queues  []workqueue.Interface
-	logger  logr.Logger
 	started atomic.Bool
 }
 
@@ -30,14 +29,13 @@ func newReconstituter(mgr ctrl.Manager) (*reconstituter, error) {
 	r := &reconstituter{
 		cache:  newCache(mgr.GetClient()),
 		client: mgr.GetClient(),
-		logger: mgr.GetLogger(),
 	}
-	_, err := ctrl.NewControllerManagedBy(mgr).
+	return r, ctrl.NewControllerManagedBy(mgr).
 		Named("reconstituter").
 		For(&apiv1.Composition{}).
 		Owns(&apiv1.ResourceSlice{}).
-		Build(r)
-	return r, err
+		WithLogConstructor(manager.NewLogConstructor(mgr, "reconstituter")).
+		Complete(r)
 }
 
 func (r *reconstituter) AddQueue(queue workqueue.Interface) {
@@ -61,15 +59,11 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	}
 
 	// We populate the cache with both the previous and current syntheses
-	var compGen int64 = -1
-	if comp.Status.CurrentState != nil {
-		compGen = comp.Status.CurrentState.ObservedCompositionGeneration
-	}
-	err = r.populateCache(ctx, comp, comp.Status.PreviousState, compGen)
+	err = r.populateCache(ctx, comp, comp.Status.PreviousState)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("processing previous state: %w", err)
 	}
-	err = r.populateCache(ctx, comp, comp.Status.CurrentState, -1)
+	err = r.populateCache(ctx, comp, comp.Status.CurrentState)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("processing current state: %w", err)
 	}
@@ -78,7 +72,7 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	return ctrl.Result{}, nil
 }
 
-func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis, nextGen int64) error {
+func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis) error {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	if synthesis == nil || synthesis.ResourceSliceCount == nil {
@@ -101,7 +95,7 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 		return fmt.Errorf("listing resource slices: %w", err)
 	}
 
-	logger.V(1).Info(fmt.Sprintf("found %d resource slices", len(slices.Items)))
+	logger.V(1).Info(fmt.Sprintf("found %d slices for this synthesis", len(slices.Items)))
 	if int64(len(slices.Items)) != *synthesis.ResourceSliceCount {
 		logger.V(1).Info("stale informer - waiting for sync")
 		return nil
@@ -117,19 +111,5 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 		}
 	}
 
-	// Also enqueue work queue items for resources that have been deleted
-	// TODO: Move up?
-	if nextGen == -1 {
-		return nil
-	}
-	for _, req := range reqs {
-		_, ok := r.cache.Get(ctx, &req.ResourceRef, nextGen)
-		if ok {
-			continue // still exists
-		}
-		for _, queue := range r.queues {
-			queue.Add(req)
-		}
-	}
 	return nil
 }

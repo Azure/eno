@@ -2,7 +2,6 @@ package reconstitution
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -12,13 +11,13 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 )
 
-var ErrNotFound = errors.New("resource not found")
-
+// Reconciler is implemented by types that can reconcile individual, reconstituted resources.
 type Reconciler interface {
 	Name() string
 	Reconcile(ctx context.Context, req *Request) (ctrl.Result, error)
 }
 
+// Client provides read/write access to a collection of reconstituted resources.
 type Client interface {
 	Get(ctx context.Context, ref *ResourceRef, gen int64) (*Resource, bool)
 	PatchStatusAsync(ctx context.Context, req *ManifestRef, patchFn StatusPatchFn)
@@ -26,10 +25,10 @@ type Client interface {
 
 type StatusPatchFn func(*apiv1.ResourceState) bool
 
-// ResourceRef refers to a specific synthesized resource.
-type ResourceRef struct {
-	Composition           types.NamespacedName
-	Name, Namespace, Kind string
+// ManifestRef references a particular resource manifest within a resource slice.
+type ManifestRef struct {
+	Slice types.NamespacedName
+	Index int // position of this manifest within the slice
 }
 
 // Resource is the controller's internal representation of a single resource out of a ResourceSlice.
@@ -37,21 +36,19 @@ type Resource struct {
 	Ref *ResourceRef
 
 	Manifest          string
-	Object            *unstructured.Unstructured
 	ReconcileInterval time.Duration
+	Object            *unstructured.Unstructured
 }
 
+// ResourceRef refers to a specific synthesized resource.
+type ResourceRef struct {
+	Composition           types.NamespacedName
+	Name, Namespace, Kind string
+}
+
+// Request is like controller-runtime reconcile.Request but for reconstituted resources.
+// https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/reconcile#Request
 type Request struct {
 	ResourceRef
 	Manifest ManifestRef
-}
-
-func (r *Request) LogValues() []any {
-	return []any{"composition", r.Composition, "resource", r.ResourceRef, "manifest", r.Manifest}
-}
-
-// ManifestRef references a particular resource manifest within a resource slice.
-type ManifestRef struct {
-	Slice types.NamespacedName
-	Index int // position of this manifest within the slice
 }

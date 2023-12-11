@@ -14,8 +14,6 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// TODO: Is it possible for resynthesization to ocurr without an update to the composition spec?
-
 // cache maintains a fast index of (ResourceRef + Composition + Synthesis) -> Resource.
 type cache struct {
 	client client.Client
@@ -48,6 +46,8 @@ func (c *cache) Get(ctx context.Context, ref *ResourceRef, gen int64) (*Resource
 	if !ok {
 		return nil, false
 	}
+
+	// Copy the resource so it's safe for callers to mutate
 	return &Resource{
 		Ref:               ref,
 		Manifest:          res.Manifest,
@@ -56,6 +56,8 @@ func (c *cache) Get(ctx context.Context, ref *ResourceRef, gen int64) (*Resource
 	}, ok
 }
 
+// HasSynthesis returns true when the cache contains the resulting resources of the given synthesis.
+// This should be called before Fill to determine if filling is necessary.
 func (c *cache) HasSynthesis(ctx context.Context, comp types.NamespacedName, synthesis *apiv1.Synthesis) bool {
 	key := synthesisKey{
 		Composition: comp,
@@ -68,8 +70,8 @@ func (c *cache) HasSynthesis(ctx context.Context, comp types.NamespacedName, syn
 	return exists
 }
 
-// Fill populates the cache with resources from the given slices and associates them with a
-// composition and synthesis such that they can easily be purged from the cache after deletion.
+// Fill populates the cache with all (or no) resources that are part of the given synthesis.
+// Requests to be enqueued are returned. Although this arguably violates separation of concerns, it's convenient and efficient.
 func (c *cache) Fill(ctx context.Context, comp types.NamespacedName, synthesis *apiv1.Synthesis, items []apiv1.ResourceSlice) ([]*Request, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
@@ -96,18 +98,18 @@ func (c *cache) buildResources(ctx context.Context, comp types.NamespacedName, i
 	for _, slice := range items {
 		slice := slice
 
-		// NOTE: In the future we can build a DAG here to find edges between dependant resources
+		// NOTE: In the future we can build a DAG here to find edges between dependant resources and append them to the Resource structs
 
 		for i, resource := range slice.Spec.Resources {
 			resource := resource
-			gr, err := c.buildResource(ctx, comp, &slice, &resource)
+			res, err := c.buildResource(ctx, comp, &slice, &resource)
 			if err != nil {
 				return nil, nil, fmt.Errorf("building resource at index %d of slice %s: %w", i, slice.Name, err)
 			}
-			key := resourceKey{Kind: gr.Ref.Kind, Namespace: gr.Ref.Namespace, Name: gr.Ref.Name}
-			resources[key] = gr
+			key := resourceKey{Kind: res.Ref.Kind, Namespace: res.Ref.Namespace, Name: res.Ref.Name}
+			resources[key] = res
 			requests = append(requests, &Request{
-				ResourceRef: *gr.Ref,
+				ResourceRef: *res.Ref,
 				Manifest: ManifestRef{
 					Slice: types.NamespacedName{
 						Namespace: slice.Namespace,
@@ -143,7 +145,7 @@ func (c *cache) buildResource(ctx context.Context, comp types.NamespacedName, sl
 		return nil, fmt.Errorf("invalid json: %w", err)
 	}
 
-	gr := &Resource{
+	res := &Resource{
 		Ref: &ResourceRef{
 			Composition: comp,
 			Namespace:   parsed.GetNamespace(),
@@ -154,12 +156,12 @@ func (c *cache) buildResource(ctx context.Context, comp types.NamespacedName, sl
 		Object:   parsed,
 	}
 	if resource.ReconcileInterval != nil {
-		gr.ReconcileInterval = resource.ReconcileInterval.Duration
+		res.ReconcileInterval = resource.ReconcileInterval.Duration
 	}
-	if gr.Ref.Name == "" || parsed.GetAPIVersion() == "" {
+	if res.Ref.Name == "" || parsed.GetAPIVersion() == "" {
 		return nil, fmt.Errorf("missing name, kind, or apiVersion")
 	}
-	return gr, nil
+	return res, nil
 }
 
 // Purge removes resources associated with a particular composition synthesis from the cache.
@@ -172,6 +174,7 @@ func (c *cache) Purge(ctx context.Context, compNSN types.NamespacedName, comp *a
 
 	remainingSyns := []int64{}
 	for _, syn := range c.synthesesByComposition[compNSN] {
+		// Don't touch any syntheses still referenced by the composition
 		if comp != nil && ((comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration == syn) || (comp.Status.PreviousState != nil && comp.Status.PreviousState.ObservedCompositionGeneration == syn)) {
 			remainingSyns = append(remainingSyns, syn)
 			continue // still referenced by the Generation
