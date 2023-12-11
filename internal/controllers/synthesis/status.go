@@ -78,7 +78,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 		}
-		logger.Info("populated synthesis status to reflect pod")
+		logger.V(1).Info("added synthesizer pod status to its composition resource")
 		return ctrl.Result{}, nil
 	}
 
@@ -87,7 +87,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if err := c.client.Update(ctx, pod); err != nil {
 			return ctrl.Result{}, fmt.Errorf("removing pod finalizer: %w", err)
 		}
-		logger.Info("removed pod finalizer")
+		logger.V(1).Info("removed pod finalizer")
 		return ctrl.Result{}, nil
 	}
 
