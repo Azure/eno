@@ -48,3 +48,7 @@ type ResourceState struct {
 	// Like Reconciled, it latches and will never transition from true->false.
 	Ready *bool `json:"ready,omitempty"`
 }
+
+type ResourceSliceRef struct {
+	Name string `json:"name,omitempty"`
+}

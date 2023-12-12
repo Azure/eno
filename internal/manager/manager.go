@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -18,9 +17,8 @@ import (
 )
 
 const (
-	IdxSlicesByCompositionGeneration = ".metadata.ownerReferences.compositionGen" // see: NewSlicesByCompositionGenerationKey
-	IdxPodsByComposition             = ".metadata.ownerReferences.composition"
-	IdxCompositionsBySynthesizer     = ".spec.synthesizer"
+	IdxPodsByComposition         = ".metadata.ownerReferences.composition"
+	IdxCompositionsBySynthesizer = ".spec.synthesizer"
 )
 
 type Options struct {
@@ -42,18 +40,6 @@ func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
 	}
 
 	err = apiv1.SchemeBuilder.AddToScheme(mgr.GetScheme())
-	if err != nil {
-		return nil, err
-	}
-
-	err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, IdxSlicesByCompositionGeneration, func(o client.Object) []string {
-		slice := o.(*apiv1.ResourceSlice)
-		owner := metav1.GetControllerOf(slice)
-		if owner == nil || owner.Kind != "Composition" {
-			return nil
-		}
-		return []string{NewSlicesByCompositionGenerationKey(owner.Name, slice.Spec.CompositionGeneration)}
-	})
 	if err != nil {
 		return nil, err
 	}
@@ -89,10 +75,4 @@ func NewLogConstructor(mgr ctrl.Manager, controllerName string) func(*reconcile.
 		}
 		return l
 	}
-}
-
-// NewSlicesByCompositionGenerationKey documents the key structure used by IdxSlicesByCompositionGeneration.
-func NewSlicesByCompositionGenerationKey(compName string, compGeneration int64) string {
-	// keys will not collide because k8s doesn't allow slashes in names
-	return fmt.Sprintf("%s/%d", compName, compGeneration)
 }

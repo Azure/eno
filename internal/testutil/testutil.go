@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	goruntime "runtime"
+	"strconv"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -160,13 +162,58 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 			return reconcile.Result{}, nil // no pods yet
 		}
 
-		// Add resource slice count - the wrapper will do this in the real world
-		pod := pods.Items[0]
-		if comp.Status.CurrentState.ResourceSliceCount == nil {
-			count := int64(len(slices))
-			comp.Status.CurrentState.ResourceSliceCount = &count
-			err = cli.Status().Update(ctx, comp)
-			if err != nil {
+		for _, pod := range pods.Items {
+			pod := pod
+
+			if pod.DeletionTimestamp != nil {
+				continue // pod no longer exists
+			}
+
+			// The real pod controller will ignore outdated (probably deleting) pods
+			compGen, _ := strconv.ParseInt(pod.Annotations["eno.azure.io/composition-generation"], 10, 0)
+			synGen, _ := strconv.ParseInt(pod.Annotations["eno.azure.io/synthesizer-generation"], 10, 0)
+			if synGen < syn.Generation || compGen < comp.Generation {
+				t.Logf("skipping pod %s because it's out of date (%d < %d || %d < %d)", pod.Name, synGen, syn.Generation, compGen, comp.Generation)
+				continue
+			}
+
+			// nil func == 0 slices
+			var slices []*apiv1.ResourceSlice
+			if fn != nil {
+				slices = fn(comp, syn)
+			}
+
+			// Write all of the resource slices, update the resource slice count accordingly
+			// TODO: We need a controller to remove failed/outdated resource slice writes
+			// TODO: Do we have immutable validation on the CRD?
+			sliceRefs := []*apiv1.ResourceSliceRef{}
+			if comp.Status.CurrentState.ResourceSlices == nil {
+				for _, slice := range slices {
+					cp := slice.DeepCopy()
+					cp.Spec.CompositionGeneration = comp.Generation
+					if err := controllerutil.SetControllerReference(comp, cp, cli.Scheme()); err != nil {
+						return reconcile.Result{}, err
+					}
+					if err := cli.Create(ctx, cp); err != nil {
+						return reconcile.Result{}, err // TODO: we can't recover from this
+					}
+					sliceRefs = append(sliceRefs, &apiv1.ResourceSliceRef{Name: cp.Name})
+					t.Logf("created resource slice: %s", cp.Name)
+				}
+				err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+					err := cli.Get(ctx, r.NamespacedName, comp)
+					if err != nil {
+						return err
+					}
+					comp.Status.CurrentState.ResourceSlices = sliceRefs
+					comp.Status.CurrentState.Synthesized = true
+					err = cli.Status().Update(ctx, comp)
+					if err != nil {
+						return err
+					}
+					t.Logf("updated resource slice refs for %s (image %s)", pod.Name, pod.Spec.Containers[0].Image)
+					return nil
+				})
 				return reconcile.Result{}, err
 			}
 			t.Logf("updated resource slice count for %s", pod.Name)
@@ -174,20 +221,22 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 		}
 
 		// Mark the pod as terminated to signal that synthesis is complete
-		if len(pod.Status.ContainerStatuses) == 0 {
-			pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
-				State: corev1.ContainerState{
-					Terminated: &corev1.ContainerStateTerminated{
-						ExitCode: 0,
+		for _, pod := range pods.Items {
+			if len(pod.Status.ContainerStatuses) == 0 {
+				pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+					State: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							ExitCode: 0,
+						},
 					},
-				},
-			}}
-			err = cli.Status().Update(ctx, &pod)
-			if err != nil {
-				return reconcile.Result{}, err
+				}}
+				err = cli.Status().Update(ctx, &pod)
+				if err != nil {
+					return reconcile.Result{}, err
+				}
+				t.Logf("updated container status for %s", pod.Name)
+				return reconcile.Result{}, nil
 			}
-			t.Logf("updated container status for %s", pod.Name)
-			return reconcile.Result{}, nil
 		}
 
 		return reconcile.Result{}, nil

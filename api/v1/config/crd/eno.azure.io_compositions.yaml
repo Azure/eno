@@ -86,13 +86,16 @@ spec:
                     type: string
                   ready:
                     type: boolean
-                  resourceSliceCount:
-                    description: Number of resulting resource slices. Since they are
-                      immutable, this provides adequate timing signal to avoid stale
-                      informer caches.
-                    format: int64
-                    type: integer
+                  resourceSlices:
+                    items:
+                      properties:
+                        name:
+                          type: string
+                      type: object
+                    type: array
                   synced:
+                    type: boolean
+                  synthesized:
                     type: boolean
                 type: object
               previousState:
@@ -110,13 +113,16 @@ spec:
                     type: string
                   ready:
                     type: boolean
-                  resourceSliceCount:
-                    description: Number of resulting resource slices. Since they are
-                      immutable, this provides adequate timing signal to avoid stale
-                      informer caches.
-                    format: int64
-                    type: integer
+                  resourceSlices:
+                    items:
+                      properties:
+                        name:
+                          type: string
+                      type: object
+                    type: array
                   synced:
+                    type: boolean
+                  synthesized:
                     type: boolean
                 type: object
             type: object

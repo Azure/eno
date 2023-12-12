@@ -96,6 +96,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 func statusIsOutOfSync(comp *apiv1.Composition, podCompGen, podSynGen int64) bool {
 	// TODO: Unit tests, make sure to cover the pod creation latching logic
+	// TODO: Do we need to also check against the previous state? Do we swap if the current state is still being synthesized? Should we?
 	return (comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration == podCompGen) &&
 		(comp.Status.CurrentState.PodCreation == nil || comp.Status.CurrentState.ObservedSynthesizerGeneration != podSynGen)
 }
