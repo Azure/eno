@@ -75,8 +75,8 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis) error {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	if synthesis == nil || synthesis.ResourceSliceCount == nil {
-		// a nil resourceSliceCount means synthesis is still in progress
+	if synthesis == nil || !synthesis.Synthesized {
+		// synthesis is still in progress
 		return nil
 	}
 	compNSN := types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}
@@ -87,20 +87,19 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 		return nil
 	}
 
-	slices := &apiv1.ResourceSliceList{}
-	err := r.client.List(ctx, slices, client.InNamespace(comp.Namespace), client.MatchingFields{
-		manager.IdxSlicesByCompositionGeneration: manager.NewSlicesByCompositionGenerationKey(comp.Name, synthesis.ObservedCompositionGeneration), // TODO: probably needs to consider synth version too
-	})
-	if err != nil {
-		return fmt.Errorf("listing resource slices: %w", err)
+	slices := make([]apiv1.ResourceSlice, len(synthesis.ResourceSlices))
+	for i, ref := range synthesis.ResourceSlices {
+		slice := apiv1.ResourceSlice{}
+		slice.Name = ref.Name
+		slice.Namespace = comp.Namespace
+		err := r.client.Get(ctx, client.ObjectKeyFromObject(&slice), &slice)
+		if err != nil {
+			return fmt.Errorf("unable to get resource slice: %w", err)
+		}
+		slices[i] = slice
 	}
 
-	if int64(len(slices.Items)) != *synthesis.ResourceSliceCount {
-		logger.V(1).Info(fmt.Sprintf("stale informer - waiting for sync (%d of %d slices found)", len(slices.Items), *synthesis.ResourceSliceCount))
-		return nil
-	}
-
-	reqs, err := r.cache.Fill(ctx, compNSN, synthesis, slices.Items)
+	reqs, err := r.cache.Fill(ctx, compNSN, synthesis, slices)
 	if err != nil {
 		return err
 	}

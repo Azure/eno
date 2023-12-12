@@ -66,6 +66,7 @@ func NewContext(t *testing.T) context.Context {
 // In CI the second environment is used to compatibility test against a matrix of k8s versions.
 // This compatibility testing is tightly coupled to the github action and not expected to work locally.
 func NewManager(t *testing.T) *Manager {
+	t.Parallel()
 	_, b, _, _ := goruntime.Caller(0)
 	root := filepath.Join(filepath.Dir(b), "..", "..")
 
@@ -255,7 +256,8 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 			// Write all of the resource slices, update the resource slice count accordingly
 			// TODO: We need a controller to remove failed/outdated resource slice writes
 			// TODO: Do we have immutable validation on the CRD?
-			if comp.Status.CurrentState.ResourceSliceCount == nil {
+			sliceRefs := []*apiv1.ResourceSliceRef{}
+			if comp.Status.CurrentState.ResourceSlices == nil {
 				for _, slice := range slices {
 					cp := slice.DeepCopy()
 					cp.Spec.CompositionGeneration = comp.Generation
@@ -265,21 +267,21 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 					if err := cli.Create(ctx, cp); err != nil {
 						return reconcile.Result{}, err // TODO: we can't recover from this
 					}
+					sliceRefs = append(sliceRefs, &apiv1.ResourceSliceRef{Name: cp.Name})
 					t.Logf("created resource slice: %s", cp.Name)
 				}
-
 				err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 					err := cli.Get(ctx, r.NamespacedName, comp)
 					if err != nil {
 						return err
 					}
-					count := int64(len(slices))
-					comp.Status.CurrentState.ResourceSliceCount = &count
+					comp.Status.CurrentState.ResourceSlices = sliceRefs
+					comp.Status.CurrentState.Synthesized = true
 					err = cli.Status().Update(ctx, comp)
 					if err != nil {
 						return err
 					}
-					t.Logf("updated resource slice count for %s (image %s)", pod.Name, pod.Spec.Containers[0].Image)
+					t.Logf("updated resource slice refs for %s (image %s)", pod.Name, pod.Spec.Containers[0].Image)
 					return nil
 				})
 				return reconcile.Result{}, err
