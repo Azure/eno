@@ -31,10 +31,6 @@ type Manifest struct {
 	Manifest string `json:"manifest,omitempty"`
 
 	ReconcileInterval *metav1.Duration `json:"reconcileInterval,omitempty"`
-
-	// A reference to the secret holding this resource.
-	// This is only relevant when the resource's kind is Secret.
-	SecretName *string `json:"secretName,omitempty"`
 }
 
 type ResourceSliceStatus struct {

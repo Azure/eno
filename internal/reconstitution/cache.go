@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sync"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -75,7 +74,7 @@ func (c *cache) HasSynthesis(ctx context.Context, comp types.NamespacedName, syn
 func (c *cache) Fill(ctx context.Context, comp types.NamespacedName, synthesis *apiv1.Synthesis, items []apiv1.ResourceSlice) ([]*Request, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	// Building resources can be expensive (secret lookups, json parsing, etc.) so don't hold the lock during this call
+	// Building resources can be expensive (json parsing, etc.) so don't hold the lock during this call
 	resources, requests, err := c.buildResources(ctx, comp, items)
 	if err != nil {
 		return nil, err
@@ -126,19 +125,6 @@ func (c *cache) buildResources(ctx context.Context, comp types.NamespacedName, i
 
 func (c *cache) buildResource(ctx context.Context, comp types.NamespacedName, slice *apiv1.ResourceSlice, resource *apiv1.Manifest) (*Resource, error) {
 	manifest := resource.Manifest
-	if resource.SecretName != nil {
-		secret := &corev1.Secret{}
-		secret.Name = *resource.SecretName
-		secret.Namespace = slice.Namespace
-		err := c.client.Get(ctx, client.ObjectKeyFromObject(secret), secret)
-		if err != nil {
-			return nil, fmt.Errorf("getting secret: %w", err)
-		}
-		if secret.Data != nil {
-			manifest = string(secret.Data["manifest"])
-		}
-	}
-
 	parsed := &unstructured.Unstructured{}
 	err := parsed.UnmarshalJSON([]byte(manifest))
 	if err != nil {
