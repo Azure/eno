@@ -234,6 +234,10 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 		for _, pod := range pods.Items {
 			pod := pod
 
+			if pod.DeletionTimestamp != nil {
+				continue // pod no longer exists
+			}
+
 			// The real pod controller will ignore outdated (probably deleting) pods
 			compGen, _ := strconv.ParseInt(pod.Annotations["eno.azure.io/composition-generation"], 10, 0)
 			synGen, _ := strconv.ParseInt(pod.Annotations["eno.azure.io/synthesizer-generation"], 10, 0)
@@ -250,6 +254,7 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 
 			// Write all of the resource slices, update the resource slice count accordingly
 			// TODO: We need a controller to remove failed/outdated resource slice writes
+			// TODO: Do we have immutable validation on the CRD?
 			if comp.Status.CurrentState.ResourceSliceCount == nil {
 				for _, slice := range slices {
 					cp := slice.DeepCopy()
