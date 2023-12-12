@@ -35,6 +35,7 @@ func TestManagerBasics(t *testing.T) {
 	comp.Status.CurrentState = &apiv1.Synthesis{
 		ObservedCompositionGeneration: comp.Generation,
 		ResourceSlices:                []*apiv1.ResourceSliceRef{{Name: "test-slice"}},
+		Synthesized:                   true,
 	}
 	require.NoError(t, client.Status().Update(ctx, comp))
 

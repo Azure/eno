@@ -56,6 +56,7 @@ func NewContext(t *testing.T) context.Context {
 }
 
 func NewManager(t *testing.T) *Manager {
+	t.Parallel()
 	_, b, _, _ := goruntime.Caller(0)
 	root := filepath.Join(filepath.Dir(b), "..", "..")
 

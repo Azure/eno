@@ -33,13 +33,14 @@ func TestReconstituterIntegration(t *testing.T) {
 	comp.Status.CurrentState = &apiv1.Synthesis{
 		ObservedCompositionGeneration: comp.Generation,
 		ResourceSlices:                []*apiv1.ResourceSliceRef{{Name: "test-slice"}},
+		Synthesized:                   true,
 	}
 	require.NoError(t, client.Status().Update(ctx, comp))
 
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = "test-slice"
 	slice.Namespace = "default"
-	slice.Spec.CompositionGeneration = comp.Generation
+	slice.Spec.CompositionGeneration = comp.Generation // TODO: Do we actually need this?
 	slice.Spec.Resources = []apiv1.Manifest{{
 		Manifest: `{"kind":"baz","apiVersion":"any","metadata":{"name":"foo","namespace":"bar"}}`,
 	}}
