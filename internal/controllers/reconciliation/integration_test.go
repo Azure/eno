@@ -41,7 +41,6 @@ type crudTestCase struct {
 
 var crudTests = []crudTestCase{
 	{
-		// TODO: This test has a rare race condition I think
 		Name:  "strategic-merge", // will fail if non-strategic merge is used
 		Empty: &corev1.Service{},
 		Initial: &corev1.Service{

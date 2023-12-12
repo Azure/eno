@@ -64,7 +64,6 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("getting composition: %w", err)
 	}
-	logger.V(1).Info("TODO syncing", "resource", req.ResourceRef)
 
 	if comp.Status.CurrentState == nil {
 		// we don't log here because it would be too noisy
