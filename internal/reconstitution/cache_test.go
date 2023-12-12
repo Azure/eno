@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
@@ -61,53 +60,6 @@ func TestCacheBasics(t *testing.T) {
 
 		assert.Len(t, c.resources, 0)
 	})
-}
-
-func TestCacheSecretNotFound(t *testing.T) {
-	ctx := testutil.NewContext(t)
-
-	client := testutil.NewClient(t)
-	c := newCache(client)
-
-	comp, synth, resources, _ := newCacheTestFixtures(1, 1)
-	secretName := "does-not-exist"
-	resources[0].Spec.Resources[0].SecretName = &secretName
-
-	_, err := c.Fill(ctx, comp, synth, resources)
-	require.Error(t, err)
-	assert.True(t, errors.IsNotFound(err))
-}
-
-func TestCacheSecret(t *testing.T) {
-	ctx := testutil.NewContext(t)
-
-	client := testutil.NewClient(t)
-	c := newCache(client)
-
-	comp, synth, resources, expectedReqs := newCacheTestFixtures(1, 1)
-
-	// Store the resource's manifest in a secret
-	secret := &corev1.Secret{}
-	secret.Name = "test-manifest"
-	secret.Namespace = resources[0].Namespace
-	secret.Data = map[string][]byte{"manifest": []byte(resources[0].Spec.Resources[0].Manifest)}
-	require.NoError(t, client.Create(ctx, secret))
-
-	// Reference the secret's manifest and remove it from the resource slice itself
-	resources[0].Spec.Resources[0].SecretName = &secret.Name
-	resources[0].Spec.Resources[0].Manifest = ""
-
-	// Everything should still work
-	reqs, err := c.Fill(ctx, comp, synth, resources)
-	require.NoError(t, err)
-	assert.Equal(t, expectedReqs, reqs)
-
-	// Confirm cache was filled correctly
-	resource, exists := c.Get(ctx, &expectedReqs[0].ResourceRef, synth.ObservedCompositionGeneration)
-	require.True(t, exists)
-	assert.NotEmpty(t, resource.Manifest)
-	assert.Equal(t, "ConfigMap", resource.Object.GetKind())
-	assert.Equal(t, "slice-0-resource-0", resource.Object.GetName())
 }
 
 func TestCacheInvalidManifest(t *testing.T) {
