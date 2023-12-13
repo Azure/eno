@@ -22,10 +22,6 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 )
 
-// TODO: Cover no-op update, assert on exact k8s api requests
-
-// TODO: Why are we sending strategic patches for CRs? Why does it work?
-
 // TODO: Test what happens if the resource already exists but we have no previous record of it
 
 // TODO: Assert on status
@@ -187,6 +183,7 @@ func TestCRUD(t *testing.T) {
 					return err == nil
 				})
 				test.AssertCreated(t, obj)
+				test.WaitForPhase(t, downstream, "create")
 			})
 
 			if test.ApplyExternalUpdate != nil {
@@ -204,24 +201,16 @@ func TestCRUD(t *testing.T) {
 						return nil
 					})
 					require.NoError(t, err)
-
-					// wait for this write to hit the informer cache
-					// in real life things will converge eventually, but here we expect writes to be ordered
-					testutil.Eventually(t, func() bool {
-						obj, err := test.Get(downstream)
-						return err == nil && getPhase(obj) == "external-update"
-					})
+					test.WaitForPhase(t, downstream, "external-update")
 				})
 			}
 
 			t.Run("update", func(t *testing.T) {
 				setImage(t, upstream, syn, comp, "update")
+				test.WaitForPhase(t, downstream, "update")
 
-				var obj client.Object
-				testutil.Eventually(t, func() bool {
-					obj, err = test.Get(downstream)
-					return err == nil && getPhase(obj) == "update"
-				})
+				obj, err := test.Get(downstream)
+				require.NoError(t, err)
 				test.AssertUpdated(t, obj)
 			})
 
@@ -236,6 +225,13 @@ func TestCRUD(t *testing.T) {
 			// })
 		})
 	}
+}
+
+func (c *crudTestCase) WaitForPhase(t *testing.T, downstream client.Client, phase string) {
+	testutil.Eventually(t, func() bool {
+		obj, err := c.Get(downstream)
+		return err == nil && getPhase(obj) == phase
+	})
 }
 
 func (c *crudTestCase) Get(downstream client.Client) (client.Object, error) {
