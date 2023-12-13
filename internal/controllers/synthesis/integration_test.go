@@ -285,6 +285,7 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 		})
 		require.NoError(t, err)
 
+		// TODO: This test is a tiny bit flaky
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 			return comp.Status.CurrentState != nil && len(comp.Status.CurrentState.ResourceSlices) == 2
