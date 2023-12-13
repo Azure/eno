@@ -203,7 +203,6 @@ func TestControllerSynthesizerRollout(t *testing.T) {
 	require.NoError(t, err)
 
 	// The first synthesizer update should be applied to the composition
-	// TODO: Flake because sometimes the pod updates the slice refs but the synth generation somehow still doesn't match this one
 	testutil.Eventually(t, func() bool {
 		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
 		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedSynthesizerGeneration >= syn.Generation
