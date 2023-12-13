@@ -66,7 +66,6 @@ func NewContext(t *testing.T) context.Context {
 // In CI the second environment is used to compatibility test against a matrix of k8s versions.
 // This compatibility testing is tightly coupled to the github action and not expected to work locally.
 func NewManager(t *testing.T) *Manager {
-	t.Parallel()
 	_, b, _, _ := goruntime.Caller(0)
 	root := filepath.Join(filepath.Dir(b), "..", "..")
 
