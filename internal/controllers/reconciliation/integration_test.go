@@ -196,7 +196,7 @@ func TestCRUD(t *testing.T) {
 						require.NoError(t, err)
 
 						updatedObj := test.ApplyExternalUpdate(t, obj)
-						setPhase(updatedObj, "external-update")
+						updatedObj = setPhase(updatedObj, "external-update")
 						if err := downstream.Update(ctx, updatedObj); err != nil {
 							return err
 						}
@@ -279,10 +279,10 @@ func newSliceBuilder(t *testing.T, scheme *runtime.Scheme, test *crudTestCase) f
 		switch s.Spec.Image {
 		case "create":
 			obj = test.Initial.DeepCopyObject().(client.Object)
-			setPhase(obj, "create")
+			obj = setPhase(obj, "create")
 		case "update":
 			obj = test.Updated.DeepCopyObject().(client.Object)
-			setPhase(obj, "update")
+			obj = setPhase(obj, "update")
 		case "delete":
 			return []*apiv1.ResourceSlice{slice}
 		default:
@@ -301,13 +301,15 @@ func newSliceBuilder(t *testing.T, scheme *runtime.Scheme, test *crudTestCase) f
 	}
 }
 
-func setPhase(obj client.Object, phase string) {
-	anno := obj.GetAnnotations()
+func setPhase(obj client.Object, phase string) client.Object {
+	copy := obj.DeepCopyObject().(client.Object)
+	anno := copy.GetAnnotations()
 	if anno == nil {
 		anno = map[string]string{}
 	}
 	anno["test-phase"] = phase
-	obj.SetAnnotations(anno)
+	copy.SetAnnotations(anno)
+	return copy
 }
 
 func getPhase(obj client.Object) string {
