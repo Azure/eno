@@ -30,8 +30,6 @@ import (
 
 // TODO: Assert on status
 
-// TODO: Test renaming
-
 type crudTestCase struct {
 	Name                         string
 	Empty, Initial, Updated      client.Object
@@ -182,7 +180,6 @@ func TestCRUD(t *testing.T) {
 			comp.Spec.Synthesizer.Name = syn.Name
 			require.NoError(t, upstream.Create(ctx, comp))
 
-			var lastResourceVersion string
 			t.Run("creation", func(t *testing.T) {
 				var obj client.Object
 				testutil.Eventually(t, func() bool {
@@ -190,7 +187,6 @@ func TestCRUD(t *testing.T) {
 					return err == nil
 				})
 				test.AssertCreated(t, obj)
-				lastResourceVersion = obj.GetResourceVersion()
 			})
 
 			if test.ApplyExternalUpdate != nil {
@@ -200,24 +196,20 @@ func TestCRUD(t *testing.T) {
 						require.NoError(t, err)
 
 						updatedObj := test.ApplyExternalUpdate(t, obj)
+						setPhase(updatedObj, "external-update")
 						if err := downstream.Update(ctx, updatedObj); err != nil {
 							return err
 						}
 
-						lastResourceVersion = updatedObj.GetResourceVersion()
-						t.Logf("external update version %s", lastResourceVersion)
 						return nil
 					})
 					require.NoError(t, err)
 
 					// wait for this write to hit the informer cache
+					// in real life things will converge eventually, but here we expect writes to be ordered
 					testutil.Eventually(t, func() bool {
 						obj, err := test.Get(downstream)
-						if err != nil || obj.GetResourceVersion() != lastResourceVersion {
-							return false
-						}
-						lastResourceVersion = obj.GetResourceVersion()
-						return true
+						return err == nil && getPhase(obj) == "external-update"
 					})
 				})
 			}
@@ -228,7 +220,7 @@ func TestCRUD(t *testing.T) {
 				var obj client.Object
 				testutil.Eventually(t, func() bool {
 					obj, err = test.Get(downstream)
-					return err == nil && obj.GetResourceVersion() != lastResourceVersion
+					return err == nil && getPhase(obj) == "update"
 				})
 				test.AssertUpdated(t, obj)
 			})
@@ -287,8 +279,10 @@ func newSliceBuilder(t *testing.T, scheme *runtime.Scheme, test *crudTestCase) f
 		switch s.Spec.Image {
 		case "create":
 			obj = test.Initial.DeepCopyObject().(client.Object)
+			setPhase(obj, "create")
 		case "update":
 			obj = test.Updated.DeepCopyObject().(client.Object)
+			setPhase(obj, "update")
 		case "delete":
 			return []*apiv1.ResourceSlice{slice}
 		default:
@@ -305,4 +299,21 @@ func newSliceBuilder(t *testing.T, scheme *runtime.Scheme, test *crudTestCase) f
 		slice.Spec.Resources = []apiv1.Manifest{{Manifest: string(js)}}
 		return []*apiv1.ResourceSlice{slice}
 	}
+}
+
+func setPhase(obj client.Object, phase string) {
+	anno := obj.GetAnnotations()
+	if anno == nil {
+		anno = map[string]string{}
+	}
+	anno["test-phase"] = phase
+	obj.SetAnnotations(anno)
+}
+
+func getPhase(obj client.Object) string {
+	anno := obj.GetAnnotations()
+	if anno == nil {
+		anno = map[string]string{}
+	}
+	return anno["test-phase"]
 }
