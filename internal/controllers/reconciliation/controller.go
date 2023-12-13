@@ -2,10 +2,12 @@ package reconciliation
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -143,6 +145,10 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 		logger.V(1).Info("skipping empty patch")
 		return nil
 	}
+	patch, err = addResourceVersion(patch, current.GetResourceVersion())
+	if err != nil {
+		return fmt.Errorf("adding resource version: %w", err)
+	}
 	logger.V(1).Info("TODO: REMOVE ME", "patchBody", string(patch))
 	err = c.upstreamClient.Patch(ctx, current, client.RawPatch(patchType, patch))
 	if err != nil {
@@ -180,4 +186,21 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 	patchmeta := strategicpatch.NewPatchMetaFromOpenAPI(model)
 	patch, err := strategicpatch.CreateThreeWayMergePatch(prevManifest, []byte(resource.Manifest), currentJS, patchmeta, true)
 	return patch, types.StrategicMergePatchType, err
+}
+
+// TODO: Remove creationTimestamp=null from patches
+func addResourceVersion(patch []byte, rv string) ([]byte, error) {
+	var patchMap map[string]interface{}
+	err := json.Unmarshal(patch, &patchMap)
+	if err != nil {
+		return nil, err
+	}
+	u := unstructured.Unstructured{Object: patchMap}
+	a, err := meta.Accessor(&u)
+	if err != nil {
+		return nil, err
+	}
+	a.SetResourceVersion(rv)
+
+	return json.Marshal(patchMap)
 }
