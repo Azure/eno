@@ -22,8 +22,6 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 )
 
-// TODO: Sometimes the resource is patched to the create phase after the external update but before the update
-
 type crudTestCase struct {
 	Name                         string
 	Empty, Initial, Updated      client.Object
