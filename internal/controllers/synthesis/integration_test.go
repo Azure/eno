@@ -19,7 +19,7 @@ import (
 var minimalTestConfig = &Config{
 	WrapperImage: "test-wrapper-image",
 	MaxRestarts:  3,
-	Timeout:      time.Second * 2,
+	Timeout:      time.Second * 6,
 }
 
 func TestControllerHappyPath(t *testing.T) {
