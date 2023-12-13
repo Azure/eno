@@ -220,9 +220,9 @@ func (c *crudTestCase) WaitForPhase(t *testing.T, downstream client.Client, phas
 		currentPhase := getPhase(obj)
 		currentRV := obj.GetResourceVersion()
 		if lastRV == "" {
-			t.Logf("initial resource version %s was observed in phase %s", obj.GetResourceVersion(), currentPhase)
+			t.Logf("initial resource version %s was observed in phase %s", currentRV, currentPhase)
 		} else if currentRV != lastRV {
-			t.Logf("resource version transitioned from %s to %s in phase %s", obj.GetResourceVersion(), lastRV, currentPhase)
+			t.Logf("resource version transitioned from %s to %s in phase %s", lastRV, currentRV, currentPhase)
 		}
 		lastRV = currentRV
 		return err == nil && currentPhase == phase
