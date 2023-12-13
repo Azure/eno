@@ -214,9 +214,18 @@ func TestCRUD(t *testing.T) {
 }
 
 func (c *crudTestCase) WaitForPhase(t *testing.T, downstream client.Client, phase string) {
+	var lastRV string
 	testutil.Eventually(t, func() bool {
 		obj, err := c.Get(downstream)
-		return err == nil && getPhase(obj) == phase
+		currentPhase := getPhase(obj)
+		currentRV := obj.GetResourceVersion()
+		if lastRV == "" {
+			t.Logf("initial resource version %s was observed in phase %s", obj.GetResourceVersion(), currentPhase)
+		} else if currentRV != lastRV {
+			t.Logf("resource version transitioned from %s to %s in phase %s", obj.GetResourceVersion(), lastRV, currentPhase)
+		}
+		lastRV = currentRV
+		return err == nil && currentPhase == phase
 	})
 }
 
