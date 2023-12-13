@@ -55,7 +55,6 @@ func New(mgr *reconstitution.Manager, downstream *rest.Config, discoveryRPS floa
 func (c *Controller) Name() string { return "reconciliationController" }
 
 func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request) (ctrl.Result, error) {
-	logger := logr.FromContextOrDiscard(ctx)
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, req.Composition, comp)
 	if err != nil {
@@ -63,9 +62,10 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 
 	if comp.Status.CurrentState == nil {
-		// we don't log here because it would be too noisy
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, nil // nothing to do
 	}
+	logger := logr.FromContextOrDiscard(ctx).WithValues("synthesizerName", comp.Spec.Synthesizer.Name, "synthesizerGeneration", comp.Status.CurrentState.ObservedSynthesizerGeneration)
+	ctx = logr.NewContext(ctx, logger)
 
 	// Find the current and (optionally) previous desired states in the cache
 	currentGen := comp.Status.CurrentState.ObservedCompositionGeneration
@@ -103,7 +103,6 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	if err := c.reconcileResource(ctx, prev, resource, current); err != nil {
 		return ctrl.Result{}, err
 	}
-	logger.V(1).Info("sync'd resource")
 
 	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) bool {
 		if rs.Reconciled {

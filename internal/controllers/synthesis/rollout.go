@@ -48,7 +48,6 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if syn.Status.LastRolloutTime != nil {
 		remainingCooldown := c.cooldown - time.Since(syn.Status.LastRolloutTime.Time)
 		if remainingCooldown > 0 {
-			logger.V(1).Info("waiting to roll out a synthesizer change until the cooldown period has passed", "latency", remainingCooldown.Milliseconds())
 			return ctrl.Result{RequeueAfter: remainingCooldown}, nil
 		}
 	}
@@ -77,7 +76,6 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if err := c.client.Status().Update(ctx, syn); err != nil {
 			return ctrl.Result{}, fmt.Errorf("advancing last rollout time: %w", err)
 		}
-		logger.V(1).Info("advanced last rollout time")
 
 		err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 			if err := c.client.Get(ctx, client.ObjectKeyFromObject(&comp), &comp); err != nil {
@@ -89,7 +87,7 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
 		}
-		logger.Info("synthesizing composition because its synthesizer has changed since last synthesis")
+		logger.Info("advancing synthesizer rollout process")
 		return ctrl.Result{RequeueAfter: c.cooldown}, nil
 	}
 
@@ -99,7 +97,12 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if err := c.client.Status().Update(ctx, syn); err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating synthesizer's current generation: %w", err)
 		}
-		logger.Info("rollout is complete - updated synthesizer's current generation")
+
+		// TODO: Add metrics around rollout progress
+		// TODO: Track rollout latency
+		if len(compList.Items) > 0 { // log doesn't make sense if the synthesizer wasn't actually rolled out
+			logger.Info("finished rolling out latest synthesizer version")
+		}
 		return ctrl.Result{}, nil // TODO: Consider leaving this loop open in case new compositions fell through the cracks earlier
 	}
 

@@ -56,7 +56,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if comp.Spec.Synthesizer.Name == "" {
 		return ctrl.Result{}, nil
 	}
-	logger = logger.WithValues("composition", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
 
 	syn := &apiv1.Synthesizer{}
 	syn.Name = comp.Spec.Synthesizer.Name
@@ -64,7 +64,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("getting synthesizer: %w", err)
 	}
-	logger = logger.WithValues("synthesizer", syn.Name, "synthesizerGeneration", syn.Generation)
+	logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
 
 	// Update composition status
 	var (
@@ -78,7 +78,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 		}
-		logger.V(1).Info("added synthesizer pod status to its composition resource")
+		logger.V(1).Info("wrote synthesizer pod metadata to composition")
 		return ctrl.Result{}, nil
 	}
 
@@ -87,7 +87,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if err := c.client.Update(ctx, pod); err != nil {
 			return ctrl.Result{}, fmt.Errorf("removing pod finalizer: %w", err)
 		}
-		logger.V(1).Info("removed pod finalizer")
+		logger.V(1).Info("synthesizer pod can safely be deleted now that its metadata has been captured")
 		return ctrl.Result{}, nil
 	}
 

@@ -254,7 +254,6 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 
 			// Write all of the resource slices, update the resource slice count accordingly
 			// TODO: We need a controller to remove failed/outdated resource slice writes
-			// TODO: Do we have immutable validation on the CRD?
 			sliceRefs := []*apiv1.ResourceSliceRef{}
 			if comp.Status.CurrentState.ResourceSlices == nil {
 				for _, slice := range slices {
@@ -264,7 +263,7 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 						return reconcile.Result{}, err
 					}
 					if err := cli.Create(ctx, cp); err != nil {
-						return reconcile.Result{}, err // TODO: we can't recover from this
+						return reconcile.Result{}, err
 					}
 					sliceRefs = append(sliceRefs, &apiv1.ResourceSliceRef{Name: cp.Name})
 					t.Logf("created resource slice: %s", cp.Name)
