@@ -1,0 +1,54 @@
+name: Kubernetes Version Compatibility Tests
+on:
+  push:
+  workflow_dispatch:
+  schedule:
+    - cron: 0 0 * * *
+
+env:
+  setupEnvtestCmd: "go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest"
+
+jobs:
+  buildMatrix:
+    name: Generate Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.build.outputs.matrix }}
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Generate test matrix using setup-envtest
+        id: build
+        run: |
+          echo "matrix=$($setupEnvtestCmd -p env list | awk '/)/ {print $2}' | awk -F'.' '{print $2}' | jq -c --slurp 'map(tostring) | unique')" >> $GITHUB_OUTPUT 
+
+  test:
+    name: Kubernetes 1.${{ matrix.downstreamApiserverMinorVersion }}
+    needs: buildMatrix
+    runs-on: ubuntu-latest
+    env:
+      upstreamApiserverVersion: 1.28.x
+    strategy:
+      fail-fast: false
+      matrix:
+        downstreamApiserverMinorVersion: ${{ fromJson(needs.buildMatrix.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Download kubebuilder assets
+        run: |
+          echo "UPSTREAM_KUBEBUILDER_ASSETS=$($setupEnvtestCmd use -p path ${{ env.upstreamApiserverVersion }})" >> $GITHUB_ENV
+          echo "DOWNSTREAM_KUBEBUILDER_ASSETS=$($setupEnvtestCmd use -p path 1.${{ matrix.downstreamApiserverMinorVersion }}.x)" >> $GITHUB_ENV
+
+      - name: Run tests
+        run: go test -v ./internal/controllers/reconciliation
+        env:
+          DOWNSTREAM_VERSION_MINOR: "${{ matrix.downstreamApiserverMinorVersion }}"
