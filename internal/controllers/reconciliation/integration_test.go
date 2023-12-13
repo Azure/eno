@@ -188,7 +188,7 @@ func TestCRUD(t *testing.T) {
 						obj, err := test.Get(downstream)
 						require.NoError(t, err)
 
-						updatedObj := test.ApplyExternalUpdate(t, obj)
+						updatedObj := test.ApplyExternalUpdate(t, obj.DeepCopyObject().(client.Object))
 						updatedObj = setPhase(updatedObj, "external-update")
 						if err := downstream.Update(ctx, updatedObj); err != nil {
 							return err
