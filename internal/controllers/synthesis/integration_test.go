@@ -16,6 +16,8 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 )
 
+// TODO: We never release superseded pods
+
 var minimalTestConfig = &Config{
 	WrapperImage: "test-wrapper-image",
 	MaxRestarts:  3,
@@ -254,12 +256,12 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 
 	syn1 := &apiv1.Synthesizer{}
 	syn1.Name = "test-syn-1"
-	syn1.Spec.Image = "test-syn-image"
+	syn1.Spec.Image = "initial-image"
 	require.NoError(t, cli.Create(ctx, syn1))
 
 	syn2 := &apiv1.Synthesizer{}
 	syn2.Name = "test-syn-2"
-	syn2.Spec.Image = "initial-image"
+	syn2.Spec.Image = "updated-image"
 	require.NoError(t, cli.Create(ctx, syn2))
 
 	comp := &apiv1.Composition{}
