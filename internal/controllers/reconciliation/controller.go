@@ -148,7 +148,6 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 	if err != nil {
 		return fmt.Errorf("adding resource version: %w", err)
 	}
-	logger.V(1).Info("TODO: REMOVE ME", "patchBody", string(patch))
 	err = c.upstreamClient.Patch(ctx, current, client.RawPatch(patchType, patch))
 	if err != nil {
 		return fmt.Errorf("applying patch: %w", err)
