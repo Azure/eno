@@ -163,13 +163,6 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 		prevManifest = []byte(prev.Manifest)
 	}
 
-	// TODO: Don't bother storing the json blob on the manifest struct
-	var resourceManifest []byte
-	if resource != nil {
-		resource.Object.SetResourceVersion(current.GetResourceVersion())
-		resourceManifest, _ = resource.Object.MarshalJSON()
-	}
-
 	currentJS, err := current.MarshalJSON()
 	if err != nil {
 		return nil, "", fmt.Errorf("building json representation of desired state: %w", err)
@@ -180,11 +173,11 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 		return nil, "", fmt.Errorf("getting merge metadata: %w", err)
 	}
 	if model == nil {
-		patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(prevManifest, []byte(resourceManifest), currentJS)
+		patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(prevManifest, []byte(resource.Manifest), currentJS)
 		return patch, types.MergePatchType, err
 	}
 
 	patchmeta := strategicpatch.NewPatchMetaFromOpenAPI(model)
-	patch, err := strategicpatch.CreateThreeWayMergePatch(prevManifest, []byte(resourceManifest), currentJS, patchmeta, true)
+	patch, err := strategicpatch.CreateThreeWayMergePatch(prevManifest, []byte(resource.Manifest), currentJS, patchmeta, true)
 	return patch, types.StrategicMergePatchType, err
 }
