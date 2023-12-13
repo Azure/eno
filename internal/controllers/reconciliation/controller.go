@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -145,7 +144,7 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 		logger.V(1).Info("skipping empty patch")
 		return nil
 	}
-	patch, err = addResourceVersion(patch, current.GetResourceVersion())
+	patch, err = mungePatch(patch, current.GetResourceVersion())
 	if err != nil {
 		return fmt.Errorf("adding resource version: %w", err)
 	}
@@ -160,10 +159,6 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 }
 
 func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) ([]byte, types.PatchType, error) {
-	// We need to remove the creation timestamp since the other versions of the resource we're merging against won't have it.
-	// It's safe to mutate in this case because resource has already been copied by the cache.
-	current.SetCreationTimestamp(metav1.NewTime(time.Time{}))
-
 	var prevManifest []byte
 	if prev != nil {
 		prevManifest = []byte(prev.Manifest)
@@ -188,8 +183,7 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 	return patch, types.StrategicMergePatchType, err
 }
 
-// TODO: Remove creationTimestamp=null from patches
-func addResourceVersion(patch []byte, rv string) ([]byte, error) {
+func mungePatch(patch []byte, rv string) ([]byte, error) {
 	var patchMap map[string]interface{}
 	err := json.Unmarshal(patch, &patchMap)
 	if err != nil {
@@ -201,6 +195,7 @@ func addResourceVersion(patch []byte, rv string) ([]byte, error) {
 		return nil, err
 	}
 	a.SetResourceVersion(rv)
+	a.SetCreationTimestamp(metav1.Time{})
 
 	return json.Marshal(patchMap)
 }
