@@ -93,13 +93,17 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// Update the status to reflect the completed rollout
 	if syn.Status.CurrentGeneration != syn.Generation {
+		previousTime := syn.Status.LastRolloutTime
+		now := metav1.Now()
+		syn.Status.LastRolloutTime = &now
 		syn.Status.CurrentGeneration = syn.Generation
 		if err := c.client.Status().Update(ctx, syn); err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating synthesizer's current generation: %w", err)
 		}
 
-		// TODO: Add metrics around rollout progress
-		// TODO: Track rollout latency
+		if previousTime != nil {
+			logger = logger.WithValues("latency", now.Sub(previousTime.Time).Milliseconds())
+		}
 		if len(compList.Items) > 0 { // log doesn't make sense if the synthesizer wasn't actually rolled out
 			logger.Info("finished rolling out latest synthesizer version")
 		}
