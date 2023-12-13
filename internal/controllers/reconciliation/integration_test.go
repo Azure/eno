@@ -22,6 +22,8 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 )
 
+// TODO: Sometimes the resource is patched to the create phase after the external update but before the update
+
 type crudTestCase struct {
 	Name                         string
 	Empty, Initial, Updated      client.Object
@@ -243,18 +245,6 @@ func setImage(t *testing.T, upstream client.Client, syn *apiv1.Synthesizer, comp
 		}
 		syn.Spec.Image = image
 		return upstream.Update(context.Background(), syn)
-	})
-	require.NoError(t, err)
-
-	// Also pin the composition to >= this synthesizer version.
-	// This is necessary to avoid deadlock in cases where incoherent cache causes the composition not to be updated on this tick of the rollout loop.
-	// It isn't a problem in production because we don't expect serialized behavior from the rollout controller.
-	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		if err := upstream.Get(context.Background(), client.ObjectKeyFromObject(comp), comp); err != nil {
-			return err
-		}
-		comp.Spec.Synthesizer.MinGeneration = syn.Generation
-		return upstream.Update(context.Background(), comp)
 	})
 	require.NoError(t, err)
 }

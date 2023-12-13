@@ -31,6 +31,7 @@ func NewRolloutController(mgr ctrl.Manager, cooldownPeriod time.Duration) error 
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Synthesizer{}).
+		Watches(&apiv1.Composition{}, manager.NewCompositionToSynthesizerHandler(c.client)).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "rolloutController")).
 		Complete(c)
 }
@@ -48,7 +49,7 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if syn.Status.LastRolloutTime != nil {
 		remainingCooldown := c.cooldown - time.Since(syn.Status.LastRolloutTime.Time)
 		if remainingCooldown > 0 {
-			return ctrl.Result{RequeueAfter: remainingCooldown}, nil
+			return ctrl.Result{RequeueAfter: remainingCooldown}, nil // not ready to continue rollout yet
 		}
 	}
 
@@ -61,6 +62,7 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// randomize list to avoid always rolling out changes in the same order
+	// TODO: Consider a more efficient approach here
 	rand.Shuffle(len(compList.Items), func(i, j int) { compList.Items[i] = compList.Items[j] })
 
 	for _, comp := range compList.Items {
@@ -107,7 +109,7 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if len(compList.Items) > 0 { // log doesn't make sense if the synthesizer wasn't actually rolled out
 			logger.Info("finished rolling out latest synthesizer version")
 		}
-		return ctrl.Result{}, nil // TODO: Consider leaving this loop open in case new compositions fell through the cracks earlier
+		return ctrl.Result{}, nil
 	}
 
 	return ctrl.Result{}, nil
