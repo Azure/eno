@@ -134,6 +134,7 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 	}
 
 	// Compute a merge patch
+	prevRV := current.GetResourceVersion()
 	patch, patchType, err := c.buildPatch(ctx, prev, resource, current)
 	if err != nil {
 		return fmt.Errorf("building patch: %w", err)
@@ -146,7 +147,7 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 	if err != nil {
 		return fmt.Errorf("applying patch: %w", err)
 	}
-	logger.V(0).Info("patched resource", "patchType", string(patchType), "resourceVersion", current.GetResourceVersion())
+	logger.V(0).Info("patched resource", "patchType", string(patchType), "resourceVersion", current.GetResourceVersion(), "previousResourceVersion", prevRV)
 
 	return nil
 }
