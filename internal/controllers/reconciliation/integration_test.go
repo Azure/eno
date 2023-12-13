@@ -22,10 +22,6 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 )
 
-// TODO: Test what happens if the resource already exists but we have no previous record of it
-
-// TODO: Assert on status
-
 type crudTestCase struct {
 	Name                         string
 	Empty, Initial, Updated      client.Object
@@ -213,16 +209,6 @@ func TestCRUD(t *testing.T) {
 				require.NoError(t, err)
 				test.AssertUpdated(t, obj)
 			})
-
-			// TODO
-			// t.Run("delete", func(t *testing.T) {
-			// 	setSynImage(t, upstream, syn, "delete")
-
-			// 	testutil.Eventually(t, func() bool {
-			// 		_, err = test.Get(downstream)
-			// 		return errors.IsNotFound(err)
-			// 	})
-			// })
 		})
 	}
 }

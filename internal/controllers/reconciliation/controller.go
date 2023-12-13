@@ -2,6 +2,7 @@ package reconciliation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -20,11 +21,7 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// TODO: Implement tombstones
-// - Synthesis collection controller diffs against previous state, creates tombstones
-// - Any tombstones present and not yet reconciled in the previous state are passed on to the next
-
-// TODO: Minimal retries for validation error
+// TODO: Handle 400s better
 
 type Controller struct {
 	client         client.Client
@@ -77,16 +74,18 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	var prev *reconstitution.Resource
 	if comp.Status.PreviousState != nil {
 		prev, _ = c.resourceClient.Get(ctx, &req.ResourceRef, comp.Status.PreviousState.ObservedCompositionGeneration)
-	} else {
-		logger.V(1).Info("no previous state given")
 	}
 
-	// TODO: This probably isn't a good solution. Maybe include in queue msg?
+	// The current and previous resource can both be nil,
+	// so we need to check both to find the apiVersion
 	var apiVersion string
 	if resource != nil {
 		apiVersion = resource.Object.GetAPIVersion()
 	} else if prev != nil {
 		apiVersion = prev.Object.GetAPIVersion()
+	} else {
+		logger.Error(errors.New("no apiVersion provided"), "neither the current or previous resource have an apiVersion")
+		return ctrl.Result{}, nil
 	}
 
 	// Fetch the current resource
@@ -123,19 +122,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) error {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	// Delete
-	if resource == nil && prev != nil {
-		if current.GetResourceVersion() == "" || current.GetDeletionTimestamp() != nil {
-			return nil // already deleted
-		}
-
-		logger.V(0).Info("deleting resource")
-		err := c.upstreamClient.Delete(ctx, prev.Object)
-		if err != nil {
-			return fmt.Errorf("deleting resource: %w", err)
-		}
-		return nil
-	}
+	// TODO: Handle deletes here
 
 	// Always create the resource when it doesn't exist
 	if current.GetResourceVersion() == "" {
