@@ -72,7 +72,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		synGen, _  = strconv.ParseInt(pod.Annotations["eno.azure.io/synthesizer-generation"], 10, 0)
 	)
 	logger.WithValues("synthesizerGeneration", synGen, "compositionGeneration", compGen)
-	if statusIsOutOfSync(comp, compGen, synGen) {
+	if shouldWriteStatus(comp, compGen, synGen) {
 		comp.Status.CurrentState.PodCreation = &pod.CreationTimestamp
 		comp.Status.CurrentState.ObservedSynthesizerGeneration = synGen
 
@@ -80,7 +80,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 		}
 		logger.V(1).Info("wrote synthesizer pod metadata to composition")
-		return ctrl.Result{}, nil
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Remove the finalizer
@@ -89,15 +89,15 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			return ctrl.Result{}, fmt.Errorf("removing pod finalizer: %w", err)
 		}
 		logger.V(1).Info("synthesizer pod can safely be deleted now that its metadata has been captured")
-		return ctrl.Result{}, nil
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	return ctrl.Result{}, nil
 }
 
-func statusIsOutOfSync(comp *apiv1.Composition, podCompGen, podSynGen int64) bool {
-	// TODO: Unit tests, make sure to cover the pod creation latching logic
-	// TODO: Do we need to also check against the previous state? Do we swap if the current state is still being synthesized? Should we?
-	return (comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration == podCompGen) &&
-		(comp.Status.CurrentState.PodCreation == nil || comp.Status.CurrentState.ObservedSynthesizerGeneration != podSynGen)
+func shouldWriteStatus(comp *apiv1.Composition, podCompGen, podSynGen int64) bool {
+	current := comp.Status.CurrentState
+	isOldPod := current == nil || current.ObservedCompositionGeneration != podCompGen
+	isInSync := current != nil && current.PodCreation != nil
+	return !isOldPod && !isInSync
 }

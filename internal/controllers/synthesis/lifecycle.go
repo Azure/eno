@@ -131,7 +131,7 @@ func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1
 	for _, pod := range pods.Items {
 		pod := pod
 		reason, shouldDelete := c.podStatusTerminal(&pod)
-		isCurrent := podDerivedFrom(comp, syn, &pod)
+		isCurrent := podDerivedFrom(comp, syn, &pod) && len(comp.Status.CurrentState.ResourceSlices) != 0
 
 		// If the current pod is being deleted it's safe to create a new one if needed
 		// Avoid getting stuck by pods that fail to delete
