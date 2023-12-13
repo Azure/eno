@@ -16,8 +16,6 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 )
 
-// TODO: We never release superseded pods
-
 var minimalTestConfig = &Config{
 	WrapperImage: "test-wrapper-image",
 	MaxRestarts:  3,
@@ -108,13 +106,12 @@ func TestControllerHappyPath(t *testing.T) {
 		}
 	})
 
-	// TODO: This is flaky
-	// // The pod eventually completes and is deleted
-	// testutil.Eventually(t, func() bool {
-	// 	list := &corev1.PodList{}
-	// 	require.NoError(t, cli.List(ctx, list))
-	// 	return len(list.Items) == 0
-	// })
+	// The pod eventually completes and is deleted
+	testutil.Eventually(t, func() bool {
+		list := &corev1.PodList{}
+		require.NoError(t, cli.List(ctx, list))
+		return len(list.Items) == 0
+	})
 }
 
 func TestControllerFastCompositionUpdates(t *testing.T) {
