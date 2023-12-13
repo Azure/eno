@@ -215,7 +215,7 @@ func TestCRUD(t *testing.T) {
 			}
 
 			t.Run("update", func(t *testing.T) {
-				setSynImage(t, upstream, syn, comp, "update")
+				setImage(t, upstream, syn, comp, "update")
 
 				var obj client.Object
 				testutil.Eventually(t, func() bool {
@@ -245,7 +245,7 @@ func (c *crudTestCase) Get(downstream client.Client) (client.Object, error) {
 	return obj, downstream.Get(context.Background(), client.ObjectKeyFromObject(obj), obj)
 }
 
-func setSynImage(t *testing.T, upstream client.Client, syn *apiv1.Synthesizer, comp *apiv1.Composition, image string) {
+func setImage(t *testing.T, upstream client.Client, syn *apiv1.Synthesizer, comp *apiv1.Composition, image string) {
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		if err := upstream.Get(context.Background(), client.ObjectKeyFromObject(syn), syn); err != nil {
 			return err
