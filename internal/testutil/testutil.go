@@ -255,7 +255,7 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 			// Write all of the resource slices, update the resource slice count accordingly
 			// TODO: We need a controller to remove failed/outdated resource slice writes
 			sliceRefs := []*apiv1.ResourceSliceRef{}
-			if comp.Status.CurrentState.ResourceSlices == nil {
+			if !comp.Status.CurrentState.Synthesized {
 				for _, slice := range slices {
 					cp := slice.DeepCopy()
 					cp.Spec.CompositionGeneration = comp.Generation

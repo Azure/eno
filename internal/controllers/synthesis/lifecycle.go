@@ -93,7 +93,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// No need to create a pod if everything is in sync
-	if comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSlices != nil {
+	if comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized {
 		return ctrl.Result{}, nil
 	}
 
@@ -117,7 +117,7 @@ func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1
 	var activeLatest bool
 	for _, pod := range pods.Items {
 		pod := pod
-		if pod.DeletionTimestamp != nil || !podDerivedFrom(comp, syn, &pod) {
+		if pod.DeletionTimestamp != nil || !podDerivedFrom(comp, &pod) {
 			continue
 		}
 		if activeLatest {
@@ -131,7 +131,7 @@ func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1
 	for _, pod := range pods.Items {
 		pod := pod
 		reason, shouldDelete := c.podStatusTerminal(&pod)
-		isCurrent := podDerivedFrom(comp, syn, &pod) && len(comp.Status.CurrentState.ResourceSlices) != 0
+		isCurrent := podDerivedFrom(comp, &pod)
 
 		// If the current pod is being deleted it's safe to create a new one if needed
 		// Avoid getting stuck by pods that fail to delete

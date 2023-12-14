@@ -64,7 +64,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("getting synthesizer: %w", err)
 	}
-	logger = logger.WithValues("synthesizerName", syn.Name)
+	logger = logger.WithValues("synthesizerName", syn.Name, "podName", pod.Name)
 
 	// Update composition status
 	var (
@@ -97,7 +97,5 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 func shouldWriteStatus(comp *apiv1.Composition, podCompGen, podSynGen int64) bool {
 	current := comp.Status.CurrentState
-	isOldPod := current == nil || current.ObservedCompositionGeneration != podCompGen
-	isInSync := current != nil && current.PodCreation != nil
-	return !isOldPod && !isInSync
+	return current == nil || (current.ObservedCompositionGeneration == podCompGen && (current.PodCreation == nil || current.ObservedSynthesizerGeneration == 0))
 }
