@@ -12,8 +12,6 @@ import (
 )
 
 func newPod(cfg *Config, scheme *runtime.Scheme, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev1.Pod {
-	const wrapperVolumeName = "wrapper"
-
 	pod := &corev1.Pod{}
 	pod.GenerateName = "synthesis-"
 	pod.Namespace = comp.Namespace
@@ -31,23 +29,10 @@ func newPod(cfg *Config, scheme *runtime.Scheme, comp *apiv1.Composition, syn *a
 	yes := true
 	pod.Spec = corev1.PodSpec{
 		RestartPolicy: corev1.RestartPolicyOnFailure,
-		InitContainers: []corev1.Container{{
-			Name:  "setup",
-			Image: cfg.WrapperImage,
-			Command: []string{
-				"/eno-wrapper", "--install=/wrapper/eno-wrapper",
-			},
-			VolumeMounts: []corev1.VolumeMount{{
-				Name:      wrapperVolumeName,
-				MountPath: "/wrapper",
-			}},
-		}},
 		Containers: []corev1.Container{{
-			Name:  "synthesizer",
-			Image: syn.Spec.Image,
-			Command: []string{
-				"/wrapper/eno-wrapper", "--generate",
-			},
+			Name:    "synthesizer",
+			Image:   syn.Spec.Image,
+			Command: []string{"sleep", "infinity"},
 			SecurityContext: &corev1.SecurityContext{
 				Capabilities: &corev1.Capabilities{
 					Drop: []corev1.Capability{"ALL"},
@@ -55,11 +40,6 @@ func newPod(cfg *Config, scheme *runtime.Scheme, comp *apiv1.Composition, syn *a
 				RunAsUser:    &userID,
 				RunAsNonRoot: &yes,
 			},
-			VolumeMounts: []corev1.VolumeMount{{
-				Name:      wrapperVolumeName,
-				MountPath: "/wrapper",
-				ReadOnly:  true,
-			}},
 			Env: []corev1.EnvVar{
 				{
 					Name:  "COMPOSITION_NAME",
@@ -78,10 +58,6 @@ func newPod(cfg *Config, scheme *runtime.Scheme, comp *apiv1.Composition, syn *a
 					Value: strconv.FormatInt(syn.Generation, 10),
 				},
 			},
-		}},
-		Volumes: []corev1.Volume{{
-			Name:         wrapperVolumeName,
-			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 		}},
 	}
 
