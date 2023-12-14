@@ -3,13 +3,17 @@ package synthesis
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"strconv"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -92,12 +96,12 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, nil // old pod - don't bother synthesizing
 	}
 
-	err = c.exec(ctx, syn, comp, pod)
+	refs, err := c.exec(ctx, syn, comp, pod)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("executing synthesizer: %w", err)
 	}
 
-	err = c.writeStatus(ctx, comp, compGen)
+	err = c.writeStatus(ctx, comp, compGen, refs)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 	}
@@ -105,12 +109,34 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	return ctrl.Result{}, nil
 }
 
-func (c *execController) exec(ctx context.Context, syn *apiv1.Synthesizer, comp *apiv1.Composition, pod *corev1.Pod) error {
+func (c *execController) exec(ctx context.Context, syn *apiv1.Synthesizer, comp *apiv1.Composition, pod *corev1.Pod) ([]*apiv1.ResourceSliceRef, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 	logger.V(1).Info("starting up the synthesizer")
 
-	// TODO: Timeout
+	inputsBuffer := bytes.NewBufferString("\n")
+	for _, ref := range comp.Spec.Inputs {
+		if ref.Resource == nil {
+			continue // not a k8s resource
+		}
+		input := &unstructured.Unstructured{}
+		input.SetName(ref.Resource.Name)
+		input.SetNamespace(ref.Resource.Namespace)
+		input.SetKind(ref.Resource.Kind)
+		input.SetAPIVersion(ref.Resource.APIVersion)
 
+		err := c.client.Get(ctx, client.ObjectKeyFromObject(input), input)
+		if err != nil {
+			// TODO: Handle 40x carefully
+			return nil, fmt.Errorf("getting resource %s/%s: %w", input.GetKind(), input.GetName(), err)
+		}
+		js, err := input.MarshalJSON()
+		if err != nil {
+			return nil, fmt.Errorf("encoding input resource as json %s/%s: %w", input.GetKind(), input.GetName(), err)
+		}
+		inputsBuffer.Write(append(js, '\n'))
+	}
+
+	// TODO: Timeout
 	req := c.execClient.
 		Post().
 		Namespace(pod.Namespace).
@@ -126,28 +152,60 @@ func (c *execController) exec(ctx context.Context, syn *apiv1.Synthesizer, comp 
 			TTY:       true,
 		}, runtime.NewParameterCodec(c.scheme))
 
-	stdin := bytes.NewBufferString("\n\n")
-	stdout := &bytes.Buffer{} // TODO: Buffer?
-	stderr := &bytes.Buffer{}
-
 	exec, err := remotecommand.NewSPDYExecutor(c.restConfig, "POST", req.URL())
 	if err != nil {
-		return fmt.Errorf("creating remote command executor: %w", err)
+		return nil, fmt.Errorf("creating remote command executor: %w", err)
 	}
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
 	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
-		Stdin:  stdin,
+		Stdin:  inputsBuffer,
 		Stdout: stdout,
 		Stderr: stderr,
 		Tty:    true,
 	})
 	if err != nil {
-		return fmt.Errorf("starting stream: %w", err)
+		return nil, fmt.Errorf("starting stream: %w", err)
 	}
 
-	return nil
+	// TODO: Handle non-0 exit codes?
+
+	slice := &apiv1.ResourceSlice{}
+	slice.GenerateName = comp.Name + "-"
+	slice.Namespace = comp.Namespace
+	slices := []*apiv1.ResourceSlice{slice} // TODO: Paginate slices
+	dec := json.NewDecoder(stdout)
+	for {
+		output := &unstructured.Unstructured{}
+		if err := dec.Decode(output); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, fmt.Errorf("parsing output json: %w", err)
+		}
+
+		js, err := output.MarshalJSON()
+		if err != nil {
+			return nil, fmt.Errorf("encoding output resource as json %s/%s: %w", output.GetKind(), output.GetName(), err)
+		}
+
+		slice.Spec.Resources = append(slice.Spec.Resources, apiv1.Manifest{Manifest: string(js)}) // TODO: Set reconcile interval
+	}
+
+	sliceRefs := make([]*apiv1.ResourceSliceRef, len(slices))
+	for i, slice := range slices { // TODO: Maybe don't buffer?
+		// TODO: Retries? Separate rate limit?
+		err = c.client.Create(ctx, slice)
+		if err != nil {
+			return nil, fmt.Errorf("creating resource slice %d: %w", i, err)
+		}
+		sliceRefs[i] = &apiv1.ResourceSliceRef{Name: slice.Name}
+	}
+
+	return sliceRefs, nil
 }
 
-func (c *execController) writeStatus(ctx context.Context, comp *apiv1.Composition, compGen int64) error {
+func (c *execController) writeStatus(ctx context.Context, comp *apiv1.Composition, compGen int64 ,refs []*apiv1.ResourceSliceRef) error {
 	logger := logr.FromContextOrDiscard(ctx)
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		err := c.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
@@ -167,7 +225,7 @@ func (c *execController) writeStatus(ctx context.Context, comp *apiv1.Compositio
 			return nil // no updates needed
 		}
 		comp.Status.CurrentState.Synthesized = true
-		// TODO: Also update slice refs
+		comp.Status.CurrentState.ResourceSlices = refs
 
 		err = c.client.Status().Update(ctx, comp)
 		if err != nil {
