@@ -38,6 +38,8 @@ func TestExecIntegration(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "alpine:latest"
+	// syn.Spec.Command = []string{"/bin/sh", "-c", "cat /dev/stdin"}
+	syn.Spec.Command = []string{"/bin/sh", "-c", "sleep 1 && echo {}"}
 	require.NoError(t, cli.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}

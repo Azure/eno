@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
@@ -124,11 +125,15 @@ func (c *execController) exec(ctx context.Context, syn *apiv1.Synthesizer, comp 
 		input.SetKind(ref.Resource.Kind)
 		input.SetAPIVersion(ref.Resource.APIVersion)
 
+		start := time.Now()
 		err := c.client.Get(ctx, client.ObjectKeyFromObject(input), input)
 		if err != nil {
 			// TODO: Handle 40x carefully
 			return nil, fmt.Errorf("getting resource %s/%s: %w", input.GetKind(), input.GetName(), err)
 		}
+		logger.V(1).Info("retrieved input resource", "resourceName", input.GetName(), "resourceNamespace", input.GetNamespace(), "resourceKind", input.GetKind(), "latency", time.Since(start).Milliseconds())
+		// TODO: Cache inputs?
+
 		js, err := input.MarshalJSON()
 		if err != nil {
 			return nil, fmt.Errorf("encoding input resource as json %s/%s: %w", input.GetKind(), input.GetName(), err)
@@ -145,7 +150,7 @@ func (c *execController) exec(ctx context.Context, syn *apiv1.Synthesizer, comp 
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Container: "synthesizer",
-			Command:   []string{"/bin/sh", "-c", "sleep 1 && echo done!"}, // TODO
+			Command:   syn.Spec.Command, // TODO: Defaulting? Required?
 			Stdin:     true,
 			Stdout:    true,
 			Stderr:    true,
@@ -165,7 +170,7 @@ func (c *execController) exec(ctx context.Context, syn *apiv1.Synthesizer, comp 
 		Tty:    true,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("starting stream: %w", err)
+		return nil, fmt.Errorf("starting stream: %t", err)
 	}
 
 	// TODO: Handle non-0 exit codes?
@@ -195,17 +200,19 @@ func (c *execController) exec(ctx context.Context, syn *apiv1.Synthesizer, comp 
 	sliceRefs := make([]*apiv1.ResourceSliceRef, len(slices))
 	for i, slice := range slices { // TODO: Maybe don't buffer?
 		// TODO: Retries? Separate rate limit?
+		start := time.Now()
 		err = c.client.Create(ctx, slice)
 		if err != nil {
 			return nil, fmt.Errorf("creating resource slice %d: %w", i, err)
 		}
+		logger.V(1).Info("wrote resource slice", "resourceSliceName", slice.Name, "latency", time.Since(start).Milliseconds())
 		sliceRefs[i] = &apiv1.ResourceSliceRef{Name: slice.Name}
 	}
 
 	return sliceRefs, nil
 }
 
-func (c *execController) writeStatus(ctx context.Context, comp *apiv1.Composition, compGen int64 ,refs []*apiv1.ResourceSliceRef) error {
+func (c *execController) writeStatus(ctx context.Context, comp *apiv1.Composition, compGen int64, refs []*apiv1.ResourceSliceRef) error {
 	logger := logr.FromContextOrDiscard(ctx)
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		err := c.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)

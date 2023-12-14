@@ -25,6 +25,8 @@ type Synthesizer struct {
 type SynthesizerSpec struct {
 	// +required
 	Image string `json:"image,omitempty"`
+
+	Command []string `json:"command,omitempty"`
 }
 
 type SynthesizerStatus struct {

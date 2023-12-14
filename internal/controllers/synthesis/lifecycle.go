@@ -68,18 +68,18 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("listing pods: %w", err)
 	}
-	logger, toDelete, ok := c.shouldDeletePod(logger, comp, syn, pods)
-	if !ok && toDelete == nil {
-		// The pod is still running.
-		// Poll periodically to check if has timed out.
-		return ctrl.Result{RequeueAfter: c.config.Timeout}, nil
-	}
-	if !ok && toDelete != nil {
+	logger, toDelete, exists := c.shouldDeletePod(logger, comp, syn, pods)
+	if toDelete != nil {
 		if err := c.client.Delete(ctx, toDelete); err != nil {
-			return ctrl.Result{}, fmt.Errorf("deleting pod: %w", err)
+			return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("deleting pod: %w", err)) // TODO: Make sure all deletes have ignore 404
 		}
 		logger.Info("deleted synthesizer pod", "podName", toDelete.Name)
 		return ctrl.Result{}, nil
+	}
+	if exists {
+		// The pod is still running.
+		// Poll periodically to check if has timed out.
+		return ctrl.Result{RequeueAfter: c.config.Timeout}, nil
 	}
 
 	// Swap the state to prepare for resynthesis if needed
@@ -108,24 +108,25 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	return ctrl.Result{}, nil
 }
 
-func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Synthesizer, pods *corev1.PodList) (logr.Logger, *corev1.Pod, bool) {
+func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Synthesizer, pods *corev1.PodList) (logr.Logger, *corev1.Pod /* exists */, bool) {
 	if len(pods.Items) == 0 {
-		return logger, nil, true
+		return logger, nil, false
 	}
 
+	// TODO: Fix
 	// Just in case we somehow created more than one pod (stale informer cache, etc.) - delete duplicates
-	var activeLatest bool
-	for _, pod := range pods.Items {
-		pod := pod
-		if pod.DeletionTimestamp != nil || !podDerivedFrom(comp, &pod) {
-			continue
-		}
-		if activeLatest {
-			logger = logger.WithValues("reason", "Duplicate")
-			return logger, &pod, false
-		}
-		activeLatest = true
-	}
+	// var activeLatest bool
+	// for _, pod := range pods.Items {
+	// 	pod := pod
+	// 	if pod.DeletionTimestamp != nil || !podDerivedFrom(comp, &pod) {
+	// 		continue
+	// 	}
+	// 	if activeLatest {
+	// 		logger = logger.WithValues("reason", "Duplicate")
+	// 		return logger, &pod, false
+	// 	}
+	// 	activeLatest = true
+	// }
 
 	// Only create pods when the previous one is deleting or non-existant
 	for _, pod := range pods.Items {
@@ -141,12 +142,13 @@ func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1
 		// If the current pod is being deleted it's safe to create a new one if needed
 		// Avoid getting stuck by pods that fail to delete
 		if pod.DeletionTimestamp != nil && isCurrent {
-			return logger, nil, true
+			// TODO: Fix
+			// return logger, nil, false
 		}
 
 		// Pod exists but still has work to do
 		if isCurrent && !shouldDelete {
-			continue
+			return logger, nil, true
 		}
 
 		// Don't delete pods again
@@ -155,6 +157,7 @@ func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1
 		}
 
 		if isCurrent && comp.Status.CurrentState != nil && comp.Status.CurrentState.PodCreation != nil {
+			// TODO: Move latency to exec controller?
 			logger = logger.WithValues("latency", time.Since(comp.Status.CurrentState.PodCreation.Time).Milliseconds())
 		}
 		if shouldDelete {
@@ -163,25 +166,23 @@ func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1
 		if !isCurrent {
 			logger = logger.WithValues("reason", "Superseded")
 		}
-		return logger, &pod, false
+		return logger, &pod, true
 	}
 	return logger, nil, false
 }
 
 func (c *podLifecycleController) podStatusTerminal(pod *corev1.Pod) (string, bool) {
+	// TODO: Move move timeouts to exec controller?
 	if time.Since(pod.CreationTimestamp.Time) > c.config.Timeout {
 		return "Timeout", true
 	}
-	for _, cont := range append(pod.Status.ContainerStatuses, pod.Status.InitContainerStatuses...) {
+	for _, cont := range pod.Status.ContainerStatuses {
 		if cont.RestartCount > c.config.MaxRestarts {
 			return "MaxRestartsExceeded", true
 		}
 		if cont.State.Terminated == nil || cont.State.Terminated.ExitCode != 0 {
 			return "", false // has not completed yet
 		}
-	}
-	if len(pod.Status.ContainerStatuses) > 0 {
-		return "Unknown", true // shouldn't be possible
 	}
 	return "", false // status not initialized yet
 }

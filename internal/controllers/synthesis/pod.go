@@ -28,7 +28,6 @@ func newPod(cfg *Config, scheme *runtime.Scheme, comp *apiv1.Composition, syn *a
 	userID := int64(1000)
 	yes := true
 	pod.Spec = corev1.PodSpec{
-		RestartPolicy: corev1.RestartPolicyOnFailure,
 		Containers: []corev1.Container{{
 			Name:    "synthesizer",
 			Image:   syn.Spec.Image,

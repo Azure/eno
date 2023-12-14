@@ -32,6 +32,10 @@ spec:
             type: object
           spec:
             properties:
+              command:
+                items:
+                  type: string
+                type: array
               image:
                 type: string
             type: object
