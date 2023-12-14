@@ -133,6 +133,11 @@ func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1
 		reason, shouldDelete := c.podStatusTerminal(&pod)
 		isCurrent := podDerivedFrom(comp, &pod)
 
+		// TODO: Can this come from past generation?
+		if !shouldDelete && comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized {
+			shouldDelete = true
+		}
+
 		// If the current pod is being deleted it's safe to create a new one if needed
 		// Avoid getting stuck by pods that fail to delete
 		if pod.DeletionTimestamp != nil && isCurrent {
@@ -170,9 +175,6 @@ func (c *podLifecycleController) podStatusTerminal(pod *corev1.Pod) (string, boo
 	for _, cont := range append(pod.Status.ContainerStatuses, pod.Status.InitContainerStatuses...) {
 		if cont.RestartCount > c.config.MaxRestarts {
 			return "MaxRestartsExceeded", true
-		}
-		if cont.State.Terminated != nil && cont.State.Terminated.ExitCode == 0 {
-			return "Succeeded", true
 		}
 		if cont.State.Terminated == nil || cont.State.Terminated.ExitCode != 0 {
 			return "", false // has not completed yet

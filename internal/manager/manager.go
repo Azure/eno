@@ -25,6 +25,8 @@ const (
 	IdxCompositionsBySynthesizer = ".spec.synthesizer"
 )
 
+// TODO: Filter informers on pod label
+
 type Options struct {
 	Rest            *rest.Config
 	HealthProbeAddr string
