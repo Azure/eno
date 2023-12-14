@@ -97,34 +97,7 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, fmt.Errorf("executing synthesizer: %w", err)
 	}
 
-	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		err = c.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		if err != nil {
-			return err
-		}
-
-		if compGen < comp.Generation {
-			logger.V(1).Info("synthesis is no longer relevant - discarding its output")
-			return nil
-		}
-
-		if comp.Status.CurrentState == nil {
-			comp.Status.CurrentState = &apiv1.Synthesis{}
-		}
-		if comp.Status.CurrentState.Synthesized {
-			return nil // no updates needed
-		}
-		comp.Status.CurrentState.Synthesized = true
-		// TODO: Also update slice refs
-
-		err = c.client.Status().Update(ctx, comp)
-		if err != nil {
-			return err
-		}
-
-		logger.V(1).Info("finished synthesizing the composition")
-		return nil
-	})
+	err = c.writeStatus(ctx, comp, compGen)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 	}
@@ -172,4 +145,36 @@ func (c *execController) exec(ctx context.Context, syn *apiv1.Synthesizer, comp 
 	}
 
 	return nil
+}
+
+func (c *execController) writeStatus(ctx context.Context, comp *apiv1.Composition, compGen int64) error {
+	logger := logr.FromContextOrDiscard(ctx)
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		err := c.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if err != nil {
+			return err
+		}
+
+		if compGen < comp.Generation {
+			logger.V(1).Info("synthesis is no longer relevant - discarding its output")
+			return nil
+		}
+
+		if comp.Status.CurrentState == nil {
+			comp.Status.CurrentState = &apiv1.Synthesis{}
+		}
+		if comp.Status.CurrentState.Synthesized {
+			return nil // no updates needed
+		}
+		comp.Status.CurrentState.Synthesized = true
+		// TODO: Also update slice refs
+
+		err = c.client.Status().Update(ctx, comp)
+		if err != nil {
+			return err
+		}
+
+		logger.V(1).Info("finished synthesizing the composition")
+		return nil
+	})
 }
