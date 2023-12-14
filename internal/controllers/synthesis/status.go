@@ -53,7 +53,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition resource: %w", err))
 	}
-	if comp.Spec.Synthesizer.Name == "" {
+	if comp.Spec.Synthesizer.Name == "" || comp.Status.CurrentState == nil {
 		return ctrl.Result{}, nil
 	}
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace)
@@ -73,7 +73,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	)
 	logger.WithValues("synthesizerGeneration", synGen, "compositionGeneration", compGen)
 	if shouldWriteStatus(comp, compGen, synGen) {
-		comp.Status.CurrentState.PodCreation = &pod.CreationTimestamp
+		comp.Status.CurrentState.PodCreation = &pod.CreationTimestamp // TODO: Sometimes panics?
 		comp.Status.CurrentState.ObservedSynthesizerGeneration = synGen
 
 		if err := c.client.Status().Update(ctx, comp); err != nil {

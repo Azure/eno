@@ -185,10 +185,14 @@ func (m *Manager) Start(t *testing.T) {
 }
 
 func Eventually(t testing.TB, fn func() bool) {
+	SomewhatEventually(t, time.Second*5, fn)
+}
+
+func SomewhatEventually(t testing.TB, dur time.Duration, fn func() bool) {
 	t.Helper()
 	start := time.Now()
 	for {
-		if time.Since(start) > time.Second*5 {
+		if time.Since(start) > dur {
 			t.Fatalf("timeout while waiting for condition")
 			return
 		}

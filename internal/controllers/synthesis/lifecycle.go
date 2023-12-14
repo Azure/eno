@@ -134,7 +134,7 @@ func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1
 		isCurrent := podDerivedFrom(comp, &pod)
 
 		// TODO: Can this come from past generation?
-		if !shouldDelete && comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized {
+		if comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized {
 			shouldDelete = true
 		}
 
@@ -187,8 +187,7 @@ func (c *podLifecycleController) podStatusTerminal(pod *corev1.Pod) (string, boo
 }
 
 func swapStates(syn *apiv1.Synthesizer, comp *apiv1.Composition) {
-	// TODO: Block swapping prev->current if the any resources present in prev but absent in current have not yet been reconciled
-	// This will ensure that we don't orphan resources
+	// TODO: Is there ever a case where we would _not_ want to swap current->prev? Such as if prev succeeded but cur hasn't?
 	comp.Status.PreviousState = comp.Status.CurrentState
 	comp.Status.CurrentState = &apiv1.Synthesis{
 		ObservedCompositionGeneration: comp.Generation,

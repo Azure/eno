@@ -16,6 +16,8 @@ import (
 	"github.com/Azure/eno/internal/manager"
 )
 
+// TODO: Doesn't behave right when compositions haven't yet been synthesized
+
 // TODO: Does controller-runtime add jitter to requeue intervals automatically?
 
 type rolloutController struct {
