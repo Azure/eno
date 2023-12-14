@@ -57,6 +57,8 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("getting resource: %w", err)
 	}
+	logger := logr.FromContextOrDiscard(ctx).WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
+	ctx = logr.NewContext(ctx, logger)
 
 	// We populate the cache with both the previous and current syntheses
 	err = r.populateCache(ctx, comp, comp.Status.PreviousState)
@@ -81,7 +83,7 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 	}
 	compNSN := types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}
 
-	logger = logger.WithValues("synthesisGen", synthesis.ObservedCompositionGeneration)
+	logger = logger.WithValues("synthesisCompositionGeneration", synthesis.ObservedCompositionGeneration)
 	ctx = logr.NewContext(ctx, logger)
 	if r.cache.HasSynthesis(ctx, compNSN, synthesis) {
 		return nil

@@ -50,7 +50,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	if comp.Spec.Synthesizer.Name == "" {
 		return ctrl.Result{}, nil
 	}
-	logger = logger.WithValues("composition", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
 
 	syn := &apiv1.Synthesizer{}
 	syn.Name = comp.Spec.Synthesizer.Name
@@ -58,7 +58,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("getting synthesizer: %w", err)
 	}
-	logger = logger.WithValues("synthesizer", syn.Name, "synthesizerGeneration", syn.Generation)
+	logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
 
 	// Delete any unnecessary pods
 	pods := &corev1.PodList{}
@@ -78,7 +78,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		if err := c.client.Delete(ctx, toDelete); err != nil {
 			return ctrl.Result{}, fmt.Errorf("deleting pod: %w", err)
 		}
-		logger.Info("deleted pod", "podName", toDelete.Name)
+		logger.Info("deleted synthesizer pod", "podName", toDelete.Name)
 		return ctrl.Result{}, nil
 	}
 
@@ -88,12 +88,12 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
 		}
-		logger.Info("swapped composition state because composition was modified since last synthesis")
+		logger.Info("start to synthesize")
 		return ctrl.Result{}, nil
 	}
 
 	// No need to create a pod if everything is in sync
-	if comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSlices != nil {
+	if comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized {
 		return ctrl.Result{}, nil
 	}
 
@@ -103,7 +103,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreAlreadyExists(fmt.Errorf("creating pod: %w", err))
 	}
-	logger.Info("created pod", "podName", pod.Name)
+	logger.Info("created synthesizer pod", "podName", pod.Name)
 
 	return ctrl.Result{}, nil
 }
@@ -117,7 +117,7 @@ func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1
 	var activeLatest bool
 	for _, pod := range pods.Items {
 		pod := pod
-		if pod.DeletionTimestamp != nil || !podDerivedFrom(comp, syn, &pod) {
+		if pod.DeletionTimestamp != nil || !podDerivedFrom(comp, &pod) {
 			continue
 		}
 		if activeLatest {
@@ -131,7 +131,7 @@ func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1
 	for _, pod := range pods.Items {
 		pod := pod
 		reason, shouldDelete := c.podStatusTerminal(&pod)
-		isCurrent := podDerivedFrom(comp, syn, &pod)
+		isCurrent := podDerivedFrom(comp, &pod)
 
 		// If the current pod is being deleted it's safe to create a new one if needed
 		// Avoid getting stuck by pods that fail to delete

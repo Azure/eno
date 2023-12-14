@@ -84,11 +84,9 @@ func (d *discoveryCache) checkSupportUnlocked(ctx context.Context, gvk schema.Gr
 
 	for _, c := range d.current.GetConsumes(gvk, "PATCH") {
 		if c == string(types.StrategicMergePatchType) {
-			logger.V(1).Info("using strategic merge")
 			return model, nil
 		}
 	}
 
-	logger.V(1).Info("not using strategic merge because it is not supported by the resource")
 	return nil, nil // doesn't support strategic merge
 }

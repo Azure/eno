@@ -49,10 +49,7 @@ func (w *writeBuffer) PatchStatusAsync(ctx context.Context, ref *ManifestRef, pa
 	w.mut.Lock()
 	defer w.mut.Unlock()
 
-	logr.FromContextOrDiscard(ctx).V(1).Info("buffering status update")
-
 	key := ref.Slice
-	// TODO(jordan): Consider de-duping this slice to avoid potentially allocating a lot of memory if some bug causes churning of the control loop that ends up calling this.
 	w.state[key] = append(w.state[key], &asyncStatusUpdate{
 		SlicedResource: ref,
 		PatchFn:        patchFn,
@@ -107,7 +104,6 @@ func (w *writeBuffer) processQueueItem(ctx context.Context) bool {
 
 func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.NamespacedName, updates []*asyncStatusUpdate) bool {
 	logger := logr.FromContextOrDiscard(ctx)
-	logger.V(1).Info("starting to update slice status")
 
 	slice := &apiv1.ResourceSlice{}
 	err := w.client.Get(ctx, sliceNSN, slice)
@@ -121,24 +117,17 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 	}
 
 	if len(slice.Status.Resources) != len(slice.Spec.Resources) {
-		logger.V(1).Info("allocating resource status slice")
 		slice.Status.Resources = make([]apiv1.ResourceState, len(slice.Spec.Resources))
 	}
 
 	var dirty bool
 	for _, update := range updates {
-		logger := logger.WithValues("slicedResource", update.SlicedResource)
 		statusPtr := &slice.Status.Resources[update.SlicedResource.Index]
-
 		if update.PatchFn(statusPtr) {
-			logger.V(1).Info("patch caused status to change")
 			dirty = true
-		} else {
-			logger.V(1).Info("patch did not cause status to change")
 		}
 	}
 	if !dirty {
-		logger.V(1).Info("no status updates were necessary")
 		return true
 	}
 

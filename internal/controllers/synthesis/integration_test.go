@@ -19,7 +19,7 @@ import (
 var minimalTestConfig = &Config{
 	WrapperImage: "test-wrapper-image",
 	MaxRestarts:  3,
-	Timeout:      time.Second * 2,
+	Timeout:      time.Second * 6,
 }
 
 func TestControllerHappyPath(t *testing.T) {
@@ -107,12 +107,11 @@ func TestControllerHappyPath(t *testing.T) {
 	})
 
 	// The pod eventually completes and is deleted
-	// TODO: Why does this fail?
-	// testutil.Eventually(t, func() bool {
-	// 	list := &corev1.PodList{}
-	// 	require.NoError(t, cli.List(ctx, list))
-	// 	return len(list.Items) == 0
-	// })
+	testutil.Eventually(t, func() bool {
+		list := &corev1.PodList{}
+		require.NoError(t, cli.List(ctx, list))
+		return len(list.Items) == 0
+	})
 }
 
 func TestControllerFastCompositionUpdates(t *testing.T) {
@@ -254,12 +253,12 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 
 	syn1 := &apiv1.Synthesizer{}
 	syn1.Name = "test-syn-1"
-	syn1.Spec.Image = "test-syn-image"
+	syn1.Spec.Image = "initial-image"
 	require.NoError(t, cli.Create(ctx, syn1))
 
 	syn2 := &apiv1.Synthesizer{}
 	syn2.Name = "test-syn-2"
-	syn2.Spec.Image = "initial-image"
+	syn2.Spec.Image = "updated-image"
 	require.NoError(t, cli.Create(ctx, syn2))
 
 	comp := &apiv1.Composition{}
@@ -285,7 +284,6 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		// TODO: This test is a tiny bit flaky
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 			return comp.Status.CurrentState != nil && len(comp.Status.CurrentState.ResourceSlices) == 2

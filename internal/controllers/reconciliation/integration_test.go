@@ -188,7 +188,7 @@ func TestCRUD(t *testing.T) {
 						obj, err := test.Get(downstream)
 						require.NoError(t, err)
 
-						updatedObj := test.ApplyExternalUpdate(t, obj)
+						updatedObj := test.ApplyExternalUpdate(t, obj.DeepCopyObject().(client.Object))
 						updatedObj = setPhase(updatedObj, "external-update")
 						if err := downstream.Update(ctx, updatedObj); err != nil {
 							return err
@@ -214,9 +214,18 @@ func TestCRUD(t *testing.T) {
 }
 
 func (c *crudTestCase) WaitForPhase(t *testing.T, downstream client.Client, phase string) {
+	var lastRV string
 	testutil.Eventually(t, func() bool {
 		obj, err := c.Get(downstream)
-		return err == nil && getPhase(obj) == phase
+		currentPhase := getPhase(obj)
+		currentRV := obj.GetResourceVersion()
+		if lastRV == "" {
+			t.Logf("initial resource version %s was observed in phase %s", currentRV, currentPhase)
+		} else if currentRV != lastRV {
+			t.Logf("resource version transitioned from %s to %s in phase %s", lastRV, currentRV, currentPhase)
+		}
+		lastRV = currentRV
+		return err == nil && currentPhase == phase
 	})
 }
 
@@ -234,18 +243,6 @@ func setImage(t *testing.T, upstream client.Client, syn *apiv1.Synthesizer, comp
 		}
 		syn.Spec.Image = image
 		return upstream.Update(context.Background(), syn)
-	})
-	require.NoError(t, err)
-
-	// Also pin the composition to >= this synthesizer version.
-	// This is necessary to avoid deadlock in cases where incoherent cache causes the composition not to be updated on this tick of the rollout loop.
-	// It isn't a problem in production because we don't expect serialized behavior from the rollout controller.
-	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		if err := upstream.Get(context.Background(), client.ObjectKeyFromObject(comp), comp); err != nil {
-			return err
-		}
-		comp.Spec.Synthesizer.MinGeneration = syn.Generation
-		return upstream.Update(context.Background(), comp)
 	})
 	require.NoError(t, err)
 }
