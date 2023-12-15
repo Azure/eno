@@ -16,7 +16,7 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 )
 
-func TestExecIntegration(t *testing.T) {
+func TestExecIntegrationHappyPath(t *testing.T) {
 	// Skip this by default since it requires a real k8s cluster and doesn't currently clean up after itself
 	// I'm thinking we may want to replace this with a proper e2e test once things are glued together.
 	if os.Getenv("RUN_EXEC_INTEGRATION") == "" {

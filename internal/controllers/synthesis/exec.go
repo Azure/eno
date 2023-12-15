@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strconv"
 	"time"
 
@@ -95,12 +96,12 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, nil // old pod - don't bother synthesizing
 	}
 
-	refs, err := c.exec(ctx, syn, comp, pod)
+	refs, err := c.synthesize(ctx, syn, comp, pod)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("executing synthesizer: %w", err)
 	}
 
-	err = c.writeStatus(ctx, comp, compGen, refs)
+	err = c.writeSuccessStatus(ctx, comp, compGen, refs)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 	}
@@ -108,36 +109,13 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	return ctrl.Result{}, nil
 }
 
-func (c *execController) exec(ctx context.Context, syn *apiv1.Synthesizer, comp *apiv1.Composition, pod *corev1.Pod) ([]*apiv1.ResourceSliceRef, error) {
+func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer, comp *apiv1.Composition, pod *corev1.Pod) ([]*apiv1.ResourceSliceRef, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 	logger.V(1).Info("starting up the synthesizer")
 
-	inputs := make([]*unstructured.Unstructured, len(comp.Spec.Inputs))
-	for i, ref := range comp.Spec.Inputs {
-		if ref.Resource == nil {
-			continue // not a k8s resource
-		}
-		input := &unstructured.Unstructured{}
-		input.SetName(ref.Resource.Name)
-		input.SetNamespace(ref.Resource.Namespace)
-		input.SetKind(ref.Resource.Kind)
-		input.SetAPIVersion(ref.Resource.APIVersion)
-		appendInputNameAnnotation(&ref, input)
-
-		// TODO: Cache inputs?
-
-		start := time.Now()
-		err := c.client.Get(ctx, client.ObjectKeyFromObject(input), input)
-		if err != nil {
-			// TODO: Handle 40x carefully
-			return nil, fmt.Errorf("getting resource %s/%s: %w", input.GetKind(), input.GetName(), err)
-		}
-		logger.V(1).Info("retrieved input resource", "resourceName", input.GetName(), "resourceNamespace", input.GetNamespace(), "resourceKind", input.GetKind(), "latency", time.Since(start).Milliseconds())
-		inputs[i] = input
-	}
-	inputsJson, err := json.Marshal(&inputs)
+	inputsJson, err := c.buildInputsJson(ctx, comp)
 	if err != nil {
-		return nil, fmt.Errorf("encoding json: %w", err)
+		return nil, fmt.Errorf("building inputs: %w", err)
 	}
 
 	req := c.execClient.
@@ -179,13 +157,50 @@ func (c *execController) exec(ctx context.Context, syn *apiv1.Synthesizer, comp 
 
 	// TODO: Handle non-0 exit codes?
 
+	return c.writeOutputToSlices(ctx, comp, stdout)
+}
+
+func (c *execController) buildInputsJson(ctx context.Context, comp *apiv1.Composition) ([]byte, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+
+	inputs := make([]*unstructured.Unstructured, len(comp.Spec.Inputs))
+	for i, ref := range comp.Spec.Inputs {
+		if ref.Resource == nil {
+			continue // not a k8s resource
+		}
+		input := &unstructured.Unstructured{}
+		input.SetName(ref.Resource.Name)
+		input.SetNamespace(ref.Resource.Namespace)
+		input.SetKind(ref.Resource.Kind)
+		input.SetAPIVersion(ref.Resource.APIVersion)
+		appendInputNameAnnotation(&ref, input)
+
+		// TODO: Cache inputs?
+
+		start := time.Now()
+		err := c.client.Get(ctx, client.ObjectKeyFromObject(input), input)
+		if err != nil {
+			// TODO: Handle 40x carefully
+			return nil, fmt.Errorf("getting resource %s/%s: %w", input.GetKind(), input.GetName(), err)
+		}
+
+		logger.V(1).Info("retrieved input resource", "resourceName", input.GetName(), "resourceNamespace", input.GetNamespace(), "resourceKind", input.GetKind(), "latency", time.Since(start).Milliseconds())
+		inputs[i] = input
+	}
+
+	return json.Marshal(&inputs)
+}
+
+func (c *execController) writeOutputToSlices(ctx context.Context, comp *apiv1.Composition, stdout io.Reader) ([]*apiv1.ResourceSliceRef, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+
 	slice := &apiv1.ResourceSlice{}
 	slice.GenerateName = comp.Name + "-"
 	slice.Namespace = comp.Namespace
 	slices := []*apiv1.ResourceSlice{slice} // TODO: Paginate slices
 
 	outputs := []*unstructured.Unstructured{}
-	err = json.NewDecoder(stdout).Decode(&outputs)
+	err := json.NewDecoder(stdout).Decode(&outputs)
 	if err != nil {
 		return nil, fmt.Errorf("parsing outputs: %w", err)
 	}
@@ -199,10 +214,10 @@ func (c *execController) exec(ctx context.Context, syn *apiv1.Synthesizer, comp 
 
 	sliceRefs := make([]*apiv1.ResourceSliceRef, len(slices))
 	for i, slice := range slices { // TODO: Maybe don't buffer?
-		// TODO: Retries? Separate rate limit?
 		start := time.Now()
 		err = c.client.Create(ctx, slice)
 		if err != nil {
+			// TODO: Retries? Separate rate limit?
 			return nil, fmt.Errorf("creating resource slice %d: %w", i, err)
 		}
 		logger.V(1).Info("wrote resource slice", "resourceSliceName", slice.Name, "latency", time.Since(start).Milliseconds())
@@ -212,7 +227,7 @@ func (c *execController) exec(ctx context.Context, syn *apiv1.Synthesizer, comp 
 	return sliceRefs, nil
 }
 
-func (c *execController) writeStatus(ctx context.Context, comp *apiv1.Composition, compGen int64, refs []*apiv1.ResourceSliceRef) error {
+func (c *execController) writeSuccessStatus(ctx context.Context, comp *apiv1.Composition, compGen int64, refs []*apiv1.ResourceSliceRef) error {
 	logger := logr.FromContextOrDiscard(ctx)
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		err := c.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
