@@ -113,56 +113,42 @@ func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1
 		return logger, nil, false
 	}
 
-	// TODO: Fix
-	// Just in case we somehow created more than one pod (stale informer cache, etc.) - delete duplicates
-	// var activeLatest bool
-	// for _, pod := range pods.Items {
-	// 	pod := pod
-	// 	if pod.DeletionTimestamp != nil || !podDerivedFrom(comp, &pod) {
-	// 		continue
-	// 	}
-	// 	if activeLatest {
-	// 		logger = logger.WithValues("reason", "Duplicate")
-	// 		return logger, &pod, false
-	// 	}
-	// 	activeLatest = true
-	// }
-
 	// Only create pods when the previous one is deleting or non-existant
 	for _, pod := range pods.Items {
 		pod := pod
-		shouldDelete := time.Since(pod.CreationTimestamp.Time) > c.config.Timeout // we re-queue elsewhere, this is safe
-		isCurrent := podDerivedFrom(comp, &pod)
-
-		// TODO: Can this come from past generation?
-		if comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized {
-			shouldDelete = true
-		}
-
-		// If the current pod is being deleted it's safe to create a new one if needed
-		// Avoid getting stuck by pods that fail to delete
-		if pod.DeletionTimestamp != nil && isCurrent {
-			// TODO: Fix
-			// return logger, nil, false
-		}
-
-		// Pod exists but still has work to do
-		if isCurrent && !shouldDelete {
-			return logger, nil, true
-		}
-
-		// Don't delete pods again
 		if pod.DeletionTimestamp != nil {
 			continue // already deleted
 		}
 
-		if isCurrent && comp.Status.CurrentState != nil && comp.Status.CurrentState.PodCreation != nil {
-			logger = logger.WithValues("reason", "Timeout", "latency", time.Since(comp.Status.CurrentState.PodCreation.Time).Milliseconds())
-		}
+		isCurrent := podDerivedFrom(comp, &pod)
 		if !isCurrent {
 			logger = logger.WithValues("reason", "Superseded")
+			return logger, &pod, true
 		}
-		return logger, &pod, true
+
+		// TODO: Is it necessary to allow concurrent pods while one is terminating to avoid deadlocks?
+
+		// Synthesis is done
+		if comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized {
+			if comp.Status.CurrentState != nil && comp.Status.CurrentState.PodCreation != nil {
+				logger = logger.WithValues("latency", time.Since(comp.Status.CurrentState.PodCreation.Time).Milliseconds())
+			}
+			logger = logger.WithValues("reason", "Success")
+			return logger, &pod, true
+		}
+
+		// Pod is too old
+		// We timeout eventually in case it landed on a node that for whatever reason isn't capable of running the pod
+		if time.Since(pod.CreationTimestamp.Time) > c.config.Timeout {
+			if comp.Status.CurrentState != nil && comp.Status.CurrentState.PodCreation != nil {
+				logger = logger.WithValues("latency", time.Since(comp.Status.CurrentState.PodCreation.Time).Milliseconds())
+			}
+			logger = logger.WithValues("reason", "Timeout")
+			return logger, &pod, true
+		}
+
+		// At this point the pod should still be running - no need to check other pods
+		return logger, nil, true
 	}
 	return logger, nil, false
 }

@@ -185,6 +185,7 @@ func (m *Manager) Start(t *testing.T) {
 }
 
 func Eventually(t testing.TB, fn func() bool) {
+	t.Helper()
 	SomewhatEventually(t, time.Second*5, fn)
 }
 
@@ -246,9 +247,8 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 
 			// The real pod controller will ignore outdated (probably deleting) pods
 			compGen, _ := strconv.ParseInt(pod.Annotations["eno.azure.io/composition-generation"], 10, 0)
-			synGen, _ := strconv.ParseInt(pod.Annotations["eno.azure.io/synthesizer-generation"], 10, 0)
-			if synGen < syn.Generation || compGen < comp.Generation {
-				t.Logf("skipping pod %s because it's out of date (%d < %d || %d < %d)", pod.Name, synGen, syn.Generation, compGen, comp.Generation)
+			if compGen < comp.Generation {
+				t.Logf("skipping pod %s because it's out of date (%d < %d)", pod.Name, compGen, comp.Generation)
 				continue
 			}
 
@@ -281,8 +281,8 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 					}
 					comp.Status.CurrentState.ResourceSlices = sliceRefs
 					comp.Status.CurrentState.Synthesized = true
-					if synGen < syn.Generation || compGen < comp.Generation {
-						t.Logf("skipping update For pod %s because it's out of date (%d < %d || %d < %d)", pod.Name, synGen, syn.Generation, compGen, comp.Generation)
+					if compGen < comp.Generation {
+						t.Logf("skipping updated pod %s because it's out of date (%d < %d)", pod.Name, compGen, comp.Generation)
 						return nil
 					}
 					err = cli.Status().Update(ctx, comp)
