@@ -15,6 +15,8 @@ import (
 	"github.com/Azure/eno/internal/manager"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -179,7 +181,9 @@ func (c *execController) buildInputsJson(ctx context.Context, comp *apiv1.Compos
 		start := time.Now()
 		err := c.client.Get(ctx, client.ObjectKeyFromObject(input), input)
 		if err != nil {
-			// TODO: Handle 40x carefully
+			if k8serrors.IsNotFound(err) {
+				// TODO: Handle
+			}
 			return nil, fmt.Errorf("getting resource %s/%s: %w", input.GetKind(), input.GetName(), err)
 		}
 
@@ -208,11 +212,14 @@ func (c *execController) writeOutputToSlices(ctx context.Context, comp *apiv1.Co
 		if err != nil {
 			return nil, fmt.Errorf("encoding outputs: %w", err)
 		}
-		slice.Spec.Resources = append(slice.Spec.Resources, apiv1.Manifest{Manifest: string(js)}) // TODO: Set reconcile interval
+		slice.Spec.Resources = append(slice.Spec.Resources, apiv1.Manifest{
+			Manifest:          string(js),
+			ReconcileInterval: consumeReconcileIntervalAnnotation(output), // TODO: Handle parse errors?
+		})
 	}
 
 	sliceRefs := make([]*apiv1.ResourceSliceRef, len(slices))
-	for i, slice := range slices { // TODO: Maybe don't buffer?
+	for i, slice := range slices {
 		start := time.Now()
 		err = c.client.Create(ctx, slice)
 		if err != nil {
@@ -281,4 +288,24 @@ func truncateString(str string, length int) (out string) {
 		}
 	}
 	return out + "[truncated]"
+}
+
+func consumeReconcileIntervalAnnotation(obj client.Object) *metav1.Duration {
+	const key = "eno.azure.io/reconcile-interval"
+	anno := obj.GetAnnotations()
+	if anno == nil {
+		return nil
+	}
+	str := anno[key]
+	if str == "" {
+		return nil
+	}
+	delete(anno, key)
+	obj.SetAnnotations(anno)
+
+	dur, err := time.ParseDuration(str)
+	if err != nil {
+		return nil
+	}
+	return &metav1.Duration{Duration: dur}
 }
