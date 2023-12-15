@@ -79,11 +79,6 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition resource: %w", err))
 	}
-	if comp.Status.CurrentState == nil || comp.Status.CurrentState.Synthesized {
-		// TODO: Do we need to watch syntheses?
-		// TODO: We need to be smarter about synth versions here
-		return ctrl.Result{}, nil // nothing to do!
-	}
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace)
 
 	syn := &apiv1.Synthesizer{}
@@ -274,7 +269,7 @@ func appendInputNameAnnotation(ref *apiv1.InputRef, input *unstructured.Unstruct
 	input.SetAnnotations(anno)
 }
 
-func truncateString(str string, length int) (out string ){
+func truncateString(str string, length int) (out string) {
 	if length <= 0 {
 		return ""
 	}
