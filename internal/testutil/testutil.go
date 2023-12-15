@@ -206,6 +206,8 @@ func SomewhatEventually(t testing.TB, dur time.Duration, fn func() bool) {
 // NewPodController adds a controller to the manager that simulates the behavior of a synthesis pod.
 // Useful for integration testing without kcm/kubelet. Slices returned from the given function will
 // be associated with the composition by this function.
+//
+// TODO: Replace this with the real exec controller + a fake connection
 func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition, *apiv1.Synthesizer) []*apiv1.ResourceSlice) {
 	cli := mgr.GetClient()
 	podCtrl := reconcile.Func(func(ctx context.Context, r reconcile.Request) (reconcile.Result, error) {

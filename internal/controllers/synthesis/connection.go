@@ -24,6 +24,12 @@ type SynthesizerConnection interface {
 	Synthesize(ctx context.Context, syn *apiv1.Synthesizer, pod *corev1.Pod, inputsJson []byte) (io.Reader, error)
 }
 
+type SynthesizerConnectionFunc func(ctx context.Context, syn *apiv1.Synthesizer, pod *corev1.Pod, inputsJson []byte) (io.Reader, error)
+
+func (s SynthesizerConnectionFunc) Synthesize(ctx context.Context, syn *apiv1.Synthesizer, pod *corev1.Pod, inputsJson []byte) (io.Reader, error) {
+	return s(ctx, syn, pod, inputsJson)
+}
+
 type SynthesizerPodConnection struct {
 	execClient rest.Interface
 	scheme     *runtime.Scheme
