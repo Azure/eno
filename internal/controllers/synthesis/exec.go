@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -19,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
+	"k8s.io/client-go/util/exec"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -133,7 +136,7 @@ func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer,
 			TTY:       false,
 		}, runtime.NewParameterCodec(c.scheme))
 
-	exec, err := remotecommand.NewSPDYExecutor(c.restConfig, "POST", req.URL())
+	executor, err := remotecommand.NewSPDYExecutor(c.restConfig, "POST", req.URL())
 	if err != nil {
 		return nil, fmt.Errorf("creating remote command executor: %w", err)
 	}
@@ -145,17 +148,20 @@ func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer,
 
 	stderr := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
-	err = exec.StreamWithContext(streamCtx, remotecommand.StreamOptions{
+	err = executor.StreamWithContext(streamCtx, remotecommand.StreamOptions{
 		Stdin:  bytes.NewBuffer(append(inputsJson, '\x00')),
 		Stdout: stdout,
 		Stderr: stderr,
-		Tty:    false,
 	})
 	if err != nil {
+		e := &exec.CodeExitError{}
+		// TODO: How to test? Publish events? Status?
+		if errors.As(err, e) {
+			msg := truncateString(strings.TrimSpace(stderr.String()), 256)
+			return nil, fmt.Errorf("command exited with status %d - stderr: %s", e.Code, msg)
+		}
 		return nil, fmt.Errorf("starting stream: %w", err)
 	}
-
-	// TODO: Handle non-0 exit codes?
 
 	return c.writeOutputToSlices(ctx, comp, stdout)
 }
@@ -266,4 +272,20 @@ func appendInputNameAnnotation(ref *apiv1.InputRef, input *unstructured.Unstruct
 	}
 	anno["eno.azure.io/input-name"] = ref.Name
 	input.SetAnnotations(anno)
+}
+
+func truncateString(str string, length int) (out string ){
+	if length <= 0 {
+		return ""
+	}
+
+	count := 0
+	for _, char := range str {
+		out += string(char)
+		count++
+		if count >= length {
+			break
+		}
+	}
+	return out + "[truncated]"
 }
