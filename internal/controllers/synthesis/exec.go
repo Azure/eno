@@ -122,9 +122,9 @@ func (c *execController) exec(ctx context.Context, syn *apiv1.Synthesizer, comp 
 		input.SetNamespace(ref.Resource.Namespace)
 		input.SetKind(ref.Resource.Kind)
 		input.SetAPIVersion(ref.Resource.APIVersion)
+		appendInputNameAnnotation(&ref, input)
 
 		// TODO: Cache inputs?
-		// TODO: Append input name annotation
 
 		start := time.Now()
 		err := c.client.Get(ctx, client.ObjectKeyFromObject(input), input)
@@ -242,4 +242,13 @@ func (c *execController) writeStatus(ctx context.Context, comp *apiv1.Compositio
 		logger.V(1).Info("finished synthesizing the composition")
 		return nil
 	})
+}
+
+func appendInputNameAnnotation(ref *apiv1.InputRef, input *unstructured.Unstructured) {
+	anno := input.GetAnnotations()
+	if anno == nil {
+		anno = map[string]string{}
+	}
+	anno["eno.azure.io/input-name"] = ref.Name
+	input.SetAnnotations(anno)
 }

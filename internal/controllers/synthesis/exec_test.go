@@ -47,7 +47,7 @@ func TestExecIntegration(t *testing.T) {
 	comp.Namespace = "default"
 	comp.Spec.Synthesizer.Name = syn.Name
 	comp.Spec.Inputs = []apiv1.InputRef{{
-		Name: "test-input",
+		Name: "test-input-name",
 		Resource: &apiv1.ResourceInputRef{
 			// Use self as input since it's easy
 			APIVersion: "eno.azure.io/v1",
@@ -72,4 +72,5 @@ func TestExecIntegration(t *testing.T) {
 	err = cli.Get(ctx, client.ObjectKeyFromObject(slice), slice)
 	require.NoError(t, err)
 	assert.Contains(t, slice.Spec.Resources[0].Manifest, "Composition")
+	assert.Contains(t, slice.Spec.Resources[0].Manifest, "test-input-name") // sets the input name annotation
 }
