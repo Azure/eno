@@ -97,11 +97,12 @@ func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer,
 		return nil, fmt.Errorf("building inputs: %w", err)
 	}
 
-	logger.V(1).Info("starting up the synthesizer")
+	start := time.Now()
 	stdout, err := c.conn.Synthesize(ctx, syn, pod, inputsJson)
 	if err != nil {
 		return nil, err
 	}
+	logger.V(1).Info("synthesizing is done", "latency", time.Since(start).Milliseconds())
 
 	return c.writeOutputToSlices(ctx, comp, stdout)
 }

@@ -131,7 +131,7 @@ func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1
 	// Only create pods when the previous one is deleting or non-existant
 	for _, pod := range pods.Items {
 		pod := pod
-		reason, shouldDelete := c.podStatusTerminal(&pod)
+		shouldDelete := time.Since(pod.CreationTimestamp.Time) > c.config.Timeout // we re-queue elsewhere, this is safe
 		isCurrent := podDerivedFrom(comp, &pod)
 
 		// TODO: Can this come from past generation?
@@ -157,11 +157,7 @@ func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1
 		}
 
 		if isCurrent && comp.Status.CurrentState != nil && comp.Status.CurrentState.PodCreation != nil {
-			// TODO: Move latency to exec controller?
-			logger = logger.WithValues("latency", time.Since(comp.Status.CurrentState.PodCreation.Time).Milliseconds())
-		}
-		if shouldDelete {
-			logger = logger.WithValues("reason", reason)
+			logger = logger.WithValues("reason", "Timeout", "latency", time.Since(comp.Status.CurrentState.PodCreation.Time).Milliseconds())
 		}
 		if !isCurrent {
 			logger = logger.WithValues("reason", "Superseded")
@@ -169,22 +165,6 @@ func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1
 		return logger, &pod, true
 	}
 	return logger, nil, false
-}
-
-func (c *podLifecycleController) podStatusTerminal(pod *corev1.Pod) (string, bool) {
-	// TODO: Move move timeouts to exec controller?
-	if time.Since(pod.CreationTimestamp.Time) > c.config.Timeout {
-		return "Timeout", true
-	}
-	for _, cont := range pod.Status.ContainerStatuses {
-		if cont.RestartCount > c.config.MaxRestarts {
-			return "MaxRestartsExceeded", true
-		}
-		if cont.State.Terminated == nil || cont.State.Terminated.ExitCode != 0 {
-			return "", false // has not completed yet
-		}
-	}
-	return "", false // status not initialized yet
 }
 
 func swapStates(syn *apiv1.Synthesizer, comp *apiv1.Composition) {
