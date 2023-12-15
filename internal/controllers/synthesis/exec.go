@@ -90,8 +90,8 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	logger = logger.WithValues("synthesizerName", syn.Name)
 	ctx = logr.NewContext(ctx, logger)
 
-	if compGen < comp.Generation { // TODO: Remove syn other places too?
-		return ctrl.Result{}, nil // old pod - don't bother synthesizing
+	if compGen < comp.Generation {
+		return ctrl.Result{}, nil // old pod - don't bother synthesizing. The lifecycle controller will delete it
 	}
 
 	refs, err := c.synthesize(ctx, syn, comp, pod)
@@ -109,13 +109,18 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer, comp *apiv1.Composition, pod *corev1.Pod) ([]*apiv1.ResourceSliceRef, error) {
 	logger := logr.FromContextOrDiscard(ctx)
-	logger.V(1).Info("starting up the synthesizer")
 
 	inputsJson, err := c.buildInputsJson(ctx, comp)
 	if err != nil {
 		return nil, fmt.Errorf("building inputs: %w", err)
 	}
 
+	cmd := syn.Spec.Command
+	if len(cmd) == 0 {
+		cmd = []string{"synthesize"}
+	}
+
+	logger.V(1).Info("starting up the synthesizer")
 	req := c.execClient.
 		Post().
 		Namespace(pod.Namespace).
@@ -124,7 +129,7 @@ func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer,
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Container: "synthesizer",
-			Command:   syn.Spec.Command, // TODO: Defaulting? Required?
+			Command:   cmd,
 			Stdin:     true,
 			Stdout:    true,
 			Stderr:    true,
