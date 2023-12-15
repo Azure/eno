@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,14 +39,23 @@ func TestExecIntegration(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "alpine:latest"
-	// syn.Spec.Command = []string{"/bin/sh", "-c", "cat /dev/stdin"}
-	syn.Spec.Command = []string{"/bin/sh", "-c", "sleep 1 && echo {}"}
+	syn.Spec.Command = []string{"/bin/sh", "-c", "cat /dev/stdin"}
 	require.NoError(t, cli.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}
 	comp.Name = "test-comp"
 	comp.Namespace = "default"
 	comp.Spec.Synthesizer.Name = syn.Name
+	comp.Spec.Inputs = []apiv1.InputRef{{
+		Name: "test-input",
+		Resource: &apiv1.ResourceInputRef{
+			// Use self as input since it's easy
+			APIVersion: "eno.azure.io/v1",
+			Kind:       "Composition",
+			Namespace:  comp.Namespace,
+			Name:       comp.Name,
+		},
+	}}
 	require.NoError(t, cli.Create(ctx, comp))
 
 	// The pod eventually performs the synthesis
@@ -53,4 +63,13 @@ func TestExecIntegration(t *testing.T) {
 		err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		return err == nil && comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized
 	})
+
+	// The resulting input slice should contain a copy of the input
+	sliceRef := comp.Status.CurrentState.ResourceSlices[0]
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = sliceRef.Name
+	slice.Namespace = comp.Namespace
+	err = cli.Get(ctx, client.ObjectKeyFromObject(slice), slice)
+	require.NoError(t, err)
+	assert.Contains(t, slice.Spec.Resources[0].Manifest, "Composition")
 }

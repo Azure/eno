@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"strconv"
 	"time"
 
@@ -114,8 +112,8 @@ func (c *execController) exec(ctx context.Context, syn *apiv1.Synthesizer, comp 
 	logger := logr.FromContextOrDiscard(ctx)
 	logger.V(1).Info("starting up the synthesizer")
 
-	inputsBuffer := bytes.NewBufferString("\n")
-	for _, ref := range comp.Spec.Inputs {
+	inputs := make([]*unstructured.Unstructured, len(comp.Spec.Inputs))
+	for i, ref := range comp.Spec.Inputs {
 		if ref.Resource == nil {
 			continue // not a k8s resource
 		}
@@ -125,6 +123,9 @@ func (c *execController) exec(ctx context.Context, syn *apiv1.Synthesizer, comp 
 		input.SetKind(ref.Resource.Kind)
 		input.SetAPIVersion(ref.Resource.APIVersion)
 
+		// TODO: Cache inputs?
+		// TODO: Append input name annotation
+
 		start := time.Now()
 		err := c.client.Get(ctx, client.ObjectKeyFromObject(input), input)
 		if err != nil {
@@ -132,16 +133,13 @@ func (c *execController) exec(ctx context.Context, syn *apiv1.Synthesizer, comp 
 			return nil, fmt.Errorf("getting resource %s/%s: %w", input.GetKind(), input.GetName(), err)
 		}
 		logger.V(1).Info("retrieved input resource", "resourceName", input.GetName(), "resourceNamespace", input.GetNamespace(), "resourceKind", input.GetKind(), "latency", time.Since(start).Milliseconds())
-		// TODO: Cache inputs?
-
-		js, err := input.MarshalJSON()
-		if err != nil {
-			return nil, fmt.Errorf("encoding input resource as json %s/%s: %w", input.GetKind(), input.GetName(), err)
-		}
-		inputsBuffer.Write(append(js, '\n'))
+		inputs[i] = input
+	}
+	inputsJson, err := json.Marshal(&inputs)
+	if err != nil {
+		return nil, fmt.Errorf("encoding json: %w", err)
 	}
 
-	// TODO: Timeout
 	req := c.execClient.
 		Post().
 		Namespace(pod.Namespace).
@@ -154,23 +152,29 @@ func (c *execController) exec(ctx context.Context, syn *apiv1.Synthesizer, comp 
 			Stdin:     true,
 			Stdout:    true,
 			Stderr:    true,
-			TTY:       true,
+			TTY:       false,
 		}, runtime.NewParameterCodec(c.scheme))
 
 	exec, err := remotecommand.NewSPDYExecutor(c.restConfig, "POST", req.URL())
 	if err != nil {
 		return nil, fmt.Errorf("creating remote command executor: %w", err)
 	}
-	stdout := &bytes.Buffer{}
+
+	streamCtx, cancel := context.WithTimeout(ctx, time.Second*5) // TODO: Configurable
+	defer cancel()
+
+	// TODO: Concurrency safety
+
 	stderr := &bytes.Buffer{}
-	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
-		Stdin:  inputsBuffer,
+	stdout := &bytes.Buffer{}
+	err = exec.StreamWithContext(streamCtx, remotecommand.StreamOptions{
+		Stdin:  bytes.NewBuffer(append(inputsJson, '\x00')),
 		Stdout: stdout,
 		Stderr: stderr,
-		Tty:    true,
+		Tty:    false,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("starting stream: %t", err)
+		return nil, fmt.Errorf("starting stream: %w", err)
 	}
 
 	// TODO: Handle non-0 exit codes?
@@ -179,21 +183,17 @@ func (c *execController) exec(ctx context.Context, syn *apiv1.Synthesizer, comp 
 	slice.GenerateName = comp.Name + "-"
 	slice.Namespace = comp.Namespace
 	slices := []*apiv1.ResourceSlice{slice} // TODO: Paginate slices
-	dec := json.NewDecoder(stdout)
-	for {
-		output := &unstructured.Unstructured{}
-		if err := dec.Decode(output); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return nil, fmt.Errorf("parsing output json: %w", err)
-		}
 
+	outputs := []*unstructured.Unstructured{}
+	err = json.NewDecoder(stdout).Decode(&outputs)
+	if err != nil {
+		return nil, fmt.Errorf("parsing outputs: %w", err)
+	}
+	for _, output := range outputs {
 		js, err := output.MarshalJSON()
 		if err != nil {
-			return nil, fmt.Errorf("encoding output resource as json %s/%s: %w", output.GetKind(), output.GetName(), err)
+			return nil, fmt.Errorf("encoding outputs: %w", err)
 		}
-
 		slice.Spec.Resources = append(slice.Spec.Resources, apiv1.Manifest{Manifest: string(js)}) // TODO: Set reconcile interval
 	}
 
