@@ -33,10 +33,15 @@ spec:
           spec:
             properties:
               command:
+                default:
+                - synthesize
                 items:
                   type: string
                 type: array
               image:
+                type: string
+              timeout:
+                default: 10s
                 type: string
             type: object
           status:

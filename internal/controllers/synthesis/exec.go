@@ -115,11 +115,6 @@ func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer,
 		return nil, fmt.Errorf("building inputs: %w", err)
 	}
 
-	cmd := syn.Spec.Command
-	if len(cmd) == 0 {
-		cmd = []string{"synthesize"}
-	}
-
 	logger.V(1).Info("starting up the synthesizer")
 	req := c.execClient.
 		Post().
@@ -129,7 +124,7 @@ func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer,
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Container: "synthesizer",
-			Command:   cmd,
+			Command:   syn.Spec.Command,
 			Stdin:     true,
 			Stdout:    true,
 			Stderr:    true,
@@ -141,10 +136,8 @@ func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer,
 		return nil, fmt.Errorf("creating remote command executor: %w", err)
 	}
 
-	streamCtx, cancel := context.WithTimeout(ctx, time.Second*5) // TODO: Configurable
+	streamCtx, cancel := context.WithTimeout(ctx, syn.Spec.Timeout.Duration)
 	defer cancel()
-
-	// TODO: Concurrency safety
 
 	stderr := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
