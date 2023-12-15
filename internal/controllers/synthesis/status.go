@@ -39,7 +39,6 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 	if len(pod.OwnerReferences) == 0 || pod.OwnerReferences[0].Kind != "Composition" {
 		// This shouldn't be common as the informer watch filters on Eno-managed pods using a selector
-		logger.V(1).Info("skipping pod because it isn't owned by a composition")
 		return ctrl.Result{}, nil
 	}
 	if pod.Annotations == nil {
@@ -73,7 +72,10 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	)
 	logger.WithValues("synthesizerGeneration", synGen, "compositionGeneration", compGen)
 	if shouldWriteStatus(comp, compGen, synGen) {
-		comp.Status.CurrentState.PodCreation = &pod.CreationTimestamp
+		if comp.Status.CurrentState == nil {
+			comp.Status.CurrentState = &apiv1.Synthesis{}
+		}
+		comp.Status.CurrentState.PodCreation = &pod.CreationTimestamp // TODO: Sometimes panics?
 		comp.Status.CurrentState.ObservedSynthesizerGeneration = synGen
 
 		if err := c.client.Status().Update(ctx, comp); err != nil {

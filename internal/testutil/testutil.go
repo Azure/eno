@@ -186,9 +186,14 @@ func (m *Manager) Start(t *testing.T) {
 
 func Eventually(t testing.TB, fn func() bool) {
 	t.Helper()
+	SomewhatEventually(t, time.Second*5, fn)
+}
+
+func SomewhatEventually(t testing.TB, dur time.Duration, fn func() bool) {
+	t.Helper()
 	start := time.Now()
 	for {
-		if time.Since(start) > time.Second*5 {
+		if time.Since(start) > dur {
 			t.Fatalf("timeout while waiting for condition")
 			return
 		}
@@ -202,6 +207,8 @@ func Eventually(t testing.TB, fn func() bool) {
 // NewPodController adds a controller to the manager that simulates the behavior of a synthesis pod.
 // Useful for integration testing without kcm/kubelet. Slices returned from the given function will
 // be associated with the composition by this function.
+//
+// TODO: Replace this with the real exec controller + a fake connection
 func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition, *apiv1.Synthesizer) []*apiv1.ResourceSlice) {
 	cli := mgr.GetClient()
 	podCtrl := reconcile.Func(func(ctx context.Context, r reconcile.Request) (reconcile.Result, error) {
@@ -240,9 +247,8 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 
 			// The real pod controller will ignore outdated (probably deleting) pods
 			compGen, _ := strconv.ParseInt(pod.Annotations["eno.azure.io/composition-generation"], 10, 0)
-			synGen, _ := strconv.ParseInt(pod.Annotations["eno.azure.io/synthesizer-generation"], 10, 0)
-			if synGen < syn.Generation || compGen < comp.Generation {
-				t.Logf("skipping pod %s because it's out of date (%d < %d || %d < %d)", pod.Name, synGen, syn.Generation, compGen, comp.Generation)
+			if compGen < comp.Generation {
+				t.Logf("skipping pod %s because it's out of date (%d < %d)", pod.Name, compGen, comp.Generation)
 				continue
 			}
 
@@ -275,8 +281,8 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 					}
 					comp.Status.CurrentState.ResourceSlices = sliceRefs
 					comp.Status.CurrentState.Synthesized = true
-					if synGen < syn.Generation || compGen < comp.Generation {
-						t.Logf("skipping update For pod %s because it's out of date (%d < %d || %d < %d)", pod.Name, synGen, syn.Generation, compGen, comp.Generation)
+					if compGen < comp.Generation {
+						t.Logf("skipping updated pod %s because it's out of date (%d < %d)", pod.Name, compGen, comp.Generation)
 						return nil
 					}
 					err = cli.Status().Update(ctx, comp)
@@ -287,25 +293,6 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 					return nil
 				})
 				return reconcile.Result{}, err
-			}
-		}
-
-		// Mark the pod as terminated to signal that synthesis is complete
-		for _, pod := range pods.Items {
-			if len(pod.Status.ContainerStatuses) == 0 {
-				pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
-					State: corev1.ContainerState{
-						Terminated: &corev1.ContainerStateTerminated{
-							ExitCode: 0,
-						},
-					},
-				}}
-				err = cli.Status().Update(ctx, &pod)
-				if err != nil {
-					return reconcile.Result{}, err
-				}
-				t.Logf("updated container status for %s", pod.Name)
-				return reconcile.Result{}, nil
 			}
 		}
 

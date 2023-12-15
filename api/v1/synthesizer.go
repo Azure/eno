@@ -25,6 +25,12 @@ type Synthesizer struct {
 type SynthesizerSpec struct {
 	// +required
 	Image string `json:"image,omitempty"`
+
+	// +kubebuilder:default={"synthesize"}
+	Command []string `json:"command,omitempty"`
+
+	// +kubebuilder:default="10s"
+	Timeout metav1.Duration `json:"timeout,omitempty"`
 }
 
 type SynthesizerStatus struct {

@@ -68,18 +68,18 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("listing pods: %w", err)
 	}
-	logger, toDelete, ok := c.shouldDeletePod(logger, comp, syn, pods)
-	if !ok && toDelete == nil {
-		// The pod is still running.
-		// Poll periodically to check if has timed out.
-		return ctrl.Result{RequeueAfter: c.config.Timeout}, nil
-	}
-	if !ok && toDelete != nil {
+	logger, toDelete, exists := c.shouldDeletePod(logger, comp, syn, pods)
+	if toDelete != nil {
 		if err := c.client.Delete(ctx, toDelete); err != nil {
-			return ctrl.Result{}, fmt.Errorf("deleting pod: %w", err)
+			return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("deleting pod: %w", err))
 		}
 		logger.Info("deleted synthesizer pod", "podName", toDelete.Name)
 		return ctrl.Result{}, nil
+	}
+	if exists {
+		// The pod is still running.
+		// Poll periodically to check if has timed out.
+		return ctrl.Result{RequeueAfter: c.config.Timeout}, nil
 	}
 
 	// Swap the state to prepare for resynthesis if needed
@@ -108,85 +108,53 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	return ctrl.Result{}, nil
 }
 
-func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Synthesizer, pods *corev1.PodList) (logr.Logger, *corev1.Pod, bool) {
+func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Synthesizer, pods *corev1.PodList) (logr.Logger, *corev1.Pod /* exists */, bool) {
 	if len(pods.Items) == 0 {
-		return logger, nil, true
-	}
-
-	// Just in case we somehow created more than one pod (stale informer cache, etc.) - delete duplicates
-	var activeLatest bool
-	for _, pod := range pods.Items {
-		pod := pod
-		if pod.DeletionTimestamp != nil || !podDerivedFrom(comp, &pod) {
-			continue
-		}
-		if activeLatest {
-			logger = logger.WithValues("reason", "Duplicate")
-			return logger, &pod, false
-		}
-		activeLatest = true
+		return logger, nil, false
 	}
 
 	// Only create pods when the previous one is deleting or non-existant
 	for _, pod := range pods.Items {
 		pod := pod
-		reason, shouldDelete := c.podStatusTerminal(&pod)
-		isCurrent := podDerivedFrom(comp, &pod)
-
-		// If the current pod is being deleted it's safe to create a new one if needed
-		// Avoid getting stuck by pods that fail to delete
-		if pod.DeletionTimestamp != nil && isCurrent {
-			return logger, nil, true
-		}
-
-		// Pod exists but still has work to do
-		if isCurrent && !shouldDelete {
-			continue
-		}
-
-		// Don't delete pods again
 		if pod.DeletionTimestamp != nil {
 			continue // already deleted
 		}
 
-		if isCurrent && comp.Status.CurrentState != nil && comp.Status.CurrentState.PodCreation != nil {
-			logger = logger.WithValues("latency", time.Since(comp.Status.CurrentState.PodCreation.Time).Milliseconds())
-		}
-		if shouldDelete {
-			logger = logger.WithValues("reason", reason)
-		}
+		isCurrent := podDerivedFrom(comp, &pod)
 		if !isCurrent {
 			logger = logger.WithValues("reason", "Superseded")
+			return logger, &pod, true
 		}
-		return logger, &pod, false
+
+		// TODO: Is it necessary to allow concurrent pods while one is terminating to avoid deadlocks?
+
+		// Synthesis is done
+		if comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized {
+			if comp.Status.CurrentState != nil && comp.Status.CurrentState.PodCreation != nil {
+				logger = logger.WithValues("latency", time.Since(comp.Status.CurrentState.PodCreation.Time).Milliseconds())
+			}
+			logger = logger.WithValues("reason", "Success")
+			return logger, &pod, true
+		}
+
+		// Pod is too old
+		// We timeout eventually in case it landed on a node that for whatever reason isn't capable of running the pod
+		if time.Since(pod.CreationTimestamp.Time) > c.config.Timeout {
+			if comp.Status.CurrentState != nil && comp.Status.CurrentState.PodCreation != nil {
+				logger = logger.WithValues("latency", time.Since(comp.Status.CurrentState.PodCreation.Time).Milliseconds())
+			}
+			logger = logger.WithValues("reason", "Timeout")
+			return logger, &pod, true
+		}
+
+		// At this point the pod should still be running - no need to check other pods
+		return logger, nil, true
 	}
 	return logger, nil, false
 }
 
-func (c *podLifecycleController) podStatusTerminal(pod *corev1.Pod) (string, bool) {
-	if time.Since(pod.CreationTimestamp.Time) > c.config.Timeout {
-		return "Timeout", true
-	}
-	for _, cont := range append(pod.Status.ContainerStatuses, pod.Status.InitContainerStatuses...) {
-		if cont.RestartCount > c.config.MaxRestarts {
-			return "MaxRestartsExceeded", true
-		}
-		if cont.State.Terminated != nil && cont.State.Terminated.ExitCode == 0 {
-			return "Succeeded", true
-		}
-		if cont.State.Terminated == nil || cont.State.Terminated.ExitCode != 0 {
-			return "", false // has not completed yet
-		}
-	}
-	if len(pod.Status.ContainerStatuses) > 0 {
-		return "Unknown", true // shouldn't be possible
-	}
-	return "", false // status not initialized yet
-}
-
 func swapStates(syn *apiv1.Synthesizer, comp *apiv1.Composition) {
-	// TODO: Block swapping prev->current if the any resources present in prev but absent in current have not yet been reconciled
-	// This will ensure that we don't orphan resources
+	// TODO: Is there ever a case where we would _not_ want to swap current->prev? Such as if prev succeeded but cur hasn't?
 	comp.Status.PreviousState = comp.Status.CurrentState
 	comp.Status.CurrentState = &apiv1.Synthesis{
 		ObservedCompositionGeneration: comp.Generation,
