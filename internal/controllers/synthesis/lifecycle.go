@@ -71,7 +71,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	logger, toDelete, exists := c.shouldDeletePod(logger, comp, syn, pods)
 	if toDelete != nil {
 		if err := c.client.Delete(ctx, toDelete); err != nil {
-			return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("deleting pod: %w", err)) // TODO: Make sure all deletes have ignore 404
+			return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("deleting pod: %w", err))
 		}
 		logger.Info("deleted synthesizer pod", "podName", toDelete.Name)
 		return ctrl.Result{}, nil
