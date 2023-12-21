@@ -1,6 +1,5 @@
 # This Github Action will build and publish images to Azure Container Registry(ACR), from where the published images will be
 # automatically pushed to the trusted registry, Microsoft Container Registry(MCR).
-
 name: Building and Pushing to MCR
 on:
   workflow_dispatch:
@@ -54,10 +53,9 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       - name: 'Login the ACR'
         run: az acr login -n ${{ secrets.AZURE_REGISTRY }}
-      - name: Build and publish image
+      - name: Build and publish eno-manager
         run: |
-          #TODO: build cmd, and push to registry (don't forget docker build --output=registry)
-          make docker-build-eno
+          make docker-build-eno-manager
         env:
-          IMAGE_VERSION: ${{ needs.prepare-variables.outputs.release_tag }}
+          ENO_MANAGER_IMAGE_VERSION: ${{ needs.prepare-variables.outputs.release_tag }}
           REGISTRY: ${{ secrets.AZURE_REGISTRY }}/${{ env.REGISTRY_REPO}}
