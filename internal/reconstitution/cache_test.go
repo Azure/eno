@@ -122,7 +122,6 @@ func TestCachePartialPurge(t *testing.T) {
 	// Add another resource to the composition but synthesized from a newer generation
 	_, _, resources, expectedReqs := newCacheTestFixtures(1, 1)
 	synth.ObservedCompositionGeneration++
-	resources[0].Spec.CompositionGeneration = synth.ObservedCompositionGeneration
 	expectedReqs[0].Composition = compNSN
 	_, err = c.Fill(ctx, compNSN, synth, resources)
 	require.NoError(t, err)
@@ -169,7 +168,6 @@ func newCacheTestFixtures(sliceCount, resPerSliceCount int) (types.NamespacedNam
 		slice.Name = string(uuid.NewUUID())
 		slice.Namespace = "slice-ns"
 		slice.Spec.Resources = make([]apiv1.Manifest, resPerSliceCount)
-		slice.Spec.CompositionGeneration = synth.ObservedCompositionGeneration
 
 		for j := 0; j < resPerSliceCount; j++ {
 			resource := &corev1.ConfigMap{}

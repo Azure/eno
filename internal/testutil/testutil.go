@@ -264,7 +264,6 @@ func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition
 			if !comp.Status.CurrentState.Synthesized {
 				for _, slice := range slices {
 					cp := slice.DeepCopy()
-					cp.Spec.CompositionGeneration = comp.Generation
 					if err := controllerutil.SetControllerReference(comp, cp, cli.Scheme()); err != nil {
 						return reconcile.Result{}, err
 					}

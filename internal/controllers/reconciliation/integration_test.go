@@ -250,7 +250,6 @@ func newSliceBuilder(t *testing.T, scheme *runtime.Scheme, test *crudTestCase) f
 		slice := &apiv1.ResourceSlice{}
 		slice.GenerateName = "test-"
 		slice.Namespace = "default"
-		slice.Spec.CompositionGeneration = c.Generation
 
 		var obj client.Object
 		switch s.Spec.Image {

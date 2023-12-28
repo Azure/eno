@@ -75,7 +75,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if comp.Status.CurrentState == nil {
 			comp.Status.CurrentState = &apiv1.Synthesis{}
 		}
-		comp.Status.CurrentState.PodCreation = &pod.CreationTimestamp // TODO: Sometimes panics?
+		comp.Status.CurrentState.PodCreation = &pod.CreationTimestamp
 		comp.Status.CurrentState.ObservedSynthesizerGeneration = synGen
 
 		if err := c.client.Status().Update(ctx, comp); err != nil {
