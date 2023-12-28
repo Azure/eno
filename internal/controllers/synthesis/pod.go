@@ -60,10 +60,6 @@ func newPod(cfg *Config, scheme *runtime.Scheme, comp *apiv1.Composition, syn *a
 		}},
 	}
 
-	if cfg.JobSA != "" {
-		pod.Spec.ServiceAccountName = cfg.JobSA
-	}
-
 	return pod
 }
 

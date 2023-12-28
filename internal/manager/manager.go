@@ -13,6 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -69,6 +70,8 @@ func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	mgr.AddHealthzCheck("ping", healthz.Ping)
 
 	return mgr, nil
 }
