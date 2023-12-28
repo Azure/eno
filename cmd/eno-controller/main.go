@@ -14,7 +14,7 @@ import (
 	"github.com/Azure/eno/internal/manager"
 )
 
-// TODO: Expose leader election options
+// TODO: Expose leader election and other manager options
 
 func main() {
 	if err := run(); err != nil {

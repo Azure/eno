@@ -22,17 +22,20 @@ func main() {
 	}
 }
 
-// TODO: Label filters, etc.
-
 func run() error {
 	ctx := ctrl.SetupSignalHandler()
 	var (
 		rediscoverWhenNotFound bool
 		writeBatchInterval     time.Duration
 		discoveryMaxRPS        float32
+
+		mgrOpts = &manager.Options{
+			Rest: ctrl.GetConfigOrDie(),
+		}
 	)
 	flag.BoolVar(&rediscoverWhenNotFound, "rediscover-when-not-found", true, "Invalidate discovery cache when any type is not found in the openapi spec. Set this to false on <= k8s 1.14")
 	flag.DurationVar(&writeBatchInterval, "write-batch-interval", time.Second*5, "The max throughput of composition status updates")
+	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 
 	zl, err := zap.NewProduction()
@@ -41,9 +44,7 @@ func run() error {
 	}
 	logger := zapr.NewLogger(zl)
 
-	mgr, err := manager.New(logger, &manager.Options{
-		Rest: ctrl.GetConfigOrDie(),
-	})
+	mgr, err := manager.New(logger, mgrOpts)
 	if err != nil {
 		return fmt.Errorf("constructing manager: %w", err)
 	}
