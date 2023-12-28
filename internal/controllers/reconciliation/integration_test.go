@@ -146,9 +146,7 @@ func TestCRUD(t *testing.T) {
 			require.NoError(t, synthesis.NewRolloutController(mgr.Manager, time.Millisecond))
 			require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 			require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, &synthesis.Config{
-				WrapperImage: "test-wrapper",
-				MaxRestarts:  2,
-				Timeout:      time.Second * 5,
+				Timeout: time.Second * 5,
 			}))
 
 			// Simulate synthesis of our test composition into the resources specified by the test case

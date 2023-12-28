@@ -98,6 +98,7 @@ func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer,
 	}
 
 	start := time.Now()
+	// TODO: Timeouts?
 	stdout, err := c.conn.Synthesize(ctx, syn, pod, inputsJson)
 	if err != nil {
 		return nil, err

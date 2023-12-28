@@ -2,6 +2,14 @@
 
 Work in progress.
 
+## Development Environment
+
+```bash
+# Assumes kubectl is configured for your dev cluster (local or otherwise), and can pull images from $REGISTRY
+export REGISTRY="your registry"
+./dev/build.sh
+```
+
 ## Contributing
 
 This project welcomes contributions and suggestions.  Most contributions require you to agree to a

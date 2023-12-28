@@ -15,10 +15,7 @@ import (
 )
 
 type Config struct {
-	WrapperImage string
-	JobSA        string
-	MaxRestarts  int32
-	Timeout      time.Duration
+	Timeout time.Duration
 }
 
 type podLifecycleController struct {
