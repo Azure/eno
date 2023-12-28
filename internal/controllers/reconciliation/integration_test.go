@@ -2,7 +2,6 @@ package reconciliation
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -148,9 +147,7 @@ func TestCRUD(t *testing.T) {
 			require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, &synthesis.Config{
 				Timeout: time.Second * 5,
 			}))
-
-			// Simulate synthesis of our test composition into the resources specified by the test case
-			testutil.NewPodController(t, mgr.Manager, newSliceBuilder(t, scheme, &test))
+			require.NoError(t, synthesis.NewExecController(mgr.Manager, &testutil.ExecConn{Hook: newSliceBuilder(t, scheme, &test)}))
 
 			// Test subject
 			// Only enable rediscoverWhenNotFound on k8s versions that can support it.
@@ -245,12 +242,8 @@ func setImage(t *testing.T, upstream client.Client, syn *apiv1.Synthesizer, comp
 	require.NoError(t, err)
 }
 
-func newSliceBuilder(t *testing.T, scheme *runtime.Scheme, test *crudTestCase) func(c *apiv1.Composition, s *apiv1.Synthesizer) []*apiv1.ResourceSlice {
-	return func(c *apiv1.Composition, s *apiv1.Synthesizer) []*apiv1.ResourceSlice {
-		slice := &apiv1.ResourceSlice{}
-		slice.GenerateName = "test-"
-		slice.Namespace = "default"
-
+func newSliceBuilder(t *testing.T, scheme *runtime.Scheme, test *crudTestCase) func(s *apiv1.Synthesizer) []client.Object {
+	return func(s *apiv1.Synthesizer) []client.Object {
 		var obj client.Object
 		switch s.Spec.Image {
 		case "create":
@@ -260,7 +253,7 @@ func newSliceBuilder(t *testing.T, scheme *runtime.Scheme, test *crudTestCase) f
 			obj = test.Updated.DeepCopyObject().(client.Object)
 			obj = setPhase(obj, "update")
 		case "delete":
-			return []*apiv1.ResourceSlice{slice}
+			return []client.Object{obj}
 		default:
 			t.Fatalf("unknown pseudo-image: %s", s.Spec.Image)
 		}
@@ -269,11 +262,7 @@ func newSliceBuilder(t *testing.T, scheme *runtime.Scheme, test *crudTestCase) f
 		require.NoError(t, err)
 		obj.GetObjectKind().SetGroupVersionKind(gvks[0])
 
-		js, err := json.Marshal(obj)
-		require.NoError(t, err)
-
-		slice.Spec.Resources = []apiv1.Manifest{{Manifest: string(js)}}
-		return []*apiv1.ResourceSlice{slice}
+		return []client.Object{obj}
 	}
 }
 

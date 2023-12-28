@@ -1,8 +1,11 @@
 package testutil
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -19,12 +22,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -97,6 +98,7 @@ func NewManager(t *testing.T) *Manager {
 	})
 	require.NoError(t, err)
 	require.NoError(t, testv1.SchemeBuilder.AddToScheme(mgr.GetScheme())) // test-specific CRDs
+	newFakePodRuntime(t, mgr)
 
 	m := &Manager{
 		Manager:              mgr,
@@ -204,103 +206,37 @@ func SomewhatEventually(t testing.TB, dur time.Duration, fn func() bool) {
 	}
 }
 
-// NewPodController adds a controller to the manager that simulates the behavior of a synthesis pod.
-// Useful for integration testing without kcm/kubelet. Slices returned from the given function will
-// be associated with the composition by this function.
-//
-// TODO: Replace this with the real exec controller + a fake connection
-func NewPodController(t testing.TB, mgr ctrl.Manager, fn func(*apiv1.Composition, *apiv1.Synthesizer) []*apiv1.ResourceSlice) {
+// newFakePodRuntime marks pod containers as running without actually doing anything.
+// Allows fake synthesis using the exec controller, which waits until synthesizer containers are running.
+func newFakePodRuntime(t testing.TB, mgr ctrl.Manager) {
 	cli := mgr.GetClient()
 	podCtrl := reconcile.Func(func(ctx context.Context, r reconcile.Request) (reconcile.Result, error) {
-		comp := &apiv1.Composition{}
-		err := cli.Get(ctx, r.NamespacedName, comp)
+		pod := &corev1.Pod{}
+		err := cli.Get(ctx, r.NamespacedName, pod)
 		if err != nil {
 			return reconcile.Result{}, err
 		}
-
-		// The state is populated async with pod creation so it may not exist at this point
-		if comp.Status.CurrentState == nil {
+		if len(pod.Status.ContainerStatuses) > 0 {
 			return reconcile.Result{}, nil
 		}
 
-		syn := &apiv1.Synthesizer{}
-		syn.Name = comp.Spec.Synthesizer.Name
-		err = cli.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+			State: corev1.ContainerState{
+				Running: &corev1.ContainerStateRunning{},
+			},
+		}}
+
+		err = cli.Status().Update(ctx, pod)
 		if err != nil {
 			return reconcile.Result{}, err
 		}
-
-		pods := &corev1.PodList{}
-		err = cli.List(ctx, pods, client.MatchingFields{
-			manager.IdxPodsByComposition: comp.Name,
-		})
-		if err != nil {
-			return reconcile.Result{}, err
-		}
-
-		for _, pod := range pods.Items {
-			pod := pod
-
-			if pod.DeletionTimestamp != nil {
-				continue // pod no longer exists
-			}
-
-			// The real pod controller will ignore outdated (probably deleting) pods
-			compGen, _ := strconv.ParseInt(pod.Annotations["eno.azure.io/composition-generation"], 10, 0)
-			if compGen < comp.Generation {
-				t.Logf("skipping pod %s because it's out of date (%d < %d)", pod.Name, compGen, comp.Generation)
-				continue
-			}
-
-			// nil func == 0 slices
-			var slices []*apiv1.ResourceSlice
-			if fn != nil {
-				slices = fn(comp, syn)
-			}
-
-			// Write all of the resource slices, update the resource slice count accordingly
-			// TODO: We need a controller to remove failed/outdated resource slice writes
-			sliceRefs := []*apiv1.ResourceSliceRef{}
-			if !comp.Status.CurrentState.Synthesized {
-				for _, slice := range slices {
-					cp := slice.DeepCopy()
-					if err := controllerutil.SetControllerReference(comp, cp, cli.Scheme()); err != nil {
-						return reconcile.Result{}, err
-					}
-					if err := cli.Create(ctx, cp); err != nil {
-						return reconcile.Result{}, err
-					}
-					sliceRefs = append(sliceRefs, &apiv1.ResourceSliceRef{Name: cp.Name})
-					t.Logf("created resource slice: %s", cp.Name)
-				}
-				err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-					err := cli.Get(ctx, r.NamespacedName, comp)
-					if err != nil {
-						return err
-					}
-					comp.Status.CurrentState.ResourceSlices = sliceRefs
-					comp.Status.CurrentState.Synthesized = true
-					if compGen < comp.Generation {
-						t.Logf("skipping updated pod %s because it's out of date (%d < %d)", pod.Name, compGen, comp.Generation)
-						return nil
-					}
-					err = cli.Status().Update(ctx, comp)
-					if err != nil {
-						return err
-					}
-					t.Logf("updated resource slice refs for %s (image %s)", pod.Name, pod.Spec.Containers[0].Image)
-					return nil
-				})
-				return reconcile.Result{}, err
-			}
-		}
+		logr.FromContextOrDiscard(ctx).Info("added container running state")
 
 		return reconcile.Result{}, nil
 	})
 
 	_, err := ctrl.NewControllerManagedBy(mgr).
-		For(&apiv1.Composition{}).
-		Owns(&corev1.Pod{}).
+		For(&corev1.Pod{}).
 		Build(podCtrl)
 	require.NoError(t, err)
 }
@@ -313,4 +249,22 @@ func AtLeastVersion(t *testing.T, minor int) bool {
 
 	version, _ := strconv.Atoi(versionStr)
 	return version >= minor
+}
+
+type ExecConn struct {
+	Hook func(s *apiv1.Synthesizer) []client.Object
+}
+
+func (e *ExecConn) Synthesize(ctx context.Context, syn *apiv1.Synthesizer, pod *corev1.Pod, inputsJson []byte) (io.Reader, error) {
+	if e.Hook == nil {
+		return bytes.NewBufferString("[]"), nil
+	}
+
+	objs := e.Hook(syn)
+	js, err := json.Marshal(&objs)
+	if err != nil {
+		return nil, err
+	}
+
+	return bytes.NewBuffer(js), nil
 }
