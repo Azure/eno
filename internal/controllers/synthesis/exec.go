@@ -13,7 +13,6 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/retry"
@@ -82,7 +81,11 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, nil // old pod - don't bother synthesizing. The lifecycle controller will delete it
 	}
 
-	refs, err := c.synthesize(ctx, syn, comp, pod)
+	refs, safeToRetry, err := c.synthesize(ctx, syn, comp, pod)
+	if !safeToRetry {
+		logger.V(1).Info("dropped item without successfully reconciling")
+		return ctrl.Result{}, nil
+	}
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("executing synthesizer: %w", err)
 	}
@@ -95,12 +98,15 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	return ctrl.Result{}, nil
 }
 
-func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer, comp *apiv1.Composition, pod *corev1.Pod) ([]*apiv1.ResourceSliceRef, error) {
+func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer, comp *apiv1.Composition, pod *corev1.Pod) ([]*apiv1.ResourceSliceRef, bool /* safe to retry */, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	inputsJson, err := c.buildInputsJson(ctx, comp)
+	inputsJson, safeToRetry, err := c.buildInputsJson(ctx, comp)
+	if !safeToRetry {
+		return nil, false, nil
+	}
 	if err != nil {
-		return nil, fmt.Errorf("building inputs: %w", err)
+		return nil, true, fmt.Errorf("building inputs: %w", err)
 	}
 
 	synctx, done := context.WithTimeout(ctx, c.timeout)
@@ -109,18 +115,18 @@ func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer,
 	start := time.Now()
 	stdout, err := c.conn.Synthesize(synctx, syn, pod, inputsJson)
 	if err != nil {
-		return nil, err
+		return nil, true, err
 	}
 	logger.V(1).Info("synthesizing is done", "latency", time.Since(start).Milliseconds())
 
 	return c.writeOutputToSlices(ctx, comp, stdout)
 }
 
-func (c *execController) buildInputsJson(ctx context.Context, comp *apiv1.Composition) ([]byte, error) {
+func (c *execController) buildInputsJson(ctx context.Context, comp *apiv1.Composition) ([]byte, bool /* safe to retry */, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	inputs := make([]*unstructured.Unstructured, len(comp.Spec.Inputs))
-	for i, ref := range comp.Spec.Inputs {
+	var inputs []*unstructured.Unstructured
+	for _, ref := range comp.Spec.Inputs {
 		if ref.Resource == nil {
 			continue // not a k8s resource
 		}
@@ -134,31 +140,33 @@ func (c *execController) buildInputsJson(ctx context.Context, comp *apiv1.Compos
 		start := time.Now()
 		err := c.client.Get(ctx, client.ObjectKeyFromObject(input), input)
 		if err != nil {
-			if k8serrors.IsNotFound(err) {
-				// TODO: Handle
+			err = fmt.Errorf("getting resource %s/%s: %w", input.GetKind(), input.GetName(), err)
+			if errors.IsNotFound(err) {
+				return nil, false, err
 			}
-			return nil, fmt.Errorf("getting resource %s/%s: %w", input.GetKind(), input.GetName(), err)
+			return nil, true, err
 		}
 
 		logger.V(1).Info("retrieved input resource", "resourceName", input.GetName(), "resourceNamespace", input.GetNamespace(), "resourceKind", input.GetKind(), "latency", time.Since(start).Milliseconds())
-		inputs[i] = input
+		inputs = append(inputs, input)
 	}
 
-	return json.Marshal(&inputs)
+	js, err := json.Marshal(&inputs)
+	return js, true, err
 }
 
-func (c *execController) writeOutputToSlices(ctx context.Context, comp *apiv1.Composition, stdout io.Reader) ([]*apiv1.ResourceSliceRef, error) {
+func (c *execController) writeOutputToSlices(ctx context.Context, comp *apiv1.Composition, stdout io.Reader) ([]*apiv1.ResourceSliceRef, bool /* safe to retry */, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	outputs := []*unstructured.Unstructured{}
 	err := json.NewDecoder(stdout).Decode(&outputs)
 	if err != nil {
-		return nil, fmt.Errorf("parsing outputs: %w", err)
+		return nil, false, fmt.Errorf("parsing outputs: %w", err)
 	}
 
 	slices, err := buildResourceSlices(comp, outputs, maxSliceJsonBytes)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	sliceRefs := make([]*apiv1.ResourceSliceRef, len(slices))
@@ -167,14 +175,14 @@ func (c *execController) writeOutputToSlices(ctx context.Context, comp *apiv1.Co
 
 		err = c.writeResourceSlice(ctx, slice)
 		if err != nil {
-			return nil, fmt.Errorf("creating resource slice %d: %w", i, err)
+			return nil, true, fmt.Errorf("creating resource slice %d: %w", i, err)
 		}
 
 		logger.V(1).Info("wrote resource slice", "resourceSliceName", slice.Name, "latency", time.Since(start).Milliseconds())
 		sliceRefs[i] = &apiv1.ResourceSliceRef{Name: slice.Name}
 	}
 
-	return sliceRefs, nil
+	return sliceRefs, true, nil
 }
 
 func buildResourceSlices(comp *apiv1.Composition, outputs []*unstructured.Unstructured, maxJsonBytes int) ([]*apiv1.ResourceSlice, error) {
@@ -199,7 +207,7 @@ func buildResourceSlices(comp *apiv1.Composition, outputs []*unstructured.Unstru
 		sliceBytes += len(js)
 		slice.Spec.Resources = append(slice.Spec.Resources, apiv1.Manifest{
 			Manifest:          string(js),
-			ReconcileInterval: consumeReconcileIntervalAnnotation(output), // TODO: Handle parse errors?
+			ReconcileInterval: consumeReconcileIntervalAnnotation(output),
 		})
 	}
 
