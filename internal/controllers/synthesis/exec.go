@@ -21,6 +21,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// maxSliceJsonBytes is the max sum of a resource slice's manifests. It's set to 1mb, which leaves 512mb of space for the resource's status, encoding overhead, etc.
+const maxSliceJsonBytes = 1024 * 1024
+
 type execController struct {
 	client  client.Client
 	timeout time.Duration
@@ -147,27 +150,15 @@ func (c *execController) buildInputsJson(ctx context.Context, comp *apiv1.Compos
 func (c *execController) writeOutputToSlices(ctx context.Context, comp *apiv1.Composition, stdout io.Reader) ([]*apiv1.ResourceSliceRef, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	slice := &apiv1.ResourceSlice{}
-	slice.GenerateName = comp.Name + "-"
-	slice.Namespace = comp.Namespace
-	slices := []*apiv1.ResourceSlice{slice} // TODO: Paginate slices
-
 	outputs := []*unstructured.Unstructured{}
 	err := json.NewDecoder(stdout).Decode(&outputs)
 	if err != nil {
 		return nil, fmt.Errorf("parsing outputs: %w", err)
 	}
 
-	// We iterate twice to release the json buffer's memory before writing the slices, since writing all of them could take a while
-	for _, output := range outputs {
-		js, err := output.MarshalJSON()
-		if err != nil {
-			return nil, fmt.Errorf("encoding outputs: %w", err)
-		}
-		slice.Spec.Resources = append(slice.Spec.Resources, apiv1.Manifest{
-			Manifest:          string(js),
-			ReconcileInterval: consumeReconcileIntervalAnnotation(output), // TODO: Handle parse errors?
-		})
+	slices, err := buildResourceSlices(comp, outputs, maxSliceJsonBytes)
+	if err != nil {
+		return nil, err
 	}
 
 	sliceRefs := make([]*apiv1.ResourceSliceRef, len(slices))
@@ -184,6 +175,35 @@ func (c *execController) writeOutputToSlices(ctx context.Context, comp *apiv1.Co
 	}
 
 	return sliceRefs, nil
+}
+
+func buildResourceSlices(comp *apiv1.Composition, outputs []*unstructured.Unstructured, maxJsonBytes int) ([]*apiv1.ResourceSlice, error) {
+	var (
+		slices     []*apiv1.ResourceSlice
+		sliceBytes int
+		slice      *apiv1.ResourceSlice
+	)
+
+	for i, output := range outputs {
+		js, err := output.MarshalJSON()
+		if err != nil {
+			return nil, fmt.Errorf("encoding output %d: %w", i, err)
+		}
+		if slice == nil || sliceBytes >= maxJsonBytes {
+			sliceBytes = 0
+			slice = &apiv1.ResourceSlice{}
+			slice.GenerateName = comp.Name + "-"
+			slice.Namespace = comp.Namespace
+			slices = append(slices, slice)
+		}
+		sliceBytes += len(js)
+		slice.Spec.Resources = append(slice.Spec.Resources, apiv1.Manifest{
+			Manifest:          string(js),
+			ReconcileInterval: consumeReconcileIntervalAnnotation(output), // TODO: Handle parse errors?
+		})
+	}
+
+	return slices, nil
 }
 
 func (c *execController) writeResourceSlice(ctx context.Context, slice *apiv1.ResourceSlice) error {
