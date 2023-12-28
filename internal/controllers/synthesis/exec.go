@@ -12,6 +12,7 @@ import (
 	"github.com/Azure/eno/internal/manager"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -156,6 +157,8 @@ func (c *execController) writeOutputToSlices(ctx context.Context, comp *apiv1.Co
 	if err != nil {
 		return nil, fmt.Errorf("parsing outputs: %w", err)
 	}
+
+	// We iterate twice to release the json buffer's memory before writing the slices, since writing all of them could take a while
 	for _, output := range outputs {
 		js, err := output.MarshalJSON()
 		if err != nil {
@@ -170,16 +173,28 @@ func (c *execController) writeOutputToSlices(ctx context.Context, comp *apiv1.Co
 	sliceRefs := make([]*apiv1.ResourceSliceRef, len(slices))
 	for i, slice := range slices {
 		start := time.Now()
-		err = c.client.Create(ctx, slice)
+
+		err = c.writeResourceSlice(ctx, slice)
 		if err != nil {
-			// TODO: Retries? Separate rate limit?
 			return nil, fmt.Errorf("creating resource slice %d: %w", i, err)
 		}
+
 		logger.V(1).Info("wrote resource slice", "resourceSliceName", slice.Name, "latency", time.Since(start).Milliseconds())
 		sliceRefs[i] = &apiv1.ResourceSliceRef{Name: slice.Name}
 	}
 
 	return sliceRefs, nil
+}
+
+func (c *execController) writeResourceSlice(ctx context.Context, slice *apiv1.ResourceSlice) error {
+	// We retry on request timeouts to avoid the overhead of re-synthesizing in cases where we're sometimes unable to reach apiserver
+	return retry.OnError(retry.DefaultRetry, errors.IsServerTimeout, func() error {
+		err := c.client.Create(ctx, slice)
+		if err != nil {
+			logr.FromContextOrDiscard(ctx).Error(err, "error while creating resource slice - will retry later")
+		}
+		return err
+	})
 }
 
 func (c *execController) writeSuccessStatus(ctx context.Context, comp *apiv1.Composition, compGen int64, refs []*apiv1.ResourceSliceRef) error {
