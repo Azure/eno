@@ -9,6 +9,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/manager"
 )
 
 func newPod(cfg *Config, scheme *runtime.Scheme, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev1.Pod {
@@ -16,7 +17,7 @@ func newPod(cfg *Config, scheme *runtime.Scheme, comp *apiv1.Composition, syn *a
 	pod.GenerateName = "synthesis-"
 	pod.Namespace = comp.Namespace
 	pod.Finalizers = []string{"eno.azure.io/cleanup"}
-	pod.Labels = map[string]string{"app.kubernetes.io/managed-by": "eno"}
+	pod.Labels = map[string]string{manager.ManagerLabelKey: manager.ManagerLabelValue}
 	pod.Annotations = map[string]string{
 		"eno.azure.io/composition-generation": strconv.FormatInt(comp.Generation, 10),
 		"eno.azure.io/synthesizer-generation": strconv.FormatInt(syn.Generation, 10),
