@@ -21,17 +21,19 @@ import (
 )
 
 type execController struct {
-	client client.Client
-	conn   SynthesizerConnection
+	client  client.Client
+	timeout time.Duration
+	conn    SynthesizerConnection
 }
 
-func NewExecController(mgr ctrl.Manager, conn SynthesizerConnection) error {
+func NewExecController(mgr ctrl.Manager, timeout time.Duration, conn SynthesizerConnection) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Pod{}).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "execController")).
 		Complete(&execController{
-			client: mgr.GetClient(),
-			conn:   conn,
+			client:  mgr.GetClient(),
+			timeout: timeout,
+			conn:    conn,
 		})
 }
 
@@ -97,9 +99,11 @@ func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer,
 		return nil, fmt.Errorf("building inputs: %w", err)
 	}
 
+	synctx, done := context.WithTimeout(ctx, c.timeout)
+	defer done()
+
 	start := time.Now()
-	// TODO: Timeouts?
-	stdout, err := c.conn.Synthesize(ctx, syn, pod, inputsJson)
+	stdout, err := c.conn.Synthesize(synctx, syn, pod, inputsJson)
 	if err != nil {
 		return nil, err
 	}
@@ -122,8 +126,6 @@ func (c *execController) buildInputsJson(ctx context.Context, comp *apiv1.Compos
 		input.SetKind(ref.Resource.Kind)
 		input.SetAPIVersion(ref.Resource.APIVersion)
 		appendInputNameAnnotation(&ref, input)
-
-		// TODO: Cache inputs?
 
 		start := time.Now()
 		err := c.client.Get(ctx, client.ObjectKeyFromObject(input), input)

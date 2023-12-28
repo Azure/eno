@@ -147,7 +147,7 @@ func TestCRUD(t *testing.T) {
 			require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, &synthesis.Config{
 				Timeout: time.Second * 5,
 			}))
-			require.NoError(t, synthesis.NewExecController(mgr.Manager, &testutil.ExecConn{Hook: newSliceBuilder(t, scheme, &test)}))
+			require.NoError(t, synthesis.NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{Hook: newSliceBuilder(t, scheme, &test)}))
 
 			// Test subject
 			// Only enable rediscoverWhenNotFound on k8s versions that can support it.

@@ -83,7 +83,6 @@ func (s *SynthesizerPodConnection) Synthesize(ctx context.Context, syn *apiv1.Sy
 	})
 	if err != nil {
 		e := &exec.CodeExitError{}
-		// TODO: Unit tests
 		if errors.As(err, e) {
 			msg := truncateString(strings.TrimSpace(stderr.String()), 256)
 			return nil, fmt.Errorf("command exited with status %d - stderr: %s", e.Code, msg)

@@ -22,7 +22,7 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// TODO: Block Composition deletion until resources have been cleaned up
+// TODO: Block ResourceSlice deletion until resources have been cleaned up
 // TODO: Clean up unused resource slices older than a duration
 
 // TODO: Handle 400s better
