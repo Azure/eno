@@ -1,0 +1,26 @@
+apiVersion: eno.azure.io/v1
+kind: Synthesizer
+metadata:
+  name: test-synth
+spec:
+  image: docker.io/ubuntu:latest
+  command:
+  - /bin/bash
+  - -c
+  - |
+    echo '[{
+      "apiVersion": "v1",
+      "kind": "ConfigMap",
+      "metadata": { "name": "test-cm", "namespace": "default" },
+      "data": { "foo": "bar" }
+    }]'
+
+---
+
+apiVersion: eno.azure.io/v1
+kind: Composition
+metadata:
+  name: test-comp
+spec:
+  synthesizer:
+    name: test-synth
