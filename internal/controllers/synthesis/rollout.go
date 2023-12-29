@@ -60,7 +60,6 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// randomize list to avoid always rolling out changes in the same order
-	// TODO: Consider a more efficient approach here
 	rand.Shuffle(len(compList.Items), func(i, j int) { compList.Items[i] = compList.Items[j] })
 
 	for _, comp := range compList.Items {
