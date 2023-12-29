@@ -14,7 +14,7 @@ import (
 	"github.com/Azure/eno/internal/manager"
 )
 
-// TODO: Expose leader election options
+// TODO: Expose leader election and other manager options
 
 func main() {
 	if err := run(); err != nil {
@@ -26,10 +26,12 @@ func main() {
 func run() error {
 	ctx := ctrl.SetupSignalHandler()
 	var (
-		rolloutCooldown time.Duration
-		synconf         = &synthesis.Config{}
+		rolloutCooldown  time.Duration
+		synthesisTimeout time.Duration
+		synconf          = &synthesis.Config{}
 	)
-	flag.DurationVar(&synconf.Timeout, "synthesis-timeout", time.Minute, "Maximum lifespan of synthesizer pods")
+	flag.DurationVar(&synconf.Timeout, "synthesis-pod-timeout", time.Minute, "Maximum lifespan of synthesizer pods")
+	flag.DurationVar(&synthesisTimeout, "synthesis-timeout", time.Second*30, "Timeout when executing synthesizer binaries")
 	flag.DurationVar(&rolloutCooldown, "rollout-cooldown", time.Second*30, "Minimum period of time between each ensuing composition update after a synthesizer is updated")
 	flag.Parse()
 
@@ -51,7 +53,7 @@ func run() error {
 		return fmt.Errorf("constructing synthesizer connection: %w", err)
 	}
 
-	err = synthesis.NewExecController(mgr, synconn)
+	err = synthesis.NewExecController(mgr, synthesisTimeout, synconn)
 	if err != nil {
 		return fmt.Errorf("constructing execution controller: %w", err)
 	}

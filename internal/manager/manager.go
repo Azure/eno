@@ -2,14 +2,19 @@ package manager
 
 import (
 	"context"
+	"flag"
+	"fmt"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -24,24 +29,55 @@ import (
 const (
 	IdxPodsByComposition         = ".metadata.ownerReferences.composition"
 	IdxCompositionsBySynthesizer = ".spec.synthesizer"
-)
 
-// TODO: Filter informers on pod label
+	ManagerLabelKey   = "app.kubernetes.io/managed-by"
+	ManagerLabelValue = "eno"
+)
 
 type Options struct {
 	Rest            *rest.Config
+	Namespace       string
 	HealthProbeAddr string
 	MetricsAddr     string
 }
 
+func (o *Options) Bind(set *flag.FlagSet) {
+	flag.StringVar(&o.Namespace, "namespace", "", "Only reconcile resources in a particular namespace")
+}
+
 func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
-	mgr, err := ctrl.NewManager(opts.Rest, manager.Options{
+	mgrOpts := manager.Options{
 		Logger:                 logger,
 		HealthProbeBindAddress: opts.HealthProbeAddr,
 		Metrics: server.Options{
 			BindAddress: opts.MetricsAddr,
 		},
-	})
+	}
+
+	podLabelSelector := labels.SelectorFromSet(labels.Set{ManagerLabelKey: ManagerLabelValue})
+	if opts.Namespace == "" {
+		mgrOpts.Cache.ByObject = map[client.Object]cache.ByObject{
+			&corev1.Pod{}: {Label: podLabelSelector},
+		}
+	} else {
+		fieldSelector := fields.ParseSelectorOrDie(fmt.Sprintf("metadata.namespace=%s", opts.Namespace))
+
+		mgrOpts.Cache.ByObject = map[client.Object]cache.ByObject{
+			&corev1.Pod{}: {
+				Label: podLabelSelector,
+				Field: fieldSelector,
+			},
+		}
+
+		mgrOpts.Cache.DefaultNamespaces = map[string]cache.Config{
+			opts.Namespace: {
+				LabelSelector: labels.Everything(),
+				FieldSelector: fieldSelector,
+			},
+		}
+	}
+
+	mgr, err := ctrl.NewManager(opts.Rest, mgrOpts)
 	if err != nil {
 		return nil, err
 	}

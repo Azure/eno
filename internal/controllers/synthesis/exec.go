@@ -12,26 +12,32 @@ import (
 	"github.com/Azure/eno/internal/manager"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
+// maxSliceJsonBytes is the max sum of a resource slice's manifests. It's set to 1mb, which leaves 512mb of space for the resource's status, encoding overhead, etc.
+const maxSliceJsonBytes = 1024 * 1024
+
 type execController struct {
-	client client.Client
-	conn   SynthesizerConnection
+	client  client.Client
+	timeout time.Duration
+	conn    SynthesizerConnection
 }
 
-func NewExecController(mgr ctrl.Manager, conn SynthesizerConnection) error {
+func NewExecController(mgr ctrl.Manager, timeout time.Duration, conn SynthesizerConnection) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Pod{}).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "execController")).
 		Complete(&execController{
-			client: mgr.GetClient(),
-			conn:   conn,
+			client:  mgr.GetClient(),
+			timeout: timeout,
+			conn:    conn,
 		})
 }
 
@@ -97,9 +103,11 @@ func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer,
 		return nil, fmt.Errorf("building inputs: %w", err)
 	}
 
+	synctx, done := context.WithTimeout(ctx, c.timeout)
+	defer done()
+
 	start := time.Now()
-	// TODO: Timeouts?
-	stdout, err := c.conn.Synthesize(ctx, syn, pod, inputsJson)
+	stdout, err := c.conn.Synthesize(synctx, syn, pod, inputsJson)
 	if err != nil {
 		return nil, err
 	}
@@ -111,8 +119,8 @@ func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer,
 func (c *execController) buildInputsJson(ctx context.Context, comp *apiv1.Composition) ([]byte, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	inputs := make([]*unstructured.Unstructured, len(comp.Spec.Inputs))
-	for i, ref := range comp.Spec.Inputs {
+	var inputs []*unstructured.Unstructured
+	for _, ref := range comp.Spec.Inputs {
 		if ref.Resource == nil {
 			continue // not a k8s resource
 		}
@@ -123,61 +131,94 @@ func (c *execController) buildInputsJson(ctx context.Context, comp *apiv1.Compos
 		input.SetAPIVersion(ref.Resource.APIVersion)
 		appendInputNameAnnotation(&ref, input)
 
-		// TODO: Cache inputs?
-
 		start := time.Now()
 		err := c.client.Get(ctx, client.ObjectKeyFromObject(input), input)
 		if err != nil {
-			if k8serrors.IsNotFound(err) {
-				// TODO: Handle
-			}
+			// Ideally we could stop retrying eventually here in cases where the resource doesn't exist,
+			// but it isn't safe to _never_ retry (informers across types aren't ordered), and controller-runtime
+			// doesn't expose the retry count.
 			return nil, fmt.Errorf("getting resource %s/%s: %w", input.GetKind(), input.GetName(), err)
 		}
 
 		logger.V(1).Info("retrieved input resource", "resourceName", input.GetName(), "resourceNamespace", input.GetNamespace(), "resourceKind", input.GetKind(), "latency", time.Since(start).Milliseconds())
-		inputs[i] = input
+		inputs = append(inputs, input)
 	}
 
-	return json.Marshal(&inputs)
+	js, err := json.Marshal(&inputs)
+	if err != nil {
+		return nil, reconcile.TerminalError(err)
+	}
+	return js, nil
 }
 
 func (c *execController) writeOutputToSlices(ctx context.Context, comp *apiv1.Composition, stdout io.Reader) ([]*apiv1.ResourceSliceRef, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	slice := &apiv1.ResourceSlice{}
-	slice.GenerateName = comp.Name + "-"
-	slice.Namespace = comp.Namespace
-	slices := []*apiv1.ResourceSlice{slice} // TODO: Paginate slices
-
 	outputs := []*unstructured.Unstructured{}
 	err := json.NewDecoder(stdout).Decode(&outputs)
 	if err != nil {
-		return nil, fmt.Errorf("parsing outputs: %w", err)
+		return nil, reconcile.TerminalError(fmt.Errorf("parsing outputs: %w", err))
 	}
-	for _, output := range outputs {
-		js, err := output.MarshalJSON()
-		if err != nil {
-			return nil, fmt.Errorf("encoding outputs: %w", err)
-		}
-		slice.Spec.Resources = append(slice.Spec.Resources, apiv1.Manifest{
-			Manifest:          string(js),
-			ReconcileInterval: consumeReconcileIntervalAnnotation(output), // TODO: Handle parse errors?
-		})
+
+	slices, err := buildResourceSlices(comp, outputs, maxSliceJsonBytes)
+	if err != nil {
+		return nil, err
 	}
 
 	sliceRefs := make([]*apiv1.ResourceSliceRef, len(slices))
 	for i, slice := range slices {
 		start := time.Now()
-		err = c.client.Create(ctx, slice)
+
+		err = c.writeResourceSlice(ctx, slice)
 		if err != nil {
-			// TODO: Retries? Separate rate limit?
 			return nil, fmt.Errorf("creating resource slice %d: %w", i, err)
 		}
+
 		logger.V(1).Info("wrote resource slice", "resourceSliceName", slice.Name, "latency", time.Since(start).Milliseconds())
 		sliceRefs[i] = &apiv1.ResourceSliceRef{Name: slice.Name}
 	}
 
 	return sliceRefs, nil
+}
+
+func buildResourceSlices(comp *apiv1.Composition, outputs []*unstructured.Unstructured, maxJsonBytes int) ([]*apiv1.ResourceSlice, error) {
+	var (
+		slices     []*apiv1.ResourceSlice
+		sliceBytes int
+		slice      *apiv1.ResourceSlice
+	)
+
+	for i, output := range outputs {
+		js, err := output.MarshalJSON()
+		if err != nil {
+			return nil, reconcile.TerminalError(fmt.Errorf("encoding output %d: %w", i, err))
+		}
+		if slice == nil || sliceBytes >= maxJsonBytes {
+			sliceBytes = 0
+			slice = &apiv1.ResourceSlice{}
+			slice.GenerateName = comp.Name + "-"
+			slice.Namespace = comp.Namespace
+			slices = append(slices, slice)
+		}
+		sliceBytes += len(js)
+		slice.Spec.Resources = append(slice.Spec.Resources, apiv1.Manifest{
+			Manifest:          string(js),
+			ReconcileInterval: consumeReconcileIntervalAnnotation(output),
+		})
+	}
+
+	return slices, nil
+}
+
+func (c *execController) writeResourceSlice(ctx context.Context, slice *apiv1.ResourceSlice) error {
+	// We retry on request timeouts to avoid the overhead of re-synthesizing in cases where we're sometimes unable to reach apiserver
+	return retry.OnError(retry.DefaultRetry, errors.IsServerTimeout, func() error {
+		err := c.client.Create(ctx, slice)
+		if err != nil {
+			logr.FromContextOrDiscard(ctx).Error(err, "error while creating resource slice - will retry later")
+		}
+		return err
+	})
 }
 
 func (c *execController) writeSuccessStatus(ctx context.Context, comp *apiv1.Composition, compGen int64, refs []*apiv1.ResourceSliceRef) error {

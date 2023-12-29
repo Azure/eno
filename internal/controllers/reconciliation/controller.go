@@ -16,16 +16,15 @@ import (
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/reconstitution"
 	"github.com/go-logr/logr"
 )
 
-// TODO: Block Composition deletion until resources have been cleaned up
+// TODO: Block ResourceSlice deletion until resources have been cleaned up
 // TODO: Clean up unused resource slices older than a duration
-
-// TODO: Handle 400s better
 
 type Controller struct {
 	client         client.Client
@@ -168,7 +167,7 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 
 	currentJS, err := current.MarshalJSON()
 	if err != nil {
-		return nil, "", fmt.Errorf("building json representation of desired state: %w", err)
+		return nil, "", reconcile.TerminalError(fmt.Errorf("building json representation of desired state: %w", err))
 	}
 
 	model, err := c.discovery.Get(ctx, resource.Object.GroupVersionKind())
@@ -177,11 +176,17 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 	}
 	if model == nil {
 		patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(prevManifest, []byte(resource.Manifest), currentJS)
+		if err != nil {
+			return nil, "", reconcile.TerminalError(err)
+		}
 		return patch, types.MergePatchType, err
 	}
 
 	patchmeta := strategicpatch.NewPatchMetaFromOpenAPI(model)
 	patch, err := strategicpatch.CreateThreeWayMergePatch(prevManifest, []byte(resource.Manifest), currentJS, patchmeta, true)
+	if err != nil {
+		return nil, "", reconcile.TerminalError(err)
+	}
 	return patch, types.StrategicMergePatchType, err
 }
 
@@ -189,12 +194,12 @@ func mungePatch(patch []byte, rv string) ([]byte, error) {
 	var patchMap map[string]interface{}
 	err := json.Unmarshal(patch, &patchMap)
 	if err != nil {
-		return nil, err
+		return nil, reconcile.TerminalError(err)
 	}
 	u := unstructured.Unstructured{Object: patchMap}
 	a, err := meta.Accessor(&u)
 	if err != nil {
-		return nil, err
+		return nil, reconcile.TerminalError(err)
 	}
 	a.SetResourceVersion(rv)
 	a.SetCreationTimestamp(metav1.Time{})

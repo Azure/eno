@@ -23,12 +23,12 @@ var minimalTestConfig = &Config{
 func TestControllerHappyPath(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
-	testutil.NewPodController(t, mgr.Manager, nil)
 	cli := mgr.GetClient()
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
 	require.NoError(t, NewRolloutController(mgr.Manager, time.Millisecond*10))
+	require.NoError(t, NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{}))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -111,15 +111,15 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
-	testutil.NewPodController(t, mgr.Manager, func(c *apiv1.Composition, s *apiv1.Synthesizer) []*apiv1.ResourceSlice {
-		// simulate real pods taking some random amount of time to generation
-		time.Sleep(time.Millisecond * time.Duration(rand.Int63n(300)))
-		return nil
-	})
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
 	require.NoError(t, NewRolloutController(mgr.Manager, time.Millisecond*10))
+	require.NoError(t, NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
+		// simulate real pods taking some random amount of time to generation
+		time.Sleep(time.Millisecond * time.Duration(rand.Int63n(300)))
+		return nil
+	}}))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -148,7 +148,7 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// It should eventually converge even though pods did not terminate in order (due to jitter in testutil.NewPodController)
+	// It should eventually converge even though pods did not terminate in order
 	latest := comp.Generation
 	testutil.Eventually(t, func() bool {
 		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
@@ -159,12 +159,12 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 func TestControllerSynthesizerRollout(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
-	testutil.NewPodController(t, mgr.Manager, nil)
 	cli := mgr.GetClient()
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
 	require.NoError(t, NewRolloutController(mgr.Manager, time.Hour*24)) // Rollout should not continue during this test
+	require.NoError(t, NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{}))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -227,17 +227,23 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
-	testutil.NewPodController(t, mgr.Manager, func(c *apiv1.Composition, s *apiv1.Synthesizer) []*apiv1.ResourceSlice {
-		emptySlice := &apiv1.ResourceSlice{}
-		emptySlice.GenerateName = "test-"
-		emptySlice.Namespace = "default"
 
-		// return two slices for the second test synthesizer, we'll assert on that later
-		if s.Name == "test-syn-2" {
-			return []*apiv1.ResourceSlice{emptySlice.DeepCopy(), emptySlice.DeepCopy()}
-		}
-		return []*apiv1.ResourceSlice{emptySlice.DeepCopy()}
-	})
+	require.NoError(t, NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{
+		Hook: func(s *apiv1.Synthesizer) []client.Object {
+			cm := &corev1.ConfigMap{}
+			cm.APIVersion = "v1"
+			cm.Kind = "ConfigMap"
+			cm.Name = "test"
+			cm.Namespace = "default"
+
+			if s.Name == "test-syn-2" {
+				// return two objects for the second test synthesizer, we'll assert on that later
+				return []client.Object{cm, cm}
+			}
+
+			return []client.Object{cm}
+		},
+	}))
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
@@ -260,11 +266,15 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 	comp.Spec.Synthesizer.Name = syn1.Name
 	require.NoError(t, cli.Create(ctx, comp))
 
+	var initialSlices []*apiv1.ResourceSliceRef
+	var initialGen int64
 	t.Run("initial creation", func(t *testing.T) {
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-			return comp.Status.CurrentState != nil && len(comp.Status.CurrentState.ResourceSlices) == 1
+			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSlices != nil
 		})
+		initialSlices = comp.Status.CurrentState.ResourceSlices
+		initialGen = comp.Generation
 	})
 
 	t.Run("update synthesizer name", func(t *testing.T) {
@@ -279,7 +289,8 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			return comp.Status.CurrentState != nil && len(comp.Status.CurrentState.ResourceSlices) == 2
+			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration > initialGen
 		})
+		assert.NotEqual(t, comp.Status.CurrentState.ResourceSlices, initialSlices)
 	})
 }

@@ -42,7 +42,6 @@ func TestManagerBasics(t *testing.T) {
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = "test-slice"
 	slice.Namespace = "default"
-	slice.Spec.CompositionGeneration = comp.Generation
 	slice.Spec.Resources = []apiv1.Manifest{{
 		Manifest: `{"kind":"baz","apiVersion":"any","metadata":{"name":"foo","namespace":"bar"}}`,
 	}}
