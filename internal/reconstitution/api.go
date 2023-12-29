@@ -2,7 +2,6 @@ package reconstitution
 
 import (
 	"context"
-	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -35,9 +34,8 @@ type ManifestRef struct {
 type Resource struct {
 	Ref *ResourceRef
 
-	Manifest          string
-	ReconcileInterval time.Duration
-	Object            *unstructured.Unstructured
+	Manifest *apiv1.Manifest
+	Object   *unstructured.Unstructured
 }
 
 // ResourceRef refers to a specific synthesized resource.

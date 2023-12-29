@@ -47,11 +47,11 @@ func (c *cache) Get(ctx context.Context, ref *ResourceRef, gen int64) (*Resource
 	}
 
 	// Copy the resource so it's safe for callers to mutate
+	refDeref := *ref
 	return &Resource{
-		Ref:               ref,
-		Manifest:          res.Manifest,
-		Object:            res.Object.DeepCopy(),
-		ReconcileInterval: res.ReconcileInterval,
+		Ref:      &refDeref,
+		Manifest: res.Manifest.DeepCopy(),
+		Object:   res.Object.DeepCopy(),
 	}, ok
 }
 
@@ -138,11 +138,8 @@ func (c *cache) buildResource(ctx context.Context, comp types.NamespacedName, sl
 			Name:        parsed.GetName(),
 			Kind:        parsed.GetKind(),
 		},
-		Manifest: manifest,
+		Manifest: resource,
 		Object:   parsed,
-	}
-	if resource.ReconcileInterval != nil {
-		res.ReconcileInterval = resource.ReconcileInterval.Duration
 	}
 	if res.Ref.Name == "" || parsed.GetAPIVersion() == "" {
 		return nil, fmt.Errorf("missing name, kind, or apiVersion")
