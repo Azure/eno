@@ -187,13 +187,13 @@ func (c *execController) writeOutputToSlices(ctx context.Context, comp *apiv1.Co
 }
 
 func (c *execController) fetchPreviousSlices(ctx context.Context, comp *apiv1.Composition) ([]*apiv1.ResourceSlice, error) {
-	if comp.Status.CurrentState == nil {
+	if comp.Status.PreviousState == nil {
 		return nil, nil // nothing to fetch
 	}
 	logger := logr.FromContextOrDiscard(ctx)
 
 	slices := []*apiv1.ResourceSlice{}
-	for _, ref := range comp.Status.CurrentState.ResourceSlices {
+	for _, ref := range comp.Status.PreviousState.ResourceSlices {
 		slice := &apiv1.ResourceSlice{}
 		slice.Name = ref.Name
 		slice.Namespace = comp.Namespace
