@@ -123,7 +123,7 @@ func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1
 			return logger, &pod, true
 		}
 
-		// TODO: Is it necessary to allow concurrent pods while one is terminating to avoid deadlocks?
+		// TODO: Allow a second concurrent pod only while one is terminating (to avoid deadlocks)
 
 		// Synthesis is done
 		if comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized {
@@ -151,8 +151,10 @@ func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1
 }
 
 func swapStates(syn *apiv1.Synthesizer, comp *apiv1.Composition) {
-	// TODO: Is there ever a case where we would _not_ want to swap current->prev? Such as if prev succeeded but cur hasn't?
-	comp.Status.PreviousState = comp.Status.CurrentState
+	// If the previous state has been synthesized but not the current, keep the previous to avoid orphaning deleted resources
+	if comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized {
+		comp.Status.PreviousState = comp.Status.CurrentState
+	}
 	comp.Status.CurrentState = &apiv1.Synthesis{
 		ObservedCompositionGeneration: comp.Generation,
 	}

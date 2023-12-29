@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -204,6 +205,15 @@ func TestCRUD(t *testing.T) {
 				require.NoError(t, err)
 				test.AssertUpdated(t, obj)
 			})
+
+			t.Run("delete", func(t *testing.T) {
+				setImage(t, upstream, syn, comp, "delete")
+
+				testutil.Eventually(t, func() bool {
+					_, err := test.Get(downstream)
+					return errors.IsNotFound(err)
+				})
+			})
 		})
 	}
 }
@@ -253,7 +263,7 @@ func newSliceBuilder(t *testing.T, scheme *runtime.Scheme, test *crudTestCase) f
 			obj = test.Updated.DeepCopyObject().(client.Object)
 			obj = setPhase(obj, "update")
 		case "delete":
-			return []client.Object{obj}
+			return []client.Object{}
 		default:
 			t.Fatalf("unknown pseudo-image: %s", s.Spec.Image)
 		}

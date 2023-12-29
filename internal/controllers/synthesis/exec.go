@@ -160,7 +160,12 @@ func (c *execController) writeOutputToSlices(ctx context.Context, comp *apiv1.Co
 		return nil, reconcile.TerminalError(fmt.Errorf("parsing outputs: %w", err))
 	}
 
-	slices, err := buildResourceSlices(comp, outputs, maxSliceJsonBytes)
+	previous, err := c.fetchPreviousSlices(ctx, comp)
+	if err != nil {
+		return nil, err
+	}
+
+	slices, err := buildResourceSlices(comp, previous, outputs, maxSliceJsonBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -181,18 +186,74 @@ func (c *execController) writeOutputToSlices(ctx context.Context, comp *apiv1.Co
 	return sliceRefs, nil
 }
 
-func buildResourceSlices(comp *apiv1.Composition, outputs []*unstructured.Unstructured, maxJsonBytes int) ([]*apiv1.ResourceSlice, error) {
-	var (
-		slices     []*apiv1.ResourceSlice
-		sliceBytes int
-		slice      *apiv1.ResourceSlice
-	)
+func (c *execController) fetchPreviousSlices(ctx context.Context, comp *apiv1.Composition) ([]*apiv1.ResourceSlice, error) {
+	if comp.Status.PreviousState == nil {
+		return nil, nil // nothing to fetch
+	}
+	logger := logr.FromContextOrDiscard(ctx)
 
+	slices := []*apiv1.ResourceSlice{}
+	for _, ref := range comp.Status.PreviousState.ResourceSlices {
+		slice := &apiv1.ResourceSlice{}
+		slice.Name = ref.Name
+		slice.Namespace = comp.Namespace
+		err := c.client.Get(ctx, client.ObjectKeyFromObject(slice), slice)
+		if errors.IsNotFound(err) {
+			logger.Info("resource slice referenced by composition was not found - skipping", "resourceSliceName", slice.Name)
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("fetching current resource slice %q: %w", slice.Name, err)
+		}
+		slices = append(slices, slice)
+	}
+
+	return slices, nil
+}
+
+func buildResourceSlices(comp *apiv1.Composition, previous []*apiv1.ResourceSlice, outputs []*unstructured.Unstructured, maxJsonBytes int) ([]*apiv1.ResourceSlice, error) {
+	// Encode the given resources into manifest structs
+	refs := map[resourceRef]struct{}{}
+	manifests := []apiv1.Manifest{}
 	for i, output := range outputs {
 		js, err := output.MarshalJSON()
 		if err != nil {
 			return nil, reconcile.TerminalError(fmt.Errorf("encoding output %d: %w", i, err))
 		}
+		manifests = append(manifests, apiv1.Manifest{
+			Manifest:          string(js),
+			ReconcileInterval: consumeReconcileIntervalAnnotation(output),
+		})
+		refs[newResourceRef(output)] = struct{}{}
+	}
+
+	// Build tombstones by diffing the new state against the current state
+	// Existing tombstones are passed down if they haven't yet been reconciled to avoid orphaning resources
+	for _, slice := range previous {
+		for i, res := range slice.Spec.Resources {
+			res := res
+			obj := &unstructured.Unstructured{}
+			err := obj.UnmarshalJSON([]byte(res.Manifest))
+			if err != nil {
+				return nil, reconcile.TerminalError(fmt.Errorf("decoding resource %d of slice %s: %w", i, slice.Name, err))
+			}
+
+			if _, ok := refs[newResourceRef(obj)]; ok || (res.Deleted && slice.Status.Resources != nil && slice.Status.Resources[i].Reconciled) {
+				continue // still exists or has already been deleted
+			}
+
+			res.Deleted = true
+			manifests = append(manifests, res)
+		}
+	}
+
+	// Build the slice resources
+	var (
+		slices     []*apiv1.ResourceSlice
+		sliceBytes int
+		slice      *apiv1.ResourceSlice
+	)
+	for _, manifest := range manifests {
 		if slice == nil || sliceBytes >= maxJsonBytes {
 			sliceBytes = 0
 			slice = &apiv1.ResourceSlice{}
@@ -200,11 +261,8 @@ func buildResourceSlices(comp *apiv1.Composition, outputs []*unstructured.Unstru
 			slice.Namespace = comp.Namespace
 			slices = append(slices, slice)
 		}
-		sliceBytes += len(js)
-		slice.Spec.Resources = append(slice.Spec.Resources, apiv1.Manifest{
-			Manifest:          string(js),
-			ReconcileInterval: consumeReconcileIntervalAnnotation(output),
-		})
+		sliceBytes += len(manifest.Manifest)
+		slice.Spec.Resources = append(slice.Spec.Resources, manifest)
 	}
 
 	return slices, nil
@@ -296,4 +354,17 @@ func consumeReconcileIntervalAnnotation(obj client.Object) *metav1.Duration {
 		return nil
 	}
 	return &metav1.Duration{Duration: dur}
+}
+
+type resourceRef struct {
+	Name, Namespace, Kind, Group string
+}
+
+func newResourceRef(obj *unstructured.Unstructured) resourceRef {
+	return resourceRef{
+		Name:      obj.GetName(),
+		Namespace: obj.GetNamespace(),
+		Kind:      obj.GetKind(),
+		Group:     obj.GroupVersionKind().Group,
+	}
 }

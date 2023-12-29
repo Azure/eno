@@ -214,7 +214,7 @@ func newFakePodRuntime(t testing.TB, mgr ctrl.Manager) {
 		pod := &corev1.Pod{}
 		err := cli.Get(ctx, r.NamespacedName, pod)
 		if err != nil {
-			return reconcile.Result{}, err
+			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 		if len(pod.Status.ContainerStatuses) > 0 {
 			return reconcile.Result{}, nil

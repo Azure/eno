@@ -4,12 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
 
@@ -86,25 +84,6 @@ func TestCacheManifestMissingName(t *testing.T) {
 
 	_, err := c.Fill(ctx, comp, synth, resources)
 	require.ErrorContains(t, err, "missing name, kind, or apiVersion")
-}
-
-func TestCacheReconcileInterval(t *testing.T) {
-	ctx := testutil.NewContext(t)
-
-	client := testutil.NewClient(t)
-	c := newCache(client)
-
-	comp, synth, resources, expectedReqs := newCacheTestFixtures(1, 1)
-	interval := time.Second * 3
-	resources[0].Spec.Resources[0].ReconcileInterval = &metav1.Duration{Duration: interval}
-
-	reqs, err := c.Fill(ctx, comp, synth, resources)
-	require.NoError(t, err)
-	assert.Equal(t, expectedReqs, reqs)
-
-	resource, exists := c.Get(ctx, &expectedReqs[0].ResourceRef, synth.ObservedCompositionGeneration)
-	require.True(t, exists)
-	assert.Equal(t, interval, resource.ReconcileInterval)
 }
 
 func TestCachePartialPurge(t *testing.T) {

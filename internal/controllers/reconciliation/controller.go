@@ -115,8 +115,8 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		return true
 	})
 
-	if resource != nil {
-		return ctrl.Result{RequeueAfter: resource.ReconcileInterval}, nil
+	if resource != nil && resource.Manifest.ReconcileInterval != nil {
+		return ctrl.Result{RequeueAfter: resource.Manifest.ReconcileInterval.Duration}, nil
 	}
 	return ctrl.Result{}, nil
 }
@@ -124,7 +124,18 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) error {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	// TODO: Handle deletes here
+	if resource.Manifest.Deleted {
+		if current == nil || current.GetDeletionTimestamp() != nil {
+			return nil // already deleted - nothing to do
+		}
+
+		err := c.upstreamClient.Delete(ctx, resource.Object)
+		if err != nil {
+			return client.IgnoreNotFound(fmt.Errorf("deleting resource: %w", err))
+		}
+		logger.V(0).Info("deleted resource")
+		return nil
+	}
 
 	// Always create the resource when it doesn't exist
 	if current.GetResourceVersion() == "" {
@@ -162,7 +173,7 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) ([]byte, types.PatchType, error) {
 	var prevManifest []byte
 	if prev != nil {
-		prevManifest = []byte(prev.Manifest)
+		prevManifest = []byte(prev.Manifest.Manifest)
 	}
 
 	currentJS, err := current.MarshalJSON()
@@ -175,7 +186,7 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 		return nil, "", fmt.Errorf("getting merge metadata: %w", err)
 	}
 	if model == nil {
-		patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(prevManifest, []byte(resource.Manifest), currentJS)
+		patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(prevManifest, []byte(resource.Manifest.Manifest), currentJS)
 		if err != nil {
 			return nil, "", reconcile.TerminalError(err)
 		}
@@ -183,7 +194,7 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 	}
 
 	patchmeta := strategicpatch.NewPatchMetaFromOpenAPI(model)
-	patch, err := strategicpatch.CreateThreeWayMergePatch(prevManifest, []byte(resource.Manifest), currentJS, patchmeta, true)
+	patch, err := strategicpatch.CreateThreeWayMergePatch(prevManifest, []byte(resource.Manifest.Manifest), currentJS, patchmeta, true)
 	if err != nil {
 		return nil, "", reconcile.TerminalError(err)
 	}
