@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -43,27 +42,7 @@ func TestBuildInputsJson(t *testing.T) {
 		}},
 	}
 
-	js, safeToRetry, err := e.buildInputsJson(testutil.NewContext(t), comp)
+	js, err := e.buildInputsJson(testutil.NewContext(t), comp)
 	require.NoError(t, err)
-	assert.True(t, safeToRetry)
 	assert.Equal(t, "[{\"apiVersion\":\"v1\",\"kind\":\"ConfigMap\",\"metadata\":{\"creationTimestamp\":null,\"name\":\"test-cm\",\"namespace\":\"test-namespace\",\"resourceVersion\":\"999\"}}]", string(js))
-}
-
-func TestBuildInputsJsonNotFound(t *testing.T) {
-	client := fake.NewFakeClient()
-	e := &execController{client: client}
-
-	comp := &apiv1.Composition{}
-	comp.Spec.Inputs = []apiv1.InputRef{
-		{Resource: &apiv1.ResourceInputRef{
-			APIVersion: "v1",
-			Kind:       "ConfigMap",
-			Name:       "does-not-exist",
-		}},
-	}
-
-	js, safeToRetry, err := e.buildInputsJson(testutil.NewContext(t), comp)
-	require.True(t, errors.IsNotFound(err))
-	assert.False(t, safeToRetry)
-	assert.Empty(t, js)
 }
