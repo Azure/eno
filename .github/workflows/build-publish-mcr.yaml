@@ -53,9 +53,15 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       - name: 'Login the ACR'
         run: az acr login -n ${{ secrets.AZURE_REGISTRY }}
-      - name: Build and publish eno-manager
+      - name: Build and publish eno-controller
         run: |
-          make docker-build-eno-manager
+          make docker-build-eno-controller
         env:
-          ENO_MANAGER_IMAGE_VERSION: ${{ needs.prepare-variables.outputs.release_tag }}
+          ENO_CONTROLLER_IMAGE_VERSION: ${{ needs.prepare-variables.outputs.release_tag }}
+          REGISTRY: ${{ secrets.AZURE_REGISTRY }}/${{ env.REGISTRY_REPO}}
+      - name: Build and publish eno-reconciler
+        run: |
+          make docker-build-eno-reconciler
+        env:
+          ENO_RECONCILER_IMAGE_VERSION: ${{ needs.prepare-variables.outputs.release_tag }}
           REGISTRY: ${{ secrets.AZURE_REGISTRY }}/${{ env.REGISTRY_REPO}}
