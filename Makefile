@@ -8,7 +8,7 @@ ENO_MANAGER_IMAGE_NAME ?= eno-manager
 OUTPUT_TYPE ?= type=registry
 
 .PHONY: docker-build-eno-manager
-docker-build-hub-agent: docker-buildx-builder
+docker-build-eno-manager: docker-buildx-builder
 	docker buildx build \
 		--file docker/$(ENO_MANAGER_IMAGE_NAME)/Dockerfile \
 		--output=$(OUTPUT_TYPE) \
