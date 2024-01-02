@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -22,8 +23,6 @@ import (
 	"github.com/Azure/eno/internal/reconstitution"
 	"github.com/go-logr/logr"
 )
-
-// TODO: Jitter
 
 // TODO: Block ResourceSlice deletion until resources have been cleaned up
 // TODO: Clean up unused resource slices older than a duration
@@ -124,7 +123,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	})
 
 	if resource != nil && resource.Manifest.ReconcileInterval != nil {
-		return ctrl.Result{RequeueAfter: resource.Manifest.ReconcileInterval.Duration}, nil
+		return ctrl.Result{RequeueAfter: wait.Jitter(resource.Manifest.ReconcileInterval.Duration, 0.1)}, nil
 	}
 	return ctrl.Result{}, nil
 }
