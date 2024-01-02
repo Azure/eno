@@ -8,7 +8,7 @@ spec:
   - /bin/bash
   - -c
   - |
-      n=25
+      n=23
       echo -n '['
       for i in $(seq $n); do
         echo -n "{

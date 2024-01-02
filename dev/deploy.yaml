@@ -39,6 +39,8 @@ spec:
       containers:
       - name: eno-reconciler
         image: $REGISTRY/eno-reconciler:$TAG
+        args:
+        - --qps=1000
         env:
           - name: PPROF_ADDR
             value: ":8888"

@@ -52,13 +52,19 @@ type Options struct {
 	Namespace       string
 	HealthProbeAddr string
 	MetricsAddr     string
+	qps             float64 // flags don't support float32, bind to this value and copy over to Rest.QPS during initialization
 }
 
 func (o *Options) Bind(set *flag.FlagSet) {
-	flag.StringVar(&o.Namespace, "namespace", "", "Only reconcile resources in a particular namespace")
+	set.StringVar(&o.Namespace, "namespace", "", "Only reconcile resources in a particular namespace")
+	set.StringVar(&o.HealthProbeAddr, "health-probe-addr", ":8081", "Address to serve health probes on")
+	set.StringVar(&o.MetricsAddr, "metrics-addr", ":8080", "Address to serve Prometheus metrics on")
+	set.IntVar(&o.Rest.Burst, "burst", 50, "apiserver client rate limiter burst configuration")
+	set.Float64Var(&o.qps, "qps", 20, "Max requests per second to apiserver")
 }
 
 func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
+	opts.Rest.QPS = float32(opts.qps)
 	mgrOpts := manager.Options{
 		Logger:                 logger,
 		HealthProbeBindAddress: opts.HealthProbeAddr,
