@@ -61,32 +61,37 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	ctx = logr.NewContext(ctx, logger)
 
 	// We populate the cache with both the previous and current syntheses
-	err = r.populateCache(ctx, comp, comp.Status.PreviousState)
+	prevReqs, err := r.populateCache(ctx, comp, comp.Status.PreviousState)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("processing previous state: %w", err)
 	}
-	err = r.populateCache(ctx, comp, comp.Status.CurrentState)
+	currentReqs, err := r.populateCache(ctx, comp, comp.Status.CurrentState)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("processing current state: %w", err)
+	}
+	for _, req := range append(prevReqs, currentReqs...) {
+		for _, queue := range r.queues {
+			queue.Add(req)
+		}
 	}
 
 	r.cache.Purge(ctx, req.NamespacedName, comp)
 	return ctrl.Result{}, nil
 }
 
-func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis) error {
+func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis) ([]*Request, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	if synthesis == nil || !synthesis.Synthesized {
 		// synthesis is still in progress
-		return nil
+		return nil, nil
 	}
 	compNSN := types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}
 
 	logger = logger.WithValues("synthesisCompositionGeneration", synthesis.ObservedCompositionGeneration)
 	ctx = logr.NewContext(ctx, logger)
 	if r.cache.HasSynthesis(ctx, compNSN, synthesis) {
-		return nil
+		return nil, nil
 	}
 
 	slices := make([]apiv1.ResourceSlice, len(synthesis.ResourceSlices))
@@ -96,20 +101,10 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 		slice.Namespace = comp.Namespace
 		err := r.client.Get(ctx, client.ObjectKeyFromObject(&slice), &slice)
 		if err != nil {
-			return fmt.Errorf("unable to get resource slice: %w", err)
+			return nil, fmt.Errorf("unable to get resource slice: %w", err)
 		}
 		slices[i] = slice
 	}
 
-	reqs, err := r.cache.Fill(ctx, compNSN, synthesis, slices)
-	if err != nil {
-		return err
-	}
-	for _, req := range reqs {
-		for _, queue := range r.queues {
-			queue.Add(req)
-		}
-	}
-
-	return nil
+	return r.cache.Fill(ctx, compNSN, synthesis, slices)
 }

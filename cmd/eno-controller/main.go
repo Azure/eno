@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-logr/zapr"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/Azure/eno/internal/controllers/synthesis"
@@ -28,14 +29,20 @@ func run() error {
 	var (
 		rolloutCooldown  time.Duration
 		synthesisTimeout time.Duration
+		debugLogging     bool
 		synconf          = &synthesis.Config{}
 	)
 	flag.DurationVar(&synconf.Timeout, "synthesis-pod-timeout", time.Minute, "Maximum lifespan of synthesizer pods")
 	flag.DurationVar(&synthesisTimeout, "synthesis-timeout", time.Second*30, "Timeout when executing synthesizer binaries")
 	flag.DurationVar(&rolloutCooldown, "rollout-cooldown", time.Second*30, "Minimum period of time between each ensuing composition update after a synthesizer is updated")
+	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.Parse()
 
-	zl, err := zap.NewProduction()
+	zapCfg := zap.NewProductionConfig()
+	if debugLogging {
+		zapCfg.Level = zap.NewAtomicLevelAt(zapcore.DebugLevel)
+	}
+	zl, err := zapCfg.Build()
 	if err != nil {
 		return err
 	}

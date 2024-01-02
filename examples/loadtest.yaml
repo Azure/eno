@@ -1,0 +1,36 @@
+apiVersion: eno.azure.io/v1
+kind: Synthesizer
+metadata:
+  name: load-test-synth
+spec:
+  image: docker.io/ubuntu:latest
+  command:
+  - /bin/bash
+  - -c
+  - |
+      n=600
+      echo -n '['
+      for i in $(seq $n); do
+        echo -n "{
+          \"apiVersion\": \"v1\",
+          \"kind\": \"ConfigMap\",
+          \"metadata\": { \"name\": \"test-cm-${i}\", \"namespace\": \"default\", \"annotations\": { \"eno.azure.io/reconcile-interval\": \"10s\" } },
+          \"data\": { \"foo\": \"bar\" }
+        }"
+        if [[ $i == $n ]]; then
+          echo "]"
+        else
+          echo ","
+        fi
+      done
+
+
+---
+
+apiVersion: eno.azure.io/v1
+kind: Composition
+metadata:
+  name: load-test
+spec:
+  synthesizer:
+    name: load-test-synth
