@@ -23,6 +23,8 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// TODO: Jitter
+
 // TODO: Block ResourceSlice deletion until resources have been cleaned up
 // TODO: Clean up unused resource slices older than a duration
 

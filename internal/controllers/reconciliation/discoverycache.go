@@ -15,11 +15,10 @@ import (
 // discoveryCache is useful to prevent excessive QPS to the discovery APIs while
 // still allowing dynamic refresh of the openapi spec on cache misses.
 type discoveryCache struct {
-	mut                   sync.Mutex
-	client                discovery.DiscoveryInterface
-	fillWhenNotFound      bool
-	currentSupportedTypes map[schema.GroupVersionKind]struct{}
-	currentSchema         map[schema.GroupVersionKind]proto.Schema
+	mut              sync.Mutex
+	client           discovery.DiscoveryInterface
+	fillWhenNotFound bool
+	current          map[schema.GroupVersionKind]proto.Schema
 }
 
 func newDicoveryCache(rc *rest.Config, qps float32, fillWhenNotFound bool) (*discoveryCache, error) {
@@ -32,7 +31,7 @@ func newDicoveryCache(rc *rest.Config, qps float32, fillWhenNotFound bool) (*dis
 	}
 	disc.UseLegacyDiscovery = true // don't bother with aggregated APIs since they may be unavailable
 
-	d := &discoveryCache{client: disc, fillWhenNotFound: fillWhenNotFound, currentSupportedTypes: map[schema.GroupVersionKind]struct{}{}, currentSchema: map[schema.GroupVersionKind]proto.Schema{}}
+	d := &discoveryCache{client: disc, fillWhenNotFound: fillWhenNotFound, current: map[schema.GroupVersionKind]proto.Schema{}}
 	return d, nil
 }
 
@@ -44,19 +43,24 @@ func (d *discoveryCache) Get(ctx context.Context, gvk schema.GroupVersionKind) (
 	// Older versions of Kubernetes don't include CRDs in the openapi spec, so on those versions we cannot invalidate the cache if a resource is not found.
 	// However, on newer versions we expect every resource to exist in the spec so retries are safe and often necessary.
 	for i := 0; i < 2; i++ {
-		if d.currentSchema == nil {
+		if d.current == nil {
 			logger.V(1).Info("filling discovery cache")
 			if err := d.fillUnlocked(ctx); err != nil {
 				return nil, err
 			}
 		}
 
-		model, ok := d.currentSchema[gvk]
+		model, ok := d.current[gvk]
 		if !ok && d.fillWhenNotFound {
-			d.currentSchema = nil // invalidate cache - retrieve fresh schema on next attempt
+			d.current = nil // invalidate cache - retrieve fresh schema on next attempt
 			continue
 		}
-		return d.checkSupportUnlocked(ctx, gvk, model)
+		if ok && model == nil {
+			logger.V(1).Info("type does not support strategic merge")
+		} else if model == nil {
+			logger.V(1).Info("type not found in openapi schema")
+		}
+		return model, nil
 	}
 	return nil, nil
 }
@@ -66,21 +70,6 @@ func (d *discoveryCache) fillUnlocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	d.currentSupportedTypes = buildSupportedTypesMap(doc)
-	d.currentSchema = buildCurrentSchemaMap(doc)
+	d.current = buildCurrentSchemaMap(doc)
 	return nil
-}
-
-func (d *discoveryCache) checkSupportUnlocked(ctx context.Context, gvk schema.GroupVersionKind, model proto.Schema) (proto.Schema, error) {
-	logger := logr.FromContextOrDiscard(ctx)
-	if model == nil {
-		logger.V(1).Info("type not found in openapi schema")
-		return nil, nil
-	}
-
-	if _, ok := d.currentSupportedTypes[gvk]; ok {
-		return model, nil
-	}
-
-	return nil, nil // doesn't support strategic merge
 }

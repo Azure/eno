@@ -11,8 +11,13 @@ import (
 	"k8s.io/kube-openapi/pkg/util/proto"
 )
 
-func buildSupportedTypesMap(doc *openapi_v2.Document) map[schema.GroupVersionKind]struct{} {
-	m := make(map[schema.GroupVersionKind]struct{})
+func buildCurrentSchemaMap(doc *openapi_v2.Document) map[schema.GroupVersionKind]proto.Schema {
+	models, err := proto.NewOpenAPIData(doc)
+	if err != nil {
+		panic(err) // TODO:?
+	}
+
+	allSupported := map[schema.GroupVersionKind]struct{}{}
 	for _, path := range doc.GetPaths().GetPath() {
 		for _, ex := range path.GetValue().GetPatch().GetVendorExtension() {
 			if ex.GetValue().GetYaml() == "" ||
@@ -31,25 +36,13 @@ func buildSupportedTypesMap(doc *openapi_v2.Document) map[schema.GroupVersionKin
 				Version: value["version"],
 				Kind:    value["kind"],
 			}
-			var supported bool
 			for _, c := range path.GetValue().GetPatch().GetConsumes() {
 				if c == string(types.StrategicMergePatchType) {
-					supported = true
+					allSupported[gvk] = struct{}{}
 					break
 				}
 			}
-			if supported {
-				m[gvk] = struct{}{}
-			}
 		}
-	}
-	return m
-}
-
-func buildCurrentSchemaMap(doc *openapi_v2.Document) map[schema.GroupVersionKind]proto.Schema {
-	models, err := proto.NewOpenAPIData(doc)
-	if err != nil {
-		panic(err) // TODO:?
 	}
 
 	m := map[schema.GroupVersionKind]proto.Schema{}
@@ -58,7 +51,11 @@ func buildCurrentSchemaMap(doc *openapi_v2.Document) map[schema.GroupVersionKind
 		gvkList := parseGroupVersionKind(model)
 		for _, gvk := range gvkList {
 			if len(gvk.Kind) > 0 {
-				m[gvk] = model
+				if _, ok := allSupported[gvk]; ok {
+					m[gvk] = model
+				} else {
+					m[gvk] = nil // unsupported == map key with nil model
+				}
 			}
 		}
 	}
