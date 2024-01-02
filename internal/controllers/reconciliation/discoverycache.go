@@ -46,6 +46,7 @@ func (d *discoveryCache) Get(ctx context.Context, gvk schema.GroupVersionKind) (
 	// However, on newer versions we expect every resource to exist in the spec so retries are safe and often necessary.
 	for i := 0; i < 2; i++ {
 		if d.current == nil {
+			// TODO: is this called when it shouldn't be? Need to enable debug logs
 			logger.V(1).Info("filling discovery cache")
 			if err := d.fillUnlocked(ctx); err != nil {
 				return nil, err
@@ -81,6 +82,8 @@ func (d *discoveryCache) checkSupportUnlocked(ctx context.Context, gvk schema.Gr
 		logger.V(1).Info("type not found in openapi schema")
 		return nil, nil
 	}
+
+	// TODO: Something here is consuming a lot of cpu cycles
 
 	for _, c := range d.current.GetConsumes(gvk, "PATCH") {
 		if c == string(types.StrategicMergePatchType) {

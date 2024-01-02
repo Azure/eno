@@ -124,7 +124,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) error {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	if resource.Manifest.Deleted {
+	if resource.Manifest.Deleted { // TODO: Sometimes nil somehow?
 		if current == nil || current.GetDeletionTimestamp() != nil {
 			return nil // already deleted - nothing to do
 		}
