@@ -4,6 +4,10 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"os"
+
+	"net/http"
+	_ "net/http/pprof"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -33,6 +37,15 @@ const (
 	ManagerLabelKey   = "app.kubernetes.io/managed-by"
 	ManagerLabelValue = "eno"
 )
+
+func init() {
+	go func() {
+		if addr := os.Getenv("PPROF_ADDR"); addr != "" {
+			err := http.ListenAndServe(addr, nil)
+			panic(fmt.Sprintf("unable to serve pprof listener: %s", err))
+		}
+	}()
+}
 
 type Options struct {
 	Rest            *rest.Config
