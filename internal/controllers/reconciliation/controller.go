@@ -61,7 +61,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, req.Composition, comp)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("getting composition: %w", err)
+		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition: %w", err))
 	}
 
 	if comp.Status.CurrentState == nil {
@@ -72,7 +72,13 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	// Find the current and (optionally) previous desired states in the cache
 	currentGen := comp.Status.CurrentState.ObservedCompositionGeneration
-	resource, _ := c.resourceClient.Get(ctx, &req.ResourceRef, currentGen)
+	resource, exists := c.resourceClient.Get(ctx, &req.ResourceRef, currentGen)
+	if !exists {
+		// It's possible for the cache to be empty because a manifest for this resource no longer exists at the requested composition generation.
+		// Dropping the work item is safe since filling the new version will generate a new queue message.
+		logger.V(1).Info("dropping work item because the corresponding manifest generation no longer exists in the cache")
+		return ctrl.Result{}, nil
+	}
 
 	var prev *reconstitution.Resource
 	if comp.Status.PreviousState != nil {

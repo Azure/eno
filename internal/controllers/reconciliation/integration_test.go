@@ -2,6 +2,7 @@ package reconciliation
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -314,21 +315,15 @@ func TestReconcileInterval(t *testing.T) {
 		Timeout: time.Second * 5,
 	}))
 	require.NoError(t, synthesis.NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
-		obj := &corev1.Service{
+		obj := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-obj",
 				Namespace: "default",
 				Annotations: map[string]string{
-					"eno.azure.io/reconcile-interval": "250ms",
+					"eno.azure.io/reconcile-interval": "100ms",
 				},
 			},
-			Spec: corev1.ServiceSpec{
-				Ports: []corev1.ServicePort{{
-					Name:     "first",
-					Port:     1234,
-					Protocol: corev1.ProtocolTCP,
-				}},
-			},
+			Data: map[string]string{"foo": "bar"},
 		}
 
 		gvks, _, err := scheme.ObjectKinds(obj)
@@ -355,7 +350,7 @@ func TestReconcileInterval(t *testing.T) {
 	require.NoError(t, upstream.Create(ctx, comp))
 
 	// Wait for service to be created
-	obj := &corev1.Service{}
+	obj := &corev1.ConfigMap{}
 	testutil.Eventually(t, func() bool {
 		obj.SetName("test-obj")
 		obj.SetNamespace("default")
@@ -364,11 +359,90 @@ func TestReconcileInterval(t *testing.T) {
 	})
 
 	// Update the service from outside of Eno
-	obj.Spec.Ports[0].Port = 2345
+	obj.Data["foo"] = "baz"
+	require.NoError(t, downstream.Update(ctx, obj))
 
 	// The service should eventually converge with the desired state
 	testutil.Eventually(t, func() bool {
 		err = downstream.Get(context.Background(), client.ObjectKeyFromObject(obj), obj)
-		return err == nil && obj.Spec.Ports[0].Port == 1234
+		return err == nil && obj.Data["foo"] == "bar"
 	})
+}
+
+// TestReconcileCacheRace covers a race condition in which a work item remains in the queue after the
+// corresponding (version of the) manifest has been removed from cache.
+func TestReconcileCacheRace(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	// Register supporting controllers
+	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
+	require.NoError(t, err)
+	require.NoError(t, synthesis.NewRolloutController(mgr.Manager, time.Microsecond))
+	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, &synthesis.Config{
+		Timeout: time.Second * 5,
+	}))
+	renderN := 0
+	require.NoError(t, synthesis.NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
+		renderN++
+		obj := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-obj",
+				Namespace: "default",
+				Annotations: map[string]string{
+					"eno.azure.io/reconcile-interval": "50ms",
+				},
+			},
+			Data: map[string]string{"foo": fmt.Sprintf("rendered-%d-times", renderN)},
+		}
+
+		gvks, _, err := scheme.ObjectKinds(obj)
+		require.NoError(t, err)
+		obj.GetObjectKind().SetGroupVersionKind(gvks[0])
+		return []client.Object{obj}
+	}}))
+
+	// Test subject
+	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15))
+	require.NoError(t, err)
+	mgr.Start(t)
+
+	// Any syn/comp will do since we faked out the synthesizer pod
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "create"
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	// Wait for resource to be created
+	obj := &corev1.ConfigMap{}
+	testutil.Eventually(t, func() bool {
+		obj.SetName("test-obj")
+		obj.SetNamespace("default")
+		err = downstream.Get(context.Background(), client.ObjectKeyFromObject(obj), obj)
+		return err == nil
+	})
+
+	// Update frequently, it shouldn't panic
+	for i := 0; i < 20; i++ {
+		err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			err = upstream.Get(context.Background(), client.ObjectKeyFromObject(syn), syn)
+			syn.Spec.Command = []string{fmt.Sprintf("any-unique-value-%d", i)}
+			return upstream.Update(ctx, syn)
+		})
+		require.NoError(t, err)
+		time.Sleep(time.Millisecond * 50)
+	}
 }
