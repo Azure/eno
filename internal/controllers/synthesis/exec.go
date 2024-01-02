@@ -216,13 +216,14 @@ func buildResourceSlices(comp *apiv1.Composition, previous []*apiv1.ResourceSlic
 	refs := map[resourceRef]struct{}{}
 	manifests := []apiv1.Manifest{}
 	for i, output := range outputs {
+		reconcileInterval := consumeReconcileIntervalAnnotation(output)
 		js, err := output.MarshalJSON()
 		if err != nil {
 			return nil, reconcile.TerminalError(fmt.Errorf("encoding output %d: %w", i, err))
 		}
 		manifests = append(manifests, apiv1.Manifest{
 			Manifest:          string(js),
-			ReconcileInterval: consumeReconcileIntervalAnnotation(output),
+			ReconcileInterval: reconcileInterval,
 		})
 		refs[newResourceRef(output)] = struct{}{}
 	}
