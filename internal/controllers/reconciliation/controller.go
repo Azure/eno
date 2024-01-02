@@ -23,6 +23,8 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// TODO: There's a 404 missing exclude somewhere
+
 // TODO: Block ResourceSlice deletion until resources have been cleaned up
 // TODO: Clean up unused resource slices older than a duration
 
@@ -72,7 +74,12 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	// Find the current and (optionally) previous desired states in the cache
 	currentGen := comp.Status.CurrentState.ObservedCompositionGeneration
-	resource, _ := c.resourceClient.Get(ctx, &req.ResourceRef, currentGen)
+	resource, exists := c.resourceClient.Get(ctx, &req.ResourceRef, currentGen)
+	if !exists {
+		// It's possible for the cache to be empty because a manifest for this resource no longer exists at the requested composition generation.
+		// Dropping the work item is safe since filling the new version will generate a new queue message.
+		return ctrl.Result{}, nil
+	}
 
 	var prev *reconstitution.Resource
 	if comp.Status.PreviousState != nil {
