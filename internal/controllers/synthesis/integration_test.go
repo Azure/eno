@@ -17,20 +17,18 @@ import (
 )
 
 var minimalTestConfig = &Config{
-	WrapperImage: "test-wrapper-image",
-	MaxRestarts:  3,
-	Timeout:      time.Second * 2,
+	Timeout: time.Second * 6,
 }
 
 func TestControllerHappyPath(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
-	testutil.NewPodController(t, mgr.Manager, nil)
 	cli := mgr.GetClient()
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
 	require.NoError(t, NewRolloutController(mgr.Manager, time.Millisecond*10))
+	require.NoError(t, NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{}))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -52,17 +50,10 @@ func TestControllerHappyPath(t *testing.T) {
 			return len(list.Items) > 0
 		})
 
-		// The pod eventually completes and is deleted
-		testutil.Eventually(t, func() bool {
-			list := &corev1.PodList{}
-			require.NoError(t, cli.List(ctx, list))
-			return len(list.Items) == 0
-		})
-
-		// The pod eventually writes a resource slice count to the status
+		// The pod eventually performs the synthesis
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSliceCount != nil
+			return comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized
 		})
 	})
 
@@ -78,14 +69,12 @@ func TestControllerHappyPath(t *testing.T) {
 		latest := comp.Generation
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration == latest
+			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration >= latest
 		})
 
 		// The previous state is retained
 		if comp.Status.PreviousState == nil {
 			t.Error("state wasn't swapped to previous")
-		} else {
-			assert.Equal(t, comp.Generation-1, comp.Status.PreviousState.ObservedCompositionGeneration)
 		}
 	})
 
@@ -101,14 +90,12 @@ func TestControllerHappyPath(t *testing.T) {
 
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
+			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedSynthesizerGeneration >= syn.Generation
 		})
 
 		// The previous state is retained
 		if comp.Status.PreviousState == nil {
 			t.Error("state wasn't swapped to previous")
-		} else {
-			assert.Equal(t, syn.Generation-1, comp.Status.PreviousState.ObservedSynthesizerGeneration)
 		}
 	})
 
@@ -124,15 +111,15 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
-	testutil.NewPodController(t, mgr.Manager, func(c *apiv1.Composition, s *apiv1.Synthesizer) []*apiv1.ResourceSlice {
-		// simulate real pods taking some random amount of time to generation
-		time.Sleep(time.Millisecond * time.Duration(rand.Int63n(300)))
-		return nil
-	})
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
 	require.NoError(t, NewRolloutController(mgr.Manager, time.Millisecond*10))
+	require.NoError(t, NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
+		// simulate real pods taking some random amount of time to generation
+		time.Sleep(time.Millisecond * time.Duration(rand.Int63n(300)))
+		return nil
+	}}))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -161,7 +148,7 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// It should eventually converge even though pods did not terminate in order (due to jitter in testutil.NewPodController)
+	// It should eventually converge even though pods did not terminate in order
 	latest := comp.Generation
 	testutil.Eventually(t, func() bool {
 		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
@@ -172,12 +159,12 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 func TestControllerSynthesizerRollout(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
-	testutil.NewPodController(t, mgr.Manager, nil)
 	cli := mgr.GetClient()
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
 	require.NoError(t, NewRolloutController(mgr.Manager, time.Hour*24)) // Rollout should not continue during this test
+	require.NoError(t, NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{}))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -185,27 +172,19 @@ func TestControllerSynthesizerRollout(t *testing.T) {
 	syn.Spec.Image = "test-syn-image"
 	require.NoError(t, cli.Create(ctx, syn))
 
-	comp1 := &apiv1.Composition{}
-	comp1.Name = "test-comp-1"
-	comp1.Namespace = "default"
-	comp1.Spec.Synthesizer.Name = syn.Name
-	require.NoError(t, cli.Create(ctx, comp1))
-
-	comp2 := &apiv1.Composition{}
-	comp2.Name = "test-comp-2"
-	comp2.Namespace = "default"
-	comp2.Spec.Synthesizer.Name = syn.Name
-	require.NoError(t, cli.Create(ctx, comp2))
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, cli.Create(ctx, comp))
 
 	// Wait for initial sync
 	testutil.Eventually(t, func() bool {
-		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp1), comp1)))
-		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp2), comp2)))
-		inSync1 := comp1.Status.CurrentState != nil && comp1.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
-		inSync2 := comp2.Status.CurrentState != nil && comp2.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
-		return inSync1 && inSync2
+		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
+		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
 	})
 
+	// First synthesizer update
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		if err := cli.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
 			return err
@@ -215,38 +194,56 @@ func TestControllerSynthesizerRollout(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// One of the compositions should be updated but not the other because we set a RolloutCooldown of 1hr
-	assertRolloutPending := func() {
-		testutil.Eventually(t, func() bool {
-			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp1), comp1)))
-			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp2), comp2)))
-			inSync1 := comp1.Status.CurrentState != nil && comp1.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
-			inSync2 := comp2.Status.CurrentState != nil && comp2.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
-			return (inSync1 && !inSync2) || (!inSync1 && inSync2)
-		})
-	}
+	// The first synthesizer update should be applied to the composition
+	testutil.Eventually(t, func() bool {
+		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
+		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
+	})
 
-	// Make sure the state persists
-	assertRolloutPending()
-	time.Sleep(time.Millisecond * 50)
-	assertRolloutPending()
+	// Wait for the informer cache to know about the last update
+	testutil.Eventually(t, func() bool {
+		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(syn), syn)))
+		return syn.Status.LastRolloutTime != nil
+	})
+
+	// Second synthesizer update
+	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		if err := cli.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
+			return err
+		}
+		syn.Spec.Image = "updated-image"
+		return cli.Update(ctx, syn)
+	})
+	require.NoError(t, err)
+
+	// The second synthesizer update should not be applied to the composition because we're within the update window
+	time.Sleep(time.Millisecond * 250)
+	original := comp.DeepCopy()
+	require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
+	assert.Equal(t, original.Generation, comp.Generation, "spec hasn't been updated")
 }
 
 func TestControllerSwitchingSynthesizers(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
-	testutil.NewPodController(t, mgr.Manager, func(c *apiv1.Composition, s *apiv1.Synthesizer) []*apiv1.ResourceSlice {
-		emptySlice := &apiv1.ResourceSlice{}
-		emptySlice.GenerateName = "test-"
-		emptySlice.Namespace = "default"
 
-		// return two slices for the second test synthesizer, we'll assert on that later
-		if s.Name == "test-syn-2" {
-			return []*apiv1.ResourceSlice{emptySlice.DeepCopy(), emptySlice.DeepCopy()}
-		}
-		return []*apiv1.ResourceSlice{emptySlice.DeepCopy()}
-	})
+	require.NoError(t, NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{
+		Hook: func(s *apiv1.Synthesizer) []client.Object {
+			cm := &corev1.ConfigMap{}
+			cm.APIVersion = "v1"
+			cm.Kind = "ConfigMap"
+			cm.Name = "test"
+			cm.Namespace = "default"
+
+			if s.Name == "test-syn-2" {
+				// return two objects for the second test synthesizer, we'll assert on that later
+				return []client.Object{cm, cm}
+			}
+
+			return []client.Object{cm}
+		},
+	}))
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
@@ -255,12 +252,12 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 
 	syn1 := &apiv1.Synthesizer{}
 	syn1.Name = "test-syn-1"
-	syn1.Spec.Image = "test-syn-image"
+	syn1.Spec.Image = "initial-image"
 	require.NoError(t, cli.Create(ctx, syn1))
 
 	syn2 := &apiv1.Synthesizer{}
 	syn2.Name = "test-syn-2"
-	syn2.Spec.Image = "initial-image"
+	syn2.Spec.Image = "updated-image"
 	require.NoError(t, cli.Create(ctx, syn2))
 
 	comp := &apiv1.Composition{}
@@ -269,11 +266,15 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 	comp.Spec.Synthesizer.Name = syn1.Name
 	require.NoError(t, cli.Create(ctx, comp))
 
+	var initialSlices []*apiv1.ResourceSliceRef
+	var initialGen int64
 	t.Run("initial creation", func(t *testing.T) {
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSliceCount != nil && *comp.Status.CurrentState.ResourceSliceCount == 1
+			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSlices != nil
 		})
+		initialSlices = comp.Status.CurrentState.ResourceSlices
+		initialGen = comp.Generation
 	})
 
 	t.Run("update synthesizer name", func(t *testing.T) {
@@ -288,7 +289,8 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSliceCount != nil && *comp.Status.CurrentState.ResourceSliceCount == 2
+			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration > initialGen
 		})
+		assert.NotEqual(t, comp.Status.CurrentState.ResourceSlices, initialSlices)
 	})
 }

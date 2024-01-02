@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eno-controller
+  labels:
+    app: eno-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: eno-controller
+  template:
+    metadata:
+      labels:
+        app: eno-controller
+    spec:
+      containers:
+      - name: eno-controller
+        image: $REGISTRY/eno-controller:$TAG
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eno-reconciler
+  labels:
+    app: eno-reconciler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: eno-reconciler
+  template:
+    metadata:
+      labels:
+        app: eno-reconciler
+    spec:
+      containers:
+      - name: eno-reconciler
+        image: $REGISTRY/eno-reconciler:$TAG
+        env:
+          - name: PPROF_ADDR
+            value: ":8888"

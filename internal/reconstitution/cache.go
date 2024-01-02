@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sync"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -43,7 +42,17 @@ func (c *cache) Get(ctx context.Context, ref *ResourceRef, gen int64) (*Resource
 
 	resKey := resourceKey{Kind: ref.Kind, Namespace: ref.Namespace, Name: ref.Name}
 	res, ok := resources[resKey]
-	return res, ok
+	if !ok {
+		return nil, false
+	}
+
+	// Copy the resource so it's safe for callers to mutate
+	refDeref := *ref
+	return &Resource{
+		Ref:      &refDeref,
+		Manifest: res.Manifest.DeepCopy(),
+		Object:   res.Object.DeepCopy(),
+	}, ok
 }
 
 // HasSynthesis returns true when the cache contains the resulting resources of the given synthesis.
@@ -65,7 +74,7 @@ func (c *cache) HasSynthesis(ctx context.Context, comp types.NamespacedName, syn
 func (c *cache) Fill(ctx context.Context, comp types.NamespacedName, synthesis *apiv1.Synthesis, items []apiv1.ResourceSlice) ([]*Request, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	// Building resources can be expensive (secret lookups, json parsing, etc.) so don't hold the lock during this call
+	// Building resources can be expensive (json parsing, etc.) so don't hold the lock during this call
 	resources, requests, err := c.buildResources(ctx, comp, items)
 	if err != nil {
 		return nil, err
@@ -116,19 +125,6 @@ func (c *cache) buildResources(ctx context.Context, comp types.NamespacedName, i
 
 func (c *cache) buildResource(ctx context.Context, comp types.NamespacedName, slice *apiv1.ResourceSlice, resource *apiv1.Manifest) (*Resource, error) {
 	manifest := resource.Manifest
-	if resource.SecretName != nil {
-		secret := &corev1.Secret{}
-		secret.Name = *resource.SecretName
-		secret.Namespace = slice.Namespace
-		err := c.client.Get(ctx, client.ObjectKeyFromObject(secret), secret)
-		if err != nil {
-			return nil, fmt.Errorf("getting secret: %w", err)
-		}
-		if secret.Data != nil {
-			manifest = string(secret.Data["manifest"])
-		}
-	}
-
 	parsed := &unstructured.Unstructured{}
 	err := parsed.UnmarshalJSON([]byte(manifest))
 	if err != nil {
@@ -142,11 +138,8 @@ func (c *cache) buildResource(ctx context.Context, comp types.NamespacedName, sl
 			Name:        parsed.GetName(),
 			Kind:        parsed.GetKind(),
 		},
-		Manifest: manifest,
-		object:   parsed,
-	}
-	if resource.ReconcileInterval != nil {
-		res.ReconcileInterval = resource.ReconcileInterval.Duration
+		Manifest: resource,
+		Object:   parsed,
 	}
 	if res.Ref.Name == "" || parsed.GetAPIVersion() == "" {
 		return nil, fmt.Errorf("missing name, kind, or apiVersion")

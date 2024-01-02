@@ -39,7 +39,6 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 	if len(pod.OwnerReferences) == 0 || pod.OwnerReferences[0].Kind != "Composition" {
 		// This shouldn't be common as the informer watch filters on Eno-managed pods using a selector
-		logger.V(1).Info("skipping pod because it isn't owned by a composition")
 		return ctrl.Result{}, nil
 	}
 	if pod.Annotations == nil {
@@ -56,7 +55,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if comp.Spec.Synthesizer.Name == "" {
 		return ctrl.Result{}, nil
 	}
-	logger = logger.WithValues("composition", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace)
 
 	syn := &apiv1.Synthesizer{}
 	syn.Name = comp.Spec.Synthesizer.Name
@@ -64,22 +63,26 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("getting synthesizer: %w", err)
 	}
-	logger = logger.WithValues("synthesizer", syn.Name, "synthesizerGeneration", syn.Generation)
+	logger = logger.WithValues("synthesizerName", syn.Name, "podName", pod.Name)
 
 	// Update composition status
 	var (
 		compGen, _ = strconv.ParseInt(pod.Annotations["eno.azure.io/composition-generation"], 10, 0)
 		synGen, _  = strconv.ParseInt(pod.Annotations["eno.azure.io/synthesizer-generation"], 10, 0)
 	)
-	if statusIsOutOfSync(comp, compGen, synGen) {
+	logger.WithValues("synthesizerGeneration", synGen, "compositionGeneration", compGen)
+	if shouldWriteStatus(comp, compGen, synGen) {
+		if comp.Status.CurrentState == nil {
+			comp.Status.CurrentState = &apiv1.Synthesis{}
+		}
 		comp.Status.CurrentState.PodCreation = &pod.CreationTimestamp
 		comp.Status.CurrentState.ObservedSynthesizerGeneration = synGen
 
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 		}
-		logger.Info("populated synthesis status to reflect pod")
-		return ctrl.Result{}, nil
+		logger.V(1).Info("wrote synthesizer pod metadata to composition")
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Remove the finalizer
@@ -87,15 +90,14 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if err := c.client.Update(ctx, pod); err != nil {
 			return ctrl.Result{}, fmt.Errorf("removing pod finalizer: %w", err)
 		}
-		logger.Info("removed pod finalizer")
-		return ctrl.Result{}, nil
+		logger.V(1).Info("synthesizer pod can safely be deleted now that its metadata has been captured")
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	return ctrl.Result{}, nil
 }
 
-func statusIsOutOfSync(comp *apiv1.Composition, podCompGen, podSynGen int64) bool {
-	// TODO: Unit tests, make sure to cover the pod creation latching logic
-	return (comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration == podCompGen) &&
-		(comp.Status.CurrentState.PodCreation == nil || comp.Status.CurrentState.ObservedSynthesizerGeneration != podSynGen)
+func shouldWriteStatus(comp *apiv1.Composition, podCompGen, podSynGen int64) bool {
+	current := comp.Status.CurrentState
+	return current == nil || (current.ObservedCompositionGeneration == podCompGen && (current.PodCreation == nil || current.ObservedSynthesizerGeneration == 0))
 }

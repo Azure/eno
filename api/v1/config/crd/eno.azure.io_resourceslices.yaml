@@ -3,15 +3,14 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.11.3
-  creationTimestamp: null
-  name: resourceslice.eno.azure.io
+    controller-gen.kubebuilder.io/version: v0.13.0
+  name: resourceslices.eno.azure.io
 spec:
   group: eno.azure.io
   names:
     kind: ResourceSlice
     listKind: ResourceSliceList
-    plural: resourceslice
+    plural: resourceslices
     singular: resourceslice
   scope: Namespaced
   versions:
@@ -33,19 +32,16 @@ spec:
             type: object
           spec:
             properties:
-              compositionGeneration:
-                format: int64
-                type: integer
               resources:
                 items:
                   properties:
+                    deleted:
+                      description: Deleted is true when this manifest represents a
+                        "tombstone" - a resource that should no longer exist.
+                      type: boolean
                     manifest:
                       type: string
                     reconcileInterval:
-                      type: string
-                    secretName:
-                      description: A reference to the secret holding this resource.
-                        This is only relevant when the resource's kind is Secret.
                       type: string
                   type: object
                 type: array

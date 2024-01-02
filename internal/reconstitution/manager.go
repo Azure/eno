@@ -12,11 +12,11 @@ import (
 
 // New creates a new Manager, which is responsible for "reconstituting" resources
 // i.e. allowing controllers to treat them as individual resources instead of their storage representation (ResourceSlice).
-func New(mgr ctrl.Manager, writeBatchInterval time.Duration) (Manager, error) {
-	m := &reconcilerManager{
+func New(mgr ctrl.Manager, writeBatchInterval time.Duration) (*Manager, error) {
+	m := &Manager{
 		Manager: mgr,
 	}
-	m.writeBuffer = newWriteBuffer(mgr.GetClient(), writeBatchInterval, 1)
+	m.writeBuffer = newWriteBuffer(mgr.GetClient(), writeBatchInterval, 2)
 	mgr.Add(m.writeBuffer)
 
 	var err error
@@ -28,41 +28,36 @@ func New(mgr ctrl.Manager, writeBatchInterval time.Duration) (Manager, error) {
 	return m, nil
 }
 
-type Manager interface {
-	GetClient() Client
-	Add(rec Reconciler) error
-}
-
-type reconcilerManager struct {
+type Manager struct {
 	ctrl.Manager
 	*reconstituter
 	*writeBuffer
 }
 
-func (m *reconcilerManager) GetClient() Client { return m }
+func (m *Manager) GetClient() Client { return m }
 
-func (m *reconcilerManager) Add(rec Reconciler) error {
+func (m *Manager) Add(rec Reconciler) error {
 	rateLimiter := workqueue.DefaultControllerRateLimiter()
 	queue := workqueue.NewRateLimitingQueueWithConfig(rateLimiter, workqueue.RateLimitingQueueConfig{
 		Name: rec.Name(),
 	})
 	qp := &queueProcessor{
-		Client:        m.Manager.GetClient(),
-		Queue:         queue,
-		Reconstituter: m.reconstituter,
-		Handler:       rec,
-		Logger:        m.Manager.GetLogger().WithValues("controller", rec.Name()),
+		Client:  m.Manager.GetClient(),
+		Queue:   queue,
+		Recon:   m.reconstituter,
+		Handler: rec,
+		Logger:  m.Manager.GetLogger().WithValues("controller", rec.Name()),
 	}
 	m.reconstituter.AddQueue(queue)
 	return m.Manager.Add(qp)
 }
 
 type queueProcessor struct {
-	Client        client.Client
-	Queue         workqueue.RateLimitingInterface
-	Reconstituter *reconstituter
-	Handler       Reconciler
-	Logger        logr.Logger
+	Client  client.Client
+	Queue   workqueue.RateLimitingInterface
+	Recon   *reconstituter
+	Handler Reconciler
+	Logger  logr.Logger
 }
 
 func (q *queueProcessor) Start(ctx context.Context) error {

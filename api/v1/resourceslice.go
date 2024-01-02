@@ -21,8 +21,6 @@ type ResourceSlice struct {
 
 // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable"
 type ResourceSliceSpec struct {
-	CompositionGeneration int64 `json:"compositionGeneration,omitempty"`
-
 	Resources []Manifest `json:"resources,omitempty"`
 }
 
@@ -30,11 +28,10 @@ type Manifest struct {
 	// +required
 	Manifest string `json:"manifest,omitempty"`
 
-	ReconcileInterval *metav1.Duration `json:"reconcileInterval,omitempty"`
+	// Deleted is true when this manifest represents a "tombstone" - a resource that should no longer exist.
+	Deleted bool `json:"deleted,omitempty"`
 
-	// A reference to the secret holding this resource.
-	// This is only relevant when the resource's kind is Secret.
-	SecretName *string `json:"secretName,omitempty"`
+	ReconcileInterval *metav1.Duration `json:"reconcileInterval,omitempty"`
 }
 
 type ResourceSliceStatus struct {
@@ -51,4 +48,8 @@ type ResourceState struct {
 	// Otherwise it is true when the resource is ready, false otherwise.
 	// Like Reconciled, it latches and will never transition from true->false.
 	Ready *bool `json:"ready,omitempty"`
+}
+
+type ResourceSliceRef struct {
+	Name string `json:"name,omitempty"`
 }

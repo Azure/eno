@@ -3,16 +3,17 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.13.0
-  name: synthesizers.eno.azure.io
+    controller-gen.kubebuilder.io/version: v0.11.3
+  creationTimestamp: null
+  name: testresources.enotest.azure.io
 spec:
-  group: eno.azure.io
+  group: enotest.azure.io
   names:
-    kind: Synthesizer
-    listKind: SynthesizerList
-    plural: synthesizers
-    singular: synthesizer
-  scope: Cluster
+    kind: TestResource
+    listKind: TestResourceList
+    plural: testresources
+    singular: testresource
+  scope: Namespaced
   versions:
   - name: v1
     schema:
@@ -32,33 +33,15 @@ spec:
             type: object
           spec:
             properties:
-              command:
-                default:
-                - synthesize
+              values:
                 items:
-                  type: string
+                  properties:
+                    int:
+                      type: integer
+                  type: object
                 type: array
-              image:
-                type: string
-              timeout:
-                default: 10s
-                type: string
             type: object
           status:
-            properties:
-              currentGeneration:
-                description: The metadata.generation of this resource at the oldest
-                  version currently used by any Generations. This will equal the current
-                  generation when slow rollout of an update to the Generations is
-                  complete.
-                format: int64
-                type: integer
-              lastRolloutTime:
-                description: LastRolloutTime is the timestamp of the last pod creation
-                  caused by a change to this resource. Should not be updated due to
-                  Composotion changes. Used to calculate rollout cooldown period.
-                format: date-time
-                type: string
             type: object
         type: object
     served: true
