@@ -13,7 +13,6 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/kube-openapi/pkg/util/proto"
-	"k8s.io/kubectl/pkg/util/openapi"
 )
 
 // discoveryCache is useful to prevent excessive QPS to the discovery APIs while
@@ -22,8 +21,8 @@ type discoveryCache struct {
 	mut                   sync.Mutex
 	client                discovery.DiscoveryInterface
 	fillWhenNotFound      bool
-	currentResources      openapi.Resources
 	currentSupportedTypes map[schema.GroupVersionKind]struct{}
+	currentSchema         map[schema.GroupVersionKind]proto.Schema
 }
 
 func newDicoveryCache(rc *rest.Config, qps float32, fillWhenNotFound bool) (*discoveryCache, error) {
@@ -36,7 +35,7 @@ func newDicoveryCache(rc *rest.Config, qps float32, fillWhenNotFound bool) (*dis
 	}
 	disc.UseLegacyDiscovery = true // don't bother with aggregated APIs since they may be unavailable
 
-	d := &discoveryCache{client: disc, fillWhenNotFound: fillWhenNotFound, currentSupportedTypes: map[schema.GroupVersionKind]struct{}{}}
+	d := &discoveryCache{client: disc, fillWhenNotFound: fillWhenNotFound, currentSupportedTypes: map[schema.GroupVersionKind]struct{}{}, currentSchema: map[schema.GroupVersionKind]proto.Schema{}}
 	return d, nil
 }
 
@@ -48,16 +47,16 @@ func (d *discoveryCache) Get(ctx context.Context, gvk schema.GroupVersionKind) (
 	// Older versions of Kubernetes don't include CRDs in the openapi spec, so on those versions we cannot invalidate the cache if a resource is not found.
 	// However, on newer versions we expect every resource to exist in the spec so retries are safe and often necessary.
 	for i := 0; i < 2; i++ {
-		if d.currentResources == nil {
+		if d.currentSchema == nil {
 			logger.V(1).Info("filling discovery cache")
 			if err := d.fillUnlocked(ctx); err != nil {
 				return nil, err
 			}
 		}
 
-		model := d.currentResources.LookupResource(gvk)
-		if model == nil && d.fillWhenNotFound {
-			d.currentResources = nil // invalidate cache - retrieve fresh schema on next attempt
+		model, ok := d.currentSchema[gvk]
+		if !ok && d.fillWhenNotFound {
+			d.currentSchema = nil // invalidate cache - retrieve fresh schema on next attempt
 			continue
 		}
 		return d.checkSupportUnlocked(ctx, gvk, model)
@@ -70,12 +69,8 @@ func (d *discoveryCache) fillUnlocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	resources, err := openapi.NewOpenAPIData(doc)
-	if err != nil {
-		return err
-	}
-	d.currentResources = resources
 	d.currentSupportedTypes = buildSupportedTypesMap(doc)
+	d.currentSchema = buildCurrentSchemaMap(doc)
 	return nil
 }
 
@@ -128,4 +123,71 @@ func buildSupportedTypesMap(doc *openapi_v2.Document) map[schema.GroupVersionKin
 		}
 	}
 	return m
+}
+
+func buildCurrentSchemaMap(doc *openapi_v2.Document) map[schema.GroupVersionKind]proto.Schema {
+	// Adopted from kubectl
+	// We modified such that the openapi doc is freed once our internal map has been built
+	// The kubectl implementation holds a pointer to it, which consumes significant amounts of memory
+
+	models, err := proto.NewOpenAPIData(doc)
+	if err != nil {
+		panic(err) // TODO:?
+	}
+
+	m := map[schema.GroupVersionKind]proto.Schema{}
+	for _, modelName := range models.ListModels() {
+		model := models.LookupModel(modelName)
+		gvkList := parseGroupVersionKind(model)
+		for _, gvk := range gvkList {
+			if len(gvk.Kind) > 0 {
+				m[gvk] = model
+			}
+		}
+	}
+
+	return m
+}
+
+func parseGroupVersionKind(s proto.Schema) []schema.GroupVersionKind {
+	// Adopted from kubectl
+	extensions := s.GetExtensions()
+	gvkListResult := []schema.GroupVersionKind{}
+
+	gvkExtension, ok := extensions["x-kubernetes-group-version-kind"]
+	if !ok {
+		return []schema.GroupVersionKind{}
+	}
+
+	gvkList, ok := gvkExtension.([]interface{})
+	if !ok {
+		return []schema.GroupVersionKind{}
+	}
+
+	for _, gvk := range gvkList {
+		gvkMap, ok := gvk.(map[interface{}]interface{})
+		if !ok {
+			continue
+		}
+		group, ok := gvkMap["group"].(string)
+		if !ok {
+			continue
+		}
+		version, ok := gvkMap["version"].(string)
+		if !ok {
+			continue
+		}
+		kind, ok := gvkMap["kind"].(string)
+		if !ok {
+			continue
+		}
+
+		gvkListResult = append(gvkListResult, schema.GroupVersionKind{
+			Group:   group,
+			Version: version,
+			Kind:    kind,
+		})
+	}
+
+	return gvkListResult
 }
