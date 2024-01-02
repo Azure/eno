@@ -11,10 +11,10 @@ import (
 	"k8s.io/kube-openapi/pkg/util/proto"
 )
 
-func buildCurrentSchemaMap(doc *openapi_v2.Document) map[schema.GroupVersionKind]proto.Schema {
+func buildCurrentSchemaMap(doc *openapi_v2.Document) (map[schema.GroupVersionKind]proto.Schema, error) {
 	models, err := proto.NewOpenAPIData(doc)
 	if err != nil {
-		panic(err) // TODO:?
+		return nil, err
 	}
 
 	allSupported := map[schema.GroupVersionKind]struct{}{}
@@ -60,7 +60,7 @@ func buildCurrentSchemaMap(doc *openapi_v2.Document) map[schema.GroupVersionKind
 		}
 	}
 
-	return m
+	return m, nil
 }
 
 func parseGroupVersionKind(s proto.Schema) []schema.GroupVersionKind {

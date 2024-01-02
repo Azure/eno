@@ -70,6 +70,9 @@ func (d *discoveryCache) fillUnlocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	d.current = buildCurrentSchemaMap(doc)
+	d.current, err = buildCurrentSchemaMap(doc)
+	if err != nil {
+		return err
+	}
 	return nil
 }
