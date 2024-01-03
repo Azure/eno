@@ -6,7 +6,7 @@ ADD go.sum .
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 go build ./cmd/eno-reconciler
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" ./cmd/eno-reconciler
 
 FROM scratch
 COPY --from=builder /app/eno-reconciler /eno-reconciler
