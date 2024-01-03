@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
@@ -65,9 +66,21 @@ func (o *Options) Bind(set *flag.FlagSet) {
 
 func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
 	opts.Rest.QPS = float32(opts.qps)
+
+	scheme := runtime.NewScheme()
+	err := apiv1.SchemeBuilder.AddToScheme(scheme)
+	if err != nil {
+		return nil, err
+	}
+	err = corev1.SchemeBuilder.AddToScheme(scheme)
+	if err != nil {
+		return nil, err
+	}
+
 	mgrOpts := manager.Options{
 		Logger:                 logger,
 		HealthProbeBindAddress: opts.HealthProbeAddr,
+		Scheme:                 scheme,
 		Metrics: server.Options{
 			BindAddress: opts.MetricsAddr,
 		},
@@ -97,11 +110,6 @@ func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
 	}
 
 	mgr, err := ctrl.NewManager(opts.Rest, mgrOpts)
-	if err != nil {
-		return nil, err
-	}
-
-	err = apiv1.SchemeBuilder.AddToScheme(mgr.GetScheme())
 	if err != nil {
 		return nil, err
 	}
