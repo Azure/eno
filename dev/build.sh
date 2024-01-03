@@ -16,7 +16,7 @@ function build() {
 }
 
 # Build!
-for f in cmd/*; do
+for f in docker/*; do
     build $f &
 done
 wait

@@ -141,7 +141,7 @@ func NewManager(t *testing.T) *Manager {
 	m.DownstreamRestConfig, err = downstreamEnv.Start()
 	require.NoError(t, err)
 
-	m.DownstreamClient, err = client.New(m.DownstreamRestConfig, client.Options{})
+	m.DownstreamClient, err = client.New(m.DownstreamRestConfig, client.Options{Scheme: mgr.GetScheme()})
 	require.NoError(t, err)
 
 	// Log apiserver version
