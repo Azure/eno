@@ -31,7 +31,7 @@ func newDicoveryCache(rc *rest.Config, qps float32, fillWhenNotFound bool) (*dis
 	}
 	disc.UseLegacyDiscovery = true // don't bother with aggregated APIs since they may be unavailable
 
-	d := &discoveryCache{client: disc, fillWhenNotFound: fillWhenNotFound, current: map[schema.GroupVersionKind]proto.Schema{}}
+	d := &discoveryCache{client: disc, fillWhenNotFound: fillWhenNotFound}
 	return d, nil
 }
 
