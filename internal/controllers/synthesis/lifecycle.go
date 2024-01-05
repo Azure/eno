@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
@@ -57,9 +58,20 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
 
+	// It isn't safe to synthesize a composition if deleting it would leave the resulting resource slices orphaned,
+	// since reconciling resource slices is necessarily dependent on the owning composition resource
+	if controllerutil.AddFinalizer(comp, "eno.azure.io/cleanup") {
+		err = c.client.Update(ctx, comp)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("updating composition: %w", err)
+		}
+		logger.Info("added cleanup finalizer to composition")
+		return ctrl.Result{}, nil
+	}
+
 	// Delete any unnecessary pods
 	pods := &corev1.PodList{}
-	err = c.client.List(ctx, pods, client.MatchingFields{
+	err = c.client.List(ctx, pods, client.InNamespace(comp.Namespace), client.MatchingFields{
 		manager.IdxPodsByComposition: comp.Name,
 	})
 	if err != nil {
@@ -90,7 +102,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// No need to create a pod if everything is in sync
-	if comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized {
+	if comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized || comp.DeletionTimestamp != nil {
 		return ctrl.Result{}, nil
 	}
 

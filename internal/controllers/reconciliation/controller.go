@@ -24,9 +24,6 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// TODO: Block ResourceSlice deletion until resources have been cleaned up
-// TODO: Clean up unused resource slices older than a duration
-
 type Controller struct {
 	client         client.Client
 	resourceClient reconstitution.Client
@@ -71,9 +68,14 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	logger := logr.FromContextOrDiscard(ctx).WithValues("synthesizerName", comp.Spec.Synthesizer.Name, "synthesizerGeneration", comp.Status.CurrentState.ObservedSynthesizerGeneration)
 	ctx = logr.NewContext(ctx, logger)
 
+	slice := &apiv1.ResourceSlice{}
+	err = c.client.Get(ctx, req.Manifest.Slice, slice)
+	if client.IgnoreNotFound(err) != nil { // it's okay if somehow the slice has been deleted - nil slice implies resource should be cleaned up
+		return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
+	}
+
 	// Find the current and (optionally) previous desired states in the cache
-	currentGen := comp.Status.CurrentState.ObservedCompositionGeneration
-	resource, exists := c.resourceClient.Get(ctx, &req.ResourceRef, currentGen)
+	resource, exists := c.resourceClient.Get(ctx, &req.ResourceRef, reconstitution.GetCompositionGenerationAtCurrentState(comp))
 	if !exists {
 		// It's possible for the cache to be empty because a manifest for this resource no longer exists at the requested composition generation.
 		// Dropping the work item is safe since filling the new version will generate a new queue message.
@@ -114,12 +116,16 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		return ctrl.Result{}, err
 	}
 
-	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) bool {
-		if rs.Reconciled {
-			return false // already in sync
+	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) (modified bool) {
+		if resource.Manifest.Deleted && !rs.Deleted {
+			rs.Deleted = true
+			modified = true
 		}
-		rs.Reconciled = true
-		return true
+		if !rs.Reconciled {
+			rs.Reconciled = true
+			modified = true
+		}
+		return
 	})
 
 	if resource != nil && resource.Manifest.ReconcileInterval != nil {

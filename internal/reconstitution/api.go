@@ -10,6 +10,8 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 )
 
+// TODO: Rename some of these types for clarity
+
 // Reconciler is implemented by types that can reconcile individual, reconstituted resources.
 type Reconciler interface {
 	Name() string

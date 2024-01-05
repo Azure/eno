@@ -17,7 +17,7 @@ func New(mgr ctrl.Manager, writeBatchInterval time.Duration) (*Manager, error) {
 		Manager: mgr,
 	}
 	m.writeBuffer = newWriteBuffer(mgr.GetClient(), writeBatchInterval, 2)
-	mgr.Add(m.writeBuffer)
+	mgr.Add(m.writeBuffer) // TODO: No logger is in the context here
 
 	var err error
 	m.reconstituter, err = newReconstituter(mgr)

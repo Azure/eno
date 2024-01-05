@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	ctrl "sigs.k8s.io/controller-runtime"
 
+	"github.com/Azure/eno/internal/controllers/cleanup"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/manager"
 )
@@ -78,6 +79,11 @@ func run() error {
 	err = synthesis.NewPodLifecycleController(mgr, synconf)
 	if err != nil {
 		return fmt.Errorf("constructing pod lifecycle controller: %w", err)
+	}
+
+	err = cleanup.NewResourceSliceController(mgr)
+	if err != nil {
+		return fmt.Errorf("constructing resource slice lifecycle controller: %w", err)
 	}
 
 	return mgr.Start(ctx)

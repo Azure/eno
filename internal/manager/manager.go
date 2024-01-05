@@ -31,9 +31,16 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 )
 
+// TODO: Field ownership naming?
+
+// TODO: Consider separate indices for each controller process
+
+// TODO: Make sure indices don't conflict across namespaces
+
 const (
-	IdxPodsByComposition         = ".metadata.ownerReferences.composition"
-	IdxCompositionsBySynthesizer = ".spec.synthesizer"
+	IdxPodsByComposition           = ".podsByComp"
+	IdxResourceSlicesByComposition = ".slicesByComp"
+	IdxCompositionsBySynthesizer   = ".compsBySynth"
 
 	ManagerLabelKey   = "app.kubernetes.io/managed-by"
 	ManagerLabelValue = "eno"
@@ -134,6 +141,18 @@ func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
 		return nil, err
 	}
 
+	err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, IdxResourceSlicesByComposition, func(o client.Object) []string {
+		slice := o.(*apiv1.ResourceSlice)
+		owner := metav1.GetControllerOf(slice)
+		if owner == nil || owner.Kind != "Composition" {
+			return nil
+		}
+		return []string{owner.Name}
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	mgr.AddHealthzCheck("ping", healthz.Ping)
 
 	return mgr, nil
@@ -175,5 +194,50 @@ func NewCompositionToSynthesizerHandler(cli client.Client) handler.EventHandler 
 			}
 			rli.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: comp.Spec.Synthesizer.Name}})
 		},
+	}
+}
+
+func NewCompositionToResourceSliceHandler(cli client.Client) handler.EventHandler {
+	return &handler.Funcs{
+		CreateFunc: func(ctx context.Context, ce event.CreateEvent, rli workqueue.RateLimitingInterface) {
+			comp, ok := ce.Object.(*apiv1.Composition)
+			if !ok {
+				logr.FromContextOrDiscard(ctx).V(0).Info("unexpected type given to NewCompositionToResourceSliceHandler")
+				return
+			}
+			enqueueCompositionSlices(ctx, rli, cli, comp)
+		},
+		UpdateFunc: func(ctx context.Context, ue event.UpdateEvent, rli workqueue.RateLimitingInterface) {
+			comp, ok := ue.ObjectNew.(*apiv1.Composition)
+			if !ok {
+				logr.FromContextOrDiscard(ctx).V(0).Info("unexpected type given to NewCompositionToResourceSliceHandler")
+				return
+			}
+			enqueueCompositionSlices(ctx, rli, cli, comp)
+		},
+		DeleteFunc: func(ctx context.Context, de event.DeleteEvent, rli workqueue.RateLimitingInterface) {
+			comp, ok := de.Object.(*apiv1.Composition)
+			if !ok {
+				logr.FromContextOrDiscard(ctx).V(0).Info("unexpected type given to NewCompositionToResourceSliceHandler")
+				return
+			}
+			enqueueCompositionSlices(ctx, rli, cli, comp)
+		},
+	}
+}
+
+func enqueueCompositionSlices(ctx context.Context, rli workqueue.RateLimitingInterface, cli client.Client, comp *apiv1.Composition) {
+	logger := logr.FromContextOrDiscard(ctx)
+
+	list := &apiv1.ResourceSliceList{}
+	err := cli.List(ctx, list, client.InNamespace(comp.Namespace), client.MatchingFields{
+		IdxResourceSlicesByComposition: comp.Name,
+	})
+	if err != nil {
+		logger.Error(err, "listing resource slices")
+		return
+	}
+	for _, item := range list.Items {
+		rli.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: item.Name, Namespace: item.Namespace}})
 	}
 }
