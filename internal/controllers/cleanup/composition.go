@@ -18,8 +18,8 @@ type compositionController struct {
 
 func NewCompositionController(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&apiv1.ResourceSlice{}).
-		Watches(&apiv1.Composition{}, manager.NewCompositionToResourceSliceHandler(mgr.GetClient())).
+		For(&apiv1.Composition{}).
+		Owns(&apiv1.ResourceSlice{}).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "compositionCleanupController")).
 		Complete(&compositionController{
 			client: mgr.GetClient(),
@@ -34,7 +34,7 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition: %w", err))
 	}
-	if !controllerutil.ContainsFinalizer(comp, "eno.azure.io/cleanup") {
+	if comp.DeletionTimestamp == nil || !controllerutil.ContainsFinalizer(comp, "eno.azure.io/cleanup") {
 		return ctrl.Result{}, nil // nothing to do
 	}
 
@@ -45,7 +45,7 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("listing resource slices: %w", err)
 	}
-	if len(list.Items) > 0 {
+	if n := len(list.Items); n > 0 {
 		return ctrl.Result{}, nil // slices still exist
 	}
 

@@ -60,7 +60,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 
 	// It isn't safe to synthesize a composition if deleting it would leave the resulting resource slices orphaned,
 	// since reconciling resource slices is necessarily dependent on the owning composition resource
-	if controllerutil.AddFinalizer(comp, "eno.azure.io/cleanup") {
+	if comp.DeletionTimestamp == nil && controllerutil.AddFinalizer(comp, "eno.azure.io/cleanup") {
 		err = c.client.Update(ctx, comp)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating composition: %w", err)
