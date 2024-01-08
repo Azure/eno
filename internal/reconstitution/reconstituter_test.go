@@ -35,6 +35,7 @@ func TestReconstituterIntegration(t *testing.T) {
 		Synthesized:                   true,
 	}
 	require.NoError(t, client.Status().Update(ctx, comp))
+	compRef := NewCompositionRef(comp)
 
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = "test-slice"
@@ -47,20 +48,19 @@ func TestReconstituterIntegration(t *testing.T) {
 
 	// Prove the resource was cached
 	ref := &ResourceRef{
-		Composition: &CompositionRef{Name: comp.Name, Namespace: comp.Namespace, Generation: comp.Status.CurrentState.ObservedCompositionGeneration},
-		Name:        "foo",
-		Namespace:   "bar",
-		Kind:        "baz",
+		Name:      "foo",
+		Namespace: "bar",
+		Kind:      "baz",
 	}
 	testutil.Eventually(t, func() bool {
-		_, exists := r.Get(ctx,comp, ref, comp.Generation)
+		_, exists := r.Get(ctx, compRef, ref)
 		return exists
 	})
 
 	// Remove the composition and confirm cache is purged
 	require.NoError(t, client.Delete(ctx, comp))
 	testutil.Eventually(t, func() bool {
-		_, exists := r.Get(ctx, comp, ref, comp.Generation)
+		_, exists := r.Get(ctx, compRef, ref)
 		return !exists
 	})
 

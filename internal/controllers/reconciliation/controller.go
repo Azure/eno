@@ -70,7 +70,8 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	// Find the current and (optionally) previous desired states in the cache
 	// TODO: Need to take deletion state from here, not from the resource request. Otherwise create/delete items will both stay in queue and churn.
-	resource, exists := c.resourceClient.Get(ctx, comp, &req.ResourceRef, comp.Status.CurrentState.ObservedCompositionGeneration)
+	compRef := reconstitution.NewCompositionRef(comp)
+	resource, exists := c.resourceClient.Get(ctx, compRef, &req.Resource)
 	if !exists {
 		// It's possible for the cache to be empty because a manifest for this resource no longer exists at the requested composition generation.
 		// Dropping the work item is safe since filling the new version will generate a new queue message.
@@ -80,7 +81,8 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	var prev *reconstitution.Resource
 	if comp.Status.PreviousState != nil {
-		prev, _ = c.resourceClient.Get(ctx, comp, &req.ResourceRef, comp.Status.PreviousState.ObservedCompositionGeneration)
+		compRef.Generation = comp.Status.PreviousState.ObservedCompositionGeneration
+		prev, _ = c.resourceClient.Get(ctx, compRef, &req.Resource)
 	}
 
 	// The current and previous resource can both be nil,
@@ -97,9 +99,9 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	// Fetch the current resource
 	current := &unstructured.Unstructured{}
-	current.SetName(req.Name)
-	current.SetNamespace(req.Namespace)
-	current.SetKind(req.Kind)
+	current.SetName(req.Resource.Name)
+	current.SetNamespace(req.Resource.Namespace)
+	current.SetKind(req.Resource.Kind)
 	current.SetAPIVersion(apiVersion)
 	err = c.upstreamClient.Get(ctx, client.ObjectKeyFromObject(current), current)
 	if client.IgnoreNotFound(err) != nil {

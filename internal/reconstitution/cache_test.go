@@ -23,6 +23,7 @@ func TestCacheBasics(t *testing.T) {
 	c := newCache(client)
 
 	comp, synth, resources, expectedReqs := newCacheTestFixtures(2, 3)
+	compRef := NewCompositionRef(comp)
 	t.Run("fill", func(t *testing.T) {
 		reqs, err := c.Fill(ctx, comp, synth, resources)
 		require.NoError(t, err)
@@ -39,7 +40,7 @@ func TestCacheBasics(t *testing.T) {
 
 	t.Run("get", func(t *testing.T) {
 		// positive
-		resource, exists := c.Get(ctx, comp, &expectedReqs[0].ResourceRef, synth.ObservedCompositionGeneration)
+		resource, exists := c.Get(ctx, compRef, &expectedReqs[0].Resource)
 		require.True(t, exists)
 		assert.NotEmpty(t, resource.Manifest)
 		assert.Equal(t, "ConfigMap", resource.Object.GetKind())
@@ -47,7 +48,9 @@ func TestCacheBasics(t *testing.T) {
 		assert.False(t, resource.Manifest.Deleted)
 
 		// negative
-		_, exists = c.Get(ctx, comp, &expectedReqs[0].ResourceRef, 123)
+		copy := *compRef
+		copy.Generation = 123
+		_, exists = c.Get(ctx, &copy, &expectedReqs[0].Resource)
 		assert.False(t, exists)
 	})
 
@@ -55,7 +58,7 @@ func TestCacheBasics(t *testing.T) {
 		c.Purge(ctx, types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}, nil)
 
 		// confirm
-		_, exists := c.Get(ctx, comp, &expectedReqs[0].ResourceRef, synth.ObservedCompositionGeneration)
+		_, exists := c.Get(ctx, compRef, &expectedReqs[0].Resource)
 		assert.False(t, exists)
 
 		assert.Len(t, c.resources, 0)
@@ -68,26 +71,18 @@ func TestCacheCleanup(t *testing.T) {
 	client := testutil.NewClient(t)
 	c := newCache(client)
 
+	now := metav1.Now()
 	comp, synth, resources, expectedReqs := newCacheTestFixtures(2, 3)
+	comp.DeletionTimestamp = &now
 	t.Run("fill", func(t *testing.T) {
 		reqs, err := c.Fill(ctx, comp, synth, resources)
 		require.NoError(t, err)
 		assert.Equal(t, expectedReqs, reqs)
 	})
-
-	t.Run("delete composition", func(t *testing.T) {
-		now := metav1.Now()
-		comp.DeletionTimestamp = &now
-		assert.False(t, c.HasSynthesis(ctx, comp, synth))
-
-		reqs, err := c.Fill(ctx, comp, synth, resources)
-		require.NoError(t, err)
-		assert.Equal(t, expectedReqs, reqs)
-		assert.True(t, c.HasSynthesis(ctx, comp, synth))
-	})
+	compRef := NewCompositionRef(comp)
 
 	t.Run("get", func(t *testing.T) {
-		resource, exists := c.Get(ctx, comp, &expectedReqs[0].ResourceRef, synth.ObservedCompositionGeneration)
+		resource, exists := c.Get(ctx, compRef, &expectedReqs[0].Resource)
 		require.True(t, exists)
 		assert.NotEmpty(t, resource.Manifest)
 		assert.Equal(t, "ConfigMap", resource.Object.GetKind())
@@ -97,7 +92,7 @@ func TestCacheCleanup(t *testing.T) {
 
 	t.Run("partial purge", func(t *testing.T) {
 		c.Purge(ctx, types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}, comp)
-		assert.Len(t, c.resources, 2) // we keep n-1 when composition is deleted for simplicity of implementation
+		assert.Len(t, c.resources, 1)
 	})
 
 	t.Run("purge", func(t *testing.T) {
@@ -148,19 +143,18 @@ func TestCachePartialPurge(t *testing.T) {
 	// Add another resource to the composition but synthesized from a newer generation
 	_, _, resources, expectedReqs := newCacheTestFixtures(1, 1)
 	synth.ObservedCompositionGeneration++
-	expectedReqs[0].Composition = &CompositionRef{Name: comp.Name, Namespace: comp.Namespace}
+	expectedReqs[0].Composition = CompositionRef{Name: comp.Name, Namespace: comp.Namespace, Generation: originalGen}
 	_, err = c.Fill(ctx, comp, synth, resources)
 	require.NoError(t, err)
+	compRef := NewCompositionRef(comp)
 
 	// Fill another composition - this one shouldn't be purged
-	var toBePreserved *ResourceRef
-	var toBePreservedComp *apiv1.Composition
+	var toBePreserved *Request
 	{
 		comp, synth, resources, expectedReqs := newCacheTestFixtures(3, 4)
 		_, err := c.Fill(ctx, comp, synth, resources)
 		require.NoError(t, err)
-		toBePreserved = &expectedReqs[0].ResourceRef
-		toBePreservedComp = comp
+		toBePreserved = expectedReqs[0]
 	}
 
 	comp.Status.CurrentState = synth // only reference the most recent synthesis
@@ -169,15 +163,16 @@ func TestCachePartialPurge(t *testing.T) {
 	c.Purge(ctx, compNSN, comp)
 
 	// The newer resource should still exist
-	_, exists := c.Get(ctx, comp, &expectedReqs[0].ResourceRef, synth.ObservedCompositionGeneration)
+	_, exists := c.Get(ctx, compRef, &expectedReqs[0].Resource)
 	assert.True(t, exists)
 
 	// The older resource is not referenced by the composition and should have been removed
-	_, exists = c.Get(ctx, comp, &expectedReqs[0].ResourceRef, originalGen)
+	compRef.Generation = originalGen
+	_, exists = c.Get(ctx, compRef, &expectedReqs[0].Resource)
 	assert.False(t, exists)
 
 	// Resource of the other composition are unaffected
-	_, exists = c.Get(ctx, toBePreservedComp, toBePreserved, originalGen)
+	_, exists = c.Get(ctx, &toBePreserved.Composition, &toBePreserved.Resource)
 	assert.True(t, exists)
 
 	// The cache should only be internally tracking the remaining synthesis of our test composition
@@ -189,6 +184,7 @@ func newCacheTestFixtures(sliceCount, resPerSliceCount int) (*apiv1.Composition,
 	comp.Namespace = string(uuid.NewUUID())
 	comp.Name = string(uuid.NewUUID())
 	synth := &apiv1.Synthesis{ObservedCompositionGeneration: 3} // just not 0
+	comp.Status.CurrentState = synth
 
 	resources := make([]apiv1.ResourceSlice, sliceCount)
 	requests := []*Request{}
@@ -210,11 +206,10 @@ func newCacheTestFixtures(sliceCount, resPerSliceCount int) (*apiv1.Composition,
 				Manifest: string(js),
 			}
 			requests = append(requests, &Request{
-				ResourceRef: ResourceRef{
-					Composition: &CompositionRef{Name: comp.Name, Namespace: comp.Namespace},
-					Name:        resource.Name,
-					Namespace:   resource.Namespace,
-					Kind:        resource.Kind,
+				Resource: ResourceRef{
+					Name:      resource.Name,
+					Namespace: resource.Namespace,
+					Kind:      resource.Kind,
 				},
 				Manifest: ManifestRef{
 					Slice: types.NamespacedName{
@@ -223,6 +218,7 @@ func newCacheTestFixtures(sliceCount, resPerSliceCount int) (*apiv1.Composition,
 					},
 					Index: j,
 				},
+				Composition: CompositionRef{Name: comp.Name, Namespace: comp.Namespace, Generation: synth.ObservedCompositionGeneration},
 			})
 		}
 		resources[i] = slice

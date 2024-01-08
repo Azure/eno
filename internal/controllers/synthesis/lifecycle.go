@@ -47,6 +47,20 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
 
+	// Deletion increments the composition's generation, but the reconstitution cache is only invalidated
+	// when the synthesized generation (from the status) changes, which will never happen because synthesis
+	// is righly disabled for deleted compositions. We break out of this deadlock condition by updating
+	// the status without actually synthesizing.
+	if comp.DeletionTimestamp != nil && comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration != comp.Generation {
+		comp.Status.CurrentState.ObservedCompositionGeneration = comp.Generation
+		err = c.client.Status().Update(ctx, comp)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("updating current composition generation: %w", err)
+		}
+		logger.Info("updated composition status to reflect deletion")
+		return ctrl.Result{}, nil
+	}
+
 	syn := &apiv1.Synthesizer{}
 	syn.Name = comp.Spec.Synthesizer.Name
 	err = c.client.Get(ctx, client.ObjectKeyFromObject(syn), syn)

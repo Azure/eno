@@ -10,8 +10,6 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 )
 
-// TODO: Rename some of these types for clarity
-
 // Reconciler is implemented by types that can reconcile individual, reconstituted resources.
 type Reconciler interface {
 	Name() string
@@ -20,7 +18,7 @@ type Reconciler interface {
 
 // Client provides read/write access to a collection of reconstituted resources.
 type Client interface {
-	Get(ctx context.Context, comp *apiv1.Composition, ref *ResourceRef, gen int64) (*Resource, bool)
+	Get(ctx context.Context, comp *CompositionRef, res *ResourceRef) (*Resource, bool)
 	PatchStatusAsync(ctx context.Context, req *ManifestRef, patchFn StatusPatchFn)
 }
 
@@ -42,18 +40,27 @@ type Resource struct {
 
 // ResourceRef refers to a specific synthesized resource.
 type ResourceRef struct {
-	Composition           *CompositionRef
 	Name, Namespace, Kind string
 }
 
+// CompositionRef refers to a specific generation of a composition.
 type CompositionRef struct {
 	Name, Namespace string
-	Generation      int64 // TODO: Remove from Get?
+	Generation      int64
+}
+
+func NewCompositionRef(comp *apiv1.Composition) *CompositionRef {
+	c := &CompositionRef{Name: comp.Name, Namespace: comp.Namespace}
+	if comp.Status.CurrentState != nil {
+		c.Generation = comp.Status.CurrentState.ObservedCompositionGeneration
+	}
+	return c
 }
 
 // Request is like controller-runtime reconcile.Request but for reconstituted resources.
 // https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/reconcile#Request
 type Request struct {
-	ResourceRef
-	Manifest ManifestRef
+	Resource    ResourceRef
+	Manifest    ManifestRef
+	Composition CompositionRef
 }
