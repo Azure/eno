@@ -5,7 +5,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -36,6 +35,7 @@ func TestReconstituterIntegration(t *testing.T) {
 		Synthesized:                   true,
 	}
 	require.NoError(t, client.Status().Update(ctx, comp))
+	compRef := NewCompositionRef(comp)
 
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = "test-slice"
@@ -48,23 +48,19 @@ func TestReconstituterIntegration(t *testing.T) {
 
 	// Prove the resource was cached
 	ref := &ResourceRef{
-		Composition: types.NamespacedName{
-			Name:      comp.Name,
-			Namespace: comp.Namespace,
-		},
 		Name:      "foo",
 		Namespace: "bar",
 		Kind:      "baz",
 	}
 	testutil.Eventually(t, func() bool {
-		_, exists := r.Get(ctx, ref, comp.Generation)
+		_, exists := r.Get(ctx, compRef, ref)
 		return exists
 	})
 
 	// Remove the composition and confirm cache is purged
 	require.NoError(t, client.Delete(ctx, comp))
 	testutil.Eventually(t, func() bool {
-		_, exists := r.Get(ctx, ref, comp.Generation)
+		_, exists := r.Get(ctx, compRef, ref)
 		return !exists
 	})
 

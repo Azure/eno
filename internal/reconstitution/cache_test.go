@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
 
@@ -22,6 +23,7 @@ func TestCacheBasics(t *testing.T) {
 	c := newCache(client)
 
 	comp, synth, resources, expectedReqs := newCacheTestFixtures(2, 3)
+	compRef := NewCompositionRef(comp)
 	t.Run("fill", func(t *testing.T) {
 		reqs, err := c.Fill(ctx, comp, synth, resources)
 		require.NoError(t, err)
@@ -38,24 +40,63 @@ func TestCacheBasics(t *testing.T) {
 
 	t.Run("get", func(t *testing.T) {
 		// positive
-		resource, exists := c.Get(ctx, &expectedReqs[0].ResourceRef, synth.ObservedCompositionGeneration)
+		resource, exists := c.Get(ctx, compRef, &expectedReqs[0].Resource)
 		require.True(t, exists)
 		assert.NotEmpty(t, resource.Manifest)
 		assert.Equal(t, "ConfigMap", resource.Object.GetKind())
 		assert.Equal(t, "slice-0-resource-0", resource.Object.GetName())
+		assert.False(t, resource.Manifest.Deleted)
 
 		// negative
-		_, exists = c.Get(ctx, &expectedReqs[0].ResourceRef, 123)
+		copy := *compRef
+		copy.Generation = 123
+		_, exists = c.Get(ctx, &copy, &expectedReqs[0].Resource)
 		assert.False(t, exists)
 	})
 
 	t.Run("purge", func(t *testing.T) {
-		c.Purge(ctx, comp, nil)
+		c.Purge(ctx, types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}, nil)
 
 		// confirm
-		_, exists := c.Get(ctx, &expectedReqs[0].ResourceRef, synth.ObservedCompositionGeneration)
+		_, exists := c.Get(ctx, compRef, &expectedReqs[0].Resource)
 		assert.False(t, exists)
 
+		assert.Len(t, c.resources, 0)
+	})
+}
+
+func TestCacheCleanup(t *testing.T) {
+	ctx := testutil.NewContext(t)
+
+	client := testutil.NewClient(t)
+	c := newCache(client)
+
+	now := metav1.Now()
+	comp, synth, resources, expectedReqs := newCacheTestFixtures(2, 3)
+	comp.DeletionTimestamp = &now
+	t.Run("fill", func(t *testing.T) {
+		reqs, err := c.Fill(ctx, comp, synth, resources)
+		require.NoError(t, err)
+		assert.Equal(t, expectedReqs, reqs)
+	})
+	compRef := NewCompositionRef(comp)
+
+	t.Run("get", func(t *testing.T) {
+		resource, exists := c.Get(ctx, compRef, &expectedReqs[0].Resource)
+		require.True(t, exists)
+		assert.NotEmpty(t, resource.Manifest)
+		assert.Equal(t, "ConfigMap", resource.Object.GetKind())
+		assert.Equal(t, "slice-0-resource-0", resource.Object.GetName())
+		assert.True(t, resource.Manifest.Deleted)
+	})
+
+	t.Run("partial purge", func(t *testing.T) {
+		c.Purge(ctx, types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}, comp)
+		assert.Len(t, c.resources, 1)
+	})
+
+	t.Run("purge", func(t *testing.T) {
+		c.Purge(ctx, types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}, nil)
 		assert.Len(t, c.resources, 0)
 	})
 }
@@ -93,52 +134,57 @@ func TestCachePartialPurge(t *testing.T) {
 	c := newCache(client)
 
 	// Fill our main composition
-	compNSN, synth, resources, _ := newCacheTestFixtures(3, 4)
-	_, err := c.Fill(ctx, compNSN, synth, resources)
+	comp, synth, resources, _ := newCacheTestFixtures(3, 4)
+	_, err := c.Fill(ctx, comp, synth, resources)
 	require.NoError(t, err)
 	originalGen := synth.ObservedCompositionGeneration
+	compNSN := types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
 
 	// Add another resource to the composition but synthesized from a newer generation
 	_, _, resources, expectedReqs := newCacheTestFixtures(1, 1)
 	synth.ObservedCompositionGeneration++
-	expectedReqs[0].Composition = compNSN
-	_, err = c.Fill(ctx, compNSN, synth, resources)
+	expectedReqs[0].Composition = CompositionRef{Name: comp.Name, Namespace: comp.Namespace, Generation: originalGen}
+	_, err = c.Fill(ctx, comp, synth, resources)
 	require.NoError(t, err)
+	compRef := NewCompositionRef(comp)
 
 	// Fill another composition - this one shouldn't be purged
-	var toBePreserved *ResourceRef
+	var toBePreserved *Request
 	{
-		compNSN, synth, resources, expectedReqs := newCacheTestFixtures(3, 4)
-		_, err := c.Fill(ctx, compNSN, synth, resources)
+		comp, synth, resources, expectedReqs := newCacheTestFixtures(3, 4)
+		_, err := c.Fill(ctx, comp, synth, resources)
 		require.NoError(t, err)
-		toBePreserved = &expectedReqs[0].ResourceRef
+		toBePreserved = expectedReqs[0]
 	}
 
-	comp := &apiv1.Composition{}
 	comp.Status.CurrentState = synth // only reference the most recent synthesis
 
 	// Purge only a single synthesis of a generation
 	c.Purge(ctx, compNSN, comp)
 
 	// The newer resource should still exist
-	_, exists := c.Get(ctx, &expectedReqs[0].ResourceRef, synth.ObservedCompositionGeneration)
+	_, exists := c.Get(ctx, compRef, &expectedReqs[0].Resource)
 	assert.True(t, exists)
 
 	// The older resource is not referenced by the composition and should have been removed
-	_, exists = c.Get(ctx, &expectedReqs[0].ResourceRef, originalGen)
+	compRef.Generation = originalGen
+	_, exists = c.Get(ctx, compRef, &expectedReqs[0].Resource)
 	assert.False(t, exists)
 
 	// Resource of the other composition are unaffected
-	_, exists = c.Get(ctx, toBePreserved, originalGen)
+	_, exists = c.Get(ctx, &toBePreserved.Composition, &toBePreserved.Resource)
 	assert.True(t, exists)
 
 	// The cache should only be internally tracking the remaining synthesis of our test composition
 	assert.Len(t, c.synthesesByComposition[compNSN], 1)
 }
 
-func newCacheTestFixtures(sliceCount, resPerSliceCount int) (types.NamespacedName, *apiv1.Synthesis, []apiv1.ResourceSlice, []*Request) {
-	comp := types.NamespacedName{Namespace: string(uuid.NewUUID()), Name: string(uuid.NewUUID())}
+func newCacheTestFixtures(sliceCount, resPerSliceCount int) (*apiv1.Composition, *apiv1.Synthesis, []apiv1.ResourceSlice, []*Request) {
+	comp := &apiv1.Composition{}
+	comp.Namespace = string(uuid.NewUUID())
+	comp.Name = string(uuid.NewUUID())
 	synth := &apiv1.Synthesis{ObservedCompositionGeneration: 3} // just not 0
+	comp.Status.CurrentState = synth
 
 	resources := make([]apiv1.ResourceSlice, sliceCount)
 	requests := []*Request{}
@@ -160,11 +206,10 @@ func newCacheTestFixtures(sliceCount, resPerSliceCount int) (types.NamespacedNam
 				Manifest: string(js),
 			}
 			requests = append(requests, &Request{
-				ResourceRef: ResourceRef{
-					Composition: comp,
-					Name:        resource.Name,
-					Namespace:   resource.Namespace,
-					Kind:        resource.Kind,
+				Resource: ResourceRef{
+					Name:      resource.Name,
+					Namespace: resource.Namespace,
+					Kind:      resource.Kind,
 				},
 				Manifest: ManifestRef{
 					Slice: types.NamespacedName{
@@ -173,6 +218,7 @@ func newCacheTestFixtures(sliceCount, resPerSliceCount int) (types.NamespacedNam
 					},
 					Index: j,
 				},
+				Composition: CompositionRef{Name: comp.Name, Namespace: comp.Namespace, Generation: synth.ObservedCompositionGeneration},
 			})
 		}
 		resources[i] = slice
