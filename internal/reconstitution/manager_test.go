@@ -28,6 +28,7 @@ func TestManagerBasics(t *testing.T) {
 
 	// Create one composition that has one synthesis of a single resource
 	comp := &apiv1.Composition{}
+	tr.comp = comp
 	comp.Name = "test-composition"
 	comp.Namespace = "default"
 	require.NoError(t, client.Create(ctx, comp))
@@ -57,13 +58,14 @@ func TestManagerBasics(t *testing.T) {
 
 type testReconciler struct {
 	mgr          *Manager
+	comp         *apiv1.Composition
 	lastResource atomic.Pointer[Resource]
 }
 
 func (t *testReconciler) Name() string { return "testReconciler" }
 
 func (t *testReconciler) Reconcile(ctx context.Context, req *Request) (ctrl.Result, error) {
-	resource, exists := t.mgr.GetClient().Get(ctx, &req.ResourceRef, 1)
+	resource, exists := t.mgr.GetClient().Get(ctx, t.comp, &req.ResourceRef, 1)
 	if !exists {
 		panic("resource should exist in cache")
 	}

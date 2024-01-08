@@ -42,8 +42,13 @@ type Resource struct {
 
 // ResourceRef refers to a specific synthesized resource.
 type ResourceRef struct {
-	Composition           *apiv1.Composition
+	Composition           *CompositionRef
 	Name, Namespace, Kind string
+}
+
+type CompositionRef struct {
+	Name, Namespace string
+	Generation      int64 // TODO: Remove from Get?
 }
 
 // Request is like controller-runtime reconcile.Request but for reconstituted resources.

@@ -140,9 +140,17 @@ func (c *cache) buildResource(ctx context.Context, comp *apiv1.Composition, slic
 		return nil, fmt.Errorf("invalid json: %w", err)
 	}
 
+	compRef := &CompositionRef{
+		Name:      comp.Name,
+		Namespace: comp.Namespace,
+	}
+	if comp.Status.CurrentState != nil {
+		compRef.Generation = comp.Status.CurrentState.ObservedCompositionGeneration
+	}
+
 	res := &Resource{
 		Ref: &ResourceRef{
-			Composition: comp,
+			Composition: compRef,
 			Namespace:   parsed.GetNamespace(),
 			Name:        parsed.GetName(),
 			Kind:        parsed.GetKind(),

@@ -86,5 +86,10 @@ func run() error {
 		return fmt.Errorf("constructing resource slice lifecycle controller: %w", err)
 	}
 
+	err = cleanup.NewCompositionController(mgr)
+	if err != nil {
+		return fmt.Errorf("constructing resource slice lifecycle controller: %w", err)
+	}
+
 	return mgr.Start(ctx)
 }

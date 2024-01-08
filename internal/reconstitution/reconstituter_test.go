@@ -47,20 +47,20 @@ func TestReconstituterIntegration(t *testing.T) {
 
 	// Prove the resource was cached
 	ref := &ResourceRef{
-		Composition: comp,
-		Name:      "foo",
-		Namespace: "bar",
-		Kind:      "baz",
+		Composition: &CompositionRef{Name: comp.Name, Namespace: comp.Namespace, Generation: comp.Status.CurrentState.ObservedCompositionGeneration},
+		Name:        "foo",
+		Namespace:   "bar",
+		Kind:        "baz",
 	}
 	testutil.Eventually(t, func() bool {
-		_, exists := r.Get(ctx, ref, comp.Generation)
+		_, exists := r.Get(ctx,comp, ref, comp.Generation)
 		return exists
 	})
 
 	// Remove the composition and confirm cache is purged
 	require.NoError(t, client.Delete(ctx, comp))
 	testutil.Eventually(t, func() bool {
-		_, exists := r.Get(ctx, ref, comp.Generation)
+		_, exists := r.Get(ctx, comp, ref, comp.Generation)
 		return !exists
 	})
 
