@@ -34,7 +34,8 @@ func (c *cache) Get(ctx context.Context, ref *ResourceRef, gen int64) (*Resource
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	synKey := synthesisKey{Composition: ref.Composition, Generation: gen}
+	compNSN := types.NamespacedName{Name: ref.Composition.Name, Namespace: ref.Composition.Namespace}
+	synKey := synthesisKey{Composition: compNSN, Generation: gen, Deleting: ref.Composition.DeletionTimestamp != nil}
 	resources, ok := c.resources[synKey]
 	if !ok {
 		return nil, false
@@ -61,6 +62,7 @@ func (c *cache) HasSynthesis(ctx context.Context, comp *apiv1.Composition, synth
 	key := synthesisKey{
 		Composition: types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace},
 		Generation:  synthesis.ObservedCompositionGeneration,
+		Deleting:    comp.DeletionTimestamp != nil,
 	}
 
 	c.mut.Lock()
@@ -84,7 +86,7 @@ func (c *cache) Fill(ctx context.Context, comp *apiv1.Composition, synthesis *ap
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	synKey := synthesisKey{Composition: compNSN, Generation: synthesis.ObservedCompositionGeneration}
+	synKey := synthesisKey{Composition: compNSN, Generation: synthesis.ObservedCompositionGeneration, Deleting: comp.DeletionTimestamp != nil}
 	c.resources[synKey] = resources
 	c.synthesesByComposition[compNSN] = append(c.synthesesByComposition[compNSN], synKey.Generation)
 
@@ -102,6 +104,11 @@ func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 
 		for i, resource := range slice.Spec.Resources {
 			resource := resource
+
+			// Delete the resource if the composition is being deleted
+			if comp.DeletionTimestamp != nil {
+				resource.Deleted = true
+			}
 
 			res, err := c.buildResource(ctx, comp, &slice, &resource)
 			if err != nil {
@@ -135,7 +142,7 @@ func (c *cache) buildResource(ctx context.Context, comp *apiv1.Composition, slic
 
 	res := &Resource{
 		Ref: &ResourceRef{
-			Composition: types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace},
+			Composition: comp,
 			Namespace:   parsed.GetNamespace(),
 			Name:        parsed.GetName(),
 			Kind:        parsed.GetKind(),
@@ -160,14 +167,25 @@ func (c *cache) Purge(ctx context.Context, compNSN types.NamespacedName, comp *a
 	remainingSyns := []int64{}
 	for _, syn := range c.synthesesByComposition[compNSN] {
 		// Don't touch any syntheses still referenced by the composition
-		if comp != nil && ((comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration == syn) || (comp.Status.PreviousState != nil && comp.Status.PreviousState.ObservedCompositionGeneration == syn) || (comp.Status.CurrentState != nil && comp.DeletionTimestamp != nil && comp.Status.CurrentState.ObservedCompositionGeneration+1 == syn)) {
+		if comp != nil && (comp.DeletionTimestamp != nil || (comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration == syn) || (comp.Status.PreviousState != nil && comp.Status.PreviousState.ObservedCompositionGeneration == syn)) {
 			remainingSyns = append(remainingSyns, syn)
 			continue // still referenced by the Generation
 		}
-		delete(c.resources, synthesisKey{
+		key := synthesisKey{
 			Composition: compNSN,
 			Generation:  syn,
-		})
+			Deleting:    comp != nil && comp.DeletionTimestamp != nil,
+		}
+		delete(c.resources, key)
+
+		// If there aren't any syntheses of this composition remaining,
+		// we need to remove any deleting OR non-deleting syntheses since
+		// we have no way of knowing the last state of the composition i.e.
+		// was it being deleted.
+		if comp == nil {
+			key.Deleting = !key.Deleting
+			delete(c.resources, key)
+		}
 	}
 	c.synthesesByComposition[compNSN] = remainingSyns
 }
@@ -175,6 +193,7 @@ func (c *cache) Purge(ctx context.Context, compNSN types.NamespacedName, comp *a
 type synthesisKey struct {
 	Composition types.NamespacedName
 	Generation  int64
+	Deleting    bool
 }
 
 type resourceKey struct {

@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
 
@@ -43,6 +44,7 @@ func TestCacheBasics(t *testing.T) {
 		assert.NotEmpty(t, resource.Manifest)
 		assert.Equal(t, "ConfigMap", resource.Object.GetKind())
 		assert.Equal(t, "slice-0-resource-0", resource.Object.GetName())
+		assert.False(t, resource.Manifest.Deleted)
 
 		// negative
 		_, exists = c.Get(ctx, &expectedReqs[0].ResourceRef, 123)
@@ -56,6 +58,50 @@ func TestCacheBasics(t *testing.T) {
 		_, exists := c.Get(ctx, &expectedReqs[0].ResourceRef, synth.ObservedCompositionGeneration)
 		assert.False(t, exists)
 
+		assert.Len(t, c.resources, 0)
+	})
+}
+
+func TestCacheCleanup(t *testing.T) {
+	ctx := testutil.NewContext(t)
+
+	client := testutil.NewClient(t)
+	c := newCache(client)
+
+	comp, synth, resources, expectedReqs := newCacheTestFixtures(2, 3)
+	t.Run("fill", func(t *testing.T) {
+		reqs, err := c.Fill(ctx, comp, synth, resources)
+		require.NoError(t, err)
+		assert.Equal(t, expectedReqs, reqs)
+	})
+
+	t.Run("delete composition", func(t *testing.T) {
+		now := metav1.Now()
+		comp.DeletionTimestamp = &now
+		assert.False(t, c.HasSynthesis(ctx, comp, synth))
+
+		reqs, err := c.Fill(ctx, comp, synth, resources)
+		require.NoError(t, err)
+		assert.Equal(t, expectedReqs, reqs)
+		assert.True(t, c.HasSynthesis(ctx, comp, synth))
+	})
+
+	t.Run("get", func(t *testing.T) {
+		resource, exists := c.Get(ctx, &expectedReqs[0].ResourceRef, synth.ObservedCompositionGeneration)
+		require.True(t, exists)
+		assert.NotEmpty(t, resource.Manifest)
+		assert.Equal(t, "ConfigMap", resource.Object.GetKind())
+		assert.Equal(t, "slice-0-resource-0", resource.Object.GetName())
+		assert.True(t, resource.Manifest.Deleted)
+	})
+
+	t.Run("partial purge", func(t *testing.T) {
+		c.Purge(ctx, types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}, comp)
+		assert.Len(t, c.resources, 2) // we keep n-1 when composition is deleted for simplicity of implementation
+	})
+
+	t.Run("purge", func(t *testing.T) {
+		c.Purge(ctx, types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}, nil)
 		assert.Len(t, c.resources, 0)
 	})
 }
@@ -102,7 +148,7 @@ func TestCachePartialPurge(t *testing.T) {
 	// Add another resource to the composition but synthesized from a newer generation
 	_, _, resources, expectedReqs := newCacheTestFixtures(1, 1)
 	synth.ObservedCompositionGeneration++
-	expectedReqs[0].Composition = compNSN
+	expectedReqs[0].Composition = comp
 	_, err = c.Fill(ctx, comp, synth, resources)
 	require.NoError(t, err)
 
@@ -163,7 +209,7 @@ func newCacheTestFixtures(sliceCount, resPerSliceCount int) (*apiv1.Composition,
 			}
 			requests = append(requests, &Request{
 				ResourceRef: ResourceRef{
-					Composition: types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace},
+					Composition: comp,
 					Name:        resource.Name,
 					Namespace:   resource.Namespace,
 					Kind:        resource.Kind,

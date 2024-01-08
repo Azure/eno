@@ -42,7 +42,7 @@ type Resource struct {
 
 // ResourceRef refers to a specific synthesized resource.
 type ResourceRef struct {
-	Composition           types.NamespacedName
+	Composition           *apiv1.Composition
 	Name, Namespace, Kind string
 }
 

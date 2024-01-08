@@ -45,9 +45,6 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition resource: %w", err))
 	}
-	if comp.Spec.Synthesizer.Name == "" {
-		return ctrl.Result{}, nil
-	}
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
 
 	syn := &apiv1.Synthesizer{}

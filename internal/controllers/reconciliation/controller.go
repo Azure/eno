@@ -57,7 +57,7 @@ func (c *Controller) Name() string { return "reconciliationController" }
 
 func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request) (ctrl.Result, error) {
 	comp := &apiv1.Composition{}
-	err := c.client.Get(ctx, req.Composition, comp)
+	err := c.client.Get(ctx, types.NamespacedName{Name: req.Composition.Name, Namespace: req.Composition.Namespace}, comp)
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition: %w", err))
 	}
@@ -67,12 +67,6 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 	logger := logr.FromContextOrDiscard(ctx).WithValues("synthesizerName", comp.Spec.Synthesizer.Name, "synthesizerGeneration", comp.Status.CurrentState.ObservedSynthesizerGeneration)
 	ctx = logr.NewContext(ctx, logger)
-
-	slice := &apiv1.ResourceSlice{}
-	err = c.client.Get(ctx, req.Manifest.Slice, slice)
-	if client.IgnoreNotFound(err) != nil { // it's okay if somehow the slice has been deleted - nil slice implies resource should be cleaned up
-		return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
-	}
 
 	// Find the current and (optionally) previous desired states in the cache
 	resource, exists := c.resourceClient.Get(ctx, &req.ResourceRef, comp.Status.CurrentState.ObservedCompositionGeneration)

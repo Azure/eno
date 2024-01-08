@@ -5,7 +5,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -48,10 +47,7 @@ func TestReconstituterIntegration(t *testing.T) {
 
 	// Prove the resource was cached
 	ref := &ResourceRef{
-		Composition: types.NamespacedName{
-			Name:      comp.Name,
-			Namespace: comp.Namespace,
-		},
+		Composition: comp,
 		Name:      "foo",
 		Namespace: "bar",
 		Kind:      "baz",
