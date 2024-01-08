@@ -60,7 +60,7 @@ func (c *Controller) Name() string { return "reconciliationController" }
 
 func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request) (ctrl.Result, error) {
 	comp := &apiv1.Composition{}
-	err := c.client.Get(ctx, req.Composition, comp)
+	err := c.client.Get(ctx, types.NamespacedName{Name: req.Composition.Name, Namespace: req.Composition.Namespace}, comp)
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition: %w", err))
 	}
@@ -72,8 +72,8 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	ctx = logr.NewContext(ctx, logger)
 
 	// Find the current and (optionally) previous desired states in the cache
-	currentGen := comp.Status.CurrentState.ObservedCompositionGeneration
-	resource, exists := c.resourceClient.Get(ctx, &req.ResourceRef, currentGen)
+	compRef := reconstitution.NewCompositionRef(comp)
+	resource, exists := c.resourceClient.Get(ctx, compRef, &req.Resource)
 	if !exists {
 		// It's possible for the cache to be empty because a manifest for this resource no longer exists at the requested composition generation.
 		// Dropping the work item is safe since filling the new version will generate a new queue message.
@@ -83,7 +83,8 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	var prev *reconstitution.Resource
 	if comp.Status.PreviousState != nil {
-		prev, _ = c.resourceClient.Get(ctx, &req.ResourceRef, comp.Status.PreviousState.ObservedCompositionGeneration)
+		compRef.Generation = comp.Status.PreviousState.ObservedCompositionGeneration
+		prev, _ = c.resourceClient.Get(ctx, compRef, &req.Resource)
 	}
 
 	// The current and previous resource can both be nil,
@@ -100,9 +101,9 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	// Fetch the current resource
 	current := &unstructured.Unstructured{}
-	current.SetName(req.Name)
-	current.SetNamespace(req.Namespace)
-	current.SetKind(req.Kind)
+	current.SetName(req.Resource.Name)
+	current.SetNamespace(req.Resource.Namespace)
+	current.SetKind(req.Resource.Kind)
 	current.SetAPIVersion(apiVersion)
 	err = c.upstreamClient.Get(ctx, client.ObjectKeyFromObject(current), current)
 	if client.IgnoreNotFound(err) != nil {

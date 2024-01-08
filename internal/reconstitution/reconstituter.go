@@ -7,7 +7,6 @@ import (
 
 	"github.com/go-logr/logr"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -86,11 +85,10 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 		// synthesis is still in progress
 		return nil, nil
 	}
-	compNSN := types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}
 
 	logger = logger.WithValues("synthesisCompositionGeneration", synthesis.ObservedCompositionGeneration)
 	ctx = logr.NewContext(ctx, logger)
-	if r.cache.HasSynthesis(ctx, compNSN, synthesis) {
+	if r.cache.HasSynthesis(ctx, comp, synthesis) {
 		return nil, nil
 	}
 
@@ -106,5 +104,5 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 		slices[i] = slice
 	}
 
-	return r.cache.Fill(ctx, compNSN, synthesis, slices)
+	return r.cache.Fill(ctx, comp, synthesis, slices)
 }
