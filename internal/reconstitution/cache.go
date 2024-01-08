@@ -60,7 +60,7 @@ func (c *cache) Get(ctx context.Context, ref *ResourceRef, gen int64) (*Resource
 func (c *cache) HasSynthesis(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis) bool {
 	key := synthesisKey{
 		Composition: types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace},
-		Generation:  getCompositionGeneration(comp, synthesis),
+		Generation:  synthesis.ObservedCompositionGeneration,
 	}
 
 	c.mut.Lock()
@@ -84,7 +84,7 @@ func (c *cache) Fill(ctx context.Context, comp *apiv1.Composition, synthesis *ap
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	synKey := synthesisKey{Composition: compNSN, Generation: getCompositionGeneration(comp, synthesis)}
+	synKey := synthesisKey{Composition: compNSN, Generation: synthesis.ObservedCompositionGeneration}
 	c.resources[synKey] = resources
 	c.synthesesByComposition[compNSN] = append(c.synthesesByComposition[compNSN], synKey.Generation)
 
@@ -146,10 +146,6 @@ func (c *cache) buildResource(ctx context.Context, comp *apiv1.Composition, slic
 	if res.Ref.Name == "" || parsed.GetAPIVersion() == "" {
 		return nil, fmt.Errorf("missing name, kind, or apiVersion")
 	}
-	if comp.DeletionTimestamp != nil {
-		// We override the deletion status of each resource in the slice when it's deleted
-		res.Manifest.Deleted = true
-	}
 	return res, nil
 }
 
@@ -183,20 +179,4 @@ type synthesisKey struct {
 
 type resourceKey struct {
 	Kind, Namespace, Name string
-}
-
-func getCompositionGeneration(comp *apiv1.Composition, syn *apiv1.Synthesis) int64 {
-	// The cache needs to be invalidated when the composition is deleted in order to mark the resources as Deleted.
-	// We can safely accomplish this by incrementing the generation, since that generation is not reachable anyway now that the resources has been deleted.
-	if comp.DeletionTimestamp != nil {
-		return syn.ObservedCompositionGeneration + 1
-	}
-	return syn.ObservedCompositionGeneration
-}
-
-func GetCompositionGenerationAtCurrentState(comp *apiv1.Composition) int64 {
-	if comp.Status.CurrentState == nil {
-		return 0
-	}
-	return getCompositionGeneration(comp, comp.Status.CurrentState)
 }

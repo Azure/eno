@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
 
@@ -52,53 +51,6 @@ func TestCacheBasics(t *testing.T) {
 
 	t.Run("purge", func(t *testing.T) {
 		c.Purge(ctx, types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}, nil)
-
-		// confirm
-		_, exists := c.Get(ctx, &expectedReqs[0].ResourceRef, synth.ObservedCompositionGeneration)
-		assert.False(t, exists)
-
-		assert.Len(t, c.resources, 0)
-	})
-}
-
-func TestCacheCompositionDeletion(t *testing.T) {
-	ctx := testutil.NewContext(t)
-
-	client := testutil.NewClient(t)
-	c := newCache(client)
-
-	comp, synth, resources, expectedReqs := newCacheTestFixtures(2, 3)
-	now := metav1.Now()
-	comp.DeletionTimestamp = &now
-	t.Run("fill", func(t *testing.T) {
-		reqs, err := c.Fill(ctx, comp, synth, resources)
-		require.NoError(t, err)
-		assert.Equal(t, expectedReqs, reqs)
-	})
-
-	t.Run("check", func(t *testing.T) {
-		// positive
-		assert.True(t, c.HasSynthesis(ctx, comp, synth))
-
-		// negative
-		assert.False(t, c.HasSynthesis(ctx, comp, &apiv1.Synthesis{ObservedCompositionGeneration: 123}))
-	})
-
-	t.Run("get", func(t *testing.T) {
-		// positive
-		resource, exists := c.Get(ctx, &expectedReqs[0].ResourceRef, synth.ObservedCompositionGeneration+1)
-		require.True(t, exists)
-		assert.NotEmpty(t, resource.Manifest)
-		assert.Equal(t, "ConfigMap", resource.Object.GetKind())
-		assert.Equal(t, "slice-0-resource-0", resource.Object.GetName())
-
-		// negative
-		_, exists = c.Get(ctx, &expectedReqs[0].ResourceRef, 123)
-		assert.False(t, exists)
-	})
-
-	t.Run("purge", func(t *testing.T) {
-		c.Purge(ctx, types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}, comp)
 
 		// confirm
 		_, exists := c.Get(ctx, &expectedReqs[0].ResourceRef, synth.ObservedCompositionGeneration)

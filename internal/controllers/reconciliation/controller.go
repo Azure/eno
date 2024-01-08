@@ -75,7 +75,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 
 	// Find the current and (optionally) previous desired states in the cache
-	resource, exists := c.resourceClient.Get(ctx, &req.ResourceRef, reconstitution.GetCompositionGenerationAtCurrentState(comp))
+	resource, exists := c.resourceClient.Get(ctx, &req.ResourceRef, comp.Status.CurrentState.ObservedCompositionGeneration)
 	if !exists {
 		// It's possible for the cache to be empty because a manifest for this resource no longer exists at the requested composition generation.
 		// Dropping the work item is safe since filling the new version will generate a new queue message.
