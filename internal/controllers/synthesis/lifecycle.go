@@ -90,6 +90,11 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Swap the state to prepare for resynthesis if needed
 	if comp.Status.CurrentState == nil || comp.Status.CurrentState.ObservedCompositionGeneration != comp.Generation {
+		if comp.DeletionTimestamp != nil {
+			// Don't synthesize if the composition is actively deleting
+			return ctrl.Result{}, nil
+		}
+
 		swapStates(syn, comp)
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
