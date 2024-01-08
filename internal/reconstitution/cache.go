@@ -30,12 +30,12 @@ func newCache(client client.Client) *cache {
 	}
 }
 
-func (c *cache) Get(ctx context.Context, ref *ResourceRef, gen int64) (*Resource, bool) {
+func (c *cache) Get(ctx context.Context, comp *apiv1.Composition, ref *ResourceRef, gen int64) (*Resource, bool) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	compNSN := types.NamespacedName{Name: ref.Composition.Name, Namespace: ref.Composition.Namespace}
-	synKey := synthesisKey{Composition: compNSN, Generation: gen, Deleting: ref.Composition.DeletionTimestamp != nil}
+	compNSN := types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
+	synKey := synthesisKey{Composition: compNSN, Generation: gen, Deleting: comp.DeletionTimestamp != nil}
 	resources, ok := c.resources[synKey]
 	if !ok {
 		return nil, false

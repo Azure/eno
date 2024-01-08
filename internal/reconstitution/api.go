@@ -20,7 +20,7 @@ type Reconciler interface {
 
 // Client provides read/write access to a collection of reconstituted resources.
 type Client interface {
-	Get(ctx context.Context, ref *ResourceRef, gen int64) (*Resource, bool)
+	Get(ctx context.Context, comp *apiv1.Composition, ref *ResourceRef, gen int64) (*Resource, bool)
 	PatchStatusAsync(ctx context.Context, req *ManifestRef, patchFn StatusPatchFn)
 }
 
