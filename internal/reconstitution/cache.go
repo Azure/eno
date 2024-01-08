@@ -18,14 +18,14 @@ type cache struct {
 	client client.Client
 
 	mut                    sync.Mutex
-	resources              map[synthesisKey]map[resourceKey]*Resource
+	resources              map[CompositionRef]map[ResourceRef]*Resource
 	synthesesByComposition map[types.NamespacedName][]int64
 }
 
 func newCache(client client.Client) *cache {
 	return &cache{
 		client:                 client,
-		resources:              make(map[synthesisKey]map[resourceKey]*Resource),
+		resources:              make(map[CompositionRef]map[ResourceRef]*Resource),
 		synthesesByComposition: make(map[types.NamespacedName][]int64),
 	}
 }
@@ -34,15 +34,12 @@ func (c *cache) Get(ctx context.Context, comp *CompositionRef, ref *ResourceRef)
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	compNSN := types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
-	synKey := synthesisKey{Composition: compNSN, Generation: comp.Generation}
-	resources, ok := c.resources[synKey]
+	resources, ok := c.resources[*comp]
 	if !ok {
 		return nil, false
 	}
 
-	resKey := resourceKey{Kind: ref.Kind, Namespace: ref.Namespace, Name: ref.Name}
-	res, ok := resources[resKey]
+	res, ok := resources[*ref]
 	if !ok {
 		return nil, false
 	}
@@ -59,9 +56,10 @@ func (c *cache) Get(ctx context.Context, comp *CompositionRef, ref *ResourceRef)
 // HasSynthesis returns true when the cache contains the resulting resources of the given synthesis.
 // This should be called before Fill to determine if filling is necessary.
 func (c *cache) HasSynthesis(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis) bool {
-	key := synthesisKey{
-		Composition: types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace},
-		Generation:  synthesis.ObservedCompositionGeneration,
+	key := CompositionRef{
+		Name:       comp.Name,
+		Namespace:  comp.Namespace,
+		Generation: synthesis.ObservedCompositionGeneration,
 	}
 
 	c.mut.Lock()
@@ -74,7 +72,6 @@ func (c *cache) HasSynthesis(ctx context.Context, comp *apiv1.Composition, synth
 // Requests to be enqueued are returned. Although this arguably violates separation of concerns, it's convenient and efficient.
 func (c *cache) Fill(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis, items []apiv1.ResourceSlice) ([]*Request, error) {
 	logger := logr.FromContextOrDiscard(ctx)
-	compNSN := types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
 
 	// Building resources can be expensive (json parsing, etc.) so don't hold the lock during this call
 	resources, requests, err := c.buildResources(ctx, comp, items)
@@ -85,16 +82,18 @@ func (c *cache) Fill(ctx context.Context, comp *apiv1.Composition, synthesis *ap
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	synKey := synthesisKey{Composition: compNSN, Generation: synthesis.ObservedCompositionGeneration}
+	synKey := CompositionRef{Name: comp.Name, Namespace: comp.Namespace, Generation: synthesis.ObservedCompositionGeneration}
 	c.resources[synKey] = resources
+
+	compNSN := types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
 	c.synthesesByComposition[compNSN] = append(c.synthesesByComposition[compNSN], synKey.Generation)
 
 	logger.Info("cache filled")
 	return requests, nil
 }
 
-func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, items []apiv1.ResourceSlice) (map[resourceKey]*Resource, []*Request, error) {
-	resources := map[resourceKey]*Resource{}
+func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, items []apiv1.ResourceSlice) (map[ResourceRef]*Resource, []*Request, error) {
+	resources := map[ResourceRef]*Resource{}
 	requests := []*Request{}
 	for _, slice := range items {
 		slice := slice
@@ -113,8 +112,7 @@ func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 			if err != nil {
 				return nil, nil, fmt.Errorf("building resource at index %d of slice %s: %w", i, slice.Name, err)
 			}
-			key := resourceKey{Kind: res.Ref.Kind, Namespace: res.Ref.Namespace, Name: res.Ref.Name}
-			resources[key] = res
+			resources[*res.Ref] = res
 			requests = append(requests, &Request{
 				Resource: *res.Ref,
 				Manifest: ManifestRef{
@@ -170,20 +168,11 @@ func (c *cache) Purge(ctx context.Context, compNSN types.NamespacedName, comp *a
 			remainingSyns = append(remainingSyns, syn)
 			continue // still referenced by the Generation
 		}
-		delete(c.resources, synthesisKey{
-			Composition: compNSN,
-			Generation:  syn,
+		delete(c.resources, CompositionRef{
+			Name:       compNSN.Name,
+			Namespace:  compNSN.Namespace,
+			Generation: syn,
 		})
 	}
 	c.synthesesByComposition[compNSN] = remainingSyns
-}
-
-// TODO: Replace with CompositionRef
-type synthesisKey struct {
-	Composition types.NamespacedName
-	Generation  int64
-}
-
-type resourceKey struct {
-	Kind, Namespace, Name string
 }
