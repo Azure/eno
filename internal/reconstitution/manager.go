@@ -83,7 +83,11 @@ func (q *queueProcessor) processQueueItem(ctx context.Context) bool {
 		return false
 	}
 
-	logger := q.Logger.WithValues("compositionName", req.Composition.Name, "compositionNamespace", req.Composition.Namespace, "resourceKind", req.ResourceRef.Kind, "resourceName", req.ResourceRef.Name, "resourceNamespace", req.ResourceRef.Namespace)
+	var compGen int64 = -1
+	if req.Composition.Status.CurrentState != nil {
+		compGen = req.Composition.Status.CurrentState.ObservedCompositionGeneration
+	}
+	logger := q.Logger.WithValues("compositionName", req.Composition.Name, "compositionNamespace", req.Composition.Namespace, "compositionGeneration", compGen, "resourceKind", req.ResourceRef.Kind, "resourceName", req.ResourceRef.Name, "resourceNamespace", req.ResourceRef.Namespace)
 	ctx = logr.NewContext(ctx, logger)
 
 	result, err := q.Handler.Reconcile(ctx, req)

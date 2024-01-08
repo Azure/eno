@@ -12,6 +12,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
+// TODO: Hold finalizer on synthesizer resources
+
 type compositionController struct {
 	client client.Client
 }
