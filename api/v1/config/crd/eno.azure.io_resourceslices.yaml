@@ -56,6 +56,11 @@ spec:
                   spec.resources at the observed generation.
                 items:
                   properties:
+                    deleted:
+                      description: Deleted is true when the resource has been cleaned
+                        up, either because spec.deleted == true or the parent composition
+                        has been deleted.
+                      type: boolean
                     ready:
                       description: nil if Eno is unable to determine the readiness
                         of this resource. Otherwise it is true when the resource is

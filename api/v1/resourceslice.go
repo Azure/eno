@@ -48,6 +48,9 @@ type ResourceState struct {
 	// Otherwise it is true when the resource is ready, false otherwise.
 	// Like Reconciled, it latches and will never transition from true->false.
 	Ready *bool `json:"ready,omitempty"`
+
+	// Deleted is true when the resource has been cleaned up, either because spec.deleted == true or the parent composition has been deleted.
+	Deleted bool `json:"deleted,omitempty"`
 }
 
 type ResourceSliceRef struct {

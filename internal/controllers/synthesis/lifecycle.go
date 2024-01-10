@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
@@ -32,6 +33,7 @@ func NewPodLifecycleController(mgr ctrl.Manager, cfg *Config) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
 		Owns(&corev1.Pod{}).
+		Owns(&apiv1.ResourceSlice{}).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "podLifecycleController")).
 		Complete(c)
 }
@@ -44,10 +46,21 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition resource: %w", err))
 	}
-	if comp.Spec.Synthesizer.Name == "" {
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
+
+	// Deletion increments the composition's generation, but the reconstitution cache is only invalidated
+	// when the synthesized generation (from the status) changes, which will never happen because synthesis
+	// is righly disabled for deleted compositions. We break out of this deadlock condition by updating
+	// the status without actually synthesizing.
+	if comp.DeletionTimestamp != nil && comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration != comp.Generation {
+		comp.Status.CurrentState.ObservedCompositionGeneration = comp.Generation
+		err = c.client.Status().Update(ctx, comp)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("updating current composition generation: %w", err)
+		}
+		logger.Info("updated composition status to reflect deletion")
 		return ctrl.Result{}, nil
 	}
-	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
 
 	syn := &apiv1.Synthesizer{}
 	syn.Name = comp.Spec.Synthesizer.Name
@@ -57,9 +70,40 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
 
+	// It isn't safe to delete compositions until their resource slices have been cleaned up,
+	// since reconciling resources necessarily requires the composition.
+	if comp.DeletionTimestamp == nil && controllerutil.AddFinalizer(comp, "eno.azure.io/cleanup") {
+		err = c.client.Update(ctx, comp)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("updating composition: %w", err)
+		}
+		logger.Info("added cleanup finalizer to composition")
+		return ctrl.Result{}, nil
+	} else if comp.DeletionTimestamp != nil {
+		list := &apiv1.ResourceSliceList{}
+		err = c.client.List(ctx, list, client.MatchingFields{
+			manager.IdxResourceSlicesByComposition: comp.Name,
+		})
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("listing resource slices: %w", err)
+		}
+		if n := len(list.Items); n > 0 {
+			return ctrl.Result{}, nil // slices still exist
+		}
+
+		controllerutil.RemoveFinalizer(comp, "eno.azure.io/cleanup")
+		err = c.client.Update(ctx, comp)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
+		}
+
+		logger.Info("removed finalizer from composition because none of its resource slices remain")
+		return ctrl.Result{}, nil
+	}
+
 	// Delete any unnecessary pods
 	pods := &corev1.PodList{}
-	err = c.client.List(ctx, pods, client.MatchingFields{
+	err = c.client.List(ctx, pods, client.InNamespace(comp.Namespace), client.MatchingFields{
 		manager.IdxPodsByComposition: comp.Name,
 	})
 	if err != nil {
@@ -81,6 +125,11 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Swap the state to prepare for resynthesis if needed
 	if comp.Status.CurrentState == nil || comp.Status.CurrentState.ObservedCompositionGeneration != comp.Generation {
+		if comp.DeletionTimestamp != nil {
+			// Don't synthesize if the composition is actively deleting
+			return ctrl.Result{}, nil
+		}
+
 		swapStates(syn, comp)
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
@@ -90,7 +139,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// No need to create a pod if everything is in sync
-	if comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized {
+	if comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized || comp.DeletionTimestamp != nil {
 		return ctrl.Result{}, nil
 	}
 

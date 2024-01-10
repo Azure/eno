@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
@@ -349,12 +350,12 @@ func TestReconcileInterval(t *testing.T) {
 	comp.Spec.Synthesizer.Name = syn.Name
 	require.NoError(t, upstream.Create(ctx, comp))
 
-	// Wait for service to be created
+	// Wait for resource to be created
 	obj := &corev1.ConfigMap{}
 	testutil.Eventually(t, func() bool {
 		obj.SetName("test-obj")
 		obj.SetNamespace("default")
-		err = downstream.Get(context.Background(), client.ObjectKeyFromObject(obj), obj)
+		err = downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
 		return err == nil
 	})
 
@@ -364,7 +365,7 @@ func TestReconcileInterval(t *testing.T) {
 
 	// The service should eventually converge with the desired state
 	testutil.Eventually(t, func() bool {
-		err = downstream.Get(context.Background(), client.ObjectKeyFromObject(obj), obj)
+		err = downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
 		return err == nil && obj.Data["foo"] == "bar"
 	})
 }
@@ -431,18 +432,64 @@ func TestReconcileCacheRace(t *testing.T) {
 	testutil.Eventually(t, func() bool {
 		obj.SetName("test-obj")
 		obj.SetNamespace("default")
-		err = downstream.Get(context.Background(), client.ObjectKeyFromObject(obj), obj)
+		err = downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
 		return err == nil
 	})
 
 	// Update frequently, it shouldn't panic
 	for i := 0; i < 20; i++ {
 		err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-			err = upstream.Get(context.Background(), client.ObjectKeyFromObject(syn), syn)
+			err = upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn)
 			syn.Spec.Command = []string{fmt.Sprintf("any-unique-value-%d", i)}
 			return upstream.Update(ctx, syn)
 		})
 		require.NoError(t, err)
 		time.Sleep(time.Millisecond * 50)
 	}
+}
+
+func TestReconcileStatus(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
+	require.NoError(t, err)
+
+	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15))
+	require.NoError(t, err)
+	mgr.Start(t)
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-slice"
+	slice.Namespace = comp.Namespace
+	require.NoError(t, controllerutil.SetControllerReference(comp, slice, upstream.Scheme()))
+	slice.Spec.Resources = []apiv1.Manifest{
+		{Manifest: `{ "kind": "ConfigMap", "apiVersion": "v1", "metadata": { "name": "test", "namespace": "default" } }`},
+		{Deleted: true, Manifest: `{ "kind": "ConfigMap", "apiVersion": "v1", "metadata": { "name": "test-deleted", "namespace": "default" } }`},
+	}
+	require.NoError(t, upstream.Create(ctx, slice))
+
+	comp.Status.CurrentState = &apiv1.Synthesis{
+		Synthesized:    true,
+		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
+	}
+	require.NoError(t, upstream.Status().Update(ctx, comp))
+
+	// Status should eventually reflect the reconciliation state
+	testutil.Eventually(t, func() bool {
+		err = upstream.Get(ctx, client.ObjectKeyFromObject(slice), slice)
+		return err == nil && len(slice.Status.Resources) == 2 &&
+			slice.Status.Resources[0].Reconciled && !slice.Status.Resources[0].Deleted &&
+			slice.Status.Resources[1].Reconciled && slice.Status.Resources[1].Deleted
+	})
 }
