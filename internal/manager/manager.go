@@ -32,8 +32,9 @@ import (
 )
 
 const (
-	IdxPodsByComposition         = ".metadata.ownerReferences.composition"
-	IdxCompositionsBySynthesizer = ".spec.synthesizer"
+	IdxPodsByComposition           = ".metadata.ownerReferences.composition"
+	IdxCompositionsBySynthesizer   = ".spec.synthesizer"
+	IdxResourceSlicesByComposition = ".resourceSlicesByComposition"
 
 	ManagerLabelKey   = "app.kubernetes.io/managed-by"
 	ManagerLabelValue = "eno"
@@ -114,14 +115,12 @@ func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
 		return nil, err
 	}
 
-	err = mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Pod{}, IdxPodsByComposition, func(o client.Object) []string {
-		pod := o.(*corev1.Pod)
-		owner := metav1.GetControllerOf(pod)
-		if owner == nil || owner.Kind != "Composition" {
-			return nil
-		}
-		return []string{owner.Name}
-	})
+	err = mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Pod{}, IdxPodsByComposition, indexController())
+	if err != nil {
+		return nil, err
+	}
+
+	err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, IdxResourceSlicesByComposition, indexController())
 	if err != nil {
 		return nil, err
 	}
@@ -175,5 +174,15 @@ func NewCompositionToSynthesizerHandler(cli client.Client) handler.EventHandler 
 			}
 			rli.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: comp.Spec.Synthesizer.Name}})
 		},
+	}
+}
+
+func indexController() client.IndexerFunc {
+	return func(o client.Object) []string {
+		owner := metav1.GetControllerOf(o)
+		if owner == nil {
+			return nil
+		}
+		return []string{owner.Name}
 	}
 }

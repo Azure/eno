@@ -250,9 +250,10 @@ func buildResourceSlices(comp *apiv1.Composition, previous []*apiv1.ResourceSlic
 
 	// Build the slice resources
 	var (
-		slices     []*apiv1.ResourceSlice
-		sliceBytes int
-		slice      *apiv1.ResourceSlice
+		slices             []*apiv1.ResourceSlice
+		sliceBytes         int
+		slice              *apiv1.ResourceSlice
+		blockOwnerDeletion = true
 	)
 	for _, manifest := range manifests {
 		if slice == nil || sliceBytes >= maxJsonBytes {
@@ -260,6 +261,15 @@ func buildResourceSlices(comp *apiv1.Composition, previous []*apiv1.ResourceSlic
 			slice = &apiv1.ResourceSlice{}
 			slice.GenerateName = comp.Name + "-"
 			slice.Namespace = comp.Namespace
+			// TODO: slice.Finalizers = []string{"eno.azure.io/cleanup"}
+			slice.OwnerReferences = []metav1.OwnerReference{{
+				APIVersion:         apiv1.SchemeGroupVersion.Identifier(),
+				Kind:               "Composition",
+				Name:               comp.Name,
+				UID:                comp.UID,
+				BlockOwnerDeletion: &blockOwnerDeletion, // we need the composition in order to successfully delete its resource slices
+				Controller:         &blockOwnerDeletion,
+			}}
 			slices = append(slices, slice)
 		}
 		sliceBytes += len(manifest.Manifest)
@@ -288,7 +298,7 @@ func (c *execController) writeSuccessStatus(ctx context.Context, comp *apiv1.Com
 			return err
 		}
 
-		if compGen < comp.Generation {
+		if compGen < comp.Generation || comp.DeletionTimestamp != nil {
 			logger.V(1).Info("synthesis is no longer relevant - discarding its output")
 			return nil
 		}
