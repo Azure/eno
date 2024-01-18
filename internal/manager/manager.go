@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 
@@ -12,11 +11,9 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -49,22 +46,6 @@ func init() {
 	}()
 }
 
-type Options struct {
-	Rest            *rest.Config
-	Namespace       string
-	HealthProbeAddr string
-	MetricsAddr     string
-	qps             float64 // flags don't support float32, bind to this value and copy over to Rest.QPS during initialization
-}
-
-func (o *Options) Bind(set *flag.FlagSet) {
-	set.StringVar(&o.Namespace, "namespace", "", "Only reconcile resources in a particular namespace")
-	set.StringVar(&o.HealthProbeAddr, "health-probe-addr", ":8081", "Address to serve health probes on")
-	set.StringVar(&o.MetricsAddr, "metrics-addr", ":8080", "Address to serve Prometheus metrics on")
-	set.IntVar(&o.Rest.Burst, "burst", 50, "apiserver client rate limiter burst configuration")
-	set.Float64Var(&o.qps, "qps", 20, "Max requests per second to apiserver")
-}
-
 func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
 	opts.Rest.QPS = float32(opts.qps)
 
@@ -87,25 +68,35 @@ func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
 		},
 	}
 
+	labelSelector, err := opts.getDefaultLabelSelector()
+	if err != nil {
+		return nil, err
+	}
+	mgrOpts.Cache.DefaultLabelSelector = labelSelector
+	fieldSelector, err := opts.getDefaultFieldSelector()
+	if err != nil {
+		return nil, err
+	}
+	mgrOpts.Cache.DefaultFieldSelector = fieldSelector
+
+	// TODO: Evaluate if the passed-in label selector should be merged with the Pod label selector.
+	// It probably should not because we're only watching Pods created by Eno itself,
+	// but this is not the case if we by some reason start watching Pods not belonging to Eno.
 	podLabelSelector := labels.SelectorFromSet(labels.Set{ManagerLabelKey: ManagerLabelValue})
 	if opts.Namespace == "" {
 		mgrOpts.Cache.ByObject = map[client.Object]cache.ByObject{
 			&corev1.Pod{}: {Label: podLabelSelector},
 		}
 	} else {
-		fieldSelector := fields.ParseSelectorOrDie(fmt.Sprintf("metadata.namespace=%s", opts.Namespace))
-
 		mgrOpts.Cache.ByObject = map[client.Object]cache.ByObject{
 			&corev1.Pod{}: {
 				Label: podLabelSelector,
-				Field: fieldSelector,
 			},
 		}
 
 		mgrOpts.Cache.DefaultNamespaces = map[string]cache.Config{
 			opts.Namespace: {
 				LabelSelector: labels.Everything(),
-				FieldSelector: fieldSelector,
 			},
 		}
 	}
