@@ -68,7 +68,9 @@ func run() error {
 
 	remoteConfig := mgr.GetConfig()
 	if remoteKubeconfigFile != "" {
-		remoteConfig = k8s.GetRESTConfigOrDie(remoteKubeconfigFile)
+		if remoteConfig, err = k8s.GetRESTConfig(remoteKubeconfigFile); err != nil {
+			return err
+		}
 	}
 	err = reconciliation.New(recmgr, remoteConfig, discoveryMaxRPS, rediscoverWhenNotFound)
 	if err != nil {

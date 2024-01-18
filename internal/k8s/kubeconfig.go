@@ -8,16 +8,15 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-func GetRESTConfigOrDie(filename string) *rest.Config {
+// GetRESTConfig is a convenience method to avoid manually opening a file.
+func GetRESTConfig(filename string) (*rest.Config, error) {
 	b, err := os.ReadFile(filename)
 	if err != nil {
-		fmt.Printf("Could not get read Kubeconfig file: %s", err.Error())
-		os.Exit(1)
+		return nil, fmt.Errorf("could not get read Kubeconfig file: %w", err)
 	}
 	cfg, err := clientcmd.RESTConfigFromKubeConfig(b)
 	if err != nil {
-		fmt.Printf("Could not get get Kubeconfig from file: %s", err.Error())
-		os.Exit(1)
+		return nil, fmt.Errorf("could not get get Kubeconfig from file: %w", err)
 	}
-	return cfg
+	return cfg, nil
 }
