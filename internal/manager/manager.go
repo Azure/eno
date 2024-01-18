@@ -90,14 +90,16 @@ func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
 	} else {
 		mgrOpts.Cache.ByObject = map[client.Object]cache.ByObject{
 			&corev1.Pod{}: {
-				Label: podLabelSelector,
+				Namespaces: map[string]cache.Config{
+					opts.Namespace: {
+						LabelSelector: podLabelSelector,
+					},
+				},
 			},
 		}
 
 		mgrOpts.Cache.DefaultNamespaces = map[string]cache.Config{
-			opts.Namespace: {
-				LabelSelector: labels.Everything(),
-			},
+			opts.Namespace: {},
 		}
 	}
 
