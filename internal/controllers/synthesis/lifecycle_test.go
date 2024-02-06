@@ -49,6 +49,12 @@ func TestCompositionDeletion(t *testing.T) {
 		return comp.Status.CurrentState != nil && len(comp.Status.CurrentState.ResourceSlices) > 0
 	})
 
+	// Wait for the resource slice to be created
+	testutil.Eventually(t, func() bool {
+		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
+		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSlices != nil
+	})
+
 	// Delete the composition
 	require.NoError(t, cli.Delete(ctx, comp))
 	deleteGen := comp.Generation
@@ -58,6 +64,11 @@ func TestCompositionDeletion(t *testing.T) {
 		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
 		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration >= deleteGen
 	})
+
+	// The composition should still exist after a bit
+	// Yeahyeahyeah a fake clock would be better but this is more obvious and not meaningfully slower
+	time.Sleep(time.Second)
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 
 	// Delete the resource slice(s)
 	slices := &apiv1.ResourceSliceList{}
