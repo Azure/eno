@@ -30,6 +30,7 @@ func TestCompositionDeletion(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
+	require.NoError(t, NewSliceCleanupController(mgr.Manager))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -67,7 +68,7 @@ func TestCompositionDeletion(t *testing.T) {
 
 	// The composition should still exist after a bit
 	// Yeahyeahyeah a fake clock would be better but this is more obvious and not meaningfully slower
-	time.Sleep(time.Second)
+	time.Sleep(time.Millisecond * 100)
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 
 	// Delete the resource slice(s)

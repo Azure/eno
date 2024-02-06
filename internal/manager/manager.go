@@ -141,6 +141,30 @@ func NewLogConstructor(mgr ctrl.Manager, controllerName string) func(*reconcile.
 	}
 }
 
+func NewCompositionToResourceSliceHandler(cli client.Client) handler.EventHandler {
+	apply := func(ctx context.Context, rli workqueue.RateLimitingInterface, obj client.Object) {
+		list := &apiv1.ResourceSliceList{}
+		err := cli.List(ctx, list, client.MatchingFields{
+			IdxResourceSlicesByComposition: obj.GetName(),
+		})
+		if err != nil {
+			logr.FromContextOrDiscard(ctx).Error(err, "listing resource slices by composition")
+			return
+		}
+	}
+	return &handler.Funcs{
+		CreateFunc: func(ctx context.Context, ce event.CreateEvent, rli workqueue.RateLimitingInterface) {
+			apply(ctx, rli, ce.Object)
+		},
+		UpdateFunc: func(ctx context.Context, ue event.UpdateEvent, rli workqueue.RateLimitingInterface) {
+			apply(ctx, rli, ue.ObjectNew)
+		},
+		DeleteFunc: func(ctx context.Context, de event.DeleteEvent, rli workqueue.RateLimitingInterface) {
+			apply(ctx, rli, de.Object)
+		},
+	}
+}
+
 func NewCompositionToSynthesizerHandler(cli client.Client) handler.EventHandler {
 	return &handler.Funcs{
 		CreateFunc: func(ctx context.Context, ce event.CreateEvent, rli workqueue.RateLimitingInterface) {

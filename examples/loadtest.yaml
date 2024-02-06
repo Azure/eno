@@ -33,3 +33,40 @@ metadata:
 spec:
   synthesizer:
     name: load-test-synth
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: roller
+  labels:
+    app: roller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: roller
+  template:
+    metadata:
+      labels:
+        app: roller
+    spec:
+      containers:
+      - name: roller
+        image: bitnami/kubectl:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          n=0
+          while true; do
+            timeout="10s"
+            if [[ $(($n % 2)) == 1 ]]; then
+              timeout="11s"
+            fi
+
+            kubectl patch synthesizers load-test-synth --type=merge --patch "{\"spec\":{\"timeout\": \"$timeout\"}}"
+            n=$(($n + 1))
+            sleep 120
+          done

@@ -262,7 +262,7 @@ func buildResourceSlices(comp *apiv1.Composition, previous []*apiv1.ResourceSlic
 			slice = &apiv1.ResourceSlice{}
 			slice.GenerateName = comp.Name + "-"
 			slice.Namespace = comp.Namespace
-			// TODO: slice.Finalizers = []string{"eno.azure.io/cleanup"}
+			slice.Finalizers = []string{"eno.azure.io/cleanup"}
 			slice.OwnerReferences = []metav1.OwnerReference{{
 				APIVersion:         apiv1.SchemeGroupVersion.Identifier(),
 				Kind:               "Composition",

@@ -170,51 +170,47 @@ func TestCRUD(t *testing.T) {
 			comp.Spec.Synthesizer.Name = syn.Name
 			require.NoError(t, upstream.Create(ctx, comp))
 
-			t.Run("creation", func(t *testing.T) {
-				var obj client.Object
-				testutil.Eventually(t, func() bool {
-					obj, err = test.Get(downstream)
-					return err == nil
-				})
-				test.AssertCreated(t, obj)
-				test.WaitForPhase(t, downstream, "create")
+			t.Logf("starting creation")
+			var obj client.Object
+			testutil.Eventually(t, func() bool {
+				obj, err = test.Get(downstream)
+				return err == nil
 			})
+			test.AssertCreated(t, obj)
+			test.WaitForPhase(t, downstream, "create")
 
 			if test.ApplyExternalUpdate != nil {
-				t.Run("external update", func(t *testing.T) {
-					err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-						obj, err := test.Get(downstream)
-						require.NoError(t, err)
-
-						updatedObj := test.ApplyExternalUpdate(t, obj.DeepCopyObject().(client.Object))
-						updatedObj = setPhase(updatedObj, "external-update")
-						if err := downstream.Update(ctx, updatedObj); err != nil {
-							return err
-						}
-
-						return nil
-					})
+				t.Logf("starting external update")
+				err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+					obj, err := test.Get(downstream)
 					require.NoError(t, err)
-					test.WaitForPhase(t, downstream, "external-update")
+
+					updatedObj := test.ApplyExternalUpdate(t, obj.DeepCopyObject().(client.Object))
+					updatedObj = setPhase(updatedObj, "external-update")
+					if err := downstream.Update(ctx, updatedObj); err != nil {
+						return err
+					}
+
+					return nil
 				})
+				require.NoError(t, err)
+				test.WaitForPhase(t, downstream, "external-update")
 			}
 
-			t.Run("update", func(t *testing.T) {
-				setImage(t, upstream, syn, comp, "update")
-				test.WaitForPhase(t, downstream, "update")
+			t.Logf("starting update")
+			setImage(t, upstream, syn, comp, "update")
+			test.WaitForPhase(t, downstream, "update")
 
-				obj, err := test.Get(downstream)
-				require.NoError(t, err)
-				test.AssertUpdated(t, obj)
-			})
+			obj, err = test.Get(downstream)
+			require.NoError(t, err)
+			test.AssertUpdated(t, obj)
 
-			t.Run("delete", func(t *testing.T) {
-				setImage(t, upstream, syn, comp, "delete")
+			t.Logf("starting deletion")
+			setImage(t, upstream, syn, comp, "delete")
 
-				testutil.Eventually(t, func() bool {
-					_, err := test.Get(downstream)
-					return errors.IsNotFound(err)
-				})
+			testutil.Eventually(t, func() bool {
+				_, err := test.Get(downstream)
+				return errors.IsNotFound(err)
 			})
 		})
 	}
@@ -491,5 +487,80 @@ func TestReconcileStatus(t *testing.T) {
 		return err == nil && len(slice.Status.Resources) == 2 &&
 			slice.Status.Resources[0].Reconciled && !slice.Status.Resources[0].Deleted &&
 			slice.Status.Resources[1].Reconciled && slice.Status.Resources[1].Deleted
+	})
+}
+
+// TestCompositionDeletionOrdering proves that compositions are not deleted until all resulting resources have been deleted.
+// This covers significant surface area between reconciliation and synthesis.
+func TestCompositionDeletionOrdering(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	// Register supporting controllers
+	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
+	require.NoError(t, err)
+	require.NoError(t, synthesis.NewRolloutController(mgr.Manager, time.Millisecond))
+	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
+	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, &synthesis.Config{
+		Timeout: time.Second * 5,
+	}))
+	require.NoError(t, synthesis.NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
+		obj := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-obj",
+				Namespace: "default",
+				Annotations: map[string]string{
+					"eno.azure.io/reconcile-interval": "100ms",
+				},
+			},
+			Data: map[string]string{"foo": "bar"},
+		}
+
+		gvks, _, err := scheme.ObjectKinds(obj)
+		require.NoError(t, err)
+		obj.GetObjectKind().SetGroupVersionKind(gvks[0])
+		return []client.Object{obj}
+	}}))
+
+	// Test subject
+	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15))
+	require.NoError(t, err)
+	mgr.Start(t)
+
+	// Any syn/comp will do since we faked out the synthesizer pod
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "create"
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	// Wait for resource to be created
+	obj := &corev1.ConfigMap{}
+	testutil.Eventually(t, func() bool {
+		obj.SetName("test-obj")
+		obj.SetNamespace("default")
+		err = downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+		return err == nil
+	})
+
+	// Delete the composition
+	require.NoError(t, upstream.Delete(ctx, comp))
+
+	// Everything should eventually be cleaned up
+	// This implicitly covers ordering, since it's impossible to delete a resource without its composition
+	testutil.Eventually(t, func() bool {
+		return errors.IsNotFound(downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)) && errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 	})
 }
