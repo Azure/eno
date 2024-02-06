@@ -25,8 +25,6 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// TODO: Block ResourceSlice deletion until resources have been cleaned up
-// TODO: Clean up unused resource slices older than a duration
 var insecureLogPatch = os.Getenv("INSECURE_LOG_PATCH") == "true"
 
 type Controller struct {
