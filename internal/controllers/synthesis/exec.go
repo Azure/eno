@@ -358,6 +358,10 @@ func consumeReconcileIntervalAnnotation(obj client.Object) *metav1.Duration {
 		return nil
 	}
 	delete(anno, key)
+
+	if len(anno) == 0 {
+		anno = nil // apiserver treats an empty annotation map as nil, we must as well to avoid constant patches
+	}
 	obj.SetAnnotations(anno)
 
 	dur, err := time.ParseDuration(str)
