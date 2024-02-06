@@ -84,8 +84,8 @@ func TestBuildResourceSlicesReconcileInterval(t *testing.T) {
 	require.Len(t, slices, 1)
 	require.Len(t, slices[0].Spec.Resources, 1)
 	require.NotNil(t, slices[0].Spec.Resources[0].ReconcileInterval)
-	assert.Equal(t, time.Second*10, slices[0].Spec.Resources[0].ReconcileInterval.Duration)                                                                                                             // it's in the manifest
-	assert.Equal(t, "{\"apiVersion\":\"mygroup/v1\",\"kind\":\"Test\",\"metadata\":{\"annotations\":{},\"name\":\"test-resource\",\"namespace\":\"test-ns\"}}\n", slices[0].Spec.Resources[0].Manifest) // it's not in the resource itself
+	assert.Equal(t, time.Second*10, slices[0].Spec.Resources[0].ReconcileInterval.Duration)                                                                                          // it's in the manifest
+	assert.Equal(t, "{\"apiVersion\":\"mygroup/v1\",\"kind\":\"Test\",\"metadata\":{\"name\":\"test-resource\",\"namespace\":\"test-ns\"}}\n", slices[0].Spec.Resources[0].Manifest) // it's not in the resource itself
 }
 
 func TestBuildResourceSlicesTombstonesVersionSemantics(t *testing.T) {

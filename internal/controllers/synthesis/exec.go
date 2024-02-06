@@ -82,6 +82,7 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, nil // old pod - don't bother synthesizing. The lifecycle controller will delete it
 	}
 
+	// TODO: Sometimes this happens concurrently?
 	refs, err := c.synthesize(ctx, syn, comp, pod)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("executing synthesizer: %w", err)
@@ -358,6 +359,10 @@ func consumeReconcileIntervalAnnotation(obj client.Object) *metav1.Duration {
 		return nil
 	}
 	delete(anno, key)
+
+	if len(anno) == 0 {
+		anno = nil // apiserver treats an empty annotation map as nil, we must as well to avoid constant patches
+	}
 	obj.SetAnnotations(anno)
 
 	dur, err := time.ParseDuration(str)
