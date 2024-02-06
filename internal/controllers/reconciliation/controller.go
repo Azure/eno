@@ -117,12 +117,16 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		return ctrl.Result{}, err
 	}
 
-	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) bool {
-		if rs.Reconciled {
-			return false // already in sync
+	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) (modified bool) {
+		if resource.Manifest.Deleted && !rs.Deleted {
+			rs.Deleted = true
+			modified = true
 		}
-		rs.Reconciled = true
-		return true
+		if !rs.Reconciled {
+			rs.Reconciled = true
+			modified = true
+		}
+		return
 	})
 
 	if resource != nil && resource.Manifest.ReconcileInterval != nil {
