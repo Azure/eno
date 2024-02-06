@@ -82,6 +82,7 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, nil // old pod - don't bother synthesizing. The lifecycle controller will delete it
 	}
 
+	// TODO: Sometimes this happens concurrently?
 	refs, err := c.synthesize(ctx, syn, comp, pod)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("executing synthesizer: %w", err)

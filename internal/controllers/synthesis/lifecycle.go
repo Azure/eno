@@ -115,6 +115,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, fmt.Errorf("listing resource slices: %w", err)
 		}
 		if len(sliceList.Items) > 0 || len(pods.Items) > 0 {
+			logger.V(1).Info(fmt.Sprintf("refusing to remove composition finalizer because %d associated resource slices and %d pods still exist", len(sliceList.Items), len(pods.Items)))
 			return ctrl.Result{}, nil // some resources still exist
 		}
 
@@ -124,7 +125,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 				return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
 			}
 
-			logger.Info("removed finalizer from composition because none of its resource slices remain")
+			logger.Info("removed finalizer from composition because none of its resource slices or synthesizer pods remain")
 		}
 
 		return ctrl.Result{}, nil
