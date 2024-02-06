@@ -44,3 +44,5 @@ spec:
         env:
           - name: PPROF_ADDR
             value: ":8888"
+          - name: INSECURE_LOG_PATCH
+            value: "true"

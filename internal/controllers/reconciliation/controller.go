@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,6 +27,7 @@ import (
 
 // TODO: Block ResourceSlice deletion until resources have been cleaned up
 // TODO: Clean up unused resource slices older than a duration
+var insecureLogPatch = os.Getenv("INSECURE_LOG_PATCH") == "true"
 
 type Controller struct {
 	client         client.Client
@@ -168,6 +170,9 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 	patch, err = mungePatch(patch, current.GetResourceVersion())
 	if err != nil {
 		return fmt.Errorf("adding resource version: %w", err)
+	}
+	if insecureLogPatch {
+		logger.V(1).Info("INSECURE logging patch", "patch", string(patch))
 	}
 	err = c.upstreamClient.Patch(ctx, current, client.RawPatch(patchType, patch))
 	if err != nil {
