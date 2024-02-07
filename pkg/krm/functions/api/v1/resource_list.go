@@ -1,7 +1,7 @@
 package v1
 
 import (
-	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 // ResourceList ResourceList is the input/output wire format for KRM functions.
@@ -21,13 +21,13 @@ type ResourceList struct {
 	//
 	// A function will read this field in the input ResourceList and populate
 	// this field in the output ResourceList.
-	Items []runtime.Object `json:"items"`
+	Items []*unstructured.Unstructured `json:"items"`
 
 	// [input]
 	// FunctionConfig is an optional Kubernetes object for passing arguments to a
 	// function invocation.
 	// +optional
-	FunctionConfig runtime.Object `json:"functionConfig,omitempty"`
+	FunctionConfig *unstructured.Unstructured `json:"functionConfig,omitempty"`
 
 	// [output]
 	// Results is an optional list that can be used by function to emit results
