@@ -561,7 +561,6 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 	// Everything should eventually be cleaned up
 	// This implicitly covers ordering, since it's impossible to delete a resource without its composition
 	testutil.Eventually(t, func() bool {
-		// TODO: Flakes
 		return errors.IsNotFound(downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)) && errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 	})
 }
