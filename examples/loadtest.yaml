@@ -8,13 +8,13 @@ spec:
   - /bin/bash
   - -c
   - |
-      n=23
+      n=3000
       echo -n '['
       for i in $(seq $n); do
         echo -n "{
           \"apiVersion\": \"v1\",
           \"kind\": \"ConfigMap\",
-          \"metadata\": { \"name\": \"test-cm-${i}\", \"namespace\": \"default\", \"annotations\": { \"eno.azure.io/reconcile-interval\": \"10s\" } },
+          \"metadata\": { \"name\": \"test-cm-${i}\", \"namespace\": \"default\", \"annotations\": { \"eno.azure.io/reconcile-interval\": \"30s\" } },
           \"data\": { \"foo\": \"bar\" }
         }"
         if [[ $i == $n ]]; then
