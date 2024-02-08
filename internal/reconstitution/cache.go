@@ -49,7 +49,7 @@ func (c *cache) Get(ctx context.Context, comp *CompositionRef, ref *ResourceRef)
 	return &Resource{
 		Ref:      &refDeref,
 		Manifest: res.Manifest.DeepCopy(),
-		Object:   res.Object.DeepCopy(),
+		Object:   res.Object,
 	}, ok
 }
 
