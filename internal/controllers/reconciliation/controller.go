@@ -104,15 +104,13 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	if client.IgnoreNotFound(err) != nil {
 		return ctrl.Result{}, fmt.Errorf("getting current state: %w", err)
 	}
-	if current == nil {
-		// This means the resource hasn't changed since last reconciliation
-		// We don't log here since this is the hottest path in Eno
-		return c.continueLoop(resource)
-	}
 
-	// Do the reconciliation
-	if err := c.reconcileResource(ctx, prev, resource, current); err != nil {
-		return ctrl.Result{}, err
+	// Nil current struct means the resource version hasn't changed since it was last observed
+	// Skip without logging since this is a very hot path
+	if current != nil {
+		if err := c.reconcileResource(ctx, prev, resource, current); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) (modified bool) {
@@ -127,13 +125,10 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		return
 	})
 
-	return c.continueLoop(resource)
-}
-
-func (c *Controller) continueLoop(resource *reconstitution.Resource) (ctrl.Result, error) {
 	if resource != nil && resource.Manifest.ReconcileInterval != nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(resource.Manifest.ReconcileInterval.Duration, 0.1)}, nil
 	}
+
 	return ctrl.Result{}, nil
 }
 
