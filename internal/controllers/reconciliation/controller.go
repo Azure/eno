@@ -100,12 +100,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 
 	// Fetch the current resource
-	current := &unstructured.Unstructured{}
-	current.SetName(req.Resource.Name)
-	current.SetNamespace(req.Resource.Namespace)
-	current.SetKind(req.Resource.Kind)
-	current.SetAPIVersion(apiVersion)
-	err = c.upstreamClient.Get(ctx, client.ObjectKeyFromObject(current), current)
+	current, err := c.getCurrent(ctx, resource, apiVersion)
 	if client.IgnoreNotFound(err) != nil {
 		return ctrl.Result{}, fmt.Errorf("getting current state: %w", err)
 	}
@@ -214,6 +209,16 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 		return nil, "", reconcile.TerminalError(err)
 	}
 	return patch, types.StrategicMergePatchType, err
+}
+
+func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Resource, apiVersion string) (*unstructured.Unstructured, error) {
+	current := &unstructured.Unstructured{}
+	current.SetName(resource.Ref.Name)
+	current.SetNamespace(resource.Ref.Namespace)
+	current.SetKind(resource.Ref.Kind)
+	current.SetAPIVersion(apiVersion)
+
+	return current, c.upstreamClient.Get(ctx, client.ObjectKeyFromObject(current), current)
 }
 
 func mungePatch(patch []byte, rv string) ([]byte, error) {
