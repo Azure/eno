@@ -47,6 +47,14 @@ func init() {
 }
 
 func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
+	return newMgr(logger, opts, true)
+}
+
+func NewWithoutIndexing(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
+	return newMgr(logger, opts, false)
+}
+
+func newMgr(logger logr.Logger, opts *Options, enableIndexing bool) (ctrl.Manager, error) {
 	opts.Rest.QPS = float32(opts.qps)
 
 	scheme := runtime.NewScheme()
@@ -91,26 +99,27 @@ func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
 		return nil, err
 	}
 
-	err = mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Pod{}, IdxPodsByComposition, indexController())
-	if err != nil {
-		return nil, err
-	}
+	if enableIndexing {
+		err = mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Pod{}, IdxPodsByComposition, indexController())
+		if err != nil {
+			return nil, err
+		}
 
-	err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, IdxResourceSlicesByComposition, indexController())
-	if err != nil {
-		return nil, err
-	}
+		err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, IdxResourceSlicesByComposition, indexController())
+		if err != nil {
+			return nil, err
+		}
 
-	err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.Composition{}, IdxCompositionsBySynthesizer, func(o client.Object) []string {
-		comp := o.(*apiv1.Composition)
-		return []string{comp.Spec.Synthesizer.Name}
-	})
-	if err != nil {
-		return nil, err
+		err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.Composition{}, IdxCompositionsBySynthesizer, func(o client.Object) []string {
+			comp := o.(*apiv1.Composition)
+			return []string{comp.Spec.Synthesizer.Name}
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	mgr.AddHealthzCheck("ping", healthz.Ping)
-
 	return mgr, nil
 }
 
