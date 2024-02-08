@@ -104,6 +104,11 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	if client.IgnoreNotFound(err) != nil {
 		return ctrl.Result{}, fmt.Errorf("getting current state: %w", err)
 	}
+	if current == nil {
+		// This means the resource hasn't changed since last reconciliation
+		// We don't log here since this is the hottest path in Eno
+		return c.continueLoop(resource)
+	}
 
 	// Do the reconciliation
 	if err := c.reconcileResource(ctx, prev, resource, current); err != nil {
@@ -122,6 +127,10 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		return
 	})
 
+	return c.continueLoop(resource)
+}
+
+func (c *Controller) continueLoop(resource *reconstitution.Resource) (ctrl.Result, error) {
 	if resource != nil && resource.Manifest.ReconcileInterval != nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(resource.Manifest.ReconcileInterval.Duration, 0.1)}, nil
 	}
@@ -212,13 +221,32 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 }
 
 func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Resource, apiVersion string) (*unstructured.Unstructured, error) {
+	if resource.HasBeenSeen() {
+		meta := &metav1.PartialObjectMetadata{}
+		meta.Name = resource.Ref.Name
+		meta.Namespace = resource.Ref.Namespace
+		meta.Kind = resource.Ref.Kind
+		meta.APIVersion = apiVersion
+		err := c.upstreamClient.Get(ctx, client.ObjectKeyFromObject(meta), meta)
+		if err != nil {
+			return nil, err
+		}
+		if resource.MatchesLastSeen(meta.ResourceVersion) {
+			return nil, nil // resource hasn't changed - no need to reconcile
+		}
+	}
+
 	current := &unstructured.Unstructured{}
 	current.SetName(resource.Ref.Name)
 	current.SetNamespace(resource.Ref.Namespace)
 	current.SetKind(resource.Ref.Kind)
 	current.SetAPIVersion(apiVersion)
+	err := c.upstreamClient.Get(ctx, client.ObjectKeyFromObject(current), current)
+	if rv := current.GetResourceVersion(); rv != "" {
+		resource.ObserveVersion(rv)
+	}
 
-	return current, c.upstreamClient.Get(ctx, client.ObjectKeyFromObject(current), current)
+	return current, err
 }
 
 func mungePatch(patch []byte, rv string) ([]byte, error) {
