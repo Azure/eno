@@ -79,28 +79,11 @@ func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
 	}
 	mgrOpts.Cache.DefaultFieldSelector = fieldSelector
 
-	// TODO: Evaluate if the passed-in label selector should be merged with the Pod label selector.
-	// It probably should not because we're only watching Pods created by Eno itself,
-	// but this is not the case if we by some reason start watching Pods not belonging to Eno.
 	podLabelSelector := labels.SelectorFromSet(labels.Set{ManagerLabelKey: ManagerLabelValue})
-	if opts.Namespace == "" {
-		mgrOpts.Cache.ByObject = map[client.Object]cache.ByObject{
-			&corev1.Pod{}: {Label: podLabelSelector},
-		}
-	} else {
-		mgrOpts.Cache.ByObject = map[client.Object]cache.ByObject{
-			&corev1.Pod{}: {
-				Namespaces: map[string]cache.Config{
-					opts.Namespace: {
-						LabelSelector: podLabelSelector,
-					},
-				},
-			},
-		}
-
-		mgrOpts.Cache.DefaultNamespaces = map[string]cache.Config{
-			opts.Namespace: {},
-		}
+	mgrOpts.Cache.ByObject = map[client.Object]cache.ByObject{
+		// We do not honor the configured label selector, because these pods will only ever have labels set by Eno.
+		// But we _do_ honor the field selector since it may reduce the namespace scope, etc.
+		&corev1.Pod{}: {Label: podLabelSelector, Field: fieldSelector},
 	}
 
 	mgr, err := ctrl.NewManager(opts.Rest, mgrOpts)

@@ -11,7 +11,6 @@ import (
 
 type Options struct {
 	Rest            *rest.Config
-	Namespace       string
 	FieldSelector   string
 	LabelSelector   string
 	HealthProbeAddr string
@@ -20,7 +19,6 @@ type Options struct {
 }
 
 func (o *Options) Bind(set *flag.FlagSet) {
-	set.StringVar(&o.Namespace, "namespace", "", "Only reconcile resources in a particular namespace")
 	set.StringVar(&o.HealthProbeAddr, "health-probe-addr", ":8081", "Address to serve health probes on")
 	set.StringVar(&o.MetricsAddr, "metrics-addr", ":8080", "Address to serve Prometheus metrics on")
 	set.IntVar(&o.Rest.Burst, "burst", 50, "apiserver client rate limiter burst configuration")
