@@ -17,7 +17,7 @@ func New(mgr ctrl.Manager, writeBatchInterval time.Duration) (*Manager, error) {
 		Manager: mgr,
 	}
 	m.writeBuffer = newWriteBuffer(mgr.GetClient(), writeBatchInterval, 2)
-	mgr.Add(m.writeBuffer) // TODO: No logger is in the context here
+	mgr.Add(m.writeBuffer)
 
 	var err error
 	m.reconstituter, err = newReconstituter(mgr)
@@ -37,7 +37,7 @@ type Manager struct {
 func (m *Manager) GetClient() Client { return m }
 
 func (m *Manager) Add(rec Reconciler) error {
-	rateLimiter := workqueue.DefaultControllerRateLimiter()
+	rateLimiter := workqueue.DefaultItemBasedRateLimiter()
 	queue := workqueue.NewRateLimitingQueueWithConfig(rateLimiter, workqueue.RateLimitingQueueConfig{
 		Name: rec.Name(),
 	})
