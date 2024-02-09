@@ -86,7 +86,8 @@ func (c *sliceCleanupController) Reconcile(ctx context.Context, req ctrl.Request
 }
 
 func shouldDelete(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
-	if slice.Spec.CompositionGeneration > comp.Generation {
+	owner := metav1.GetControllerOf(slice)
+	if slice.Spec.CompositionGeneration > comp.Generation && owner.UID == comp.UID {
 		return false // stale informer
 	}
 	isReferenced := synthesisReferencesSlice(comp.Status.CurrentState, slice) || synthesisReferencesSlice(comp.Status.PreviousState, slice)
@@ -95,7 +96,8 @@ func shouldDelete(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
 }
 
 func shouldReleaseFinalizer(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
-	if slice.Spec.CompositionGeneration > comp.Generation {
+	owner := metav1.GetControllerOf(slice)
+	if slice.Spec.CompositionGeneration > comp.Generation && owner.UID == comp.UID {
 		return false // stale informer
 	}
 	return !synthesisReferencesSlice(comp.Status.CurrentState, slice) || !resourcesRemain(slice)
