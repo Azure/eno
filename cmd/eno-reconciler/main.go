@@ -58,7 +58,7 @@ func run() error {
 	}
 	logger := zapr.NewLogger(zl)
 
-	mgr, err := manager.New(logger, mgrOpts)
+	mgr, err := manager.NewWithoutIndexing(logger, mgrOpts)
 	if err != nil {
 		return fmt.Errorf("constructing manager: %w", err)
 	}

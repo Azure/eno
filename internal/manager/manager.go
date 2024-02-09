@@ -47,6 +47,14 @@ func init() {
 }
 
 func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
+	return newMgr(logger, opts, true)
+}
+
+func NewWithoutIndexing(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
+	return newMgr(logger, opts, false)
+}
+
+func newMgr(logger logr.Logger, opts *Options, enableIndexing bool) (ctrl.Manager, error) {
 	opts.Rest.QPS = float32(opts.qps)
 
 	scheme := runtime.NewScheme()
@@ -79,28 +87,11 @@ func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
 	}
 	mgrOpts.Cache.DefaultFieldSelector = fieldSelector
 
-	// TODO: Evaluate if the passed-in label selector should be merged with the Pod label selector.
-	// It probably should not because we're only watching Pods created by Eno itself,
-	// but this is not the case if we by some reason start watching Pods not belonging to Eno.
 	podLabelSelector := labels.SelectorFromSet(labels.Set{ManagerLabelKey: ManagerLabelValue})
-	if opts.Namespace == "" {
-		mgrOpts.Cache.ByObject = map[client.Object]cache.ByObject{
-			&corev1.Pod{}: {Label: podLabelSelector},
-		}
-	} else {
-		mgrOpts.Cache.ByObject = map[client.Object]cache.ByObject{
-			&corev1.Pod{}: {
-				Namespaces: map[string]cache.Config{
-					opts.Namespace: {
-						LabelSelector: podLabelSelector,
-					},
-				},
-			},
-		}
-
-		mgrOpts.Cache.DefaultNamespaces = map[string]cache.Config{
-			opts.Namespace: {},
-		}
+	mgrOpts.Cache.ByObject = map[client.Object]cache.ByObject{
+		// We do not honor the configured label selector, because these pods will only ever have labels set by Eno.
+		// But we _do_ honor the field selector since it may reduce the namespace scope, etc.
+		&corev1.Pod{}: {Label: podLabelSelector, Field: fieldSelector},
 	}
 
 	mgr, err := ctrl.NewManager(opts.Rest, mgrOpts)
@@ -108,26 +99,27 @@ func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
 		return nil, err
 	}
 
-	err = mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Pod{}, IdxPodsByComposition, indexController())
-	if err != nil {
-		return nil, err
-	}
+	if enableIndexing {
+		err = mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Pod{}, IdxPodsByComposition, indexController())
+		if err != nil {
+			return nil, err
+		}
 
-	err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, IdxResourceSlicesByComposition, indexController())
-	if err != nil {
-		return nil, err
-	}
+		err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, IdxResourceSlicesByComposition, indexController())
+		if err != nil {
+			return nil, err
+		}
 
-	err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.Composition{}, IdxCompositionsBySynthesizer, func(o client.Object) []string {
-		comp := o.(*apiv1.Composition)
-		return []string{comp.Spec.Synthesizer.Name}
-	})
-	if err != nil {
-		return nil, err
+		err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.Composition{}, IdxCompositionsBySynthesizer, func(o client.Object) []string {
+			comp := o.(*apiv1.Composition)
+			return []string{comp.Spec.Synthesizer.Name}
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	mgr.AddHealthzCheck("ping", healthz.Ping)
-
 	return mgr, nil
 }
 

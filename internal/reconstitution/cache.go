@@ -47,9 +47,10 @@ func (c *cache) Get(ctx context.Context, comp *CompositionRef, ref *ResourceRef)
 	// Copy the resource so it's safe for callers to mutate
 	refDeref := *ref
 	return &Resource{
-		Ref:      &refDeref,
-		Manifest: res.Manifest.DeepCopy(),
-		Object:   res.Object.DeepCopy(),
+		lastSeenMeta: res.lastSeenMeta,
+		Ref:          &refDeref,
+		Manifest:     res.Manifest.DeepCopy(),
+		Object:       res.Object,
 	}, ok
 }
 
@@ -139,6 +140,7 @@ func (c *cache) buildResource(ctx context.Context, comp *apiv1.Composition, slic
 	}
 
 	res := &Resource{
+		lastSeenMeta: &lastSeenMeta{},
 		Ref: &ResourceRef{
 			Namespace: parsed.GetNamespace(),
 			Name:      parsed.GetName(),

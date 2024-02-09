@@ -2,6 +2,7 @@ package reconstitution
 
 import (
 	"context"
+	"sync"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -32,8 +33,9 @@ type ManifestRef struct {
 
 // Resource is the controller's internal representation of a single resource out of a ResourceSlice.
 type Resource struct {
-	Ref *ResourceRef
+	*lastSeenMeta
 
+	Ref      *ResourceRef
 	Manifest *apiv1.Manifest
 	Object   *unstructured.Unstructured
 }
@@ -63,4 +65,27 @@ type Request struct {
 	Resource    ResourceRef
 	Manifest    ManifestRef
 	Composition CompositionRef
+}
+
+type lastSeenMeta struct {
+	lock            sync.Mutex
+	resourceVersion string
+}
+
+func (l *lastSeenMeta) ObserveVersion(rv string) {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	l.resourceVersion = rv
+}
+
+func (l *lastSeenMeta) HasBeenSeen() bool {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	return l.resourceVersion != ""
+}
+
+func (l *lastSeenMeta) MatchesLastSeen(rv string) bool {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	return l.resourceVersion == rv
 }
