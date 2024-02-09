@@ -37,7 +37,7 @@ func TestSliceCleanupControllerOrphanedSlice(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Synthesis is in progress
+	// A random slice is created, but not part of the composition's synthesis
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = "test-1"
 	slice.Namespace = "default"

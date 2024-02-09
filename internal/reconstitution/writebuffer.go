@@ -16,11 +16,6 @@ import (
 	"github.com/go-logr/logr"
 )
 
-type asyncStatusUpdate struct {
-	SlicedResource *ManifestRef
-	PatchFn        StatusPatchFn
-}
-
 // writeBuffer reduces load on etcd/apiserver by collecting resource slice status
 // updates over a short period of time and applying them in a single update request.
 type writeBuffer struct {
@@ -29,14 +24,14 @@ type writeBuffer struct {
 	// queue items are per-slice.
 	// the state map collects multiple updates per slice to be dispatched by next queue item.
 	mut   sync.Mutex
-	state map[types.NamespacedName][]*asyncStatusUpdate
+	state map[types.NamespacedName][]int
 	queue workqueue.RateLimitingInterface
 }
 
 func newWriteBuffer(cli client.Client, batchInterval time.Duration, burst int) *writeBuffer {
 	return &writeBuffer{
 		client: cli,
-		state:  make(map[types.NamespacedName][]*asyncStatusUpdate),
+		state:  make(map[types.NamespacedName][]int),
 		queue: workqueue.NewRateLimitingQueueWithConfig(
 			&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Every(batchInterval), burst)},
 			workqueue.RateLimitingQueueConfig{
@@ -45,15 +40,12 @@ func newWriteBuffer(cli client.Client, batchInterval time.Duration, burst int) *
 	}
 }
 
-func (w *writeBuffer) PatchStatusAsync(ctx context.Context, ref *ManifestRef, patchFn StatusPatchFn) {
+func (w *writeBuffer) PatchStatusAsync(ctx context.Context, ref *ManifestRef) {
 	w.mut.Lock()
 	defer w.mut.Unlock()
 
 	key := ref.Slice
-	w.state[key] = append(w.state[key], &asyncStatusUpdate{
-		SlicedResource: ref,
-		PatchFn:        patchFn,
-	})
+	w.state[key] = append(w.state[key], ref.Index)
 	w.queue.Add(key)
 }
 
@@ -104,7 +96,7 @@ func (w *writeBuffer) processQueueItem(ctx context.Context) bool {
 	return true
 }
 
-func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.NamespacedName, updates []*asyncStatusUpdate) bool {
+func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.NamespacedName, updates []int) bool {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	slice := &apiv1.ResourceSlice{}
@@ -118,14 +110,21 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 		return false
 	}
 
+	var dirty bool
 	if len(slice.Status.Resources) != len(slice.Spec.Resources) {
 		slice.Status.Resources = make([]apiv1.ResourceState, len(slice.Spec.Resources))
+		dirty = true
 	}
 
-	var dirty bool
-	for _, update := range updates {
-		statusPtr := &slice.Status.Resources[update.SlicedResource.Index]
-		if update.PatchFn(statusPtr) {
+	for _, index := range updates {
+		state := slice.Status.Resources[index]
+
+		if (slice.Spec.Resources[index].Deleted || slice.DeletionTimestamp != nil) && !state.Deleted {
+			slice.Status.Resources[index].Deleted = true
+			dirty = true
+		}
+		if !state.Reconciled {
+			slice.Status.Resources[index].Reconciled = true
 			dirty = true
 		}
 	}

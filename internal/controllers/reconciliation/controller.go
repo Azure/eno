@@ -113,18 +113,8 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		}
 	}
 
-	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) (modified bool) {
-		if resource.Manifest.Deleted && !rs.Deleted {
-			rs.Deleted = true
-			modified = true
-		}
-		if !rs.Reconciled {
-			rs.Reconciled = true
-			modified = true
-		}
-		return
-	})
-
+	// We made it - report the status and wait for the next tick of the loop
+	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest)
 	if resource != nil && resource.Manifest.ReconcileInterval != nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(resource.Manifest.ReconcileInterval.Duration, 0.1)}, nil
 	}
@@ -135,7 +125,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) error {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	if resource.Manifest.Deleted {
+	if resource.Manifest.Deleted || resource.SliceDeleted {
 		if current == nil || current.GetDeletionTimestamp() != nil {
 			return nil // already deleted - nothing to do
 		}

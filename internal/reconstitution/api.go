@@ -20,10 +20,8 @@ type Reconciler interface {
 // Client provides read/write access to a collection of reconstituted resources.
 type Client interface {
 	Get(ctx context.Context, comp *CompositionRef, res *ResourceRef) (*Resource, bool)
-	PatchStatusAsync(ctx context.Context, req *ManifestRef, patchFn StatusPatchFn)
+	PatchStatusAsync(ctx context.Context, req *ManifestRef)
 }
-
-type StatusPatchFn func(*apiv1.ResourceState) bool
 
 // ManifestRef references a particular resource manifest within a resource slice.
 type ManifestRef struct {
@@ -35,9 +33,10 @@ type ManifestRef struct {
 type Resource struct {
 	*lastSeenMeta
 
-	Ref      *ResourceRef
-	Manifest *apiv1.Manifest
-	Object   *unstructured.Unstructured
+	Ref          *ResourceRef
+	Manifest     *apiv1.Manifest
+	Object       *unstructured.Unstructured
+	SliceDeleted bool
 }
 
 // ResourceRef refers to a specific synthesized resource.

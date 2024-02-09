@@ -87,7 +87,7 @@ func TestCacheCleanup(t *testing.T) {
 		assert.NotEmpty(t, resource.Manifest)
 		assert.Equal(t, "ConfigMap", resource.Object.GetKind())
 		assert.Equal(t, "slice-0-resource-0", resource.Object.GetName())
-		assert.True(t, resource.Manifest.Deleted)
+		assert.False(t, resource.Manifest.Deleted)
 	})
 
 	t.Run("partial purge", func(t *testing.T) {

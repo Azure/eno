@@ -146,6 +146,9 @@ func NewCompositionToResourceSliceHandler(cli client.Client) handler.EventHandle
 			logr.FromContextOrDiscard(ctx).Error(err, "listing resource slices by composition")
 			return
 		}
+		for _, item := range list.Items {
+			rli.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: item.Name, Namespace: item.Namespace}})
+		}
 	}
 	return &handler.Funcs{
 		CreateFunc: func(ctx context.Context, ce event.CreateEvent, rli workqueue.RateLimitingInterface) {

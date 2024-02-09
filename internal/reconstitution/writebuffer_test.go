@@ -32,7 +32,7 @@ func TestWriteBufferBasics(t *testing.T) {
 	req := &ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
-	w.PatchStatusAsync(ctx, req, setReconciled())
+	w.PatchStatusAsync(ctx, req)
 
 	// Slice resource's status should reflect the patch
 	w.processQueueItem(ctx)
@@ -69,12 +69,12 @@ func TestWriteBufferBatching(t *testing.T) {
 	req := &ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
-	w.PatchStatusAsync(ctx, req, setReconciled())
+	w.PatchStatusAsync(ctx, req)
 
 	req = &ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 2
-	w.PatchStatusAsync(ctx, req, setReconciled())
+	w.PatchStatusAsync(ctx, req)
 
 	// Slice resource's status should be correct after a single update
 	w.processQueueItem(ctx)
@@ -101,10 +101,10 @@ func TestWriteBufferNoUpdates(t *testing.T) {
 	req := &ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
-	w.PatchStatusAsync(ctx, req, setReconciled())
+	w.PatchStatusAsync(ctx, req)
 
 	// Remove the update leaving the queue message in place
-	w.state = map[types.NamespacedName][]*asyncStatusUpdate{}
+	w.state = map[types.NamespacedName][]int{}
 
 	// Slice's status should not have been initialized
 	w.processQueueItem(ctx)
@@ -119,7 +119,7 @@ func TestWriteBufferMissingSlice(t *testing.T) {
 
 	req := &ManifestRef{}
 	req.Slice.Name = "test-slice-1" // this doesn't exist
-	w.PatchStatusAsync(ctx, req, setReconciled())
+	w.PatchStatusAsync(ctx, req)
 
 	// Slice 404 drops the event and does not retry.
 	// Prevents a deadlock of this queue item.
@@ -150,7 +150,7 @@ func TestWriteBufferNoChange(t *testing.T) {
 	req := &ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
-	w.PatchStatusAsync(ctx, req, setReconciled())
+	w.PatchStatusAsync(ctx, req)
 
 	w.processQueueItem(ctx)
 }
@@ -174,21 +174,11 @@ func TestWriteBufferUpdateError(t *testing.T) {
 	req := &ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
-	w.PatchStatusAsync(ctx, req, setReconciled())
+	w.PatchStatusAsync(ctx, req)
 
 	// Both the queue item and state have persisted
 	w.processQueueItem(ctx)
 	key := types.NamespacedName{Name: slice.Name}
 	assert.Len(t, w.state[key], 1)
 	assert.Equal(t, 1, w.queue.Len())
-}
-
-func setReconciled() StatusPatchFn {
-	return func(rs *apiv1.ResourceState) bool {
-		if rs.Reconciled {
-			return false // already set
-		}
-		rs.Reconciled = true
-		return true
-	}
 }

@@ -168,7 +168,8 @@ func buildResourceSlices(comp *apiv1.Composition, previous []*apiv1.ResourceSlic
 				return nil, reconcile.TerminalError(fmt.Errorf("decoding resource %d of slice %s: %w", i, slice.Name, err))
 			}
 
-			if _, ok := refs[newResourceRef(obj)]; ok || (res.Deleted && slice.Status.Resources != nil && slice.Status.Resources[i].Reconciled) {
+			if _, ok := refs[newResourceRef(obj)]; ok || ((res.Deleted || slice.DeletionTimestamp != nil) && slice.Status.Resources != nil && slice.Status.Resources[i].Reconciled) {
+				// TODO: Integration test this behavior with the reconciliation controllers
 				continue // still exists or has already been deleted
 			}
 
