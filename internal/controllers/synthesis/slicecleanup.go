@@ -86,12 +86,18 @@ func (c *sliceCleanupController) Reconcile(ctx context.Context, req ctrl.Request
 }
 
 func shouldDelete(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
+	if slice.Spec.CompositionGeneration > comp.Generation {
+		return false // stale informer
+	}
 	isReferenced := synthesisReferencesSlice(comp.Status.CurrentState, slice) || synthesisReferencesSlice(comp.Status.PreviousState, slice)
 	isSynthesizing := comp.Status.CurrentState == nil || !comp.Status.CurrentState.Synthesized || (comp.Status.PreviousState != nil && !comp.Status.PreviousState.Synthesized)
 	return comp.DeletionTimestamp != nil || (!isSynthesizing && !isReferenced)
 }
 
 func shouldReleaseFinalizer(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
+	if slice.Spec.CompositionGeneration > comp.Generation {
+		return false // stale informer
+	}
 	return !synthesisReferencesSlice(comp.Status.CurrentState, slice) || !resourcesRemain(slice)
 }
 

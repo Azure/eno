@@ -200,6 +200,7 @@ func buildResourceSlices(comp *apiv1.Composition, previous []*apiv1.ResourceSlic
 				BlockOwnerDeletion: &blockOwnerDeletion, // we need the composition in order to successfully delete its resource slices
 				Controller:         &blockOwnerDeletion,
 			}}
+			slice.Spec.CompositionGeneration = comp.Generation
 			slices = append(slices, slice)
 		}
 		sliceBytes += len(manifest.Manifest)
