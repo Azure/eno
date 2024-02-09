@@ -6,6 +6,7 @@
 package v1
 
 import (
+	unstructured "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -14,15 +15,17 @@ func (in *ResourceList) DeepCopyInto(out *ResourceList) {
 	*out = *in
 	if in.Items != nil {
 		in, out := &in.Items, &out.Items
-		*out = make([]runtime.Object, len(*in))
+		*out = make([]*unstructured.Unstructured, len(*in))
 		for i := range *in {
 			if (*in)[i] != nil {
-				(*out)[i] = (*in)[i].DeepCopyObject()
+				in, out := &(*in)[i], &(*out)[i]
+				*out = (*in).DeepCopy()
 			}
 		}
 	}
 	if in.FunctionConfig != nil {
-		out.FunctionConfig = in.FunctionConfig.DeepCopyObject()
+		in, out := &in.FunctionConfig, &out.FunctionConfig
+		*out = (*in).DeepCopy()
 	}
 	if in.Results != nil {
 		in, out := &in.Results, &out.Results

@@ -2,9 +2,7 @@ package synthesis
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"strconv"
 	"time"
 
@@ -115,76 +113,6 @@ func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer,
 	logger.V(1).Info("synthesizing is done", "latency", time.Since(start).Milliseconds())
 
 	return c.writeOutputToSlices(ctx, comp, stdout)
-}
-
-func (c *execController) buildInputsJson(ctx context.Context, comp *apiv1.Composition) ([]byte, error) {
-	logger := logr.FromContextOrDiscard(ctx)
-
-	var inputs []*unstructured.Unstructured
-	for _, ref := range comp.Spec.Inputs {
-		if ref.Resource == nil {
-			continue // not a k8s resource
-		}
-		input := &unstructured.Unstructured{}
-		input.SetName(ref.Resource.Name)
-		input.SetNamespace(ref.Resource.Namespace)
-		input.SetKind(ref.Resource.Kind)
-		input.SetAPIVersion(ref.Resource.APIVersion)
-		appendInputNameAnnotation(&ref, input)
-
-		start := time.Now()
-		err := c.client.Get(ctx, client.ObjectKeyFromObject(input), input)
-		if err != nil {
-			// Ideally we could stop retrying eventually here in cases where the resource doesn't exist,
-			// but it isn't safe to _never_ retry (informers across types aren't ordered), and controller-runtime
-			// doesn't expose the retry count.
-			return nil, fmt.Errorf("getting resource %s/%s: %w", input.GetKind(), input.GetName(), err)
-		}
-
-		logger.V(1).Info("retrieved input resource", "resourceName", input.GetName(), "resourceNamespace", input.GetNamespace(), "resourceKind", input.GetKind(), "latency", time.Since(start).Milliseconds())
-		inputs = append(inputs, input)
-	}
-
-	js, err := json.Marshal(&inputs)
-	if err != nil {
-		return nil, reconcile.TerminalError(err)
-	}
-	return js, nil
-}
-
-func (c *execController) writeOutputToSlices(ctx context.Context, comp *apiv1.Composition, stdout io.Reader) ([]*apiv1.ResourceSliceRef, error) {
-	logger := logr.FromContextOrDiscard(ctx)
-
-	outputs := []*unstructured.Unstructured{}
-	err := json.NewDecoder(stdout).Decode(&outputs)
-	if err != nil {
-		return nil, reconcile.TerminalError(fmt.Errorf("parsing outputs: %w", err))
-	}
-
-	previous, err := c.fetchPreviousSlices(ctx, comp)
-	if err != nil {
-		return nil, err
-	}
-
-	slices, err := buildResourceSlices(comp, previous, outputs, maxSliceJsonBytes)
-	if err != nil {
-		return nil, err
-	}
-
-	sliceRefs := make([]*apiv1.ResourceSliceRef, len(slices))
-	for i, slice := range slices {
-		start := time.Now()
-
-		err = c.writeResourceSlice(ctx, slice)
-		if err != nil {
-			return nil, fmt.Errorf("creating resource slice %d: %w", i, err)
-		}
-
-		logger.V(1).Info("wrote resource slice", "resourceSliceName", slice.Name, "latency", time.Since(start).Milliseconds())
-		sliceRefs[i] = &apiv1.ResourceSliceRef{Name: slice.Name}
-	}
-
-	return sliceRefs, nil
 }
 
 func (c *execController) fetchPreviousSlices(ctx context.Context, comp *apiv1.Composition) ([]*apiv1.ResourceSlice, error) {
@@ -321,15 +249,6 @@ func (c *execController) writeSuccessStatus(ctx context.Context, comp *apiv1.Com
 		logger.V(1).Info("finished synthesizing the composition")
 		return nil
 	})
-}
-
-func appendInputNameAnnotation(ref *apiv1.InputRef, input *unstructured.Unstructured) {
-	anno := input.GetAnnotations()
-	if anno == nil {
-		anno = map[string]string{}
-	}
-	anno["eno.azure.io/input-name"] = ref.Name
-	input.SetAnnotations(anno)
 }
 
 func truncateString(str string, length int) (out string) {

@@ -8,13 +8,22 @@ spec:
   - /bin/bash
   - -c
   - |
-    echo '[{
-      "apiVersion": "v1",
-      "kind": "ConfigMap",
-      "metadata": { "name": "test-cm", "namespace": "default" },
-      "data": { "foo": "bar" }
-    }]'
-
+    echo '
+      {
+        "apiVersion":"config.kubernetes.io/v1",
+        "kind":"ResourceList",
+        "items":[
+          {
+            "apiVersion":"v1",
+            "data":{"someKey":"someVal"},
+            "kind":"ConfigMap",
+            "metadata":{
+              "name":"some-config",
+              "namespace": "default",
+            }
+          }
+        ]
+      }'
 ---
 
 apiVersion: eno.azure.io/v1
