@@ -248,7 +248,7 @@ func (c *execController) writeSuccessStatus(ctx context.Context, comp *apiv1.Com
 			return err
 		}
 
-		logger.V(1).Info("finished synthesizing the composition")
+		logger.V(1).Info("composition status has been updated following successful synthesis")
 		return nil
 	})
 }
