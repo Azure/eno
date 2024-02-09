@@ -1,5 +1,5 @@
 package inputs
 
 const (
-	InputAnnotationKey = "eno.azure.io/input-name"
+	InputNameAnnotationKey = "eno.azure.io/input-name"
 )

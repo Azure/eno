@@ -56,7 +56,7 @@ func appendInputNameAnnotation(ref *apiv1.InputRef, input *unstructured.Unstruct
 	if anno == nil {
 		anno = map[string]string{}
 	}
-	anno[inputs.InputAnnotationKey] = ref.Name
+	anno[inputs.InputNameAnnotationKey] = ref.Name
 	input.SetAnnotations(anno)
 }
 
