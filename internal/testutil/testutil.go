@@ -32,6 +32,7 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
 	"github.com/Azure/eno/internal/manager"
+	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 )
 
 func NewClient(t testing.TB) client.Client {
@@ -257,12 +258,26 @@ type ExecConn struct {
 }
 
 func (e *ExecConn) Synthesize(ctx context.Context, syn *apiv1.Synthesizer, pod *corev1.Pod, inputsJson []byte) (io.Reader, error) {
-	if e.Hook == nil {
-		return bytes.NewBufferString("[]"), nil
+	objs := []client.Object{}
+	if e.Hook != nil {
+		objs = e.Hook(syn)
 	}
 
-	objs := e.Hook(syn)
-	js, err := json.Marshal(&objs)
+	outObjs := []*unstructured.Unstructured{}
+	for _, o := range objs {
+		m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
+		if err != nil {
+			return nil, err
+		}
+		outObjs = append(outObjs, &unstructured.Unstructured{Object: m})
+	}
+	rl := &krmv1.ResourceList{
+		Kind:       krmv1.ResourceListKind,
+		APIVersion: krmv1.SchemeGroupVersion.String(),
+		Items:      outObjs,
+	}
+
+	js, err := json.Marshal(rl)
 	if err != nil {
 		return nil, err
 	}
