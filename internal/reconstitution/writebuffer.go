@@ -54,7 +54,7 @@ func (w *writeBuffer) PatchStatusAsync(ctx context.Context, ref *ManifestRef, pa
 		SlicedResource: ref,
 		PatchFn:        patchFn,
 	})
-	w.queue.AddRateLimited(key)
+	w.queue.Add(key)
 }
 
 func (w *writeBuffer) Start(ctx context.Context) error {
@@ -84,11 +84,13 @@ func (w *writeBuffer) processQueueItem(ctx context.Context) bool {
 	w.mut.Unlock()
 
 	if len(updates) == 0 {
-		logger.V(0).Info("dropping queue item because no updates were found for this slice (this is suspicious)")
+		w.queue.Forget(item)
+		return true // nothing to do
 	}
 
 	if w.updateSlice(ctx, sliceNSN, updates) {
 		w.queue.Forget(item)
+		w.queue.AddRateLimited(item)
 		return true
 	}
 

@@ -44,6 +44,7 @@ func TestWriteBufferBasics(t *testing.T) {
 
 	// All state has been flushed
 	assert.Len(t, w.state, 0)
+	w.processQueueItem(ctx)
 	assert.Equal(t, 0, w.queue.Len())
 }
 
@@ -122,6 +123,7 @@ func TestWriteBufferMissingSlice(t *testing.T) {
 
 	// Slice 404 drops the event and does not retry.
 	// Prevents a deadlock of this queue item.
+	w.processQueueItem(ctx)
 	w.processQueueItem(ctx)
 	assert.Equal(t, 0, w.queue.Len())
 }
