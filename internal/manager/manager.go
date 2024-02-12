@@ -74,6 +74,9 @@ func newMgr(logger logr.Logger, opts *Options, enableIndexing bool) (ctrl.Manage
 		Metrics: server.Options{
 			BindAddress: opts.MetricsAddr,
 		},
+		BaseContext: func() context.Context {
+			return logr.NewContext(context.Background(), logger)
+		},
 	}
 
 	labelSelector, err := opts.getDefaultLabelSelector()
