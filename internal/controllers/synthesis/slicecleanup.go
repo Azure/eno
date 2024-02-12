@@ -7,7 +7,6 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/go-logr/logr"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -51,7 +50,7 @@ func (c *sliceCleanupController) Reconcile(ctx context.Context, req ctrl.Request
 		if client.IgnoreNotFound(err) != nil {
 			return ctrl.Result{}, fmt.Errorf("getting composition: %w", err)
 		}
-		if !errors.IsNotFound(err) {
+		if err == nil {
 			logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace)
 			doNotDelete = !shouldDelete(comp, slice)
 			holdFinalizer = !shouldReleaseFinalizer(comp, slice)
