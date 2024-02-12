@@ -35,9 +35,10 @@ type ManifestRef struct {
 type Resource struct {
 	*lastSeenMeta
 
-	Ref      *ResourceRef
-	Manifest *apiv1.Manifest
-	Object   *unstructured.Unstructured
+	Ref          *ResourceRef
+	Manifest     *apiv1.Manifest
+	Object       *unstructured.Unstructured
+	SliceDeleted bool
 }
 
 // ResourceRef refers to a specific synthesized resource.

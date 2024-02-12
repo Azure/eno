@@ -51,6 +51,7 @@ func (c *cache) Get(ctx context.Context, comp *CompositionRef, ref *ResourceRef)
 		Ref:          &refDeref,
 		Manifest:     res.Manifest.DeepCopy(),
 		Object:       res.Object,
+		SliceDeleted: res.SliceDeleted,
 	}, ok
 }
 
@@ -104,11 +105,6 @@ func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 		for i, resource := range slice.Spec.Resources {
 			resource := resource
 
-			// Delete the resource if the composition is being deleted
-			if comp.DeletionTimestamp != nil {
-				resource.Deleted = true
-			}
-
 			res, err := c.buildResource(ctx, comp, &slice, &resource)
 			if err != nil {
 				return nil, nil, fmt.Errorf("building resource at index %d of slice %s: %w", i, slice.Name, err)
@@ -146,8 +142,9 @@ func (c *cache) buildResource(ctx context.Context, comp *apiv1.Composition, slic
 			Name:      parsed.GetName(),
 			Kind:      parsed.GetKind(),
 		},
-		Manifest: resource,
-		Object:   parsed,
+		Manifest:     resource,
+		Object:       parsed,
+		SliceDeleted: slice.DeletionTimestamp != nil,
 	}
 	if res.Ref.Name == "" || parsed.GetAPIVersion() == "" {
 		return nil, fmt.Errorf("missing name, kind, or apiVersion")
