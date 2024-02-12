@@ -32,6 +32,9 @@ spec:
             type: object
           spec:
             properties:
+              compositionGeneration:
+                format: int64
+                type: integer
               resources:
                 items:
                   properties:
