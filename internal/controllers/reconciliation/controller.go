@@ -107,14 +107,17 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	// Nil current struct means the resource version hasn't changed since it was last observed
 	// Skip without logging since this is a very hot path
+	var modified bool
 	if current != nil {
-		if err := c.reconcileResource(ctx, prev, resource, current); err != nil {
+		modified, err = c.reconcileResource(ctx, prev, resource, current)
+		if err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
 	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) (modified bool) {
-		if resource.Manifest.Deleted && !rs.Deleted {
+		// TODO: Helper for deleted
+		if (resource.Manifest.Deleted || resource.SliceDeleted) && !rs.Deleted {
 			rs.Deleted = true
 			modified = true
 		}
@@ -125,63 +128,66 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		return
 	})
 
+	if modified {
+		return ctrl.Result{Requeue: true}, nil
+	}
 	if resource != nil && resource.Manifest.ReconcileInterval != nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(resource.Manifest.ReconcileInterval.Duration, 0.1)}, nil
 	}
-
 	return ctrl.Result{}, nil
 }
 
-func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) error {
+func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) (bool, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	if resource.Manifest.Deleted || resource.SliceDeleted {
 		if current == nil || current.GetDeletionTimestamp() != nil {
-			return nil // already deleted - nothing to do
+			return false, nil // already deleted - nothing to do
 		}
 
 		err := c.upstreamClient.Delete(ctx, resource.Object)
 		if err != nil {
-			return client.IgnoreNotFound(fmt.Errorf("deleting resource: %w", err))
+			return false, client.IgnoreNotFound(fmt.Errorf("deleting resource: %w", err))
 		}
 		logger.V(0).Info("deleted resource")
-		return nil
+		return true, nil
 	}
 
 	// Always create the resource when it doesn't exist
 	if current.GetResourceVersion() == "" {
 		err := c.upstreamClient.Create(ctx, resource.Object)
 		if err != nil {
-			return fmt.Errorf("creating resource: %w", err)
+			return false, fmt.Errorf("creating resource: %w", err)
 		}
 		logger.V(0).Info("created resource")
-		return nil
+		return true, nil
 	}
 
 	// Compute a merge patch
 	prevRV := current.GetResourceVersion()
 	patch, patchType, err := c.buildPatch(ctx, prev, resource, current)
 	if err != nil {
-		return fmt.Errorf("building patch: %w", err)
+		return false, fmt.Errorf("building patch: %w", err)
 	}
+	println("TODO", string(patch))
 	if string(patch) == "{}" {
 		logger.V(1).Info("skipping empty patch")
-		return nil
+		return false, nil
 	}
 	patch, err = mungePatch(patch, current.GetResourceVersion())
 	if err != nil {
-		return fmt.Errorf("adding resource version: %w", err)
+		return false, fmt.Errorf("adding resource version: %w", err)
 	}
 	if insecureLogPatch {
 		logger.V(1).Info("INSECURE logging patch", "patch", string(patch))
 	}
 	err = c.upstreamClient.Patch(ctx, current, client.RawPatch(patchType, patch))
 	if err != nil {
-		return fmt.Errorf("applying patch: %w", err)
+		return false, fmt.Errorf("applying patch: %w", err)
 	}
 	logger.V(0).Info("patched resource", "patchType", string(patchType), "resourceVersion", current.GetResourceVersion(), "previousResourceVersion", prevRV)
 
-	return nil
+	return true, nil
 }
 
 func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) ([]byte, types.PatchType, error) {

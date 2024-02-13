@@ -92,6 +92,11 @@ func (q *queueProcessor) processQueueItem(ctx context.Context) bool {
 		logger.Error(err, "error while processing queue item")
 		return true
 	}
+	if result.Requeue {
+		q.Queue.Forget(item) // TODO: Maybe omit after first retry to avoid getting stuck in a patch tightloop?
+		q.Queue.Add(item)
+		return true
+	}
 	if result.RequeueAfter != 0 {
 		q.Queue.Forget(item)
 		q.Queue.AddAfter(item, result.RequeueAfter)
