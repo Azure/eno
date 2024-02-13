@@ -502,6 +502,8 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 	corev1.SchemeBuilder.AddToScheme(scheme)
 	testv1.SchemeBuilder.AddToScheme(scheme)
 
+	// TODO: Sometimes resource not marked as deleted
+
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()

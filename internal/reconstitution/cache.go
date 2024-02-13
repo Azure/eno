@@ -75,14 +75,15 @@ func (c *cache) HasSynthesis(ctx context.Context, comp *apiv1.Composition, synth
 func (c *cache) Fill(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis, items []apiv1.ResourceSlice) ([]*Request, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
+	// TODO: Testing race
+	c.mut.Lock()
+	defer c.mut.Unlock()
+
 	// Building resources can be expensive (json parsing, etc.) so don't hold the lock during this call
 	resources, requests, err := c.buildResources(ctx, comp, items)
 	if err != nil {
 		return nil, err
 	}
-
-	c.mut.Lock()
-	defer c.mut.Unlock()
 
 	synKey := CompositionRef{Name: comp.Name, Namespace: comp.Namespace, Generation: synthesis.ObservedCompositionGeneration}
 	c.resources[synKey] = resources
