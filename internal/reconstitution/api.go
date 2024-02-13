@@ -41,6 +41,8 @@ type Resource struct {
 	SliceDeleted bool
 }
 
+func (r *Resource) Deleted() bool { return r.SliceDeleted || r.Manifest.Deleted }
+
 // ResourceRef refers to a specific synthesized resource.
 type ResourceRef struct {
 	Name, Namespace, Kind string

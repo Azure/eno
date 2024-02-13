@@ -116,8 +116,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 
 	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) (modified bool) {
-		// TODO: Helper for deleted
-		if (resource.Manifest.Deleted || resource.SliceDeleted) && !rs.Deleted {
+		if resource.Deleted() && !rs.Deleted {
 			rs.Deleted = true
 			modified = true
 		}
@@ -140,7 +139,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) (bool, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	if resource.Manifest.Deleted || resource.SliceDeleted {
+	if resource.Deleted() {
 		if current == nil || current.GetDeletionTimestamp() != nil {
 			return false, nil // already deleted - nothing to do
 		}
@@ -169,7 +168,6 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 	if err != nil {
 		return false, fmt.Errorf("building patch: %w", err)
 	}
-	println("TODO", string(patch))
 	if string(patch) == "{}" {
 		logger.V(1).Info("skipping empty patch")
 		return false, nil
