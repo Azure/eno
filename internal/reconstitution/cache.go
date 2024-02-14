@@ -2,6 +2,7 @@ package reconstitution
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -99,6 +100,9 @@ func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 	requests := []*Request{}
 	for _, slice := range items {
 		slice := slice
+		if slice.DeletionTimestamp == nil && comp.DeletionTimestamp != nil {
+			return nil, nil, errors.New("stale informer - refusing to fill cache")
+		}
 
 		// NOTE: In the future we can build a DAG here to find edges between dependant resources and append them to the Resource structs
 
