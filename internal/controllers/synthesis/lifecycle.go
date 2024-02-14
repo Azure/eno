@@ -48,20 +48,6 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
 
-	// Deletion increments the composition's generation, but the reconstitution cache is only invalidated
-	// when the synthesized generation (from the status) changes, which will never happen because synthesis
-	// is righly disabled for deleted compositions. We break out of this deadlock condition by updating
-	// the status without actually synthesizing.
-	if comp.DeletionTimestamp != nil && comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration != comp.Generation {
-		comp.Status.CurrentState.ObservedCompositionGeneration = comp.Generation
-		err = c.client.Status().Update(ctx, comp)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("updating current composition generation: %w", err)
-		}
-		logger.Info("updated composition status to reflect deletion")
-		return ctrl.Result{}, nil
-	}
-
 	// It isn't safe to delete compositions until their resource slices have been cleaned up,
 	// since reconciling resources necessarily requires the composition.
 	if comp.DeletionTimestamp == nil && controllerutil.AddFinalizer(comp, "eno.azure.io/cleanup") {
@@ -105,7 +91,6 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{RequeueAfter: c.config.Timeout}, nil
 	}
 
-	// Remove the finalizer when all pods and slices have been deleted
 	if comp.DeletionTimestamp != nil {
 		sliceList := &apiv1.ResourceSliceList{}
 		err = c.client.List(ctx, sliceList, client.MatchingFields{
@@ -114,11 +99,31 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("listing resource slices: %w", err)
 		}
+
+		// Deletion increments the composition's generation, but the reconstitution cache is only invalidated
+		// when the synthesized generation (from the status) changes, which will never happen because synthesis
+		// is righly disabled for deleted compositions. We break out of this deadlock condition by updating
+		// the status without actually synthesizing.
+		if comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration != comp.Generation {
+			if slicesAreDeleted(sliceList.Items) {
+				return ctrl.Result{}, nil
+			}
+
+			comp.Status.CurrentState.ObservedCompositionGeneration = comp.Generation
+			comp.Status.CurrentState.Synthesized = true // in case the previous synthesis failed
+			err = c.client.Status().Update(ctx, comp)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("updating current composition generation: %w", err)
+			}
+			logger.Info("updated composition status to reflect deletion")
+			return ctrl.Result{}, nil
+		}
+
+		// Remove the finalizer when all pods and slices have been deleted
 		if len(sliceList.Items) > 0 || len(pods.Items) > 0 {
 			logger.V(1).Info(fmt.Sprintf("refusing to remove composition finalizer because %d associated resource slices and %d pods still exist", len(sliceList.Items), len(pods.Items)))
 			return ctrl.Result{}, nil // some resources still exist
 		}
-
 		if controllerutil.RemoveFinalizer(comp, "eno.azure.io/cleanup") {
 			err = c.client.Update(ctx, comp)
 			if err != nil {
@@ -215,4 +220,13 @@ func swapStates(syn *apiv1.Synthesizer, comp *apiv1.Composition) {
 	comp.Status.CurrentState = &apiv1.Synthesis{
 		ObservedCompositionGeneration: comp.Generation,
 	}
+}
+
+func slicesAreDeleted(slices []apiv1.ResourceSlice) bool {
+	for _, item := range slices {
+		if item.DeletionTimestamp == nil {
+			return false
+		}
+	}
+	return true
 }

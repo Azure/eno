@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -71,12 +72,19 @@ func TestCompositionDeletion(t *testing.T) {
 	time.Sleep(time.Millisecond * 100)
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 
-	// Delete the resource slice(s)
-	slices := &apiv1.ResourceSliceList{}
-	require.NoError(t, cli.List(ctx, slices))
-	for _, slice := range slices.Items {
-		require.NoError(t, cli.Delete(ctx, &slice))
-	}
+	// Release the slice
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		res := &apiv1.ResourceSlice{}
+		res.Name = comp.Status.CurrentState.ResourceSlices[0].Name
+		res.Namespace = comp.Namespace
+		if err := cli.Get(ctx, client.ObjectKeyFromObject(res), res); err != nil {
+			return err
+		}
+
+		res.Status.Resources = []apiv1.ResourceState{{Deleted: true, Reconciled: true}}
+		return cli.Status().Update(ctx, res)
+	})
+	require.NoError(t, err)
 
 	// The composition should eventually be released
 	testutil.Eventually(t, func() bool {

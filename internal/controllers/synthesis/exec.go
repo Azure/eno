@@ -19,6 +19,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
+// TODO: Limit the max number of pods that can be running concurrently?
+
 // maxSliceJsonBytes is the max sum of a resource slice's manifests. It's set to 1mb, which leaves 512kb of space for the resource's status, encoding overhead, etc.
 const maxSliceJsonBytes = 1024 * 768
 
@@ -80,7 +82,6 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, nil // old pod - don't bother synthesizing. The lifecycle controller will delete it
 	}
 
-	// TODO: Sometimes this happens concurrently?
 	refs, err := c.synthesize(ctx, syn, comp, pod)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("executing synthesizer: %w", err)
