@@ -119,7 +119,7 @@ func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 					},
 					Index: i,
 				},
-				Composition: *NewCompositionRef(comp),
+				Composition: types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace},
 			})
 		}
 	}

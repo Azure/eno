@@ -64,11 +64,12 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition: %w", err))
 	}
+	logger := logr.FromContextOrDiscard(ctx).WithValues("compositionGeneration", comp.Generation)
 
 	if comp.Status.CurrentState == nil {
 		return ctrl.Result{}, nil // nothing to do
 	}
-	logger := logr.FromContextOrDiscard(ctx).WithValues("synthesizerName", comp.Spec.Synthesizer.Name, "synthesizerGeneration", comp.Status.CurrentState.ObservedSynthesizerGeneration)
+	logger = logger.WithValues("synthesizerName", comp.Spec.Synthesizer.Name, "synthesizerGeneration", comp.Status.CurrentState.ObservedSynthesizerGeneration)
 	ctx = logr.NewContext(ctx, logger)
 
 	// Find the current and (optionally) previous desired states in the cache

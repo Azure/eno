@@ -67,7 +67,7 @@ func NewCompositionRef(comp *apiv1.Composition) *CompositionRef {
 type Request struct {
 	Resource    ResourceRef
 	Manifest    ManifestRef
-	Composition CompositionRef
+	Composition types.NamespacedName
 }
 
 type lastSeenMeta struct {

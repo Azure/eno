@@ -143,7 +143,7 @@ func TestCachePartialPurge(t *testing.T) {
 	// Add another resource to the composition but synthesized from a newer generation
 	_, _, resources, expectedReqs := newCacheTestFixtures(1, 1)
 	synth.ObservedCompositionGeneration++
-	expectedReqs[0].Composition = CompositionRef{Name: comp.Name, Namespace: comp.Namespace, Generation: originalGen}
+	expectedReqs[0].Composition = types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
 	_, err = c.Fill(ctx, comp, synth, resources)
 	require.NoError(t, err)
 	compRef := NewCompositionRef(comp)
@@ -172,7 +172,7 @@ func TestCachePartialPurge(t *testing.T) {
 	assert.False(t, exists)
 
 	// Resource of the other composition are unaffected
-	_, exists = c.Get(ctx, &toBePreserved.Composition, &toBePreserved.Resource)
+	_, exists = c.Get(ctx, NewCompositionRef(comp), &toBePreserved.Resource)
 	assert.True(t, exists)
 
 	// The cache should only be internally tracking the remaining synthesis of our test composition
@@ -218,7 +218,7 @@ func newCacheTestFixtures(sliceCount, resPerSliceCount int) (*apiv1.Composition,
 					},
 					Index: j,
 				},
-				Composition: CompositionRef{Name: comp.Name, Namespace: comp.Namespace, Generation: synth.ObservedCompositionGeneration},
+				Composition: types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace},
 			})
 		}
 		resources[i] = slice
