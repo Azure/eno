@@ -74,6 +74,9 @@ func TestCacheCleanup(t *testing.T) {
 	now := metav1.Now()
 	comp, synth, resources, expectedReqs := newCacheTestFixtures(2, 3)
 	comp.DeletionTimestamp = &now
+	for i := range resources {
+		resources[i].DeletionTimestamp = &now
+	}
 	t.Run("fill", func(t *testing.T) {
 		reqs, err := c.Fill(ctx, comp, synth, resources)
 		require.NoError(t, err)
