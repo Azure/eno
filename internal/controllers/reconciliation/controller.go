@@ -220,7 +220,7 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 }
 
 func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Resource, apiVersion string) (*unstructured.Unstructured, error) {
-	if resource.HasBeenSeen() {
+	if resource.HasBeenSeen() && !resource.Deleted() {
 		meta := &metav1.PartialObjectMetadata{}
 		meta.Name = resource.Ref.Name
 		meta.Namespace = resource.Ref.Namespace
