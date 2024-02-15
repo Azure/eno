@@ -83,13 +83,18 @@ func (q *queueProcessor) processQueueItem(ctx context.Context) bool {
 		return false
 	}
 
-	logger := q.Logger.WithValues("compositionName", req.Composition.Name, "compositionNamespace", req.Composition.Namespace, "compositionGeneration", req.Composition.Generation, "resourceKind", req.Resource.Kind, "resourceName", req.Resource.Name, "resourceNamespace", req.Resource.Namespace)
+	logger := q.Logger.WithValues("compositionName", req.Composition.Name, "compositionNamespace", req.Composition.Namespace, "resourceKind", req.Resource.Kind, "resourceName", req.Resource.Name, "resourceNamespace", req.Resource.Namespace)
 	ctx = logr.NewContext(ctx, logger)
 
 	result, err := q.Handler.Reconcile(ctx, req)
 	if err != nil {
 		q.Queue.AddRateLimited(item)
 		logger.Error(err, "error while processing queue item")
+		return true
+	}
+	if result.Requeue {
+		q.Queue.Forget(item) // TODO: Maybe omit after first retry to avoid getting stuck in a patch tightloop?
+		q.Queue.Add(item)
 		return true
 	}
 	if result.RequeueAfter != 0 {

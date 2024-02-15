@@ -24,6 +24,11 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 )
 
+func init() {
+	// safe for tests since they don't have any secrets
+	insecureLogPatch = true
+}
+
 type crudTestCase struct {
 	Name                         string
 	Empty, Initial, Updated      client.Object
@@ -557,6 +562,7 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 
 	// Delete the composition
 	require.NoError(t, upstream.Delete(ctx, comp))
+	t.Logf("deleted composition")
 
 	// Everything should eventually be cleaned up
 	// This implicitly covers ordering, since it's impossible to delete a resource without its composition

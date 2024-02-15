@@ -73,8 +73,11 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 			queue.Add(req)
 		}
 	}
-
 	r.cache.Purge(ctx, req.NamespacedName, comp)
+
+	if len(currentReqs)+len(prevReqs) > 0 {
+		return ctrl.Result{Requeue: true}, nil
+	}
 	return ctrl.Result{}, nil
 }
 

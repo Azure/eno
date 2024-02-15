@@ -75,7 +75,7 @@ func (w *writeBuffer) processQueueItem(ctx context.Context) bool {
 	defer w.queue.Done(item)
 	sliceNSN := item.(types.NamespacedName)
 
-	logger := logr.FromContextOrDiscard(ctx).WithValues("slice", sliceNSN, "controller", "writeBuffer")
+	logger := logr.FromContextOrDiscard(ctx).WithValues("resourceSliceName", sliceNSN.Name, "resourceSliceNamespace", sliceNSN.Namespace, "controller", "writeBuffer")
 	ctx = logr.NewContext(ctx, logger)
 
 	w.mut.Lock()

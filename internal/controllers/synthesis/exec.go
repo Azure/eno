@@ -19,6 +19,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
+// TODO: Limit the max number of pods that can be running concurrently?
+
 // maxSliceJsonBytes is the max sum of a resource slice's manifests. It's set to 1mb, which leaves 512kb of space for the resource's status, encoding overhead, etc.
 const maxSliceJsonBytes = 1024 * 768
 
@@ -80,7 +82,6 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, nil // old pod - don't bother synthesizing. The lifecycle controller will delete it
 	}
 
-	// TODO: Sometimes this happens concurrently?
 	refs, err := c.synthesize(ctx, syn, comp, pod)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("executing synthesizer: %w", err)
@@ -168,7 +169,9 @@ func buildResourceSlices(comp *apiv1.Composition, previous []*apiv1.ResourceSlic
 				return nil, reconcile.TerminalError(fmt.Errorf("decoding resource %d of slice %s: %w", i, slice.Name, err))
 			}
 
-			if _, ok := refs[newResourceRef(obj)]; ok || (res.Deleted && slice.Status.Resources != nil && slice.Status.Resources[i].Reconciled) {
+			// We don't need a tombstone once the deleted resource has been reconciled
+			if _, ok := refs[newResourceRef(obj)]; ok || ((res.Deleted || slice.DeletionTimestamp != nil) && slice.Status.Resources != nil && slice.Status.Resources[i].Reconciled) {
+				// TODO: Integration test this behavior with the reconciliation controllers
 				continue // still exists or has already been deleted
 			}
 
@@ -199,6 +202,7 @@ func buildResourceSlices(comp *apiv1.Composition, previous []*apiv1.ResourceSlic
 				BlockOwnerDeletion: &blockOwnerDeletion, // we need the composition in order to successfully delete its resource slices
 				Controller:         &blockOwnerDeletion,
 			}}
+			slice.Spec.CompositionGeneration = comp.Generation
 			slices = append(slices, slice)
 		}
 		sliceBytes += len(manifest.Manifest)
@@ -246,7 +250,7 @@ func (c *execController) writeSuccessStatus(ctx context.Context, comp *apiv1.Com
 			return err
 		}
 
-		logger.V(1).Info("finished synthesizing the composition")
+		logger.V(1).Info("composition status has been updated following successful synthesis")
 		return nil
 	})
 }

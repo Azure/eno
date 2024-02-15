@@ -35,10 +35,13 @@ type ManifestRef struct {
 type Resource struct {
 	*lastSeenMeta
 
-	Ref      *ResourceRef
-	Manifest *apiv1.Manifest
-	Object   *unstructured.Unstructured
+	Ref          *ResourceRef
+	Manifest     *apiv1.Manifest
+	Object       *unstructured.Unstructured
+	SliceDeleted bool
 }
+
+func (r *Resource) Deleted() bool { return r.SliceDeleted || r.Manifest.Deleted }
 
 // ResourceRef refers to a specific synthesized resource.
 type ResourceRef struct {
@@ -64,7 +67,7 @@ func NewCompositionRef(comp *apiv1.Composition) *CompositionRef {
 type Request struct {
 	Resource    ResourceRef
 	Manifest    ManifestRef
-	Composition CompositionRef
+	Composition types.NamespacedName
 }
 
 type lastSeenMeta struct {

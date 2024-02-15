@@ -74,6 +74,9 @@ func TestCacheCleanup(t *testing.T) {
 	now := metav1.Now()
 	comp, synth, resources, expectedReqs := newCacheTestFixtures(2, 3)
 	comp.DeletionTimestamp = &now
+	for i := range resources {
+		resources[i].DeletionTimestamp = &now
+	}
 	t.Run("fill", func(t *testing.T) {
 		reqs, err := c.Fill(ctx, comp, synth, resources)
 		require.NoError(t, err)
@@ -87,7 +90,7 @@ func TestCacheCleanup(t *testing.T) {
 		assert.NotEmpty(t, resource.Manifest)
 		assert.Equal(t, "ConfigMap", resource.Object.GetKind())
 		assert.Equal(t, "slice-0-resource-0", resource.Object.GetName())
-		assert.True(t, resource.Manifest.Deleted)
+		assert.False(t, resource.Manifest.Deleted)
 	})
 
 	t.Run("partial purge", func(t *testing.T) {
@@ -143,7 +146,7 @@ func TestCachePartialPurge(t *testing.T) {
 	// Add another resource to the composition but synthesized from a newer generation
 	_, _, resources, expectedReqs := newCacheTestFixtures(1, 1)
 	synth.ObservedCompositionGeneration++
-	expectedReqs[0].Composition = CompositionRef{Name: comp.Name, Namespace: comp.Namespace, Generation: originalGen}
+	expectedReqs[0].Composition = types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
 	_, err = c.Fill(ctx, comp, synth, resources)
 	require.NoError(t, err)
 	compRef := NewCompositionRef(comp)
@@ -172,7 +175,7 @@ func TestCachePartialPurge(t *testing.T) {
 	assert.False(t, exists)
 
 	// Resource of the other composition are unaffected
-	_, exists = c.Get(ctx, &toBePreserved.Composition, &toBePreserved.Resource)
+	_, exists = c.Get(ctx, NewCompositionRef(comp), &toBePreserved.Resource)
 	assert.True(t, exists)
 
 	// The cache should only be internally tracking the remaining synthesis of our test composition
@@ -218,7 +221,7 @@ func newCacheTestFixtures(sliceCount, resPerSliceCount int) (*apiv1.Composition,
 					},
 					Index: j,
 				},
-				Composition: CompositionRef{Name: comp.Name, Namespace: comp.Namespace, Generation: synth.ObservedCompositionGeneration},
+				Composition: types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace},
 			})
 		}
 		resources[i] = slice

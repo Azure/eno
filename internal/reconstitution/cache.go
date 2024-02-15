@@ -2,6 +2,7 @@ package reconstitution
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -51,6 +52,7 @@ func (c *cache) Get(ctx context.Context, comp *CompositionRef, ref *ResourceRef)
 		Ref:          &refDeref,
 		Manifest:     res.Manifest.DeepCopy(),
 		Object:       res.Object,
+		SliceDeleted: res.SliceDeleted,
 	}, ok
 }
 
@@ -98,16 +100,14 @@ func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 	requests := []*Request{}
 	for _, slice := range items {
 		slice := slice
+		if slice.DeletionTimestamp == nil && comp.DeletionTimestamp != nil {
+			return nil, nil, errors.New("stale informer - refusing to fill cache")
+		}
 
 		// NOTE: In the future we can build a DAG here to find edges between dependant resources and append them to the Resource structs
 
 		for i, resource := range slice.Spec.Resources {
 			resource := resource
-
-			// Delete the resource if the composition is being deleted
-			if comp.DeletionTimestamp != nil {
-				resource.Deleted = true
-			}
 
 			res, err := c.buildResource(ctx, comp, &slice, &resource)
 			if err != nil {
@@ -123,7 +123,7 @@ func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 					},
 					Index: i,
 				},
-				Composition: *NewCompositionRef(comp),
+				Composition: types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace},
 			})
 		}
 	}
@@ -146,8 +146,9 @@ func (c *cache) buildResource(ctx context.Context, comp *apiv1.Composition, slic
 			Name:      parsed.GetName(),
 			Kind:      parsed.GetKind(),
 		},
-		Manifest: resource,
-		Object:   parsed,
+		Manifest:     resource,
+		Object:       parsed,
+		SliceDeleted: slice.DeletionTimestamp != nil,
 	}
 	if res.Ref.Name == "" || parsed.GetAPIVersion() == "" {
 		return nil, fmt.Errorf("missing name, kind, or apiVersion")
