@@ -29,7 +29,6 @@ func (c *execController) buildInputsJson(ctx context.Context, comp *apiv1.Compos
 		input.SetNamespace(ref.Resource.Namespace)
 		input.SetKind(ref.Resource.Kind)
 		input.SetAPIVersion(ref.Resource.APIVersion)
-		appendInputNameAnnotation(&ref, input)
 
 		start := time.Now()
 		err := c.client.Get(ctx, client.ObjectKeyFromObject(input), input)
@@ -39,6 +38,7 @@ func (c *execController) buildInputsJson(ctx context.Context, comp *apiv1.Compos
 			// doesn't expose the retry count.
 			return nil, fmt.Errorf("getting resource %s/%s: %w", input.GetKind(), input.GetName(), err)
 		}
+		appendInputNameAnnotation(&ref, input)
 
 		logger.V(1).Info("retrieved input resource", "resourceName", input.GetName(), "resourceNamespace", input.GetNamespace(), "resourceKind", input.GetKind(), "latency", time.Since(start).Milliseconds())
 		inputs = append(inputs, input)
