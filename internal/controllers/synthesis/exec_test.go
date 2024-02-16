@@ -150,15 +150,17 @@ func TestBuildInputsJson(t *testing.T) {
 	comp := &apiv1.Composition{}
 	comp.Spec.Inputs = []apiv1.InputRef{
 		{}, // no resource reference - should be dropped
-		{Resource: &apiv1.ResourceInputRef{
-			APIVersion: "v1",
-			Kind:       "ConfigMap",
-			Name:       cm.Name,
-			Namespace:  cm.Namespace,
-		}},
+		{
+			Name: "some-name",
+			Resource: &apiv1.ResourceInputRef{
+				APIVersion: "v1",
+				Kind:       "ConfigMap",
+				Name:       cm.Name,
+				Namespace:  cm.Namespace,
+			}},
 	}
 
 	js, err := e.buildInputsJson(testutil.NewContext(t), comp)
 	require.NoError(t, err)
-	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[{\"apiVersion\":\"v1\",\"kind\":\"ConfigMap\",\"metadata\":{\"creationTimestamp\":null,\"name\":\"test-cm\",\"namespace\":\"test-namespace\",\"resourceVersion\":\"999\"}}]}", string(js))
+	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[{\"apiVersion\":\"v1\",\"kind\":\"ConfigMap\",\"metadata\":{\"annotations\":{\"eno.azure.io/input-name\":\"some-name\"},\"creationTimestamp\":null,\"name\":\"test-cm\",\"namespace\":\"test-namespace\",\"resourceVersion\":\"999\"}}]}", string(js))
 }
