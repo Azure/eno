@@ -97,6 +97,13 @@ func newMgr(logger logr.Logger, opts *Options, enableIndexing bool) (ctrl.Manage
 		&corev1.Pod{}: {Label: podLabelSelector, Field: fieldSelector},
 	}
 
+	if !enableIndexing {
+		yespls := true
+		mgrOpts.Cache.ByObject[&apiv1.ResourceSlice{}] = cache.ByObject{
+			UnsafeDisableDeepCopy: &yespls,
+		}
+	}
+
 	mgr, err := ctrl.NewManager(opts.Rest, mgrOpts)
 	if err != nil {
 		return nil, err

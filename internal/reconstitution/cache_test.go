@@ -21,6 +21,7 @@ func TestCacheBasics(t *testing.T) {
 
 	client := testutil.NewClient(t)
 	c := newCache(client)
+	t.Cleanup(c.Free)
 
 	comp, synth, resources, expectedReqs := newCacheTestFixtures(2, 3)
 	compRef := NewCompositionRef(comp)
@@ -43,8 +44,8 @@ func TestCacheBasics(t *testing.T) {
 		resource, exists := c.Get(ctx, compRef, &expectedReqs[0].Resource)
 		require.True(t, exists)
 		assert.NotEmpty(t, resource.Manifest)
-		assert.Equal(t, "ConfigMap", resource.Object.GetKind())
-		assert.Equal(t, "slice-0-resource-0", resource.Object.GetName())
+		assert.Equal(t, "ConfigMap", resource.GVK.Kind)
+		assert.Equal(t, "slice-0-resource-0", resource.Ref.Name)
 		assert.False(t, resource.Manifest.Deleted)
 
 		// negative
@@ -70,6 +71,7 @@ func TestCacheCleanup(t *testing.T) {
 
 	client := testutil.NewClient(t)
 	c := newCache(client)
+	t.Cleanup(c.Free)
 
 	now := metav1.Now()
 	comp, synth, resources, expectedReqs := newCacheTestFixtures(2, 3)
@@ -88,8 +90,8 @@ func TestCacheCleanup(t *testing.T) {
 		resource, exists := c.Get(ctx, compRef, &expectedReqs[0].Resource)
 		require.True(t, exists)
 		assert.NotEmpty(t, resource.Manifest)
-		assert.Equal(t, "ConfigMap", resource.Object.GetKind())
-		assert.Equal(t, "slice-0-resource-0", resource.Object.GetName())
+		assert.Equal(t, "ConfigMap", resource.GVK.Kind)
+		assert.Equal(t, "slice-0-resource-0", resource.Ref.Name)
 		assert.False(t, resource.Manifest.Deleted)
 	})
 
@@ -109,6 +111,7 @@ func TestCacheInvalidManifest(t *testing.T) {
 
 	client := testutil.NewClient(t)
 	c := newCache(client)
+	t.Cleanup(c.Free)
 
 	comp, synth, resources, _ := newCacheTestFixtures(1, 1)
 	resources[0].Spec.Resources[0].Manifest = "not valid json"
@@ -122,6 +125,7 @@ func TestCacheManifestMissingName(t *testing.T) {
 
 	client := testutil.NewClient(t)
 	c := newCache(client)
+	t.Cleanup(c.Free)
 
 	comp, synth, resources, _ := newCacheTestFixtures(1, 1)
 	resources[0].Spec.Resources[0].Manifest = `{"kind":"ConfigMap"}`
@@ -135,6 +139,7 @@ func TestCachePartialPurge(t *testing.T) {
 
 	client := testutil.NewClient(t)
 	c := newCache(client)
+	t.Cleanup(c.Free)
 
 	// Fill our main composition
 	comp, synth, resources, _ := newCacheTestFixtures(3, 4)

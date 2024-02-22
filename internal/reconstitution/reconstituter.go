@@ -10,6 +10,7 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	crmgr "sigs.k8s.io/controller-runtime/pkg/manager"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
@@ -29,6 +30,14 @@ func newReconstituter(mgr ctrl.Manager) (*reconstituter, error) {
 		cache:  newCache(mgr.GetClient()),
 		client: mgr.GetClient(),
 	}
+
+	// Free any pinned memory when
+	mgr.Add(crmgr.RunnableFunc(func(ctx context.Context) error {
+		<-ctx.Done()
+		r.Free()
+		return nil
+	}))
+
 	return r, ctrl.NewControllerManagedBy(mgr).
 		Named("reconstituter").
 		For(&apiv1.Composition{}).
