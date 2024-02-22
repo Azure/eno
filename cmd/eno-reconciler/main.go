@@ -17,8 +17,6 @@ import (
 	"github.com/Azure/eno/internal/reconstitution"
 )
 
-// TODO: Support two rest clients: upstream/downstream
-
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
@@ -58,7 +56,7 @@ func run() error {
 	}
 	logger := zapr.NewLogger(zl)
 
-	mgr, err := manager.NewWithoutIndexing(logger, mgrOpts)
+	mgr, err := manager.NewReconciler(logger, mgrOpts)
 	if err != nil {
 		return fmt.Errorf("constructing manager: %w", err)
 	}

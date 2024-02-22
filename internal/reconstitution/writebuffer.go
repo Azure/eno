@@ -121,6 +121,7 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 		return false
 	}
 
+	// Allocate the status slice if needed
 	var status *apiv1.ResourceSliceStatus
 	var dirty bool
 	if len(slice.Status.Resources) != len(slice.Spec.Resources) {
@@ -129,11 +130,15 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 		status.Resources = make([]apiv1.ResourceState, len(slice.Spec.Resources))
 	}
 
+	// Use the newly allocated slice (if allocated), otherwise use the already allocated one
 	unsafeSlice := slice.Status.Resources
 	if unsafeSlice == nil {
 		unsafeSlice = status.Resources
 	}
 
+	// The resource slice informer doesn't DeepCopy automatically for perf reasons.
+	// So we can apply the CheckFn to status pointers but not PatchFn.
+	// We'll deep copy the status here only when it needs to change.
 	for _, update := range updates {
 		unsafeStatusPtr := &unsafeSlice[update.SlicedResource.Index]
 		if update.CheckFn(unsafeStatusPtr) {
