@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 	"sync"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -20,7 +20,6 @@ type cache struct {
 
 	mut                    sync.Mutex
 	resources              map[CompositionRef]map[ResourceRef]*Resource
-	pins                   map[CompositionRef]*runtime.Pinner
 	synthesesByComposition map[types.NamespacedName][]int64
 }
 
@@ -28,16 +27,7 @@ func newCache(client client.Client) *cache {
 	return &cache{
 		client:                 client,
 		resources:              make(map[CompositionRef]map[ResourceRef]*Resource),
-		pins:                   make(map[CompositionRef]*runtime.Pinner),
 		synthesesByComposition: make(map[types.NamespacedName][]int64),
-	}
-}
-
-func (c *cache) Free() {
-	c.mut.Lock()
-	defer c.mut.Unlock()
-	for _, p := range c.pins {
-		p.Unpin()
 	}
 }
 
@@ -56,11 +46,12 @@ func (c *cache) Get(ctx context.Context, comp *CompositionRef, ref *ResourceRef)
 	}
 
 	// Copy the resource so it's safe for callers to mutate
+	refDeref := *ref
 	return &Resource{
 		lastSeenMeta: res.lastSeenMeta,
-		Ref:          *ref,
-		Manifest:     res.Manifest,
-		GVK:          res.GVK,
+		Ref:          &refDeref,
+		Manifest:     res.Manifest.DeepCopy(),
+		Object:       res.Object,
 		SliceDeleted: res.SliceDeleted,
 	}, ok
 }
@@ -86,8 +77,7 @@ func (c *cache) Fill(ctx context.Context, comp *apiv1.Composition, synthesis *ap
 	logger := logr.FromContextOrDiscard(ctx)
 
 	// Building resources can be expensive (json parsing, etc.) so don't hold the lock during this call
-	pinner := &runtime.Pinner{}
-	resources, requests, err := c.buildResources(ctx, comp, items, pinner)
+	resources, requests, err := c.buildResources(ctx, comp, items)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +87,6 @@ func (c *cache) Fill(ctx context.Context, comp *apiv1.Composition, synthesis *ap
 
 	synKey := CompositionRef{Name: comp.Name, Namespace: comp.Namespace, Generation: synthesis.ObservedCompositionGeneration}
 	c.resources[synKey] = resources
-	c.pins[synKey] = pinner
 
 	compNSN := types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
 	c.synthesesByComposition[compNSN] = append(c.synthesesByComposition[compNSN], synKey.Generation)
@@ -106,7 +95,7 @@ func (c *cache) Fill(ctx context.Context, comp *apiv1.Composition, synthesis *ap
 	return requests, nil
 }
 
-func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, items []apiv1.ResourceSlice, pinner *runtime.Pinner) (map[ResourceRef]*Resource, []*Request, error) {
+func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, items []apiv1.ResourceSlice) (map[ResourceRef]*Resource, []*Request, error) {
 	resources := map[ResourceRef]*Resource{}
 	requests := []*Request{}
 	for _, slice := range items {
@@ -124,12 +113,9 @@ func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 			if err != nil {
 				return nil, nil, fmt.Errorf("building resource at index %d of slice %s: %w", i, slice.Name, err)
 			}
-			pinner.Pin(res)
-			pinner.Pin(res.lastSeenMeta)
-			pinner.Pin(&res.Manifest.Manifest)
-			resources[res.Ref] = res
+			resources[*res.Ref] = res
 			requests = append(requests, &Request{
-				Resource: res.Ref,
+				Resource: *res.Ref,
 				Manifest: ManifestRef{
 					Slice: types.NamespacedName{
 						Namespace: slice.Namespace,
@@ -146,23 +132,25 @@ func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 }
 
 func (c *cache) buildResource(ctx context.Context, comp *apiv1.Composition, slice *apiv1.ResourceSlice, resource *apiv1.Manifest) (*Resource, error) {
-	res := &Resource{
-		lastSeenMeta: &lastSeenMeta{},
-		Manifest:     resource,
-		SliceDeleted: slice.DeletionTimestamp != nil,
-	}
-
-	parsed, err := res.Parse()
+	manifest := resource.Manifest
+	parsed := &unstructured.Unstructured{}
+	err := parsed.UnmarshalJSON([]byte(manifest))
 	if err != nil {
 		return nil, fmt.Errorf("invalid json: %w", err)
 	}
-	gvk := parsed.GroupVersionKind()
-	res.GVK = gvk
-	res.Ref.Name = parsed.GetName()
-	res.Ref.Namespace = parsed.GetNamespace()
-	res.Ref.Kind = parsed.GetKind() // TODO: Remove kind?
 
-	if res.Ref.Name == "" || res.Ref.Kind == "" || parsed.GetAPIVersion() == "" {
+	res := &Resource{
+		lastSeenMeta: &lastSeenMeta{},
+		Ref: &ResourceRef{
+			Namespace: parsed.GetNamespace(),
+			Name:      parsed.GetName(),
+			Kind:      parsed.GetKind(),
+		},
+		Manifest:     resource,
+		Object:       parsed,
+		SliceDeleted: slice.DeletionTimestamp != nil,
+	}
+	if res.Ref.Name == "" || parsed.GetAPIVersion() == "" {
 		return nil, fmt.Errorf("missing name, kind, or apiVersion")
 	}
 	return res, nil
@@ -183,14 +171,11 @@ func (c *cache) Purge(ctx context.Context, compNSN types.NamespacedName, comp *a
 			remainingSyns = append(remainingSyns, syn)
 			continue // still referenced by the Generation
 		}
-		ref := CompositionRef{
+		delete(c.resources, CompositionRef{
 			Name:       compNSN.Name,
 			Namespace:  compNSN.Namespace,
 			Generation: syn,
-		}
-		c.pins[ref].Unpin()
-		delete(c.resources, ref)
-		delete(c.pins, ref)
+		})
 	}
 	c.synthesesByComposition[compNSN] = remainingSyns
 }

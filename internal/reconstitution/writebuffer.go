@@ -19,7 +19,6 @@ import (
 type asyncStatusUpdate struct {
 	SlicedResource *ManifestRef
 	PatchFn        StatusPatchFn
-	CheckFn        CheckPatchFn
 }
 
 // writeBuffer reduces load on etcd/apiserver by collecting resource slice status
@@ -46,7 +45,7 @@ func newWriteBuffer(cli client.Client, batchInterval time.Duration, burst int) *
 	}
 }
 
-func (w *writeBuffer) PatchStatusAsync(ctx context.Context, ref *ManifestRef, checkFn CheckPatchFn, patchFn StatusPatchFn) {
+func (w *writeBuffer) PatchStatusAsync(ctx context.Context, ref *ManifestRef, patchFn StatusPatchFn) {
 	w.mut.Lock()
 	defer w.mut.Unlock()
 
@@ -54,7 +53,6 @@ func (w *writeBuffer) PatchStatusAsync(ctx context.Context, ref *ManifestRef, ch
 	w.state[key] = append(w.state[key], &asyncStatusUpdate{
 		SlicedResource: ref,
 		PatchFn:        patchFn,
-		CheckFn:        checkFn,
 	})
 	w.queue.Add(key)
 }
@@ -121,39 +119,22 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 		return false
 	}
 
-	var status *apiv1.ResourceSliceStatus
-	var dirty bool
 	if len(slice.Status.Resources) != len(slice.Spec.Resources) {
-		dirty = true
-		status = slice.Status.DeepCopy()
-		status.Resources = make([]apiv1.ResourceState, len(slice.Spec.Resources))
+		slice.Status.Resources = make([]apiv1.ResourceState, len(slice.Spec.Resources))
 	}
 
-	unsafeSlice := slice.Status.Resources
-	if unsafeSlice == nil {
-		unsafeSlice = status.Resources
-	}
-
+	var dirty bool
 	for _, update := range updates {
-		unsafeStatusPtr := &unsafeSlice[update.SlicedResource.Index]
-		if update.CheckFn(unsafeStatusPtr) {
-			continue
+		statusPtr := &slice.Status.Resources[update.SlicedResource.Index]
+		if update.PatchFn(statusPtr) {
+			dirty = true
 		}
-
-		if status == nil {
-			status = slice.Status.DeepCopy()
-		}
-
-		dirty = true
-		update.PatchFn(&status.Resources[update.SlicedResource.Index])
 	}
 	if !dirty {
 		return true
 	}
 
-	copy := &apiv1.ResourceSlice{Status: *status}
-	slice.ObjectMeta.DeepCopyInto(&copy.ObjectMeta)
-	err = w.client.Status().Update(ctx, copy)
+	err = w.client.Status().Update(ctx, slice)
 	if err != nil {
 		logger.Error(err, "unable to update resource slice")
 		return false
