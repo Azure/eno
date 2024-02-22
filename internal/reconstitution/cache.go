@@ -44,14 +44,7 @@ func (c *cache) Get(ctx context.Context, comp *CompositionRef, ref *ResourceRef)
 		return nil, false
 	}
 
-	// Copy the resource so it's safe for callers to mutate
-	return &Resource{
-		lastSeenMeta: res.lastSeenMeta,
-		Ref:          *ref,
-		Manifest:     res.Manifest,
-		GVK:          res.GVK,
-		SliceDeleted: res.SliceDeleted,
-	}, ok
+	return res, ok
 }
 
 // HasSynthesis returns true when the cache contains the resulting resources of the given synthesis.
