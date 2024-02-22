@@ -92,16 +92,16 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	// so we need to check both to find the apiVersion
 	var apiVersion string
 	if resource != nil {
-		apiVersion = resource.Object.GetAPIVersion()
+		apiVersion, _ = resource.GVK.ToAPIVersionAndKind()
 	} else if prev != nil {
-		apiVersion = prev.Object.GetAPIVersion()
+		apiVersion, _ = prev.GVK.ToAPIVersionAndKind()
 	} else {
 		logger.Error(errors.New("no apiVersion provided"), "neither the current or previous resource have an apiVersion")
 		return ctrl.Result{}, nil
 	}
 
 	// Fetch the current resource
-	current, err := c.getCurrent(ctx, resource, apiVersion)
+	current, hasChanged, err := c.getCurrent(ctx, resource, apiVersion)
 	if client.IgnoreNotFound(err) != nil {
 		return ctrl.Result{}, fmt.Errorf("getting current state: %w", err)
 	}
@@ -109,29 +109,26 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	// Nil current struct means the resource version hasn't changed since it was last observed
 	// Skip without logging since this is a very hot path
 	var modified bool
-	if current != nil {
+	if hasChanged {
 		modified, err = c.reconcileResource(ctx, prev, resource, current)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
-	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) (modified bool) {
-		if resource.Deleted() && !rs.Deleted {
-			rs.Deleted = true
-			modified = true
-		}
-		if !rs.Reconciled {
+	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest,
+		func(rs *apiv1.ResourceState) bool {
+			return !((resource.Deleted() && !rs.Deleted) || !rs.Reconciled)
+		},
+		func(rs *apiv1.ResourceState) {
+			rs.Deleted = resource.Deleted()
 			rs.Reconciled = true
-			modified = true
-		}
-		return
-	})
+		})
 
 	if modified {
 		return ctrl.Result{Requeue: true}, nil
 	}
-	if resource != nil && resource.Manifest.ReconcileInterval != nil {
+	if resource != nil && !resource.Deleted() && resource.Manifest.ReconcileInterval != nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(resource.Manifest.ReconcileInterval.Duration, 0.1)}, nil
 	}
 	return ctrl.Result{}, nil
@@ -145,7 +142,11 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 			return false, nil // already deleted - nothing to do
 		}
 
-		err := c.upstreamClient.Delete(ctx, resource.Object)
+		obj, err := resource.Parse()
+		if err != nil {
+			return false, fmt.Errorf("invalid resource: %w", err)
+		}
+		err = c.upstreamClient.Delete(ctx, obj)
 		if err != nil {
 			return false, client.IgnoreNotFound(fmt.Errorf("deleting resource: %w", err))
 		}
@@ -154,8 +155,12 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 	}
 
 	// Always create the resource when it doesn't exist
-	if current.GetResourceVersion() == "" {
-		err := c.upstreamClient.Create(ctx, resource.Object)
+	if current == nil {
+		obj, err := resource.Parse()
+		if err != nil {
+			return false, fmt.Errorf("invalid resource: %w", err)
+		}
+		err = c.upstreamClient.Create(ctx, obj)
 		if err != nil {
 			return false, fmt.Errorf("creating resource: %w", err)
 		}
@@ -200,7 +205,7 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 		return nil, "", reconcile.TerminalError(fmt.Errorf("building json representation of desired state: %w", err))
 	}
 
-	model, err := c.discovery.Get(ctx, resource.Object.GroupVersionKind())
+	model, err := c.discovery.Get(ctx, resource.GVK)
 	if err != nil {
 		return nil, "", fmt.Errorf("getting merge metadata: %w", err)
 	}
@@ -220,7 +225,7 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 	return patch, types.StrategicMergePatchType, err
 }
 
-func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Resource, apiVersion string) (*unstructured.Unstructured, error) {
+func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Resource, apiVersion string) (*unstructured.Unstructured, bool, error) {
 	if resource.HasBeenSeen() && !resource.Deleted() {
 		meta := &metav1.PartialObjectMetadata{}
 		meta.Name = resource.Ref.Name
@@ -229,10 +234,10 @@ func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Re
 		meta.APIVersion = apiVersion
 		err := c.upstreamClient.Get(ctx, client.ObjectKeyFromObject(meta), meta)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if resource.MatchesLastSeen(meta.ResourceVersion) {
-			return nil, nil // resource hasn't changed - no need to reconcile
+			return nil, false, nil
 		}
 	}
 
@@ -242,11 +247,13 @@ func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Re
 	current.SetKind(resource.Ref.Kind)
 	current.SetAPIVersion(apiVersion)
 	err := c.upstreamClient.Get(ctx, client.ObjectKeyFromObject(current), current)
+	if err != nil {
+		return nil, true, err
+	}
 	if rv := current.GetResourceVersion(); rv != "" {
 		resource.ObserveVersion(rv)
 	}
-
-	return current, err
+	return current, true, nil
 }
 
 func mungePatch(patch []byte, rv string) ([]byte, error) {

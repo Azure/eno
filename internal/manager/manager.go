@@ -50,11 +50,11 @@ func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
 	return newMgr(logger, opts, true)
 }
 
-func NewWithoutIndexing(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
+func NewReconciler(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
 	return newMgr(logger, opts, false)
 }
 
-func newMgr(logger logr.Logger, opts *Options, enableIndexing bool) (ctrl.Manager, error) {
+func newMgr(logger logr.Logger, opts *Options, isReconciler bool) (ctrl.Manager, error) {
 	opts.Rest.QPS = float32(opts.qps)
 
 	scheme := runtime.NewScheme()
@@ -97,12 +97,19 @@ func newMgr(logger logr.Logger, opts *Options, enableIndexing bool) (ctrl.Manage
 		&corev1.Pod{}: {Label: podLabelSelector, Field: fieldSelector},
 	}
 
+	if !isReconciler {
+		yespls := true
+		mgrOpts.Cache.ByObject[&apiv1.ResourceSlice{}] = cache.ByObject{
+			UnsafeDisableDeepCopy: &yespls,
+		}
+	}
+
 	mgr, err := ctrl.NewManager(opts.Rest, mgrOpts)
 	if err != nil {
 		return nil, err
 	}
 
-	if enableIndexing {
+	if isReconciler {
 		err = mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Pod{}, IdxPodsByComposition, indexController())
 		if err != nil {
 			return nil, err
