@@ -43,8 +43,8 @@ func TestCacheBasics(t *testing.T) {
 		resource, exists := c.Get(ctx, compRef, &expectedReqs[0].Resource)
 		require.True(t, exists)
 		assert.NotEmpty(t, resource.Manifest)
-		assert.Equal(t, "ConfigMap", resource.Object.GetKind())
-		assert.Equal(t, "slice-0-resource-0", resource.Object.GetName())
+		assert.Equal(t, "ConfigMap", resource.GVK.Kind)
+		assert.Equal(t, "slice-0-resource-0", resource.Ref.Name)
 		assert.False(t, resource.Manifest.Deleted)
 
 		// negative
@@ -88,8 +88,8 @@ func TestCacheCleanup(t *testing.T) {
 		resource, exists := c.Get(ctx, compRef, &expectedReqs[0].Resource)
 		require.True(t, exists)
 		assert.NotEmpty(t, resource.Manifest)
-		assert.Equal(t, "ConfigMap", resource.Object.GetKind())
-		assert.Equal(t, "slice-0-resource-0", resource.Object.GetName())
+		assert.Equal(t, "ConfigMap", resource.GVK.Kind)
+		assert.Equal(t, "slice-0-resource-0", resource.Ref.Name)
 		assert.False(t, resource.Manifest.Deleted)
 	})
 
