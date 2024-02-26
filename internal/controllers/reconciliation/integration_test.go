@@ -86,20 +86,19 @@ var crudTests = []crudTestCase{
 		},
 		AssertUpdated: func(t *testing.T, obj client.Object) {
 			svc := obj.(*corev1.Service).Spec
-			assert.Equal(t, []corev1.ServicePort{
-				{
-					Name:       "third",
-					Port:       3456,
-					Protocol:   corev1.ProtocolTCP,
-					TargetPort: intstr.FromInt(3456),
-				},
-				{
-					Name:       "second",
-					Port:       2345,
-					Protocol:   corev1.ProtocolTCP,
-					TargetPort: intstr.FromInt(2345),
-				},
-			}, svc.Ports)
+			require.Len(t, svc.Ports, 2)
+			assert.Equal(t, corev1.ServicePort{
+				Name:       "third",
+				Port:       3456,
+				Protocol:   corev1.ProtocolTCP,
+				TargetPort: intstr.FromInt(3456),
+			}, svc.Ports[0])
+			assert.Equal(t, corev1.ServicePort{
+				Name:       "second",
+				Port:       2345,
+				Protocol:   corev1.ProtocolTCP,
+				TargetPort: intstr.FromInt(2345),
+			}, svc.Ports[1])
 		},
 	},
 	{
