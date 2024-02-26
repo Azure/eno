@@ -6,7 +6,8 @@ Eno is a delivery system for Kubernetes configurations.
 
 ## Goals
 
-- High performance resource sync
+- Conceptually group related resources while syncing them individually for more granular retries, prioritization, etc.
+- High performance, efficient resource sync
 - No scaling bottlenecks within reason (50,000+ resources per cluster)
 - Decoupled from any particular templating engine (Helm, Kustomize, etc.)
 
