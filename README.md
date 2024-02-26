@@ -1,11 +1,68 @@
 # Eno
 
-Work in progress.
+Eno is a delivery system for Kubernetes configurations.
+
+> Status is very much alpha! Use with caution.
+
+## Goals
+
+- High performance resource sync
+- No scaling bottlenecks within reason (50,000+ resources per cluster)
+- Decoupled from any particular templating engine (Helm, Kustomize, etc.)
+
+## Minimal Example
+
+```yaml
+# Compositions represent a deployment of a given configuration as specified by its Synthesizer.
+apiVersion: eno.azure.io/v1
+kind: Composition
+metadata:
+  name: test-comp
+spec:
+  synthesizer:
+    name: test-synth
+
+---
+
+# Synthesizers specify desired state configurations using the standard KRM Function API.
+apiVersion: eno.azure.io/v1
+kind: Synthesizer
+metadata:
+  name: test-synth
+spec:
+  image: docker.io/ubuntu:latest
+  command:
+  - /bin/bash
+  - -c
+  - |
+    echo '
+      {
+        "apiVersion":"config.kubernetes.io/v1",
+        "kind":"ResourceList",
+        "items":[
+          {
+            "apiVersion":"v1",
+            "data":{"someKey":"someVal"},
+            "kind":"ConfigMap",
+            "metadata":{
+              "name":"some-config",
+              "namespace": "default",
+            }
+          }
+        ]
+      }'
+```
+
+## Features
+
+### Drift Detection
+
+Resources can be sync'd at a given interval to correct for any configuration drift by setting the annotation `eno.azure.io/reconcile-interval` to a value parsable by Go's `time.ParseDuration`.
 
 ## Development Environment
 
 ```bash
-# Assumes kubectl is configured for your dev cluster (local or otherwise), and can pull images from $REGISTRY
+# Assumes kubectl is configured for your dev cluster (local or otherwise), and can push/pull images from $REGISTRY
 export REGISTRY="your registry"
 ./dev/build.sh
 ```
