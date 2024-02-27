@@ -78,7 +78,7 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	logger = logger.WithValues("synthesizerName", syn.Name)
 	ctx = logr.NewContext(ctx, logger)
 
-	if compGen < comp.Generation || (comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized) {
+	if compGen < comp.Generation || (comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized) || comp.DeletionTimestamp != nil {
 		return ctrl.Result{}, nil // old pod - don't bother synthesizing. The lifecycle controller will delete it
 	}
 
@@ -91,6 +91,10 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 	}
+
+	// Let the informers catch up
+	// Obviously this isn't ideal, consider a lamport clock in memory
+	time.Sleep(time.Millisecond * 100)
 
 	return ctrl.Result{}, nil
 }

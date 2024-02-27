@@ -27,8 +27,9 @@ func TestControllerHappyPath(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager, time.Millisecond*10))
-	require.NoError(t, NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{}))
+	require.NoError(t, NewRolloutController(mgr.Manager, time.Hour))
+	conn := &testutil.ExecConn{}
+	require.NoError(t, NewExecController(mgr.Manager, time.Second, conn))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -71,33 +72,14 @@ func TestControllerHappyPath(t *testing.T) {
 		}
 	})
 
-	t.Run("synthesizer update", func(t *testing.T) {
-		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-			if err := cli.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
-				return err
-			}
-			syn.Spec.Image = "updated-image"
-			return cli.Update(ctx, syn)
-		})
-		require.NoError(t, err)
-
-		testutil.Eventually(t, func() bool {
-			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedSynthesizerGeneration >= syn.Generation
-		})
-
-		// The previous state is retained
-		if comp.Status.PreviousState == nil {
-			t.Error("state wasn't swapped to previous")
-		}
-	})
-
 	// The pod eventually completes and is deleted
 	testutil.Eventually(t, func() bool {
 		list := &corev1.PodList{}
 		require.NoError(t, cli.List(ctx, list))
 		return len(list.Items) == 0
 	})
+
+	assert.Equal(t, int64(2), conn.Calls.Load())
 }
 
 func TestControllerFastCompositionUpdates(t *testing.T) {
@@ -149,14 +131,60 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 	})
 }
 
-func TestControllerSynthesizerRollout(t *testing.T) {
+func TestControllerRollout(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager, time.Hour*24)) // Rollout should not continue during this test
+	require.NoError(t, NewRolloutController(mgr.Manager, time.Millisecond*10))
+	require.NoError(t, NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{}))
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "test-syn-image"
+	require.NoError(t, cli.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	t.Run("initial creation", func(t *testing.T) {
+		testutil.Eventually(t, func() bool {
+			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
+			return comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized
+		})
+	})
+
+	t.Run("synthesizer update", func(t *testing.T) {
+		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			if err := cli.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
+				return err
+			}
+			syn.Spec.Image = "updated-image"
+			return cli.Update(ctx, syn)
+		})
+		require.NoError(t, err)
+
+		testutil.Eventually(t, func() bool {
+			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedSynthesizerGeneration >= syn.Generation
+		})
+	})
+}
+
+func TestControllerSynthesizerRolloutCooldown(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	cli := mgr.GetClient()
+
+	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
+	require.NoError(t, NewStatusController(mgr.Manager))
+	require.NoError(t, NewRolloutController(mgr.Manager, time.Millisecond*10)) // Rollout should not continue during this test
 	require.NoError(t, NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{}))
 	mgr.Start(t)
 

@@ -67,11 +67,12 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		logger := logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
 
 		// Compositions aren't eligible to receive an updated synthesizer when:
+		// - They are newer than the cooldown period
 		// - They already use this or a newer synthesizer version
 		// - They haven't ever been synthesized (they'll use the new synthesizer version anyway)
 		// - They are currently being synthesized
 		// - They've been synthesized by this or a newer version
-		if comp.Spec.Synthesizer.MinGeneration >= syn.Generation || comp.Status.CurrentState == nil || !comp.Status.CurrentState.Synthesized || comp.Status.CurrentState.ObservedSynthesizerGeneration >= syn.Generation {
+		if time.Since(comp.CreationTimestamp.Time) < c.cooldown || comp.Spec.Synthesizer.MinGeneration >= syn.Generation || comp.Status.CurrentState == nil || !comp.Status.CurrentState.Synthesized || comp.Status.CurrentState.ObservedSynthesizerGeneration >= syn.Generation {
 			continue
 		}
 
