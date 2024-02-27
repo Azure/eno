@@ -105,10 +105,6 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		// is righly disabled for deleted compositions. We break out of this deadlock condition by updating
 		// the status without actually synthesizing.
 		if comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration != comp.Generation {
-			if slicesAreDeleted(sliceList.Items) {
-				return ctrl.Result{}, nil
-			}
-
 			comp.Status.CurrentState.ObservedCompositionGeneration = comp.Generation
 			comp.Status.CurrentState.Synthesized = true // in case the previous synthesis failed
 			err = c.client.Status().Update(ctx, comp)
@@ -220,13 +216,4 @@ func swapStates(syn *apiv1.Synthesizer, comp *apiv1.Composition) {
 	comp.Status.CurrentState = &apiv1.Synthesis{
 		ObservedCompositionGeneration: comp.Generation,
 	}
-}
-
-func slicesAreDeleted(slices []apiv1.ResourceSlice) bool {
-	for _, item := range slices {
-		if item.DeletionTimestamp == nil {
-			return false
-		}
-	}
-	return true
 }
