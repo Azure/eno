@@ -59,15 +59,6 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	syn := &apiv1.Synthesizer{}
-	syn.Name = comp.Spec.Synthesizer.Name
-	err = c.client.Get(ctx, client.ObjectKeyFromObject(syn), syn)
-	if err != nil {
-		// TODO: we should be able to tolerate a 404 here
-		return ctrl.Result{}, fmt.Errorf("getting synthesizer: %w", err)
-	}
-	logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
-
 	// Delete any unnecessary pods
 	pods := &corev1.PodList{}
 	err = c.client.List(ctx, pods, client.InNamespace(comp.Namespace), client.MatchingFields{
@@ -77,7 +68,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, fmt.Errorf("listing pods: %w", err)
 	}
 
-	logger, toDelete, exists := c.shouldDeletePod(logger, comp, syn, pods)
+	logger, toDelete, exists := c.shouldDeletePod(logger, comp, pods)
 	if toDelete != nil {
 		if err := c.client.Delete(ctx, toDelete); err != nil {
 			return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("deleting pod: %w", err))
@@ -134,7 +125,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Swap the state to prepare for resynthesis if needed
 	if comp.Status.CurrentState == nil || comp.Status.CurrentState.ObservedCompositionGeneration != comp.Generation {
-		swapStates(syn, comp)
+		swapStates(comp)
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
 		}
@@ -147,6 +138,14 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
+	syn := &apiv1.Synthesizer{}
+	syn.Name = comp.Spec.Synthesizer.Name
+	err = c.client.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+	if err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting synthesizer: %w", err))
+	}
+	logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
+
 	// If we made it this far it's safe to create a pod
 	pod := newPod(c.config, c.client.Scheme(), comp, syn)
 	err = c.client.Create(ctx, pod)
@@ -158,7 +157,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	return ctrl.Result{}, nil
 }
 
-func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Synthesizer, pods *corev1.PodList) (logr.Logger, *corev1.Pod /* exists */, bool) {
+func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, pods *corev1.PodList) (logr.Logger, *corev1.Pod /* exists */, bool) {
 	if len(pods.Items) == 0 {
 		return logger, nil, false
 	}
@@ -208,7 +207,7 @@ func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1
 	return logger, nil, false
 }
 
-func swapStates(syn *apiv1.Synthesizer, comp *apiv1.Composition) {
+func swapStates(comp *apiv1.Composition) {
 	// If the previous state has been synthesized but not the current, keep the previous to avoid orphaning deleted resources
 	if comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized {
 		comp.Status.PreviousState = comp.Status.CurrentState

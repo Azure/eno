@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -254,10 +255,13 @@ func AtLeastVersion(t *testing.T, minor int) bool {
 }
 
 type ExecConn struct {
-	Hook func(s *apiv1.Synthesizer) []client.Object
+	Hook  func(s *apiv1.Synthesizer) []client.Object
+	Calls atomic.Int64
 }
 
 func (e *ExecConn) Synthesize(ctx context.Context, syn *apiv1.Synthesizer, pod *corev1.Pod, inputsJson []byte) (io.Reader, error) {
+	defer e.Calls.Add(1)
+
 	objs := []client.Object{}
 	if e.Hook != nil {
 		objs = e.Hook(syn)

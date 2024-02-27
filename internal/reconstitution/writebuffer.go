@@ -121,8 +121,7 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 	slice := &apiv1.ResourceSlice{}
 	err := w.client.Get(ctx, sliceNSN, slice)
 	if errors.IsNotFound(err) {
-		// TODO: I think this should cause the work queue to Forget this item?
-		logger.V(0).Info("slice has been deleted, skipping status update")
+		logger.V(0).Info("slice has been deleted - dropping status update")
 		return true
 	}
 	if err != nil {
