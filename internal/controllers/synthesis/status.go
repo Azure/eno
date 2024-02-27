@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -42,28 +43,22 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, nil
 	}
 	if pod.Annotations == nil {
-		return ctrl.Result{}, nil
+		logger.V(1).Info("synthesizer pod without any annotations was found - removing its finalizer")
+		return c.removeFinalizer(ctx, pod)
 	}
 
 	comp := &apiv1.Composition{}
 	comp.Name = pod.OwnerReferences[0].Name
 	comp.Namespace = pod.Namespace
 	err = c.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-	if err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition resource: %w", err))
+	if errors.IsNotFound(err) {
+		logger.V(1).Info("composition was deleted unexpectedly - releasing synthesizer pod")
+		return c.removeFinalizer(ctx, pod)
 	}
-	if comp.Spec.Synthesizer.Name == "" {
-		return ctrl.Result{}, nil
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("getting composition resource: %w", err)
 	}
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace)
-
-	syn := &apiv1.Synthesizer{}
-	syn.Name = comp.Spec.Synthesizer.Name
-	err = c.client.Get(ctx, client.ObjectKeyFromObject(syn), syn)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("getting synthesizer: %w", err)
-	}
-	logger = logger.WithValues("synthesizerName", syn.Name, "podName", pod.Name)
 
 	// Update composition status
 	var (
@@ -85,16 +80,21 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Remove the finalizer
-	if controllerutil.RemoveFinalizer(pod, "eno.azure.io/cleanup") {
-		if err := c.client.Update(ctx, pod); err != nil {
-			return ctrl.Result{}, fmt.Errorf("removing pod finalizer: %w", err)
-		}
-		logger.V(1).Info("synthesizer pod can safely be deleted now that its metadata has been captured")
-		return ctrl.Result{Requeue: true}, nil
+	return c.removeFinalizer(ctx, pod)
+}
+
+func (c *statusController) removeFinalizer(ctx context.Context, pod *corev1.Pod) (ctrl.Result, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+
+	if !controllerutil.RemoveFinalizer(pod, "eno.azure.io/cleanup") {
+		return ctrl.Result{}, nil
 	}
 
-	return ctrl.Result{}, nil
+	if err := c.client.Update(ctx, pod); err != nil {
+		return ctrl.Result{}, fmt.Errorf("removing pod finalizer: %w", err)
+	}
+	logger.V(1).Info("synthesizer pod can safely be deleted")
+	return ctrl.Result{Requeue: true}, nil
 }
 
 func shouldWriteStatus(comp *apiv1.Composition, podCompGen, podSynGen int64) bool {

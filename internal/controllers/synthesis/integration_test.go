@@ -43,16 +43,9 @@ func TestControllerHappyPath(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, comp))
 
 	t.Run("initial creation", func(t *testing.T) {
-		// It creates a pod to synthesize the composition
-		testutil.Eventually(t, func() bool {
-			list := &corev1.PodList{}
-			require.NoError(t, cli.List(ctx, list))
-			return len(list.Items) > 0
-		})
-
 		// The pod eventually performs the synthesis
 		testutil.Eventually(t, func() bool {
-			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
 			return comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized
 		})
 	})

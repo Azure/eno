@@ -30,7 +30,6 @@ func newReconstituter(mgr ctrl.Manager) (*reconstituter, error) {
 		client: mgr.GetClient(),
 	}
 
-
 	return r, ctrl.NewControllerManagedBy(mgr).
 		Named("reconstituter").
 		For(&apiv1.Composition{}).

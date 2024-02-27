@@ -78,7 +78,7 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	logger = logger.WithValues("synthesizerName", syn.Name)
 	ctx = logr.NewContext(ctx, logger)
 
-	if compGen < comp.Generation {
+	if compGen < comp.Generation || (comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized) {
 		return ctrl.Result{}, nil // old pod - don't bother synthesizing. The lifecycle controller will delete it
 	}
 
@@ -111,7 +111,7 @@ func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer,
 	if err != nil {
 		return nil, err
 	}
-	logger.V(1).Info("synthesizing is done", "latency", time.Since(start).Milliseconds())
+	logger.V(1).Info("synthesis is done", "latency", time.Since(start).Milliseconds())
 
 	return c.writeOutputToSlices(ctx, comp, stdout)
 }
