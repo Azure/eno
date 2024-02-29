@@ -154,8 +154,6 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	logger.Info("created synthesizer pod", "podName", pod.Name)
 
-	time.Sleep(time.Millisecond * 100) // avoid creating extra pods when informers are stale
-
 	return ctrl.Result{}, nil
 }
 
