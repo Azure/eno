@@ -35,7 +35,7 @@ func TestExecIntegrationHappyPath(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr))
-	require.NoError(t, NewRolloutController(mgr, time.Millisecond*10))
+	require.NoError(t, NewRolloutController(mgr))
 	require.NoError(t, NewExecController(mgr, minimalTestConfig, conn))
 	go mgr.Start(ctx)
 

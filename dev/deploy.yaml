@@ -17,8 +17,6 @@ spec:
       containers:
       - name: eno-controller
         image: $REGISTRY/eno-controller:$TAG
-        args:
-        - --rollout-cooldown=1s
         env:
           - name: PPROF_ADDR
             value: ":8888"

@@ -40,6 +40,18 @@ spec:
                 type: array
               image:
                 type: string
+              podTimeout:
+                default: 2m
+                description: Pods are recreated after they've existed for at least
+                  the pod timeout interval. This helps close the loop in failure modes
+                  where a pod may be considered ready but not actually able to run.
+                type: string
+              rolloutCooldown:
+                default: 30s
+                description: Any changes to the synthesizer will be propagated to
+                  compositions that reference it. This property controls how long
+                  Eno will wait between each composition update.
+                type: string
               timeout:
                 default: 10s
                 type: string

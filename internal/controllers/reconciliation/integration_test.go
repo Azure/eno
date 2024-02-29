@@ -30,7 +30,6 @@ func init() {
 }
 
 var defaultConf = &synthesis.Config{
-	Timeout:          time.Second * 5,
 	SliceCreationQPS: 20,
 }
 
@@ -154,7 +153,7 @@ func TestCRUD(t *testing.T) {
 			// Register supporting controllers
 			rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
 			require.NoError(t, err)
-			require.NoError(t, synthesis.NewRolloutController(mgr.Manager, time.Millisecond))
+			require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
 			require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 			require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 			require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: newSliceBuilder(t, scheme, &test)}))
@@ -169,6 +168,7 @@ func TestCRUD(t *testing.T) {
 			syn := &apiv1.Synthesizer{}
 			syn.Name = "test-syn"
 			syn.Spec.Image = "create"
+			syn.Spec.RolloutCooldown.Duration = time.Millisecond
 			require.NoError(t, upstream.Create(ctx, syn))
 
 			comp := &apiv1.Composition{}
@@ -313,7 +313,7 @@ func TestReconcileInterval(t *testing.T) {
 	// Register supporting controllers
 	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
 	require.NoError(t, err)
-	require.NoError(t, synthesis.NewRolloutController(mgr.Manager, time.Millisecond))
+	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
@@ -343,6 +343,7 @@ func TestReconcileInterval(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "create"
+	syn.Spec.RolloutCooldown.Duration = time.Millisecond
 	require.NoError(t, upstream.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}
@@ -386,7 +387,7 @@ func TestReconcileCacheRace(t *testing.T) {
 	// Register supporting controllers
 	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
 	require.NoError(t, err)
-	require.NoError(t, synthesis.NewRolloutController(mgr.Manager, time.Microsecond))
+	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	renderN := 0
@@ -418,6 +419,7 @@ func TestReconcileCacheRace(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "create"
+	syn.Spec.RolloutCooldown.Duration = time.Millisecond
 	require.NoError(t, upstream.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}
@@ -508,7 +510,7 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 	// Register supporting controllers
 	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
 	require.NoError(t, err)
-	require.NoError(t, synthesis.NewRolloutController(mgr.Manager, time.Millisecond))
+	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
@@ -539,6 +541,7 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "create"
+	syn.Spec.RolloutCooldown.Duration = time.Millisecond
 	require.NoError(t, upstream.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}

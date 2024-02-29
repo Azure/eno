@@ -31,6 +31,18 @@ type SynthesizerSpec struct {
 
 	// +kubebuilder:default="10s"
 	Timeout metav1.Duration `json:"timeout,omitempty"`
+
+	// Pods are recreated after they've existed for at least the pod timeout interval.
+	// This helps close the loop in failure modes where a pod may be considered ready but not actually able to run.
+	//
+	// +kubebuilder:default="2m"
+	PodTimeout metav1.Duration `json:"podTimeout,omitempty"`
+
+	// Any changes to the synthesizer will be propagated to compositions that reference it.
+	// This property controls how long Eno will wait between each composition update.
+	//
+	// +kubebuilder:default="30s"
+	RolloutCooldown metav1.Duration `json:"rolloutCooldown,omitempty"`
 }
 
 type SynthesizerStatus struct {

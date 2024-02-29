@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/go-logr/zapr"
 	"go.uber.org/zap"
@@ -27,15 +26,10 @@ func main() {
 func run() error {
 	ctx := ctrl.SetupSignalHandler()
 	var (
-		rolloutCooldown  time.Duration
-		synthesisTimeout time.Duration
-		debugLogging     bool
-		synconf          = &synthesis.Config{}
+		debugLogging bool
+		synconf      = &synthesis.Config{}
 	)
-	flag.DurationVar(&synconf.Timeout, "synthesis-pod-timeout", time.Minute, "Maximum lifespan of synthesizer pods")
 	flag.Float64Var(&synconf.SliceCreationQPS, "slice-creation-qps", 5, "Max QPS for writing synthesized resources into resource slices")
-	flag.DurationVar(&synthesisTimeout, "synthesis-timeout", time.Second*30, "Timeout when executing synthesizer binaries")
-	flag.DurationVar(&rolloutCooldown, "rollout-cooldown", time.Second*30, "Minimum period of time between each ensuing composition update after a synthesizer is updated")
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.Parse()
 
@@ -66,7 +60,7 @@ func run() error {
 		return fmt.Errorf("constructing execution controller: %w", err)
 	}
 
-	err = synthesis.NewRolloutController(mgr, rolloutCooldown)
+	err = synthesis.NewRolloutController(mgr)
 	if err != nil {
 		return fmt.Errorf("constructing rollout controller: %w", err)
 	}

@@ -17,7 +17,6 @@ import (
 )
 
 var minimalTestConfig = &Config{
-	Timeout:          time.Second * 6,
 	SliceCreationQPS: 15,
 }
 
@@ -28,7 +27,7 @@ func TestControllerHappyPath(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager, time.Hour))
+	require.NoError(t, NewRolloutController(mgr.Manager))
 	conn := &testutil.ExecConn{}
 	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, conn))
 	mgr.Start(t)
@@ -36,6 +35,7 @@ func TestControllerHappyPath(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "test-syn-image"
+	syn.Spec.RolloutCooldown.Duration = time.Hour
 	require.NoError(t, cli.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}
@@ -93,7 +93,7 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager, time.Millisecond*10))
+	require.NoError(t, NewRolloutController(mgr.Manager))
 	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
 		// simulate real pods taking some random amount of time to generation
 		time.Sleep(time.Millisecond * time.Duration(rand.Int63n(300)))
@@ -104,6 +104,7 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "test-syn-image"
+	syn.Spec.RolloutCooldown.Duration = time.Millisecond * 10
 	require.NoError(t, cli.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}
@@ -142,13 +143,14 @@ func TestControllerRollout(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager, time.Millisecond*10))
+	require.NoError(t, NewRolloutController(mgr.Manager))
 	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, &testutil.ExecConn{}))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "test-syn-image"
+	syn.Spec.RolloutCooldown.Duration = time.Millisecond * 10
 	require.NoError(t, cli.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}
@@ -188,13 +190,14 @@ func TestControllerSynthesizerRolloutCooldown(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager, time.Millisecond*10)) // Rollout should not continue during this test
+	require.NoError(t, NewRolloutController(mgr.Manager)) // Rollout should not continue during this test
 	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, &testutil.ExecConn{}))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "test-syn-image"
+	syn.Spec.RolloutCooldown.Duration = time.Millisecond * 10
 	require.NoError(t, cli.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}
@@ -272,17 +275,19 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager, time.Millisecond*10))
+	require.NoError(t, NewRolloutController(mgr.Manager))
 	mgr.Start(t)
 
 	syn1 := &apiv1.Synthesizer{}
 	syn1.Name = "test-syn-1"
 	syn1.Spec.Image = "initial-image"
+	syn1.Spec.RolloutCooldown.Duration = time.Millisecond * 10
 	require.NoError(t, cli.Create(ctx, syn1))
 
 	syn2 := &apiv1.Synthesizer{}
 	syn2.Name = "test-syn-2"
 	syn2.Spec.Image = "updated-image"
+	syn2.Spec.RolloutCooldown.Duration = time.Millisecond * 10
 	require.NoError(t, cli.Create(ctx, syn2))
 
 	comp := &apiv1.Composition{}

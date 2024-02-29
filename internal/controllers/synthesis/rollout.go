@@ -17,15 +17,13 @@ import (
 )
 
 type rolloutController struct {
-	client   client.Client
-	cooldown time.Duration
+	client client.Client
 }
 
 // NewRolloutController re-synthesizes compositions when their synthesizer has changed while honoring a cooldown period.
-func NewRolloutController(mgr ctrl.Manager, cooldownPeriod time.Duration) error {
+func NewRolloutController(mgr ctrl.Manager) error {
 	c := &rolloutController{
-		client:   mgr.GetClient(),
-		cooldown: cooldownPeriod,
+		client: mgr.GetClient(),
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Synthesizer{}).
@@ -45,7 +43,7 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerNamespace", syn.Namespace, "synthesizerGeneration", syn.Generation)
 
 	if syn.Status.LastRolloutTime != nil && syn.Status.CurrentGeneration != syn.Generation {
-		remainingCooldown := c.cooldown - time.Since(syn.Status.LastRolloutTime.Time)
+		remainingCooldown := syn.Spec.RolloutCooldown.Duration - time.Since(syn.Status.LastRolloutTime.Time)
 		if remainingCooldown > 0 {
 			return ctrl.Result{RequeueAfter: remainingCooldown}, nil // not ready to continue rollout yet
 		}
@@ -72,7 +70,7 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		// - They haven't ever been synthesized (they'll use the new synthesizer version anyway)
 		// - They are currently being synthesized
 		// - They've been synthesized by this or a newer version
-		if time.Since(comp.CreationTimestamp.Time) < c.cooldown || comp.Spec.Synthesizer.MinGeneration >= syn.Generation || comp.Status.CurrentState == nil || !comp.Status.CurrentState.Synthesized || comp.Status.CurrentState.ObservedSynthesizerGeneration >= syn.Generation {
+		if time.Since(comp.CreationTimestamp.Time) < syn.Spec.RolloutCooldown.Duration || comp.Spec.Synthesizer.MinGeneration >= syn.Generation || comp.Status.CurrentState == nil || !comp.Status.CurrentState.Synthesized || comp.Status.CurrentState.ObservedSynthesizerGeneration >= syn.Generation {
 			continue
 		}
 
@@ -93,7 +91,7 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
 		}
 		logger.Info("advancing synthesizer rollout process")
-		return ctrl.Result{RequeueAfter: c.cooldown}, nil
+		return ctrl.Result{RequeueAfter: syn.Spec.RolloutCooldown.Duration}, nil
 	}
 
 	// Update the status to reflect the completed rollout
