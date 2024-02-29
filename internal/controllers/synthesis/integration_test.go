@@ -17,7 +17,8 @@ import (
 )
 
 var minimalTestConfig = &Config{
-	Timeout: time.Second * 6,
+	Timeout:          time.Second * 6,
+	SliceCreationQPS: 15,
 }
 
 func TestControllerHappyPath(t *testing.T) {
@@ -29,7 +30,7 @@ func TestControllerHappyPath(t *testing.T) {
 	require.NoError(t, NewStatusController(mgr.Manager))
 	require.NoError(t, NewRolloutController(mgr.Manager, time.Hour))
 	conn := &testutil.ExecConn{}
-	require.NoError(t, NewExecController(mgr.Manager, time.Second, conn))
+	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, conn))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -90,7 +91,7 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
 	require.NoError(t, NewRolloutController(mgr.Manager, time.Millisecond*10))
-	require.NoError(t, NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
+	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
 		// simulate real pods taking some random amount of time to generation
 		time.Sleep(time.Millisecond * time.Duration(rand.Int63n(300)))
 		return nil
@@ -139,7 +140,7 @@ func TestControllerRollout(t *testing.T) {
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
 	require.NoError(t, NewRolloutController(mgr.Manager, time.Millisecond*10))
-	require.NoError(t, NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{}))
+	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, &testutil.ExecConn{}))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -185,7 +186,7 @@ func TestControllerSynthesizerRolloutCooldown(t *testing.T) {
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
 	require.NoError(t, NewRolloutController(mgr.Manager, time.Millisecond*10)) // Rollout should not continue during this test
-	require.NoError(t, NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{}))
+	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, &testutil.ExecConn{}))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -249,7 +250,7 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{
+	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, &testutil.ExecConn{
 		Hook: func(s *apiv1.Synthesizer) []client.Object {
 			cm := &corev1.ConfigMap{}
 			cm.APIVersion = "v1"

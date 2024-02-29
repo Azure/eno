@@ -33,6 +33,7 @@ func run() error {
 		synconf          = &synthesis.Config{}
 	)
 	flag.DurationVar(&synconf.Timeout, "synthesis-pod-timeout", time.Minute, "Maximum lifespan of synthesizer pods")
+	flag.Float64Var(&synconf.SliceCreationQPS, "slice-creation-qps", 5, "Max QPS for writing synthesized resources into resource slices")
 	flag.DurationVar(&synthesisTimeout, "synthesis-timeout", time.Second*30, "Timeout when executing synthesizer binaries")
 	flag.DurationVar(&rolloutCooldown, "rollout-cooldown", time.Second*30, "Minimum period of time between each ensuing composition update after a synthesizer is updated")
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
@@ -60,7 +61,7 @@ func run() error {
 		return fmt.Errorf("constructing synthesizer connection: %w", err)
 	}
 
-	err = synthesis.NewExecController(mgr, synthesisTimeout, synconn)
+	err = synthesis.NewExecController(mgr, synconf, synconn)
 	if err != nil {
 		return fmt.Errorf("constructing execution controller: %w", err)
 	}

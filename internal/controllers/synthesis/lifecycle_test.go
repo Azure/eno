@@ -18,7 +18,7 @@ func TestCompositionDeletion(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{
+	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, &testutil.ExecConn{
 		Hook: func(s *apiv1.Synthesizer) []client.Object {
 			cm := &corev1.ConfigMap{}
 			cm.APIVersion = "v1"

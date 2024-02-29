@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/util/flowcontrol"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -16,19 +17,22 @@ import (
 )
 
 type Config struct {
-	Timeout time.Duration
+	Timeout          time.Duration
+	SliceCreationQPS float64
 }
 
 type podLifecycleController struct {
-	config *Config
-	client client.Client
+	config           *Config
+	client           client.Client
+	createSliceLimit flowcontrol.RateLimiter
 }
 
 // NewPodLifecycleController is responsible for creating and deleting pods as needed to synthesize compositions.
 func NewPodLifecycleController(mgr ctrl.Manager, cfg *Config) error {
 	c := &podLifecycleController{
-		config: cfg,
-		client: mgr.GetClient(),
+		config:           cfg,
+		client:           mgr.GetClient(),
+		createSliceLimit: flowcontrol.NewTokenBucketRateLimiter(float32(cfg.SliceCreationQPS), 1),
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).

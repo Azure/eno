@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -25,19 +26,21 @@ import (
 const maxSliceJsonBytes = 1024 * 768
 
 type execController struct {
-	client  client.Client
-	timeout time.Duration
-	conn    SynthesizerConnection
+	client           client.Client
+	timeout          time.Duration
+	conn             SynthesizerConnection
+	createSliceLimit flowcontrol.RateLimiter
 }
 
-func NewExecController(mgr ctrl.Manager, timeout time.Duration, conn SynthesizerConnection) error {
+func NewExecController(mgr ctrl.Manager, cfg *Config, conn SynthesizerConnection) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Pod{}).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "execController")).
 		Complete(&execController{
-			client:  mgr.GetClient(),
-			timeout: timeout,
-			conn:    conn,
+			client:           mgr.GetClient(),
+			timeout:          cfg.Timeout,
+			conn:             conn,
+			createSliceLimit: flowcontrol.NewTokenBucketRateLimiter(float32(cfg.SliceCreationQPS), 1),
 		})
 }
 
