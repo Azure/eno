@@ -29,6 +29,11 @@ func init() {
 	insecureLogPatch = true
 }
 
+var defaultConf = &synthesis.Config{
+	Timeout:          time.Second * 5,
+	SliceCreationQPS: 20,
+}
+
 type crudTestCase struct {
 	Name                         string
 	Empty, Initial, Updated      client.Object
@@ -151,10 +156,8 @@ func TestCRUD(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, synthesis.NewRolloutController(mgr.Manager, time.Millisecond))
 			require.NoError(t, synthesis.NewStatusController(mgr.Manager))
-			require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, &synthesis.Config{
-				Timeout: time.Second * 5,
-			}))
-			require.NoError(t, synthesis.NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{Hook: newSliceBuilder(t, scheme, &test)}))
+			require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
+			require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: newSliceBuilder(t, scheme, &test)}))
 
 			// Test subject
 			// Only enable rediscoverWhenNotFound on k8s versions that can support it.
@@ -312,10 +315,8 @@ func TestReconcileInterval(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, synthesis.NewRolloutController(mgr.Manager, time.Millisecond))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
-	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, &synthesis.Config{
-		Timeout: time.Second * 5,
-	}))
-	require.NoError(t, synthesis.NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
+	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
 		obj := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-obj",
@@ -387,11 +388,9 @@ func TestReconcileCacheRace(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, synthesis.NewRolloutController(mgr.Manager, time.Microsecond))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
-	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, &synthesis.Config{
-		Timeout: time.Second * 5,
-	}))
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	renderN := 0
-	require.NoError(t, synthesis.NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
+	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
 		renderN++
 		obj := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
@@ -512,10 +511,8 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 	require.NoError(t, synthesis.NewRolloutController(mgr.Manager, time.Millisecond))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
-	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, &synthesis.Config{
-		Timeout: time.Second * 5,
-	}))
-	require.NoError(t, synthesis.NewExecController(mgr.Manager, time.Second, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
+	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
 		obj := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-obj",
