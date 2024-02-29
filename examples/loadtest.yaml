@@ -15,7 +15,7 @@ spec:
           \"apiVersion\": \"v1\",
           \"kind\": \"ConfigMap\",
           \"metadata\": { \"name\": \"test-cm-${i}\", \"namespace\": \"default\", \"annotations\": { \"eno.azure.io/reconcile-interval\": \"30s\" } },
-          \"data\": { \"foo\": \"bar\" }
+          \"data\": { \"foo\": \"$(tr -dc A-Za-z0-9 </dev/urandom | head -c 4096; echo)\" }
         }"
         if [[ $i == $n ]]; then
           echo "]}"
@@ -67,5 +67,5 @@ spec:
 
             kubectl patch synthesizers load-test-synth --type=merge --patch "{\"spec\":{\"timeout\": \"$timeout\"}}"
             n=$(($n + 1))
-            sleep 120
+            sleep 10
           done
