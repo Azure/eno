@@ -39,20 +39,17 @@ jobs:
           # from AZURE_REGISTRY secret is not exported from here.
 
   publish-images:
-    runs-on: ubuntu-latest
+    runs-on:
+      labels: [self-hosted, "1ES.Pool={{ secrets.ONE_ES_RUNNER_POOL }}"]
     needs: prepare-variables
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare-variables.outputs.release_tag }}
-      - name: 'OIDC Login to Azure Public Cloud'
-        uses: azure/login@v1
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       - name: 'Login the ACR'
-        run: az acr login -n ${{ secrets.AZURE_REGISTRY }}
+        run: |
+          az login --identity
+          az acr login -n ${{ secrets.AZURE_REGISTRY }}
       - name: Build and publish eno-controller
         run: |
           make docker-build-eno-controller
