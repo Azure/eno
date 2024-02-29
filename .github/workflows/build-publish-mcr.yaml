@@ -40,7 +40,7 @@ jobs:
 
   publish-images:
     runs-on:
-      labels: [self-hosted, "1ES.Pool={{ secrets.ONE_ES_RUNNER_POOL }}"]
+      labels: [self-hosted, "1ES.Pool=1es-aks-eno-pool-ubuntu"]
     needs: prepare-variables
     steps:
       - uses: actions/checkout@v4
