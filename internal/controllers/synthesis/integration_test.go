@@ -35,7 +35,6 @@ func TestControllerHappyPath(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "test-syn-image"
-	syn.Spec.RolloutCooldown.Duration = time.Hour
 	require.NoError(t, cli.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}
@@ -104,7 +103,6 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "test-syn-image"
-	syn.Spec.RolloutCooldown.Duration = time.Millisecond * 10
 	require.NoError(t, cli.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}

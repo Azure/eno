@@ -168,7 +168,6 @@ func TestCRUD(t *testing.T) {
 			syn := &apiv1.Synthesizer{}
 			syn.Name = "test-syn"
 			syn.Spec.Image = "create"
-			syn.Spec.RolloutCooldown.Duration = time.Millisecond
 			require.NoError(t, upstream.Create(ctx, syn))
 
 			comp := &apiv1.Composition{}
@@ -205,7 +204,7 @@ func TestCRUD(t *testing.T) {
 			}
 
 			t.Logf("starting update")
-			setImage(t, upstream, syn, comp, "update")
+			setImage(t, upstream, syn, "update")
 			test.WaitForPhase(t, downstream, "update")
 
 			obj, err = test.Get(downstream)
@@ -213,7 +212,7 @@ func TestCRUD(t *testing.T) {
 			test.AssertUpdated(t, obj)
 
 			t.Logf("starting deletion")
-			setImage(t, upstream, syn, comp, "delete")
+			setImage(t, upstream, syn, "delete")
 
 			testutil.Eventually(t, func() bool {
 				_, err := test.Get(downstream)
@@ -246,7 +245,7 @@ func (c *crudTestCase) Get(downstream client.Client) (client.Object, error) {
 	return obj, downstream.Get(context.Background(), client.ObjectKeyFromObject(obj), obj)
 }
 
-func setImage(t *testing.T, upstream client.Client, syn *apiv1.Synthesizer, comp *apiv1.Composition, image string) {
+func setImage(t *testing.T, upstream client.Client, syn *apiv1.Synthesizer, image string) {
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		if err := upstream.Get(context.Background(), client.ObjectKeyFromObject(syn), syn); err != nil {
 			return err
@@ -343,7 +342,6 @@ func TestReconcileInterval(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "create"
-	syn.Spec.RolloutCooldown.Duration = time.Millisecond
 	require.NoError(t, upstream.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}
@@ -419,7 +417,6 @@ func TestReconcileCacheRace(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "create"
-	syn.Spec.RolloutCooldown.Duration = time.Millisecond
 	require.NoError(t, upstream.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}
@@ -541,7 +538,6 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "create"
-	syn.Spec.RolloutCooldown.Duration = time.Millisecond
 	require.NoError(t, upstream.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}
