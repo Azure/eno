@@ -29,6 +29,7 @@ func newReconstituter(mgr ctrl.Manager) (*reconstituter, error) {
 		cache:  newCache(mgr.GetClient()),
 		client: mgr.GetClient(),
 	}
+
 	return r, ctrl.NewControllerManagedBy(mgr).
 		Named("reconstituter").
 		For(&apiv1.Composition{}).

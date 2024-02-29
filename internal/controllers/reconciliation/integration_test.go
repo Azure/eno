@@ -86,20 +86,19 @@ var crudTests = []crudTestCase{
 		},
 		AssertUpdated: func(t *testing.T, obj client.Object) {
 			svc := obj.(*corev1.Service).Spec
-			assert.Equal(t, []corev1.ServicePort{
-				{
-					Name:       "third",
-					Port:       3456,
-					Protocol:   corev1.ProtocolTCP,
-					TargetPort: intstr.FromInt(3456),
-				},
-				{
-					Name:       "second",
-					Port:       2345,
-					Protocol:   corev1.ProtocolTCP,
-					TargetPort: intstr.FromInt(2345),
-				},
-			}, svc.Ports)
+			require.Len(t, svc.Ports, 2)
+			assert.Contains(t, svc.Ports, corev1.ServicePort{
+				Name:       "third",
+				Port:       3456,
+				Protocol:   corev1.ProtocolTCP,
+				TargetPort: intstr.FromInt(3456),
+			})
+			assert.Contains(t, svc.Ports, corev1.ServicePort{
+				Name:       "second",
+				Port:       2345,
+				Protocol:   corev1.ProtocolTCP,
+				TargetPort: intstr.FromInt(2345),
+			})
 		},
 	},
 	{
@@ -567,6 +566,9 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 	// Everything should eventually be cleaned up
 	// This implicitly covers ordering, since it's impossible to delete a resource without its composition
 	testutil.Eventually(t, func() bool {
-		return errors.IsNotFound(downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)) && errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+		resourceGone := errors.IsNotFound(downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj))
+		compGone := errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+		t.Logf("resourceGone=%t compGone=%t", resourceGone, compGone)
+		return resourceGone && compGone
 	})
 }

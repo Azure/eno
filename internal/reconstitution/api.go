@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 
@@ -20,10 +21,11 @@ type Reconciler interface {
 // Client provides read/write access to a collection of reconstituted resources.
 type Client interface {
 	Get(ctx context.Context, comp *CompositionRef, res *ResourceRef) (*Resource, bool)
-	PatchStatusAsync(ctx context.Context, req *ManifestRef, patchFn StatusPatchFn)
+	PatchStatusAsync(ctx context.Context, req *ManifestRef, checkFn CheckPatchFn, patchFn StatusPatchFn)
 }
 
-type StatusPatchFn func(*apiv1.ResourceState) bool
+type StatusPatchFn func(*apiv1.ResourceState)
+type CheckPatchFn func(*apiv1.ResourceState) bool
 
 // ManifestRef references a particular resource manifest within a resource slice.
 type ManifestRef struct {
@@ -35,13 +37,18 @@ type ManifestRef struct {
 type Resource struct {
 	*lastSeenMeta
 
-	Ref          *ResourceRef
+	Ref          ResourceRef
 	Manifest     *apiv1.Manifest
-	Object       *unstructured.Unstructured
+	GVK          schema.GroupVersionKind
 	SliceDeleted bool
 }
 
 func (r *Resource) Deleted() bool { return r.SliceDeleted || r.Manifest.Deleted }
+
+func (r *Resource) Parse() (*unstructured.Unstructured, error) {
+	u := &unstructured.Unstructured{}
+	return u, u.UnmarshalJSON([]byte(r.Manifest.Manifest))
+}
 
 // ResourceRef refers to a specific synthesized resource.
 type ResourceRef struct {

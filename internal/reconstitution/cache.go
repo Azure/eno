@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sync"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -45,15 +44,7 @@ func (c *cache) Get(ctx context.Context, comp *CompositionRef, ref *ResourceRef)
 		return nil, false
 	}
 
-	// Copy the resource so it's safe for callers to mutate
-	refDeref := *ref
-	return &Resource{
-		lastSeenMeta: res.lastSeenMeta,
-		Ref:          &refDeref,
-		Manifest:     res.Manifest.DeepCopy(),
-		Object:       res.Object,
-		SliceDeleted: res.SliceDeleted,
-	}, ok
+	return res, ok
 }
 
 // HasSynthesis returns true when the cache contains the resulting resources of the given synthesis.
@@ -113,9 +104,9 @@ func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 			if err != nil {
 				return nil, nil, fmt.Errorf("building resource at index %d of slice %s: %w", i, slice.Name, err)
 			}
-			resources[*res.Ref] = res
+			resources[res.Ref] = res
 			requests = append(requests, &Request{
-				Resource: *res.Ref,
+				Resource: res.Ref,
 				Manifest: ManifestRef{
 					Slice: types.NamespacedName{
 						Namespace: slice.Namespace,
@@ -132,25 +123,23 @@ func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 }
 
 func (c *cache) buildResource(ctx context.Context, comp *apiv1.Composition, slice *apiv1.ResourceSlice, resource *apiv1.Manifest) (*Resource, error) {
-	manifest := resource.Manifest
-	parsed := &unstructured.Unstructured{}
-	err := parsed.UnmarshalJSON([]byte(manifest))
+	res := &Resource{
+		lastSeenMeta: &lastSeenMeta{},
+		Manifest:     resource,
+		SliceDeleted: slice.DeletionTimestamp != nil,
+	}
+
+	parsed, err := res.Parse()
 	if err != nil {
 		return nil, fmt.Errorf("invalid json: %w", err)
 	}
+	gvk := parsed.GroupVersionKind()
+	res.GVK = gvk
+	res.Ref.Name = parsed.GetName()
+	res.Ref.Namespace = parsed.GetNamespace()
+	res.Ref.Kind = parsed.GetKind()
 
-	res := &Resource{
-		lastSeenMeta: &lastSeenMeta{},
-		Ref: &ResourceRef{
-			Namespace: parsed.GetNamespace(),
-			Name:      parsed.GetName(),
-			Kind:      parsed.GetKind(),
-		},
-		Manifest:     resource,
-		Object:       parsed,
-		SliceDeleted: slice.DeletionTimestamp != nil,
-	}
-	if res.Ref.Name == "" || parsed.GetAPIVersion() == "" {
+	if res.Ref.Name == "" || res.Ref.Kind == "" || parsed.GetAPIVersion() == "" {
 		return nil, fmt.Errorf("missing name, kind, or apiVersion")
 	}
 	return res, nil
