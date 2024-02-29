@@ -66,7 +66,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		synGen, _  = strconv.ParseInt(pod.Annotations["eno.azure.io/synthesizer-generation"], 10, 0)
 	)
 	logger.WithValues("synthesizerGeneration", synGen, "compositionGeneration", compGen)
-	if shouldWriteStatus(comp, compGen, synGen) {
+	if shouldWriteStatus(comp, compGen) {
 		if comp.Status.CurrentState == nil {
 			comp.Status.CurrentState = &apiv1.Synthesis{}
 		}
@@ -97,7 +97,7 @@ func (c *statusController) removeFinalizer(ctx context.Context, pod *corev1.Pod)
 	return ctrl.Result{Requeue: true}, nil
 }
 
-func shouldWriteStatus(comp *apiv1.Composition, podCompGen, podSynGen int64) bool {
+func shouldWriteStatus(comp *apiv1.Composition, podCompGen int64) bool {
 	current := comp.Status.CurrentState
 	return current == nil || (current.ObservedCompositionGeneration == podCompGen && (current.PodCreation == nil || current.ObservedSynthesizerGeneration == 0))
 }

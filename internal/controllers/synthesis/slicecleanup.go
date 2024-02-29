@@ -92,8 +92,7 @@ func shouldDelete(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
 		return false // stale informer
 	}
 	isReferenced := synthesisReferencesSlice(comp.Status.CurrentState, slice) || synthesisReferencesSlice(comp.Status.PreviousState, slice)
-	isSynthesizing := comp.Status.CurrentState == nil || !comp.Status.CurrentState.Synthesized || (comp.Status.PreviousState != nil && !comp.Status.PreviousState.Synthesized)
-	return comp.DeletionTimestamp != nil || (!isSynthesizing && !isReferenced)
+	return comp.DeletionTimestamp != nil || (!isReferenced && slice.Spec.CompositionGeneration < comp.Generation)
 }
 
 func shouldReleaseFinalizer(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {

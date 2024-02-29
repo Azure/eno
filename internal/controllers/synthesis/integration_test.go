@@ -73,14 +73,17 @@ func TestControllerHappyPath(t *testing.T) {
 		}
 	})
 
-	// The pod eventually completes and is deleted
+	// The synthesizer is eventually executed a second time
+	testutil.Eventually(t, func() bool {
+		return conn.Calls.Load() == 2
+	})
+
+	// The pod is deleted
 	testutil.Eventually(t, func() bool {
 		list := &corev1.PodList{}
 		require.NoError(t, cli.List(ctx, list))
 		return len(list.Items) == 0
 	})
-
-	assert.Equal(t, int64(2), conn.Calls.Load())
 }
 
 func TestControllerFastCompositionUpdates(t *testing.T) {
