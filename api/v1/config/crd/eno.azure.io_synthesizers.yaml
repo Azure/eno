@@ -57,6 +57,9 @@ spec:
                   Eno will wait between each composition update.
                 type: string
             type: object
+            x-kubernetes-validations:
+            - message: podTimeout must be greater than execTimeout
+              rule: duration(self.execTimeout) <= duration(self.podTimeout)
           status:
             properties:
               currentGeneration:
