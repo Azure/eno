@@ -79,7 +79,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
 
-	logger, toDelete, exists := c.shouldDeletePod(logger, comp, syn, pods)
+	logger, toDelete, exists := shouldDeletePod(logger, comp, syn, pods)
 	if toDelete != nil {
 		if err := c.client.Delete(ctx, toDelete); err != nil {
 			return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("deleting pod: %w", err))
@@ -160,21 +160,29 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	return ctrl.Result{}, nil
 }
 
-func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Synthesizer, pods *corev1.PodList) (logr.Logger, *corev1.Pod /* exists */, bool) {
+func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Synthesizer, pods *corev1.PodList) (logr.Logger, *corev1.Pod, bool /* exists */) {
 	if len(pods.Items) == 0 {
 		return logger, nil, false
 	}
 
 	// Only create pods when the previous one is deleting or non-existant
+	var onePodDeleting bool
 	for _, pod := range pods.Items {
-		pod := pod
-		if pod.DeletionTimestamp != nil {
-			continue // already deleted
-		}
-
 		if comp.DeletionTimestamp != nil {
 			logger = logger.WithValues("reason", "CompositionDeleted")
 			return logger, &pod, true
+		}
+
+		// Allow a single extra pod to be created while the previous one is terminating
+		// in order to break potential deadlocks while avoiding a thundering herd of pods
+		// TODO: e2e test for this
+		pod := pod
+		if pod.DeletionTimestamp != nil {
+			if onePodDeleting {
+				return logger, nil, true
+			}
+			onePodDeleting = true
+			continue
 		}
 
 		isCurrent := podDerivedFrom(comp, &pod)
@@ -183,11 +191,9 @@ func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1
 			return logger, &pod, true
 		}
 
-		// TODO: Allow a second concurrent pod only while one is terminating (to avoid deadlocks)
-
 		// Synthesis is done
 		if comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized {
-			if comp.Status.CurrentState != nil && comp.Status.CurrentState.PodCreation != nil {
+			if comp.Status.CurrentState.PodCreation != nil {
 				logger = logger.WithValues("latency", time.Since(comp.Status.CurrentState.PodCreation.Time).Milliseconds())
 			}
 			logger = logger.WithValues("reason", "Success")
@@ -197,9 +203,6 @@ func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1
 		// Pod is too old
 		// We timeout eventually in case it landed on a node that for whatever reason isn't capable of running the pod
 		if time.Since(pod.CreationTimestamp.Time) > syn.Spec.PodTimeout.Duration {
-			if comp.Status.CurrentState != nil && comp.Status.CurrentState.PodCreation != nil {
-				logger = logger.WithValues("latency", time.Since(comp.Status.CurrentState.PodCreation.Time).Milliseconds())
-			}
 			logger = logger.WithValues("reason", "Timeout")
 			return logger, &pod, true
 		}
