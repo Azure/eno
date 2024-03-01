@@ -71,12 +71,7 @@ func (s *SynthesizerPodConnection) Synthesize(ctx context.Context, syn *apiv1.Sy
 		return nil, fmt.Errorf("creating remote command executor: %w", err)
 	}
 
-	// Execs will in most cases block pod termination, so use the min of the exec and pod lifespan timeouts
-	timeout := syn.Spec.ExecTimeout.Duration
-	if pt := syn.Spec.PodTimeout.Duration; pt < timeout {
-		timeout = pt
-	}
-	streamCtx, cancel := context.WithTimeout(ctx, timeout)
+	streamCtx, cancel := context.WithTimeout(ctx, syn.Spec.ExecTimeout.Duration)
 	defer cancel()
 
 	stderr := &bytes.Buffer{}
