@@ -22,6 +22,7 @@ type Synthesizer struct {
 	Status SynthesizerStatus `json:"status,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="duration(self.execTimeout) <= duration(self.podTimeout)",message="podTimeout must be greater than execTimeout"
 type SynthesizerSpec struct {
 	// +required
 	Image string `json:"image,omitempty"`
