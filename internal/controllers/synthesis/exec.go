@@ -54,7 +54,7 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		// This shouldn't be common as the informer watch filters on Eno-managed pods using a selector
 		return ctrl.Result{}, nil
 	}
-	if len(pod.Status.ContainerStatuses) == 0 || pod.Status.ContainerStatuses[0].State.Running == nil {
+	if len(pod.Status.ContainerStatuses) == 0 || pod.Status.ContainerStatuses[0].State.Running == nil || pod.DeletionTimestamp != nil {
 		return ctrl.Result{}, nil // pod isn't ready for exec
 	}
 	compGen, _ := strconv.ParseInt(pod.Annotations["eno.azure.io/composition-generation"], 10, 0)
