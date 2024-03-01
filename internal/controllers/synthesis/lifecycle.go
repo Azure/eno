@@ -156,6 +156,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, client.IgnoreAlreadyExists(fmt.Errorf("creating pod: %w", err))
 	}
 	logger.Info("created synthesizer pod", "podName", pod.Name)
+	sytheses.Inc()
 
 	return ctrl.Result{}, nil
 }
@@ -201,6 +202,7 @@ func (c *podLifecycleController) shouldDeletePod(logger logr.Logger, comp *apiv1
 				logger = logger.WithValues("latency", time.Since(comp.Status.CurrentState.PodCreation.Time).Milliseconds())
 			}
 			logger = logger.WithValues("reason", "Timeout")
+			synthesPodRecreations.Inc()
 			return logger, &pod, true
 		}
 

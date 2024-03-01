@@ -3,6 +3,7 @@ package reconstitution
 import (
 	"context"
 	"sync"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -35,7 +36,8 @@ type ManifestRef struct {
 
 // Resource is the controller's internal representation of a single resource out of a ResourceSlice.
 type Resource struct {
-	*lastSeenMeta
+	lastSeenMeta
+	lastReconciledMeta
 
 	Ref          ResourceRef
 	Manifest     *apiv1.Manifest
@@ -98,4 +100,24 @@ func (l *lastSeenMeta) MatchesLastSeen(rv string) bool {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 	return l.resourceVersion == rv
+}
+
+type lastReconciledMeta struct {
+	lock           sync.Mutex
+	lastReconciled *time.Time
+}
+
+func (l *lastReconciledMeta) ObserveReconciliation() time.Duration {
+	now := time.Now()
+
+	l.lock.Lock()
+	defer l.lock.Unlock()
+
+	var latency time.Duration
+	if l.lastReconciled != nil {
+		latency = now.Sub(*l.lastReconciled)
+	}
+
+	l.lastReconciled = &now
+	return latency
 }
