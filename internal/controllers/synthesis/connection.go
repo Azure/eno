@@ -71,7 +71,7 @@ func (s *SynthesizerPodConnection) Synthesize(ctx context.Context, syn *apiv1.Sy
 		return nil, fmt.Errorf("creating remote command executor: %w", err)
 	}
 
-	streamCtx, cancel := context.WithTimeout(ctx, syn.Spec.Timeout.Duration)
+	streamCtx, cancel := context.WithTimeout(ctx, syn.Spec.ExecTimeout.Duration)
 	defer cancel()
 
 	stderr := &bytes.Buffer{}

@@ -45,7 +45,7 @@ func (d *discoveryCache) Get(ctx context.Context, gvk schema.GroupVersionKind) (
 	for i := 0; i < 2; i++ {
 		if d.current == nil {
 			logger.V(1).Info("filling discovery cache")
-			if err := d.fillUnlocked(ctx); err != nil {
+			if err := d.fillUnlocked(); err != nil {
 				return nil, err
 			}
 		}
@@ -65,7 +65,7 @@ func (d *discoveryCache) Get(ctx context.Context, gvk schema.GroupVersionKind) (
 	return nil, nil
 }
 
-func (d *discoveryCache) fillUnlocked(ctx context.Context) error {
+func (d *discoveryCache) fillUnlocked() error {
 	doc, err := d.client.OpenAPISchema()
 	if err != nil {
 		return err

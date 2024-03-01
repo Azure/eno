@@ -27,7 +27,6 @@ const maxSliceJsonBytes = 1024 * 768
 
 type execController struct {
 	client           client.Client
-	timeout          time.Duration
 	conn             SynthesizerConnection
 	createSliceLimit flowcontrol.RateLimiter
 }
@@ -38,7 +37,6 @@ func NewExecController(mgr ctrl.Manager, cfg *Config, conn SynthesizerConnection
 		WithLogConstructor(manager.NewLogConstructor(mgr, "execController")).
 		Complete(&execController{
 			client:           mgr.GetClient(),
-			timeout:          cfg.Timeout,
 			conn:             conn,
 			createSliceLimit: flowcontrol.NewTokenBucketRateLimiter(float32(cfg.SliceCreationQPS), 1),
 		})
@@ -110,7 +108,7 @@ func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer,
 		return nil, fmt.Errorf("building inputs: %w", err)
 	}
 
-	synctx, done := context.WithTimeout(ctx, c.timeout)
+	synctx, done := context.WithTimeout(ctx, syn.Spec.ExecTimeout.Duration)
 	defer done()
 
 	start := time.Now()

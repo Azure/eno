@@ -30,7 +30,6 @@ func init() {
 }
 
 var defaultConf = &synthesis.Config{
-	Timeout:          time.Second * 5,
 	SliceCreationQPS: 20,
 }
 
@@ -154,7 +153,7 @@ func TestCRUD(t *testing.T) {
 			// Register supporting controllers
 			rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
 			require.NoError(t, err)
-			require.NoError(t, synthesis.NewRolloutController(mgr.Manager, time.Millisecond))
+			require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
 			require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 			require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 			require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: newSliceBuilder(t, scheme, &test)}))
@@ -205,7 +204,7 @@ func TestCRUD(t *testing.T) {
 			}
 
 			t.Logf("starting update")
-			setImage(t, upstream, syn, comp, "update")
+			setImage(t, upstream, syn, "update")
 			test.WaitForPhase(t, downstream, "update")
 
 			obj, err = test.Get(downstream)
@@ -213,7 +212,7 @@ func TestCRUD(t *testing.T) {
 			test.AssertUpdated(t, obj)
 
 			t.Logf("starting deletion")
-			setImage(t, upstream, syn, comp, "delete")
+			setImage(t, upstream, syn, "delete")
 
 			testutil.Eventually(t, func() bool {
 				_, err := test.Get(downstream)
@@ -246,7 +245,7 @@ func (c *crudTestCase) Get(downstream client.Client) (client.Object, error) {
 	return obj, downstream.Get(context.Background(), client.ObjectKeyFromObject(obj), obj)
 }
 
-func setImage(t *testing.T, upstream client.Client, syn *apiv1.Synthesizer, comp *apiv1.Composition, image string) {
+func setImage(t *testing.T, upstream client.Client, syn *apiv1.Synthesizer, image string) {
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		if err := upstream.Get(context.Background(), client.ObjectKeyFromObject(syn), syn); err != nil {
 			return err
@@ -313,7 +312,7 @@ func TestReconcileInterval(t *testing.T) {
 	// Register supporting controllers
 	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
 	require.NoError(t, err)
-	require.NoError(t, synthesis.NewRolloutController(mgr.Manager, time.Millisecond))
+	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
@@ -386,7 +385,7 @@ func TestReconcileCacheRace(t *testing.T) {
 	// Register supporting controllers
 	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
 	require.NoError(t, err)
-	require.NoError(t, synthesis.NewRolloutController(mgr.Manager, time.Microsecond))
+	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	renderN := 0
@@ -508,7 +507,7 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 	// Register supporting controllers
 	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
 	require.NoError(t, err)
-	require.NoError(t, synthesis.NewRolloutController(mgr.Manager, time.Millisecond))
+	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
