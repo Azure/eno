@@ -168,6 +168,7 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 	// Only create pods when the previous one is deleting or non-existant
 	var onePodDeleting bool
 	for _, pod := range pods.Items {
+		pod := pod
 		if comp.DeletionTimestamp != nil {
 			logger = logger.WithValues("reason", "CompositionDeleted")
 			return logger, &pod, true
@@ -176,7 +177,6 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 		// Allow a single extra pod to be created while the previous one is terminating
 		// in order to break potential deadlocks while avoiding a thundering herd of pods
 		// TODO: e2e test for this
-		pod := pod
 		if pod.DeletionTimestamp != nil {
 			if onePodDeleting {
 				return logger, nil, true
