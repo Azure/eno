@@ -604,6 +604,9 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	comp.Spec.Synthesizer.Name = syn.Name
 	require.NoError(t, upstream.Create(ctx, comp))
 
+	// Some controllers assume compositions will precede resource slices since that will always be true in real life
+	time.Sleep(time.Millisecond * 100)
+
 	rs := &apiv1.ResourceSlice{}
 	rs.GenerateName = "test-"
 	rs.Namespace = "default"
