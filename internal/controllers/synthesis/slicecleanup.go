@@ -100,7 +100,7 @@ func shouldReleaseFinalizer(comp *apiv1.Composition, slice *apiv1.ResourceSlice)
 	if comp.Status.CurrentState != nil && slice.Spec.CompositionGeneration > comp.Status.CurrentState.ObservedCompositionGeneration && owner.UID == comp.UID {
 		return false // stale informer
 	}
-	return !synthesisReferencesSlice(comp.Status.CurrentState, slice) || !resourcesRemain(slice)
+	return !resourcesRemain(slice) || (!synthesisReferencesSlice(comp.Status.CurrentState, slice) && !synthesisReferencesSlice(comp.Status.PreviousState, slice))
 }
 
 func synthesisReferencesSlice(syn *apiv1.Synthesis, slice *apiv1.ResourceSlice) bool {
