@@ -108,7 +108,7 @@ func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer,
 		return nil, fmt.Errorf("building inputs: %w", err)
 	}
 
-	synctx, done := context.WithTimeout(ctx, syn.Spec.Timeout.Duration)
+	synctx, done := context.WithTimeout(ctx, syn.Spec.ExecTimeout.Duration)
 	defer done()
 
 	start := time.Now()

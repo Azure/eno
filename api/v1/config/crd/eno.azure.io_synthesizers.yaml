@@ -38,6 +38,10 @@ spec:
                 items:
                   type: string
                 type: array
+              execTimeout:
+                default: 10s
+                description: Timeout for each execution of the synthesizer command.
+                type: string
               image:
                 type: string
               podTimeout:
@@ -51,9 +55,6 @@ spec:
                 description: Any changes to the synthesizer will be propagated to
                   compositions that reference it. This property controls how long
                   Eno will wait between each composition update.
-                type: string
-              timeout:
-                default: 10s
                 type: string
             type: object
           status:

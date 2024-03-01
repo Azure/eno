@@ -426,7 +426,7 @@ func (in *SynthesizerSpec) DeepCopyInto(out *SynthesizerSpec) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
-	out.Timeout = in.Timeout
+	out.ExecTimeout = in.ExecTimeout
 	out.PodTimeout = in.PodTimeout
 	out.RolloutCooldown = in.RolloutCooldown
 }

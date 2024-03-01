@@ -29,8 +29,10 @@ type SynthesizerSpec struct {
 	// +kubebuilder:default={"synthesize"}
 	Command []string `json:"command,omitempty"`
 
+	// Timeout for each execution of the synthesizer command.
+	//
 	// +kubebuilder:default="10s"
-	Timeout metav1.Duration `json:"timeout,omitempty"`
+	ExecTimeout metav1.Duration `json:"execTimeout,omitempty"`
 
 	// Pods are recreated after they've existed for at least the pod timeout interval.
 	// This helps close the loop in failure modes where a pod may be considered ready but not actually able to run.
