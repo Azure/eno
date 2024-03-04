@@ -160,7 +160,7 @@ func TestCRUD(t *testing.T) {
 
 			// Test subject
 			// Only enable rediscoverWhenNotFound on k8s versions that can support it.
-			err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15))
+			err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
 			require.NoError(t, err)
 			mgr.Start(t)
 
@@ -334,7 +334,7 @@ func TestReconcileInterval(t *testing.T) {
 	}}))
 
 	// Test subject
-	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15))
+	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
 	require.NoError(t, err)
 	mgr.Start(t)
 
@@ -409,7 +409,7 @@ func TestReconcileCacheRace(t *testing.T) {
 	}}))
 
 	// Test subject
-	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15))
+	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
 	require.NoError(t, err)
 	mgr.Start(t)
 
@@ -458,7 +458,7 @@ func TestReconcileStatus(t *testing.T) {
 	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
 	require.NoError(t, err)
 
-	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15))
+	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
 	require.NoError(t, err)
 	mgr.Start(t)
 
@@ -530,7 +530,7 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 	}}))
 
 	// Test subject
-	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15))
+	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
 	require.NoError(t, err)
 	mgr.Start(t)
 
@@ -688,8 +688,7 @@ func TestResourceReadiness(t *testing.T) {
 				Name:      "test-obj",
 				Namespace: "default",
 				Annotations: map[string]string{
-					"eno.azure.io/readiness":          "self.data.foo == 'baz'",
-					"eno.azure.io/reconcile-interval": "100ms", // TODO: Remove
+					"eno.azure.io/readiness": "self.data.foo == 'baz'",
 				},
 			},
 			Data: map[string]string{"foo": s.Spec.Image},
@@ -702,7 +701,7 @@ func TestResourceReadiness(t *testing.T) {
 	}}))
 
 	// Test subject
-	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15))
+	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Millisecond)
 	require.NoError(t, err)
 	mgr.Start(t)
 

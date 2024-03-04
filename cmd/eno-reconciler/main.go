@@ -33,6 +33,7 @@ func run() error {
 		debugLogging           bool
 		remoteKubeconfigFile   string
 		remoteQPS              float64
+		readinessPollInterval time.Duration
 
 		mgrOpts = &manager.Options{
 			Rest: ctrl.GetConfigOrDie(),
@@ -43,6 +44,7 @@ func run() error {
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.StringVar(&remoteKubeconfigFile, "remote-kubeconfig", "", "Path to the kubeconfig of the apiserver where the resources will be reconciled. The config from the environment is used if this is not provided")
 	flag.Float64Var(&remoteQPS, "remote-qps", 0, "Max requests per second to the remote apiserver")
+	flag.DurationVar(&readinessPollInterval, "readiness-poll-interval", time.Second*5, "Interval at which non-ready resources will be checked for readiness")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 
@@ -75,7 +77,7 @@ func run() error {
 			remoteConfig.QPS = float32(remoteQPS)
 		}
 	}
-	err = reconciliation.New(recmgr, remoteConfig, discoveryMaxRPS, rediscoverWhenNotFound)
+	err = reconciliation.New(recmgr, remoteConfig, discoveryMaxRPS, rediscoverWhenNotFound, readinessPollInterval)
 	if err != nil {
 		return fmt.Errorf("constructing reconciliation controller: %w", err)
 	}

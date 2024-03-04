@@ -31,14 +31,15 @@ import (
 var insecureLogPatch = os.Getenv("INSECURE_LOG_PATCH") == "true"
 
 type Controller struct {
-	client         client.Client
-	resourceClient reconstitution.Client
+	client                client.Client
+	resourceClient        reconstitution.Client
+	readinessPollInterval time.Duration
 
 	upstreamClient client.Client
 	discovery      *discoveryCache
 }
 
-func New(mgr *reconstitution.Manager, downstream *rest.Config, discoveryRPS float32, rediscoverWhenNotFound bool) error {
+func New(mgr *reconstitution.Manager, downstream *rest.Config, discoveryRPS float32, rediscoverWhenNotFound bool, readinessPollInterval time.Duration) error {
 	upstreamClient, err := client.New(downstream, client.Options{
 		Scheme: runtime.NewScheme(), // empty scheme since we shouldn't rely on compile-time types
 	})
@@ -52,10 +53,11 @@ func New(mgr *reconstitution.Manager, downstream *rest.Config, discoveryRPS floa
 	}
 
 	return mgr.Add(&Controller{
-		client:         mgr.Manager.GetClient(),
-		resourceClient: mgr.GetClient(),
-		upstreamClient: upstreamClient,
-		discovery:      disc,
+		client:                mgr.Manager.GetClient(),
+		resourceClient:        mgr.GetClient(),
+		readinessPollInterval: readinessPollInterval,
+		upstreamClient:        upstreamClient,
+		discovery:             disc,
 	})
 }
 
@@ -169,6 +171,9 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	})
 	if modified {
 		return ctrl.Result{Requeue: true}, nil
+	}
+	if !ready {
+		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}
 	if resource != nil && !resource.Deleted() && resource.Manifest.ReconcileInterval != nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(resource.Manifest.ReconcileInterval.Duration, 0.1)}, nil
