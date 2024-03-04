@@ -138,6 +138,7 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 			logger.Error(err, "unable to update resource slice")
 			return false
 		}
+		slice = copy
 	}
 
 	// Transform the set of patch funcs into a set of jsonpatch objects
