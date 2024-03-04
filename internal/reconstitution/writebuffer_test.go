@@ -32,7 +32,7 @@ func TestWriteBufferBasics(t *testing.T) {
 	req := &ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
-	w.PatchStatusAsync(ctx, req, checkReconciled(), setReconciled())
+	w.PatchStatusAsync(ctx, req, setReconciled())
 
 	// Slice resource's status should reflect the patch
 	w.processQueueItem(ctx)
@@ -69,12 +69,12 @@ func TestWriteBufferBatching(t *testing.T) {
 	req := &ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
-	w.PatchStatusAsync(ctx, req, checkReconciled(), setReconciled())
+	w.PatchStatusAsync(ctx, req, setReconciled())
 
 	req = &ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 2
-	w.PatchStatusAsync(ctx, req, checkReconciled(), setReconciled())
+	w.PatchStatusAsync(ctx, req, setReconciled())
 
 	// Slice resource's status should be correct after a single update
 	w.processQueueItem(ctx)
@@ -101,7 +101,7 @@ func TestWriteBufferNoUpdates(t *testing.T) {
 	req := &ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
-	w.PatchStatusAsync(ctx, req, checkReconciled(), setReconciled())
+	w.PatchStatusAsync(ctx, req, setReconciled())
 
 	// Remove the update leaving the queue message in place
 	w.state = map[types.NamespacedName][]*asyncStatusUpdate{}
@@ -119,7 +119,7 @@ func TestWriteBufferMissingSlice(t *testing.T) {
 
 	req := &ManifestRef{}
 	req.Slice.Name = "test-slice-1" // this doesn't exist
-	w.PatchStatusAsync(ctx, req, checkReconciled(), setReconciled())
+	w.PatchStatusAsync(ctx, req, setReconciled())
 
 	// Slice 404 drops the event and does not retry.
 	// Prevents a deadlock of this queue item.
@@ -150,7 +150,7 @@ func TestWriteBufferNoChange(t *testing.T) {
 	req := &ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
-	w.PatchStatusAsync(ctx, req, checkReconciled(), setReconciled())
+	w.PatchStatusAsync(ctx, req, setReconciled())
 
 	w.processQueueItem(ctx)
 }
@@ -174,7 +174,7 @@ func TestWriteBufferUpdateError(t *testing.T) {
 	req := &ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
-	w.PatchStatusAsync(ctx, req, checkReconciled(), setReconciled())
+	w.PatchStatusAsync(ctx, req, setReconciled())
 
 	// Both the queue item and state have persisted
 	w.processQueueItem(ctx)
@@ -184,13 +184,10 @@ func TestWriteBufferUpdateError(t *testing.T) {
 }
 
 func setReconciled() StatusPatchFn {
-	return func(rs *apiv1.ResourceState) {
-		rs.Reconciled = true
-	}
-}
-
-func checkReconciled() CheckPatchFn {
-	return func(rs *apiv1.ResourceState) bool {
-		return rs.Reconciled
+	return func(rs *apiv1.ResourceState) *apiv1.ResourceState {
+		if rs != nil && rs.Reconciled {
+			return nil
+		}
+		return &apiv1.ResourceState{Reconciled: true}
 	}
 }

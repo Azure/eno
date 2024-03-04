@@ -21,11 +21,10 @@ type Reconciler interface {
 // Client provides read/write access to a collection of reconstituted resources.
 type Client interface {
 	Get(ctx context.Context, comp *CompositionRef, res *ResourceRef) (*Resource, bool)
-	PatchStatusAsync(ctx context.Context, req *ManifestRef, checkFn CheckPatchFn, patchFn StatusPatchFn)
+	PatchStatusAsync(ctx context.Context, req *ManifestRef, patchFn StatusPatchFn)
 }
 
-type StatusPatchFn func(*apiv1.ResourceState)
-type CheckPatchFn func(*apiv1.ResourceState) bool
+type StatusPatchFn func(*apiv1.ResourceState) *apiv1.ResourceState
 
 // ManifestRef references a particular resource manifest within a resource slice.
 type ManifestRef struct {

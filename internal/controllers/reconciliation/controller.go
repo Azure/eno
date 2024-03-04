@@ -116,14 +116,15 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		}
 	}
 
-	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest,
-		func(rs *apiv1.ResourceState) bool {
-			return !((resource.Deleted() && !rs.Deleted) || !rs.Reconciled)
-		},
-		func(rs *apiv1.ResourceState) {
-			rs.Deleted = resource.Deleted()
-			rs.Reconciled = true
-		})
+	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) *apiv1.ResourceState {
+		if rs.Deleted == resource.Deleted() && rs.Reconciled {
+			return nil
+		}
+		return &apiv1.ResourceState{
+			Deleted:    resource.Deleted(),
+			Reconciled: true,
+		}
+	})
 
 	if modified {
 		return ctrl.Result{Requeue: true}, nil
