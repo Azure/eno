@@ -11,6 +11,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/google/cel-go/cel"
 )
 
 // Reconciler is implemented by types that can reconcile individual, reconstituted resources.
@@ -38,10 +39,16 @@ type Resource struct {
 	lastSeenMeta
 	lastReconciledMeta
 
-	Ref          ResourceRef
-	Manifest     *apiv1.Manifest
-	GVK          schema.GroupVersionKind
-	SliceDeleted bool
+	Ref             ResourceRef
+	Manifest        *apiv1.Manifest
+	GVK             schema.GroupVersionKind
+	SliceDeleted    bool
+	ReadinessChecks []*ReadinessCheck
+}
+
+type ReadinessCheck struct {
+	Name string
+	AST  *cel.Ast
 }
 
 func (r *Resource) Deleted() bool { return r.SliceDeleted || r.Manifest.Deleted }

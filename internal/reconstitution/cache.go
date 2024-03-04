@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/types"
@@ -11,11 +13,13 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/go-logr/logr"
+	"github.com/google/cel-go/cel"
 )
 
 // cache maintains a fast index of (ResourceRef + Composition + Synthesis) -> Resource.
 type cache struct {
 	client client.Client
+	celEnv *cel.Env
 
 	mut                    sync.Mutex
 	resources              map[CompositionRef]map[ResourceRef]*Resource
@@ -23,8 +27,13 @@ type cache struct {
 }
 
 func newCache(client client.Client) *cache {
+	env, err := cel.NewEnv(cel.Variable("self", cel.DynType))
+	if err != nil {
+		panic(fmt.Sprintf("error setting up cel env: %s", err))
+	}
 	return &cache{
 		client:                 client,
+		celEnv:                 env,
 		resources:              make(map[CompositionRef]map[ResourceRef]*Resource),
 		synthesesByComposition: make(map[types.NamespacedName][]int64),
 	}
@@ -100,7 +109,7 @@ func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 		for i, resource := range slice.Spec.Resources {
 			resource := resource
 
-			res, err := c.buildResource(ctx, comp, &slice, &resource)
+			res, err := c.buildResource(ctx, &slice, &resource)
 			if err != nil {
 				return nil, nil, fmt.Errorf("building resource at index %d of slice %s: %w", i, slice.Name, err)
 			}
@@ -122,7 +131,8 @@ func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 	return resources, requests, nil
 }
 
-func (c *cache) buildResource(ctx context.Context, comp *apiv1.Composition, slice *apiv1.ResourceSlice, resource *apiv1.Manifest) (*Resource, error) {
+func (c *cache) buildResource(ctx context.Context, slice *apiv1.ResourceSlice, resource *apiv1.Manifest) (*Resource, error) {
+	logger := logr.FromContextOrDiscard(ctx)
 	res := &Resource{
 		Manifest:     resource,
 		SliceDeleted: slice.DeletionTimestamp != nil,
@@ -137,10 +147,38 @@ func (c *cache) buildResource(ctx context.Context, comp *apiv1.Composition, slic
 	res.Ref.Name = parsed.GetName()
 	res.Ref.Namespace = parsed.GetNamespace()
 	res.Ref.Kind = parsed.GetKind()
+	logger = logger.WithValues("resourceKind", parsed.GetKind(), "resourceName", parsed.GetName(), "resourceNamespace", parsed.GetNamespace())
 
 	if res.Ref.Name == "" || res.Ref.Kind == "" || parsed.GetAPIVersion() == "" {
 		return nil, fmt.Errorf("missing name, kind, or apiVersion")
 	}
+
+	anno := parsed.GetAnnotations()
+	for key, value := range parsed.GetAnnotations() {
+		if !strings.HasPrefix(key, "eno.azure.io/readiness") {
+			continue
+		}
+		delete(anno, key)
+
+		ast, iss := c.celEnv.Compile(value)
+		if iss != nil && iss.Err() != nil {
+			logger.Error(iss.Err(), "invalid cel expression")
+			continue
+		}
+
+		name := strings.TrimPrefix(key, "eno.azure.io/readiness-")
+		if name == "eno.azure.io/readiness" {
+			name = "default"
+		}
+
+		res.ReadinessChecks = append(res.ReadinessChecks, &ReadinessCheck{
+			Name: name,
+			AST:  ast,
+		})
+	}
+	parsed.SetAnnotations(anno)
+	sort.Slice(res.ReadinessChecks, func(i, j int) bool { return res.ReadinessChecks[i].Name < res.ReadinessChecks[j].Name })
+
 	return res, nil
 }
 
