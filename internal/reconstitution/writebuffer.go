@@ -131,8 +131,9 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 	// It's easier to pre-allocate the entire status slice before sending patches
 	// since the "replace" op requires an existing item.
 	if len(slice.Status.Resources) == 0 {
-		slice.Status.Resources = make([]apiv1.ResourceState, len(slice.Spec.Resources))
-		err = w.client.Status().Update(ctx, slice)
+		copy := slice.DeepCopy()
+		copy.Status.Resources = make([]apiv1.ResourceState, len(slice.Spec.Resources))
+		err = w.client.Status().Update(ctx, copy)
 		if err != nil {
 			logger.Error(err, "unable to update resource slice")
 			return false
