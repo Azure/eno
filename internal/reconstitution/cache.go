@@ -173,7 +173,8 @@ func (c *cache) buildResource(ctx context.Context, slice *apiv1.ResourceSlice, r
 
 		res.ReadinessChecks = append(res.ReadinessChecks, &ReadinessCheck{
 			Name: name,
-			AST:  ast,
+			ast:  ast,
+			env:  c.celEnv,
 		})
 	}
 	parsed.SetAnnotations(anno)

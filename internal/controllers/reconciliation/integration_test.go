@@ -665,3 +665,96 @@ func TestMidSynthesisDeletion(t *testing.T) {
 		return resourceGone && compGone
 	})
 }
+
+func TestResourceReadiness(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	// Register supporting controllers
+	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
+	require.NoError(t, err)
+	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
+	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
+	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
+		obj := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-obj",
+				Namespace: "default",
+				Annotations: map[string]string{
+					"eno.azure.io/readiness":          "self.data.foo == 'baz'",
+					"eno.azure.io/reconcile-interval": "100ms", // TODO: Remove
+				},
+			},
+			Data: map[string]string{"foo": s.Spec.Image},
+		}
+
+		gvks, _, err := scheme.ObjectKinds(obj)
+		require.NoError(t, err)
+		obj.GetObjectKind().SetGroupVersionKind(gvks[0])
+		return []client.Object{obj}
+	}}))
+
+	// Test subject
+	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15))
+	require.NoError(t, err)
+	mgr.Start(t)
+
+	// Any syn/comp will do since we faked out the synthesizer pod
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "bar"
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	// Wait for resource to be created
+	obj := &corev1.ConfigMap{}
+	testutil.Eventually(t, func() bool {
+		obj.SetName("test-obj")
+		obj.SetNamespace("default")
+		err = downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+		return err == nil
+	})
+
+	// Initially readiness should be false
+	testutil.Eventually(t, func() bool {
+		slices, err := mgr.GetCurrentResourceSlices(ctx)
+		if err != nil {
+			t.Log(err)
+			return false
+		}
+		return len(slices[0].Status.Resources) > 0 && isNotReady(slices[0].Status.Resources[0])
+	})
+
+	// Update resource to meet readiness criteria
+	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		err = upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+		syn.Spec.Image = "baz"
+		return upstream.Update(ctx, syn)
+	})
+	require.NoError(t, err)
+
+	// It should eventually be marked as ready
+	testutil.Eventually(t, func() bool {
+		slices, err := mgr.GetCurrentResourceSlices(ctx)
+		if err != nil {
+			t.Log(err)
+			return false
+		}
+		return len(slices[0].Status.Resources) > 0 && isReady(slices[0].Status.Resources[0])
+	})
+}
+
+func isReady(state apiv1.ResourceState) bool    { return state.Ready != nil && *state.Ready }
+func isNotReady(state apiv1.ResourceState) bool { return state.Ready != nil && !*state.Ready }

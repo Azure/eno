@@ -189,6 +189,41 @@ func (m *Manager) Start(t *testing.T) {
 	}()
 }
 
+func (m *Manager) GetCurrentResourceSlices(ctx context.Context) ([]*apiv1.ResourceSlice, error) {
+	cli := m.Manager.GetClient()
+
+	comps := &apiv1.CompositionList{}
+	err := cli.List(ctx, comps)
+	if err != nil {
+		return nil, err
+	}
+	if l := len(comps.Items); l != 1 {
+		return nil, fmt.Errorf("expected one composition, found %d", l)
+	}
+	if !comps.Items[0].Status.CurrentState.Synthesized {
+		return nil, fmt.Errorf("composition is still being synthesized")
+	}
+
+	synthesis := comps.Items[0].Status.CurrentState
+	if synthesis == nil {
+		return nil, fmt.Errorf("synthesis hasn't completed yet")
+	}
+	returns := make([]*apiv1.ResourceSlice, len(synthesis.ResourceSlices))
+	for i, ref := range synthesis.ResourceSlices {
+		slice := &apiv1.ResourceSlice{}
+		slice.Name = ref.Name
+		slice.Namespace = comps.Items[0].Namespace
+		returns[i] = slice
+
+		err = cli.Get(ctx, client.ObjectKeyFromObject(slice), slice)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return returns, nil
+}
+
 func Eventually(t testing.TB, fn func() bool) {
 	t.Helper()
 	SomewhatEventually(t, time.Second*5, fn)

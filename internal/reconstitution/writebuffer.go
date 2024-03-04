@@ -49,13 +49,12 @@ func newWriteBuffer(cli client.Client, batchInterval time.Duration, burst int) *
 func (w *writeBuffer) PatchStatusAsync(ctx context.Context, ref *ManifestRef, patchFn StatusPatchFn) {
 	w.mut.Lock()
 	defer w.mut.Unlock()
-	logger := logr.FromContextOrDiscard(ctx)
 
 	key := ref.Slice
 	currentSlice := w.state[key]
-	for _, item := range currentSlice {
+	for i, item := range currentSlice {
 		if *item.SlicedResource == *ref {
-			logger.V(2).Info("dropping async resource status update because another change is already buffered for this resource")
+			currentSlice[i].PatchFn = patchFn
 			return
 		}
 	}

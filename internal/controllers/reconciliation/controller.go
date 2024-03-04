@@ -26,6 +26,8 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// TODO: Set per-operation context timeouts
+
 var insecureLogPatch = os.Getenv("INSECURE_LOG_PATCH") == "true"
 
 type Controller struct {
@@ -111,8 +113,23 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		return ctrl.Result{}, nil
 	}
 
+	// Check if resource status is ready since we can't use the resource version cache for non-ready resources
+	// (otherwise we wouldn't be able to evaluate their readiness)
+	var ready bool
+	slice := &apiv1.ResourceSlice{}
+	err = c.client.Get(ctx, req.Manifest.Slice, slice)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
+	}
+	if len(slice.Status.Resources) > req.Manifest.Index {
+		status := slice.Status.Resources[req.Manifest.Index]
+		if status.Ready != nil && *status.Ready {
+			ready = true
+		}
+	}
+
 	// Fetch the current resource
-	current, hasChanged, err := c.getCurrent(ctx, resource, apiVersion)
+	current, hasChanged, err := c.getCurrent(ctx, resource, apiVersion, !ready)
 	if client.IgnoreNotFound(err) != nil {
 		return ctrl.Result{}, fmt.Errorf("getting current state: %w", err)
 	}
@@ -127,16 +144,29 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		}
 	}
 
+	// Evaluate resource readiness
+	// Resources are ready by default if no checks are given
+	if !ready {
+		ready = true
+		for _, check := range resource.ReadinessChecks {
+			err := check.Eval(ctx, current)
+			if err != nil {
+				ready = false
+			}
+		}
+	}
+
+	// Store the results
 	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) *apiv1.ResourceState {
-		if rs.Deleted == resource.Deleted() && rs.Reconciled {
+		if rs.Deleted == resource.Deleted() && rs.Reconciled && rs.Ready != nil && *rs.Ready != ready {
 			return nil
 		}
 		return &apiv1.ResourceState{
 			Deleted:    resource.Deleted(),
+			Ready:      &ready,
 			Reconciled: true,
 		}
 	})
-
 	if modified {
 		return ctrl.Result{Requeue: true}, nil
 	}
@@ -200,7 +230,7 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 		logger.V(1).Info("skipping empty patch")
 		return false, nil
 	}
-  reconciliationActions.WithLabelValues("patch").Inc()
+	reconciliationActions.WithLabelValues("patch").Inc()
 	if insecureLogPatch {
 		logger.V(1).Info("INSECURE logging patch", "patch", string(patch))
 	}
@@ -244,8 +274,8 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 	return patch, types.StrategicMergePatchType, err
 }
 
-func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Resource, apiVersion string) (*unstructured.Unstructured, bool, error) {
-	if resource.HasBeenSeen() && !resource.Deleted() {
+func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Resource, apiVersion string, disableCache bool) (*unstructured.Unstructured, bool, error) {
+	if !disableCache && resource.HasBeenSeen() && !resource.Deleted() {
 		meta := &metav1.PartialObjectMetadata{}
 		meta.Name = resource.Ref.Name
 		meta.Namespace = resource.Ref.Namespace

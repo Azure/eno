@@ -2,9 +2,11 @@ package reconstitution
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
+	celtypes "github.com/google/cel-go/common/types"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -46,16 +48,35 @@ type Resource struct {
 	ReadinessChecks []*ReadinessCheck
 }
 
-type ReadinessCheck struct {
-	Name string
-	AST  *cel.Ast
-}
-
 func (r *Resource) Deleted() bool { return r.SliceDeleted || r.Manifest.Deleted }
 
 func (r *Resource) Parse() (*unstructured.Unstructured, error) {
 	u := &unstructured.Unstructured{}
 	return u, u.UnmarshalJSON([]byte(r.Manifest.Manifest))
+}
+
+type ReadinessCheck struct {
+	Name string
+	ast  *cel.Ast
+	env  *cel.Env
+}
+
+func (r *ReadinessCheck) Eval(ctx context.Context, resource *unstructured.Unstructured) error {
+	if resource == nil {
+		return fmt.Errorf("doesn't exist TODO")
+	}
+	program, err := r.env.Program(r.ast) // TODO: Set InterruptCheckFrequency
+	if err != nil {
+		return err
+	}
+	val, _, err := program.ContextEval(ctx, map[string]any{"self": resource.Object})
+	if err != nil {
+		return err
+	}
+	if val == celtypes.True {
+		return nil
+	}
+	return fmt.Errorf("TODO %v", val)
 }
 
 // ResourceRef refers to a specific synthesized resource.
