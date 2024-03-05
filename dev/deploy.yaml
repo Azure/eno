@@ -5,6 +5,8 @@ metadata:
   labels:
     app: eno-controller
 spec:
+  strategy:
+    type: Recreate
   replicas: 1
   selector:
     matchLabels:
@@ -13,6 +15,10 @@ spec:
     metadata:
       labels:
         app: eno-controller
+      annotations:
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
+        prometheus.io/scrape: "true"
     spec:
       containers:
       - name: eno-controller
@@ -30,6 +36,8 @@ metadata:
   labels:
     app: eno-reconciler
 spec:
+  strategy:
+    type: Recreate
   replicas: 1
   selector:
     matchLabels:
@@ -38,6 +46,10 @@ spec:
     metadata:
       labels:
         app: eno-reconciler
+      annotations:
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
+        prometheus.io/scrape: "true"
     spec:
       containers:
       - name: eno-reconciler
@@ -50,3 +62,13 @@ spec:
             value: ":8888"
           - name: INSECURE_LOG_PATCH
             value: "true"
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+            scheme: HTTP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+            scheme: HTTP

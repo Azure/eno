@@ -169,6 +169,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, client.IgnoreAlreadyExists(fmt.Errorf("creating pod: %w", err))
 	}
 	logger.Info("created synthesizer pod", "podName", pod.Name)
+	sytheses.Inc()
 
 	return ctrl.Result{}, nil
 }
@@ -217,6 +218,7 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 		// We timeout eventually in case it landed on a node that for whatever reason isn't capable of running the pod
 		if time.Since(pod.CreationTimestamp.Time) > syn.Spec.PodTimeout.Duration {
 			logger = logger.WithValues("reason", "Timeout")
+			synthesPodRecreations.Inc()
 			return logger, &pod, true
 		}
 

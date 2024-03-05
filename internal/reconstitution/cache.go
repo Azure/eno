@@ -124,7 +124,6 @@ func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 
 func (c *cache) buildResource(ctx context.Context, comp *apiv1.Composition, slice *apiv1.ResourceSlice, resource *apiv1.Manifest) (*Resource, error) {
 	res := &Resource{
-		lastSeenMeta: &lastSeenMeta{},
 		Manifest:     resource,
 		SliceDeleted: slice.DeletionTimestamp != nil,
 	}

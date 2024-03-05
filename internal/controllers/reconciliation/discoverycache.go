@@ -53,6 +53,7 @@ func (d *discoveryCache) Get(ctx context.Context, gvk schema.GroupVersionKind) (
 		model, ok := d.current[gvk]
 		if !ok && d.fillWhenNotFound {
 			d.current = nil // invalidate cache - retrieve fresh schema on next attempt
+			discoveryCacheChanges.Inc()
 			continue
 		}
 		if ok && model == nil {
