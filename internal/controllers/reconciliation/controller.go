@@ -191,15 +191,15 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 	if err != nil {
 		return false, fmt.Errorf("building patch: %w", err)
 	}
-	if string(patch) == "{}" {
-		logger.V(1).Info("skipping empty patch")
-		return false, nil
-	}
-	reconciliationActions.WithLabelValues("patch").Inc()
 	patch, err = mungePatch(patch, current.GetResourceVersion())
 	if err != nil {
 		return false, fmt.Errorf("adding resource version: %w", err)
 	}
+	if len(patch) == 0 {
+		logger.V(1).Info("skipping empty patch")
+		return false, nil
+	}
+  reconciliationActions.WithLabelValues("patch").Inc()
 	if insecureLogPatch {
 		logger.V(1).Info("INSECURE logging patch", "patch", string(patch))
 	}
@@ -281,6 +281,7 @@ func mungePatch(patch []byte, rv string) ([]byte, error) {
 	if err != nil {
 		return nil, reconcile.TerminalError(err)
 	}
+
 	u := unstructured.Unstructured{Object: patchMap}
 	a, err := meta.Accessor(&u)
 	if err != nil {
@@ -288,6 +289,10 @@ func mungePatch(patch []byte, rv string) ([]byte, error) {
 	}
 	a.SetResourceVersion(rv)
 	a.SetCreationTimestamp(metav1.Time{})
+
+	if len(patchMap) <= 1 {
+		return nil, nil // resource version only == empty patch
+	}
 
 	return json.Marshal(patchMap)
 }
