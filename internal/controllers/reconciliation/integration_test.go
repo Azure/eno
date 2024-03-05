@@ -588,7 +588,7 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 
 	// Test subject
-	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15))
+	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
 	require.NoError(t, err)
 	mgr.Start(t)
 
