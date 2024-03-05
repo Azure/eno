@@ -116,9 +116,16 @@ func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer,
 	if err != nil {
 		return nil, err
 	}
-	logger.V(1).Info("synthesis is done", "latency", time.Since(start).Milliseconds())
 
-	return c.writeOutputToSlices(ctx, comp, stdout)
+	refs, err := c.writeOutputToSlices(ctx, comp, stdout)
+	if err != nil {
+		return nil, err
+	}
+
+	latency := time.Since(start)
+	synthesisLatency.Observe(latency.Seconds())
+	logger.V(0).Info("synthesis is done", "latency", latency.Milliseconds())
+	return refs, nil
 }
 
 func (c *execController) fetchPreviousSlices(ctx context.Context, comp *apiv1.Composition) ([]*apiv1.ResourceSlice, error) {
@@ -217,13 +224,20 @@ func buildResourceSlices(comp *apiv1.Composition, previous []*apiv1.ResourceSlic
 }
 
 func (c *execController) writeResourceSlice(ctx context.Context, slice *apiv1.ResourceSlice) error {
+	var bytes int
+	for _, res := range slice.Spec.Resources {
+		bytes += len(res.Manifest)
+	}
+
 	// We retry on request timeouts to avoid the overhead of re-synthesizing in cases where we're sometimes unable to reach apiserver
 	return retry.OnError(retry.DefaultRetry, errors.IsServerTimeout, func() error {
 		err := c.client.Create(ctx, slice)
 		if err != nil {
 			logr.FromContextOrDiscard(ctx).Error(err, "error while creating resource slice - will retry later")
+			return err
 		}
-		return err
+		resourceSliceWrittenBytes.Add(float64(bytes))
+		return nil
 	})
 }
 

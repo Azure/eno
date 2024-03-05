@@ -568,3 +568,100 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 		return resourceGone && compGone
 	})
 }
+
+// TestMidSynthesisDeletion proves that compositions can be deleted while they are being synthesized.
+func TestMidSynthesisDeletion(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	// Register supporting controllers
+	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
+	require.NoError(t, err)
+	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
+	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
+
+	// Test subject
+	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15))
+	require.NoError(t, err)
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "test"
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Finalizers = []string{"eno.azure.io/cleanup"}
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	// Some controllers assume compositions will precede resource slices since that will always be true in real life
+	time.Sleep(time.Millisecond * 100)
+
+	rs := &apiv1.ResourceSlice{}
+	rs.GenerateName = "test-"
+	rs.Namespace = "default"
+	rs.Finalizers = []string{"eno.azure.io/cleanup"}
+	rs.Spec.CompositionGeneration = comp.Generation
+	rs.Spec.Resources = []apiv1.Manifest{{
+		Manifest: `{ "apiVersion": "v1", "kind": "ConfigMap", "metadata": { "name": "test-obj", "namespace": "default" }}`,
+	}}
+	controllerutil.SetControllerReference(comp, rs, mgr.GetScheme())
+	require.NoError(t, upstream.Create(ctx, rs))
+
+	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Status.CurrentState = &apiv1.Synthesis{
+			ObservedCompositionGeneration: comp.Generation,
+			ObservedSynthesizerGeneration: syn.Generation,
+			Synthesized:                   true,
+			ResourceSlices:                []*apiv1.ResourceSliceRef{{Name: rs.Name}},
+		}
+		return upstream.Status().Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	// Wait for resource to be created
+	obj := &corev1.ConfigMap{}
+	testutil.Eventually(t, func() bool {
+		obj.SetName("test-obj")
+		obj.SetNamespace("default")
+		err = downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+		return err == nil
+	})
+
+	// Start re-synthesizing
+	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Spec.Synthesizer.MinGeneration = 10
+		return upstream.Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	// Wait for the state to be swapped
+	testutil.Eventually(t, func() bool {
+		err = upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentState != nil && !comp.Status.CurrentState.Synthesized
+	})
+
+	// Delete the composition
+	require.NoError(t, upstream.Delete(ctx, comp))
+	t.Logf("deleted composition")
+
+	// Everything should eventually be cleaned up
+	testutil.Eventually(t, func() bool {
+		resourceGone := errors.IsNotFound(downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj))
+		compGone := errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+		t.Logf("resourceGone=%t compGone=%t", resourceGone, compGone)
+		return resourceGone && compGone
+	})
+}

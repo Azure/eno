@@ -130,6 +130,7 @@ func newMgr(logger logr.Logger, opts *Options, isReconciler bool) (ctrl.Manager,
 	}
 
 	mgr.AddHealthzCheck("ping", healthz.Ping)
+	mgr.AddReadyzCheck("ping", healthz.Ping)
 	return mgr, nil
 }
 

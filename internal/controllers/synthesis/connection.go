@@ -82,6 +82,7 @@ func (s *SynthesizerPodConnection) Synthesize(ctx context.Context, syn *apiv1.Sy
 		Stderr: stderr,
 	})
 	if err != nil {
+		synthesisExecFailures.Inc()
 		e := &exec.CodeExitError{}
 		if errors.As(err, e) {
 			msg := truncateString(strings.TrimSpace(stderr.String()), 256)

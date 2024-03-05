@@ -102,6 +102,19 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, fmt.Errorf("listing resource slices: %w", err)
 		}
 
+		// If the composition was being synthesized at the time of deletion we need to swap the previous
+		// state back to current. Otherwise we'll get stuck waiting for a synthesis that can't happen.
+		if comp.Status.CurrentState == nil || !comp.Status.CurrentState.Synthesized {
+			comp.Status.CurrentState = comp.Status.PreviousState
+			comp.Status.PreviousState = nil
+			err = c.client.Status().Update(ctx, comp)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("reverting swapped status for deletion: %w", err)
+			}
+			logger.Info("reverted swapped status for deletion")
+			return ctrl.Result{}, nil
+		}
+
 		// Deletion increments the composition's generation, but the reconstitution cache is only invalidated
 		// when the synthesized generation (from the status) changes, which will never happen because synthesis
 		// is righly disabled for deleted compositions. We break out of this deadlock condition by updating
@@ -156,6 +169,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, client.IgnoreAlreadyExists(fmt.Errorf("creating pod: %w", err))
 	}
 	logger.Info("created synthesizer pod", "podName", pod.Name)
+	sytheses.Inc()
 
 	return ctrl.Result{}, nil
 }
@@ -204,6 +218,7 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 		// We timeout eventually in case it landed on a node that for whatever reason isn't capable of running the pod
 		if time.Since(pod.CreationTimestamp.Time) > syn.Spec.PodTimeout.Duration {
 			logger = logger.WithValues("reason", "Timeout")
+			synthesPodRecreations.Inc()
 			return logger, &pod, true
 		}
 

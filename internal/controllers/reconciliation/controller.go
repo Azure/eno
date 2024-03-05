@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -88,6 +89,16 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		prev, _ = c.resourceClient.Get(ctx, compRef, &req.Resource)
 	}
 
+	// Keep track of the last reconciliation time and report on it relative to the resource's reconcile interval
+	// This is useful for identifying cases where the loop can't keep up
+	if resource.Manifest.ReconcileInterval != nil {
+		observation := resource.ObserveReconciliation()
+		if observation > 0 {
+			delta := observation - resource.Manifest.ReconcileInterval.Duration
+			reconciliationScheduleDelta.Observe(delta.Seconds())
+		}
+	}
+
 	// The current and previous resource can both be nil,
 	// so we need to check both to find the apiVersion
 	var apiVersion string
@@ -136,12 +147,17 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) (bool, error) {
 	logger := logr.FromContextOrDiscard(ctx)
+	start := time.Now()
+	defer func() {
+		reconciliationLatency.Observe(time.Since(start).Seconds())
+	}()
 
 	if resource.Deleted() {
 		if current == nil || current.GetDeletionTimestamp() != nil {
 			return false, nil // already deleted - nothing to do
 		}
 
+		reconciliationActions.WithLabelValues("delete").Inc()
 		obj, err := resource.Parse()
 		if err != nil {
 			return false, fmt.Errorf("invalid resource: %w", err)
@@ -156,6 +172,7 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 
 	// Always create the resource when it doesn't exist
 	if current == nil {
+		reconciliationActions.WithLabelValues("create").Inc()
 		obj, err := resource.Parse()
 		if err != nil {
 			return false, fmt.Errorf("invalid resource: %w", err)
@@ -182,6 +199,7 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 		logger.V(1).Info("skipping empty patch")
 		return false, nil
 	}
+  reconciliationActions.WithLabelValues("patch").Inc()
 	if insecureLogPatch {
 		logger.V(1).Info("INSECURE logging patch", "patch", string(patch))
 	}
@@ -239,6 +257,7 @@ func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Re
 		if resource.MatchesLastSeen(meta.ResourceVersion) {
 			return nil, false, nil
 		}
+		resourceVersionChanges.Inc()
 	}
 
 	current := &unstructured.Unstructured{}
