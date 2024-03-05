@@ -57,6 +57,7 @@ func (r *Resource) Parse() (*unstructured.Unstructured, error) {
 type ReadinessCheck struct {
 	Name string
 	ast  *cel.Ast
+	program cel.Program
 	env  *cel.Env
 }
 
@@ -65,19 +66,18 @@ func newReadinessCheck(env *cel.Env, expr string) (*ReadinessCheck, error) {
 	if iss != nil && iss.Err() != nil {
 		return nil, iss.Err()
 	}
-	return &ReadinessCheck{ast: ast, env: env}, nil
+	prgm, err := env.Program(ast)// TODO: Set InterruptCheckFrequency
+	if err != nil {
+		return nil, err
+	}
+	return &ReadinessCheck{program: prgm, env: env}, nil
 }
 
 func (r *ReadinessCheck) Eval(ctx context.Context, resource *unstructured.Unstructured) bool {
 	if resource == nil {
 		return false
 	}
-	// TODO: Move up?
-	program, err := r.env.Program(r.ast) // TODO: Set InterruptCheckFrequency
-	if err != nil {
-		return false
-	}
-	val, _, err := program.ContextEval(ctx, map[string]any{"self": resource.Object})
+	val, _, err := r.program.ContextEval(ctx, map[string]any{"self": resource.Object})
 	if err != nil {
 		return false
 	}
