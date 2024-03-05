@@ -55,10 +55,10 @@ func (r *Resource) Parse() (*unstructured.Unstructured, error) {
 }
 
 type ReadinessCheck struct {
-	Name string
-	ast  *cel.Ast
+	Name    string
+	ast     *cel.Ast
 	program cel.Program
-	env  *cel.Env
+	env     *cel.Env
 }
 
 func newReadinessCheck(env *cel.Env, expr string) (*ReadinessCheck, error) {
@@ -66,7 +66,7 @@ func newReadinessCheck(env *cel.Env, expr string) (*ReadinessCheck, error) {
 	if iss != nil && iss.Err() != nil {
 		return nil, iss.Err()
 	}
-	prgm, err := env.Program(ast)// TODO: Set InterruptCheckFrequency
+	prgm, err := env.Program(ast) // TODO: Set InterruptCheckFrequency
 	if err != nil {
 		return nil, err
 	}
@@ -77,11 +77,16 @@ func (r *ReadinessCheck) Eval(ctx context.Context, resource *unstructured.Unstru
 	if resource == nil {
 		return false
 	}
-	val, _, err := r.program.ContextEval(ctx, map[string]any{"self": resource.Object})
+	val, details, err := r.program.ContextEval(ctx, map[string]any{"self": resource.Object})
+	if details != nil {
+		cost := details.ActualCost()
+		if cost != nil {
+			celEvalCost.Add(float64(*cost))
+		}
+	}
 	if err != nil {
 		return false
 	}
-	// TODO: Metric for cost
 	return val == celtypes.True
 }
 

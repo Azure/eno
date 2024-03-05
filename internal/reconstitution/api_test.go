@@ -103,6 +103,10 @@ func TestReadinessEval(t *testing.T) {
 
 			ok := r.Eval(context.Background(), tc.Resource)
 			assert.Equal(t, tc.Expect, ok)
+
+			// Make sure every program can be evaluated multiple times
+			ok = r.Eval(context.Background(), tc.Resource)
+			assert.Equal(t, tc.Expect, ok)
 		})
 	}
 }
