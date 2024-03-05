@@ -159,7 +159,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	// Store the results
 	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) *apiv1.ResourceState {
-		if rs.Deleted == resource.Deleted() && rs.Reconciled && rs.Ready != nil && *rs.Ready != ready {
+		if rs.Deleted == resource.Deleted() && rs.Reconciled && rs.Ready != nil && *rs.Ready == ready {
 			return nil
 		}
 		return &apiv1.ResourceState{
