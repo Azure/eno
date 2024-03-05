@@ -2,7 +2,6 @@ package reconstitution
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -61,22 +60,29 @@ type ReadinessCheck struct {
 	env  *cel.Env
 }
 
-func (r *ReadinessCheck) Eval(ctx context.Context, resource *unstructured.Unstructured) error {
-	if resource == nil {
-		return fmt.Errorf("doesn't exist TODO")
+func newReadinessCheck(env *cel.Env, expr string) (*ReadinessCheck, error) {
+	ast, iss := env.Compile(expr)
+	if iss != nil && iss.Err() != nil {
+		return nil, iss.Err()
 	}
+	return &ReadinessCheck{ast: ast, env: env}, nil
+}
+
+func (r *ReadinessCheck) Eval(ctx context.Context, resource *unstructured.Unstructured) bool {
+	if resource == nil {
+		return false
+	}
+	// TODO: Move up?
 	program, err := r.env.Program(r.ast) // TODO: Set InterruptCheckFrequency
 	if err != nil {
-		return err
+		return false
 	}
 	val, _, err := program.ContextEval(ctx, map[string]any{"self": resource.Object})
 	if err != nil {
-		return err
+		return false
 	}
-	if val == celtypes.True {
-		return nil
-	}
-	return fmt.Errorf("TODO %v", val)
+	// TODO: Metric for cost
+	return val == celtypes.True
 }
 
 // ResourceRef refers to a specific synthesized resource.

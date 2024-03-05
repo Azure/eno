@@ -151,8 +151,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	if !ready {
 		ready = true
 		for _, check := range resource.ReadinessChecks {
-			err := check.Eval(ctx, current)
-			if err != nil {
+			if r := check.Eval(ctx, current); !r {
 				ready = false
 			}
 		}

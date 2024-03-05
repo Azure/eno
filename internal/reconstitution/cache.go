@@ -27,7 +27,7 @@ type cache struct {
 }
 
 func newCache(client client.Client) *cache {
-	env, err := cel.NewEnv(cel.Variable("self", cel.DynType))
+	env, err := newCelEnv()
 	if err != nil {
 		panic(fmt.Sprintf("error setting up cel env: %s", err))
 	}
@@ -37,6 +37,10 @@ func newCache(client client.Client) *cache {
 		resources:              make(map[CompositionRef]map[ResourceRef]*Resource),
 		synthesesByComposition: make(map[types.NamespacedName][]int64),
 	}
+}
+
+func newCelEnv() (*cel.Env, error) {
+	return cel.NewEnv(cel.Variable("self", cel.DynType))
 }
 
 func (c *cache) Get(ctx context.Context, comp *CompositionRef, ref *ResourceRef) (*Resource, bool) {
