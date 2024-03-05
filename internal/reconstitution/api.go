@@ -56,7 +56,6 @@ func (r *Resource) Parse() (*unstructured.Unstructured, error) {
 
 type ReadinessCheck struct {
 	Name    string
-	ast     *cel.Ast
 	program cel.Program
 	env     *cel.Env
 }

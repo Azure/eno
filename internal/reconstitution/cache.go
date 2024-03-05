@@ -164,22 +164,18 @@ func (c *cache) buildResource(ctx context.Context, slice *apiv1.ResourceSlice, r
 		}
 		delete(anno, key)
 
-		ast, iss := c.celEnv.Compile(value)
-		if iss != nil && iss.Err() != nil {
-			logger.Error(iss.Err(), "invalid cel expression")
-			continue
-		}
-
 		name := strings.TrimPrefix(key, "eno.azure.io/readiness-")
 		if name == "eno.azure.io/readiness" {
 			name = "default"
 		}
 
-		res.ReadinessChecks = append(res.ReadinessChecks, &ReadinessCheck{
-			Name: name,
-			ast:  ast,
-			env:  c.celEnv,
-		})
+		check, err := newReadinessCheck(c.celEnv, value)
+		if err != nil {
+			logger.Error(err, "invalid cel expression")
+			continue
+		}
+		check.Name = name
+		res.ReadinessChecks = append(res.ReadinessChecks, check)
 	}
 	parsed.SetAnnotations(anno)
 	sort.Slice(res.ReadinessChecks, func(i, j int) bool { return res.ReadinessChecks[i].Name < res.ReadinessChecks[j].Name })
