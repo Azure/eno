@@ -2,6 +2,7 @@ package reconstitution
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -19,7 +20,6 @@ import (
 type asyncStatusUpdate struct {
 	SlicedResource *ManifestRef
 	PatchFn        StatusPatchFn
-	CheckFn        CheckPatchFn
 }
 
 // writeBuffer reduces load on etcd/apiserver by collecting resource slice status
@@ -46,7 +46,7 @@ func newWriteBuffer(cli client.Client, batchInterval time.Duration, burst int) *
 	}
 }
 
-func (w *writeBuffer) PatchStatusAsync(ctx context.Context, ref *ManifestRef, checkFn CheckPatchFn, patchFn StatusPatchFn) {
+func (w *writeBuffer) PatchStatusAsync(ctx context.Context, ref *ManifestRef, patchFn StatusPatchFn) {
 	w.mut.Lock()
 	defer w.mut.Unlock()
 	logger := logr.FromContextOrDiscard(ctx)
@@ -63,7 +63,6 @@ func (w *writeBuffer) PatchStatusAsync(ctx context.Context, ref *ManifestRef, ch
 	w.state[key] = append(currentSlice, &asyncStatusUpdate{
 		SlicedResource: ref,
 		PatchFn:        patchFn,
-		CheckFn:        checkFn,
 	})
 	w.queue.Add(key)
 }
@@ -129,44 +128,46 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 		return false
 	}
 
-	// Allocate the status slice if needed
-	var status *apiv1.ResourceSliceStatus
-	var dirty bool
-	if len(slice.Status.Resources) != len(slice.Spec.Resources) {
-		dirty = true
-		status = slice.Status.DeepCopy()
-		status.Resources = make([]apiv1.ResourceState, len(slice.Spec.Resources))
+	// It's easier to pre-allocate the entire status slice before sending patches
+	// since the "replace" op requires an existing item.
+	if len(slice.Status.Resources) == 0 {
+		copy := slice.DeepCopy()
+		copy.Status.Resources = make([]apiv1.ResourceState, len(slice.Spec.Resources))
+		err = w.client.Status().Update(ctx, copy)
+		if err != nil {
+			logger.Error(err, "unable to update resource slice")
+			return false
+		}
+		slice = copy
 	}
 
-	// Use the newly allocated slice (if allocated), otherwise use the already allocated one
+	// Transform the set of patch funcs into a set of jsonpatch objects
 	unsafeSlice := slice.Status.Resources
-	if unsafeSlice == nil {
-		unsafeSlice = status.Resources
-	}
-
-	// The resource slice informer doesn't DeepCopy automatically for perf reasons.
-	// So we can apply the CheckFn to status pointers but not PatchFn.
-	// We'll deep copy the status here only when it needs to change.
+	var patches []*jsonPatch
 	for _, update := range updates {
 		unsafeStatusPtr := &unsafeSlice[update.SlicedResource.Index]
-		if update.CheckFn(unsafeStatusPtr) {
+		patch := update.PatchFn(unsafeStatusPtr)
+		if patch == nil {
 			continue
 		}
 
-		if status == nil {
-			status = slice.Status.DeepCopy()
-		}
-
-		dirty = true
-		update.PatchFn(&status.Resources[update.SlicedResource.Index])
+		patches = append(patches, &jsonPatch{
+			Op:    "replace",
+			Path:  fmt.Sprintf("/status/resources/%d", update.SlicedResource.Index),
+			Value: patch,
+		})
 	}
-	if !dirty {
-		return true
+	if len(patches) == 0 {
+		return true // nothing to do!
 	}
 
-	copy := &apiv1.ResourceSlice{Status: *status}
-	slice.ObjectMeta.DeepCopyInto(&copy.ObjectMeta)
-	err = w.client.Status().Update(ctx, copy)
+	// Encode/apply the patch(es)
+	patchJson, err := json.Marshal(&patches)
+	if err != nil {
+		logger.Error(err, "unable to encode patch")
+		return false
+	}
+	err = w.client.Status().Patch(ctx, slice, client.RawPatch(types.JSONPatchType, patchJson))
 	if err != nil {
 		logger.Error(err, "unable to update resource slice")
 		return false
@@ -175,4 +176,10 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 	logger.V(0).Info(fmt.Sprintf("updated the status of %d resources in slice", len(updates)))
 	discoveryCacheChanges.Inc()
 	return true
+}
+
+type jsonPatch struct {
+	Op    string `json:"op"`
+	Path  string `json:"path"`
+	Value any    `json:"value"`
 }
