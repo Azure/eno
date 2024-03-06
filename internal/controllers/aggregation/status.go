@@ -63,7 +63,7 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			}
 
 			// Readiness
-			if state.Ready == nil || !*state.Ready {
+			if ready && (state.Ready == nil || !*state.Ready) {
 				ready = false
 			}
 		}
