@@ -86,6 +86,8 @@ spec:
                     type: string
                   ready:
                     type: boolean
+                  reconciled:
+                    type: boolean
                   resourceSlices:
                     items:
                       properties:
@@ -93,8 +95,6 @@ spec:
                           type: string
                       type: object
                     type: array
-                  synced:
-                    type: boolean
                   synthesized:
                     type: boolean
                 type: object
@@ -113,6 +113,8 @@ spec:
                     type: string
                   ready:
                     type: boolean
+                  reconciled:
+                    type: boolean
                   resourceSlices:
                     items:
                       properties:
@@ -120,8 +122,6 @@ spec:
                           type: string
                       type: object
                     type: array
-                  synced:
-                    type: boolean
                   synthesized:
                     type: boolean
                 type: object

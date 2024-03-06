@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	ctrl "sigs.k8s.io/controller-runtime"
 
+	"github.com/Azure/eno/internal/controllers/aggregation"
 	"github.com/Azure/eno/internal/controllers/reconciliation"
 	"github.com/Azure/eno/internal/k8s"
 	"github.com/Azure/eno/internal/manager"
@@ -33,7 +34,7 @@ func run() error {
 		debugLogging           bool
 		remoteKubeconfigFile   string
 		remoteQPS              float64
-		readinessPollInterval time.Duration
+		readinessPollInterval  time.Duration
 
 		mgrOpts = &manager.Options{
 			Rest: ctrl.GetConfigOrDie(),
@@ -66,6 +67,11 @@ func run() error {
 	recmgr, err := reconstitution.New(mgr, writeBatchInterval)
 	if err != nil {
 		return fmt.Errorf("constructing reconstitution manager: %w", err)
+	}
+
+	err = aggregation.NewStatusController(mgr)
+	if err != nil {
+		return fmt.Errorf("constructing status aggregation controller: %w", err)
 	}
 
 	remoteConfig := mgr.GetConfig()

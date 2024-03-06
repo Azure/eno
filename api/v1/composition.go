@@ -64,5 +64,5 @@ type Synthesis struct {
 
 	Synthesized bool `json:"synthesized,omitempty"`
 	Ready       bool `json:"ready,omitempty"`
-	Synced      bool `json:"synced,omitempty"`
+	Reconciled  bool `json:"reconciled,omitempty"`
 }
