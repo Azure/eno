@@ -28,6 +28,11 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 )
 
+// IMPORTANT: There are several things to know about how controller-runtime is configured:
+// - Resource slices are only watched by the reconciler process to avoid the cost of watching all of them in the controller
+// - Resource slices are not deep copied when reading from the informer - do not mutate them
+// - The resource slices cached by the informer do not have the configured manifests since they are held by the reconstitution cache anyway
+
 const (
 	IdxPodsByComposition           = ".metadata.ownerReferences.composition"
 	IdxCompositionsBySynthesizer   = ".spec.synthesizer"
@@ -112,6 +117,16 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 		yespls := true
 		mgrOpts.Cache.ByObject[&apiv1.ResourceSlice{}] = cache.ByObject{
 			UnsafeDisableDeepCopy: &yespls,
+			Transform: func(obj any) (any, error) {
+				slice, ok := obj.(*apiv1.ResourceSlice)
+				if !ok {
+					return obj, nil
+				}
+				for _, res := range slice.Spec.Resources {
+					res.Manifest = "" // remove big manifest that we don't need
+				}
+				return slice, nil
+			},
 		}
 	}
 

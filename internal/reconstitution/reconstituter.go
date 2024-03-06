@@ -18,16 +18,18 @@ import (
 // reconstituter reconstitutes individual resources from resource slices.
 // Similar to an informer but with extra logic to handle expanding the slice resources.
 type reconstituter struct {
-	*cache  // embedded because caching is logically part of the reconstituter's functionality
-	client  client.Client
-	queues  []workqueue.Interface
-	started atomic.Bool
+	*cache          // embedded because caching is logically part of the reconstituter's functionality
+	client          client.Client
+	nonCachedReader client.Reader
+	queues          []workqueue.Interface
+	started         atomic.Bool
 }
 
 func newReconstituter(mgr ctrl.Manager) (*reconstituter, error) {
 	r := &reconstituter{
-		cache:  newCache(mgr.GetClient()),
-		client: mgr.GetClient(),
+		cache:           newCache(mgr.GetClient()),
+		client:          mgr.GetClient(),
+		nonCachedReader: mgr.GetAPIReader(),
 	}
 
 	return r, ctrl.NewControllerManagedBy(mgr).
@@ -98,10 +100,12 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 
 	slices := make([]apiv1.ResourceSlice, len(synthesis.ResourceSlices))
 	for i, ref := range synthesis.ResourceSlices {
+		// We use a special non-caching client here because the manifest is removed
+		// from resource slices cached in the informer to save memory.
 		slice := apiv1.ResourceSlice{}
 		slice.Name = ref.Name
 		slice.Namespace = comp.Namespace
-		err := r.client.Get(ctx, client.ObjectKeyFromObject(&slice), &slice)
+		err := r.nonCachedReader.Get(ctx, client.ObjectKeyFromObject(&slice), &slice)
 		if err != nil {
 			// TODO: Handle 404?
 			return nil, fmt.Errorf("unable to get resource slice: %w", err)
