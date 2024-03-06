@@ -13,8 +13,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-// TODO: Release previous slices once the current set has been reconciled?
-
 type sliceCleanupController struct {
 	client client.Client
 }

@@ -76,17 +76,11 @@ func TestCompositionDeletion(t *testing.T) {
 	time.Sleep(time.Millisecond * 100)
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 
-	// Release the slice
+	// Mark the composition as reconciled
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		res := &apiv1.ResourceSlice{}
-		res.Name = comp.Status.CurrentState.ResourceSlices[0].Name
-		res.Namespace = comp.Namespace
-		if err := cli.Get(ctx, client.ObjectKeyFromObject(res), res); err != nil {
-			return err
-		}
-
-		res.Status.Resources = []apiv1.ResourceState{{Deleted: true, Reconciled: true}}
-		return cli.Status().Update(ctx, res)
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Status.CurrentState.Reconciled = true
+		return cli.Status().Update(ctx, comp)
 	})
 	require.NoError(t, err)
 
