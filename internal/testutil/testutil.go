@@ -94,7 +94,7 @@ func NewManager(t *testing.T) *Manager {
 	cfg, err := env.Start()
 	require.NoError(t, err)
 
-	mgr, err := manager.New(logr.FromContextOrDiscard(NewContext(t)), &manager.Options{
+	mgr, err := manager.NewTest(logr.FromContextOrDiscard(NewContext(t)), &manager.Options{
 		Rest:            cfg,
 		HealthProbeAddr: "127.0.0.1:0",
 		MetricsAddr:     "127.0.0.1:0",

@@ -13,6 +13,7 @@ import (
 
 	"github.com/Azure/eno/internal/controllers/aggregation"
 	"github.com/Azure/eno/internal/controllers/reconciliation"
+	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/k8s"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/Azure/eno/internal/reconstitution"
@@ -72,6 +73,11 @@ func run() error {
 	err = aggregation.NewStatusController(mgr)
 	if err != nil {
 		return fmt.Errorf("constructing status aggregation controller: %w", err)
+	}
+
+	err = synthesis.NewSliceCleanupController(mgr)
+	if err != nil {
+		return fmt.Errorf("constructing resource slice cleanup controller: %w", err)
 	}
 
 	remoteConfig := mgr.GetConfig()

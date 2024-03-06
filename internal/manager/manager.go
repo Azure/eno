@@ -47,14 +47,18 @@ func init() {
 }
 
 func New(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
-	return newMgr(logger, opts, true)
+	return newMgr(logger, opts, true, false)
 }
 
 func NewReconciler(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
-	return newMgr(logger, opts, false)
+	return newMgr(logger, opts, false, true)
 }
 
-func newMgr(logger logr.Logger, opts *Options, isReconciler bool) (ctrl.Manager, error) {
+func NewTest(logger logr.Logger, opts *Options) (ctrl.Manager, error) {
+	return newMgr(logger, opts, true, true)
+}
+
+func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) (ctrl.Manager, error) {
 	opts.Rest.QPS = float32(opts.qps)
 
 	scheme := runtime.NewScheme()
@@ -77,6 +81,9 @@ func newMgr(logger logr.Logger, opts *Options, isReconciler bool) (ctrl.Manager,
 		BaseContext: func() context.Context {
 			return logr.NewContext(context.Background(), logger)
 		},
+		Cache: cache.Options{
+			ByObject: make(map[client.Object]cache.ByObject),
+		},
 	}
 
 	labelSelector, err := opts.getDefaultLabelSelector()
@@ -91,13 +98,17 @@ func newMgr(logger logr.Logger, opts *Options, isReconciler bool) (ctrl.Manager,
 	mgrOpts.Cache.DefaultFieldSelector = fieldSelector
 
 	podLabelSelector := labels.SelectorFromSet(labels.Set{ManagerLabelKey: ManagerLabelValue})
-	mgrOpts.Cache.ByObject = map[client.Object]cache.ByObject{
+
+	if isController {
 		// We do not honor the configured label selector, because these pods will only ever have labels set by Eno.
 		// But we _do_ honor the field selector since it may reduce the namespace scope, etc.
-		&corev1.Pod{}: {Label: podLabelSelector, Field: fieldSelector},
+		mgrOpts.Cache.ByObject[&corev1.Pod{}] = cache.ByObject{
+			Label: podLabelSelector,
+			Field: fieldSelector,
+		}
 	}
 
-	if !isReconciler {
+	if isReconciler {
 		yespls := true
 		mgrOpts.Cache.ByObject[&apiv1.ResourceSlice{}] = cache.ByObject{
 			UnsafeDisableDeepCopy: &yespls,
@@ -109,13 +120,8 @@ func newMgr(logger logr.Logger, opts *Options, isReconciler bool) (ctrl.Manager,
 		return nil, err
 	}
 
-	if isReconciler {
+	if isController {
 		err = mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Pod{}, IdxPodsByComposition, indexController())
-		if err != nil {
-			return nil, err
-		}
-
-		err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, IdxResourceSlicesByComposition, indexController())
 		if err != nil {
 			return nil, err
 		}
@@ -124,6 +130,12 @@ func newMgr(logger logr.Logger, opts *Options, isReconciler bool) (ctrl.Manager,
 			comp := o.(*apiv1.Composition)
 			return []string{comp.Spec.Synthesizer.Name}
 		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	if isReconciler {
+		err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, IdxResourceSlicesByComposition, indexController())
 		if err != nil {
 			return nil, err
 		}
