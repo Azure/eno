@@ -80,10 +80,5 @@ func run() error {
 		return fmt.Errorf("constructing pod lifecycle controller: %w", err)
 	}
 
-	err = synthesis.NewSliceCleanupController(mgr)
-	if err != nil {
-		return fmt.Errorf("constructing resource slice cleanup controller: %w", err)
-	}
-
 	return mgr.Start(ctx)
 }
