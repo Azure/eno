@@ -94,6 +94,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if comp.DeletionTimestamp != nil {
+		// TODO: Remove this by aggregating the reconciliation status of deletions into the composition and checking here
 		sliceList := &apiv1.ResourceSliceList{}
 		err = c.client.List(ctx, sliceList, client.MatchingFields{
 			manager.IdxResourceSlicesByComposition: comp.Name,
