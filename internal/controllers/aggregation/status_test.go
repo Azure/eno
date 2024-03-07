@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -19,11 +18,17 @@ func testAggregation(t *testing.T, ready bool, reconciled bool) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
 
+	var readyTime *metav1.Time
+	if ready {
+		now := metav1.Now()
+		readyTime = &now
+	}
+
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = "test-slice-1"
 	slice.Namespace = "default"
 	slice.Spec.Resources = []apiv1.Manifest{{Manifest: "{}"}}
-	slice.Status.Resources = []apiv1.ResourceState{{Ready: ptr.To(ready), Reconciled: reconciled}}
+	slice.Status.Resources = []apiv1.ResourceState{{Ready: readyTime, Reconciled: reconciled}}
 	require.NoError(t, cli.Create(ctx, slice))
 	require.NoError(t, cli.Status().Update(ctx, slice))
 
@@ -101,16 +106,15 @@ func TestCleanupSafety(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
 
-	ready := true
+	now := metav1.Now()
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = "test-slice-1"
 	slice.Namespace = "default"
 	slice.Spec.Resources = []apiv1.Manifest{{Manifest: "{}"}}
-	slice.Status.Resources = []apiv1.ResourceState{{Ready: &ready, Reconciled: true}}
+	slice.Status.Resources = []apiv1.ResourceState{{Ready: &now, Reconciled: true}}
 	require.NoError(t, cli.Create(ctx, slice))
 	require.NoError(t, cli.Status().Update(ctx, slice))
 
-	now := metav1.Now()
 	comp := &apiv1.Composition{}
 	comp.Name = "test"
 	comp.Namespace = "default"

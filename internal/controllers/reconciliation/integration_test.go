@@ -768,7 +768,7 @@ func TestResourceReadiness(t *testing.T) {
 	// The composition should also be updated
 	testutil.Eventually(t, func() bool {
 		err = upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready == nil
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
 	})
 
 	// Update resource to not meet readiness criteria
@@ -786,5 +786,5 @@ func TestResourceReadiness(t *testing.T) {
 	})
 }
 
-func isReady(state apiv1.ResourceState) bool    { return state.Ready != nil && *state.Ready }
-func isNotReady(state apiv1.ResourceState) bool { return state.Ready != nil && !*state.Ready }
+func isReady(state apiv1.ResourceState) bool    { return state.Ready != nil }
+func isNotReady(state apiv1.ResourceState) bool { return state.Ready == nil }

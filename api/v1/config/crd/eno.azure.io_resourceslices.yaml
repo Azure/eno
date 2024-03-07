@@ -69,7 +69,8 @@ spec:
                         of this resource. Otherwise it is true when the resource is
                         ready, false otherwise. Like Reconciled, it latches and will
                         never transition from true->false.
-                      type: boolean
+                      format: date-time
+                      type: string
                     reconciled:
                       description: 'True when the resource has been sync''d to the
                         specified manifest. This property latches: it will remain

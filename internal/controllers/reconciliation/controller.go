@@ -135,8 +135,8 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	// - Readiness checks are skipped when this version of the resource's desired state has already become ready
 	// - Readiness checks are skipped when the resource hasn't changed since the last check
 	// - Readiness defaults to true if no checks are given
-	ready := true
-	if hasChanged && len(resource.ReadinessChecks) > 0 {
+	var ready *metav1.Time
+	if len(resource.ReadinessChecks) > 0 {
 		slice := &apiv1.ResourceSlice{}
 		err = c.client.Get(ctx, req.Manifest.Slice, slice)
 		if err != nil {
@@ -144,33 +144,33 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		}
 		if len(slice.Status.Resources) > req.Manifest.Index {
 			status := slice.Status.Resources[req.Manifest.Index]
-			if status.Ready == nil || !*status.Ready {
-				for _, check := range resource.ReadinessChecks {
-					if r := check.Eval(ctx, current); !r {
-						ready = false
-					}
+			ready = status.Ready
+		}
+		if ready == nil {
+			// TODO: Sort
+			for _, check := range resource.ReadinessChecks {
+				if r := check.Eval(ctx, current); r != nil {
+					ready = r
 				}
 			}
-		} else {
-			ready = false
 		}
 	}
 
 	// Store the results
 	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) *apiv1.ResourceState {
-		if rs.Deleted == resource.Deleted() && rs.Reconciled && rs.Ready != nil && *rs.Ready == ready {
+		if rs.Deleted == resource.Deleted() && rs.Reconciled && rs.Ready != nil && *rs.Ready == *ready {
 			return nil
 		}
 		return &apiv1.ResourceState{
 			Deleted:    resource.Deleted(),
-			Ready:      &ready,
+			Ready:      ready,
 			Reconciled: true,
 		}
 	})
 	if modified {
 		return ctrl.Result{Requeue: true}, nil
 	}
-	if !ready {
+	if ready == nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}
 	if resource != nil && !resource.Deleted() && resource.Manifest.ReconcileInterval != nil {

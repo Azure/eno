@@ -299,8 +299,7 @@ func (in *ResourceState) DeepCopyInto(out *ResourceState) {
 	*out = *in
 	if in.Ready != nil {
 		in, out := &in.Ready, &out.Ready
-		*out = new(bool)
-		**out = **in
+		*out = (*in).DeepCopy()
 	}
 }
 
@@ -327,6 +326,10 @@ func (in *Synthesis) DeepCopyInto(out *Synthesis) {
 	}
 	if in.Reconciled != nil {
 		in, out := &in.Reconciled, &out.Reconciled
+		*out = (*in).DeepCopy()
+	}
+	if in.Ready != nil {
+		in, out := &in.Ready, &out.Ready
 		*out = (*in).DeepCopy()
 	}
 	if in.ResourceSlices != nil {

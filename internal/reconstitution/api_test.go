@@ -109,12 +109,12 @@ func TestReadinessEval(t *testing.T) {
 			r, err := newReadinessCheck(env, tc.Expr)
 			require.NoError(t, err)
 
-			ok := r.Eval(context.Background(), tc.Resource)
-			assert.Equal(t, tc.Expect, ok)
+			time := r.Eval(context.Background(), tc.Resource)
+			assert.Equal(t, tc.Expect, time != nil)
 
 			// Make sure every program can be evaluated multiple times
-			ok = r.Eval(context.Background(), tc.Resource)
-			assert.Equal(t, tc.Expect, ok)
+			time = r.Eval(context.Background(), tc.Resource)
+			assert.Equal(t, tc.Expect, time != nil)
 		})
 	}
 }

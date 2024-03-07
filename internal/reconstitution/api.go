@@ -7,6 +7,7 @@ import (
 
 	celtypes "github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -73,9 +74,9 @@ func newReadinessCheck(env *cel.Env, expr string) (*ReadinessCheck, error) {
 	return &ReadinessCheck{program: prgm, env: env}, nil
 }
 
-func (r *ReadinessCheck) Eval(ctx context.Context, resource *unstructured.Unstructured) bool {
+func (r *ReadinessCheck) Eval(ctx context.Context, resource *unstructured.Unstructured) *metav1.Time {
 	if resource == nil {
-		return false
+		return nil
 	}
 	val, details, err := r.program.ContextEval(ctx, map[string]any{"self": resource.Object})
 	if details != nil {
@@ -85,7 +86,7 @@ func (r *ReadinessCheck) Eval(ctx context.Context, resource *unstructured.Unstru
 		}
 	}
 	if err != nil {
-		return false
+		return nil
 	}
 
 	// Support matching on condition structs.
@@ -94,13 +95,24 @@ func (r *ReadinessCheck) Eval(ctx context.Context, resource *unstructured.Unstru
 		for _, ref := range list {
 			if mp, ok := ref.Value().(map[string]any); ok {
 				if mp != nil && mp["status"] == "True" && mp["type"] != "" && mp["reason"] != "" {
-					return true
+					ts := metav1.Now()
+					if str, ok := mp["lastTransitionTime"].(string); ok {
+						parsed, err := time.Parse(time.RFC3339, str)
+						if err == nil {
+							ts.Time = parsed
+						}
+					}
+					return &ts
 				}
 			}
 		}
 	}
 
-	return val == celtypes.True
+	if val == celtypes.True {
+		now := metav1.Now()
+		return &now
+	}
+	return nil
 }
 
 // ResourceRef refers to a specific synthesized resource.
