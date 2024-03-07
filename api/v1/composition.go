@@ -62,8 +62,7 @@ type Synthesis struct {
 	PodCreation *metav1.Time `json:"podCreation,omitempty"`
 	Synthesized *metav1.Time `json:"synthesized,omitempty"`
 	Reconciled  *metav1.Time `json:"reconciled,omitempty"`
+	Ready       *metav1.Time `json:"ready,omitempty"`
 
 	ResourceSlices []*ResourceSliceRef `json:"resourceSlices,omitempty"`
-
-	Ready bool `json:"ready,omitempty"`
 }
