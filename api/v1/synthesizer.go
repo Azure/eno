@@ -46,6 +46,15 @@ type SynthesizerSpec struct {
 	//
 	// +kubebuilder:default="30s"
 	RolloutCooldown metav1.Duration `json:"rolloutCooldown,omitempty"`
+
+	// Only bound inputs are provided to the synthesizer.
+	// All bound inputs must be set on a composition before it can be synthesized.
+	// Compositions are resynthesized per the rolloutCooldown when one or more bound inputs change.
+	InputBindings []*InputBinding `json:"inputBindings,omitempty"`
+}
+
+type InputBinding struct {
+	Name string `json:"name,omitempty"`
 }
 
 type SynthesizerStatus struct {

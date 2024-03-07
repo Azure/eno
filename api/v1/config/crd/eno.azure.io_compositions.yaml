@@ -33,22 +33,14 @@ spec:
           spec:
             properties:
               inputs:
-                description: Inputs are given to the Synthesizer during synthesis.
+                description: Inputs are string literals provided to the Synthesizer
+                  during synthesis.
                 items:
                   properties:
                     name:
                       type: string
-                    resource:
-                      properties:
-                        apiVersion:
-                          type: string
-                        kind:
-                          type: string
-                        name:
-                          type: string
-                        namespace:
-                          type: string
-                      type: object
+                    value:
+                      type: string
                   type: object
                 type: array
               reconcileInterval:

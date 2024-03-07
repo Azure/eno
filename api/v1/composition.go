@@ -27,26 +27,15 @@ type CompositionSpec struct {
 	// Per-resource jitter will be applied to avoid spikes in request rate.
 	ReconcileInterval *metav1.Duration `json:"reconcileInterval,omitempty"`
 
-	// Inputs are given to the Synthesizer during synthesis.
-	Inputs []InputRef `json:"inputs,omitempty"`
+	// Inputs are string literals provided to the Synthesizer during synthesis.
+	Inputs []Input `json:"inputs,omitempty"`
 }
 
-type InputRef struct {
+type Input struct {
 	// +required
 	Name string `json:"name,omitempty"`
 
-	Resource *ResourceInputRef `json:"resource,omitempty"`
-}
-
-type ResourceInputRef struct {
-	// +required
-	APIVersion string `json:"apiVersion,omitempty"`
-	// +required
-	Kind string `json:"kind,omitempty"`
-	// +required
-	Namespace string `json:"namespace,omitempty"`
-	// +required
-	Name string `json:"name,omitempty"`
+	Value string `json:"value,omitempty"`
 }
 
 type CompositionStatus struct {

@@ -44,6 +44,17 @@ spec:
                 type: string
               image:
                 type: string
+              inputBindings:
+                description: Only bound inputs are provided to the synthesizer. All
+                  bound inputs must be set on a composition before it can be synthesized.
+                  Compositions are resynthesized per the rolloutCooldown when one
+                  or more bound inputs change.
+                items:
+                  properties:
+                    name:
+                      type: string
+                  type: object
+                type: array
               podTimeout:
                 default: 2m
                 description: Pods are recreated after they've existed for at least
