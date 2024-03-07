@@ -6,6 +6,7 @@ import (
 	"time"
 
 	celtypes "github.com/google/cel-go/common/types"
+	"github.com/google/cel-go/common/types/ref"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -86,6 +87,19 @@ func (r *ReadinessCheck) Eval(ctx context.Context, resource *unstructured.Unstru
 	if err != nil {
 		return false
 	}
+
+	// Support matching on condition structs.
+	// This allows us to grab the transition time instead of just using the current time.
+	if list, ok := val.Value().([]ref.Val); ok {
+		for _, ref := range list {
+			if mp, ok := ref.Value().(map[string]any); ok {
+				if mp != nil && mp["status"] == "True" && mp["type"] != "" && mp["reason"] != "" {
+					return true
+				}
+			}
+		}
+	}
+
 	return val == celtypes.True
 }
 

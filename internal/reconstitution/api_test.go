@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -13,10 +14,11 @@ var simpleConditionStatus = map[string]any{
 	"status": map[string]any{
 		"conditions": []map[string]any{
 			{
-				"message": "foo bar",
-				"reason":  "Testing",
-				"status":  "True",
-				"type":    "Test",
+				"message":            "foo bar",
+				"reason":             "Testing",
+				"lastTransitionTime": metav1.Now().String(),
+				"status":             "True",
+				"type":               "Test",
 			},
 			{
 				"message": "foo bar",
@@ -89,6 +91,12 @@ var readinessEvalTests = []struct {
 		},
 		Expr:   "self.status.conditions.exists(item, item.type == 'TestFoo' && item.status == 'True')",
 		Expect: false,
+	},
+	{
+		Name:     "magic-condition-matcher-her",
+		Resource: &unstructured.Unstructured{Object: simpleConditionStatus},
+		Expr:     "self.status.conditions.filter(item, item.type == 'Test' && item.status == 'True')",
+		Expect:   true,
 	},
 }
 
