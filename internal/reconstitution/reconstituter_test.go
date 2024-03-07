@@ -29,7 +29,7 @@ func TestReconstituterIntegration(t *testing.T) {
 	comp.Namespace = "default"
 	require.NoError(t, client.Create(ctx, comp))
 
-	comp.Status.CurrentState = &apiv1.Synthesis{
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
 		ObservedCompositionGeneration: comp.Generation,
 		ResourceSlices:                []*apiv1.ResourceSliceRef{{Name: "test-slice"}},
 		Synthesized:                   true,

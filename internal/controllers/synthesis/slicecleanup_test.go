@@ -30,7 +30,7 @@ func TestSliceCleanupControllerOrphanedSlice(t *testing.T) {
 		if client.IgnoreNotFound(err) != nil {
 			return err
 		}
-		comp.Status.CurrentState = &apiv1.Synthesis{
+		comp.Status.CurrentSynthesis = &apiv1.Synthesis{
 			Synthesized: true,
 		}
 		return mgr.GetClient().Status().Update(ctx, comp)

@@ -47,7 +47,7 @@ func TestControllerHappyPath(t *testing.T) {
 		// The pod eventually performs the synthesis
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-			return comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized
+			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized
 		})
 	})
 
@@ -63,11 +63,11 @@ func TestControllerHappyPath(t *testing.T) {
 		latest := comp.Generation
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration >= latest
+			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration >= latest
 		})
 
 		// The previous state is retained
-		if comp.Status.PreviousState == nil {
+		if comp.Status.PreviousSynthesis == nil {
 			t.Error("state wasn't swapped to previous")
 		}
 	})
@@ -130,7 +130,7 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 	latest := comp.Generation
 	testutil.Eventually(t, func() bool {
 		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration == latest
+		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == latest
 	})
 }
 
@@ -160,7 +160,7 @@ func TestControllerRollout(t *testing.T) {
 	t.Run("initial creation", func(t *testing.T) {
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-			return comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized
+			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized
 		})
 	})
 
@@ -176,7 +176,7 @@ func TestControllerRollout(t *testing.T) {
 
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedSynthesizerGeneration >= syn.Generation
+			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration >= syn.Generation
 		})
 	})
 }
@@ -207,7 +207,7 @@ func TestControllerSynthesizerRolloutCooldown(t *testing.T) {
 	// Wait for initial sync
 	testutil.Eventually(t, func() bool {
 		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
+		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
 	})
 
 	// First synthesizer update
@@ -223,7 +223,7 @@ func TestControllerSynthesizerRolloutCooldown(t *testing.T) {
 	// The first synthesizer update should be applied to the composition
 	testutil.Eventually(t, func() bool {
 		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
+		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
 	})
 
 	// Wait for the informer cache to know about the last update
@@ -299,9 +299,9 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 	t.Run("initial creation", func(t *testing.T) {
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSlices != nil
+			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ResourceSlices != nil
 		})
-		initialSlices = comp.Status.CurrentState.ResourceSlices
+		initialSlices = comp.Status.CurrentSynthesis.ResourceSlices
 		initialGen = comp.Generation
 	})
 
@@ -317,8 +317,8 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration > initialGen
+			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration > initialGen
 		})
-		assert.NotEqual(t, comp.Status.CurrentState.ResourceSlices, initialSlices)
+		assert.NotEqual(t, comp.Status.CurrentSynthesis.ResourceSlices, initialSlices)
 	})
 }

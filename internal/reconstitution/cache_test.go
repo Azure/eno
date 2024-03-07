@@ -163,7 +163,7 @@ func TestCachePartialPurge(t *testing.T) {
 		toBePreserved = expectedReqs[0]
 	}
 
-	comp.Status.CurrentState = synth // only reference the most recent synthesis
+	comp.Status.CurrentSynthesis = synth // only reference the most recent synthesis
 
 	// Purge only a single synthesis of a generation
 	c.Purge(ctx, compNSN, comp)
@@ -190,7 +190,7 @@ func newCacheTestFixtures(sliceCount, resPerSliceCount int) (*apiv1.Composition,
 	comp.Namespace = string(uuid.NewUUID())
 	comp.Name = string(uuid.NewUUID())
 	synth := &apiv1.Synthesis{ObservedCompositionGeneration: 3} // just not 0
-	comp.Status.CurrentState = synth
+	comp.Status.CurrentSynthesis = synth
 
 	resources := make([]apiv1.ResourceSlice, sliceCount)
 	requests := []*Request{}

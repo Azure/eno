@@ -28,7 +28,7 @@ func testAggregation(t *testing.T, ready *bool, reconciled bool) {
 	comp := &apiv1.Composition{}
 	comp.Name = "test"
 	comp.Namespace = "default"
-	comp.Status.CurrentState = &apiv1.Synthesis{
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
 		Synthesized:    true,
 		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
 	}
@@ -41,11 +41,11 @@ func testAggregation(t *testing.T, ready *bool, reconciled bool) {
 	require.NoError(t, err)
 
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-	assert.Equal(t, reconciled, comp.Status.CurrentState.Reconciled)
+	assert.Equal(t, reconciled, comp.Status.CurrentSynthesis.Reconciled)
 	if ready == nil {
-		assert.False(t, comp.Status.CurrentState.Ready)
+		assert.False(t, comp.Status.CurrentSynthesis.Ready)
 	} else {
-		assert.Equal(t, *ready, comp.Status.CurrentState.Ready)
+		assert.Equal(t, *ready, comp.Status.CurrentSynthesis.Ready)
 	}
 }
 
@@ -88,7 +88,7 @@ func TestStaleStatus(t *testing.T) {
 	comp := &apiv1.Composition{}
 	comp.Name = "test"
 	comp.Namespace = "default"
-	comp.Status.CurrentState = &apiv1.Synthesis{
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
 		Synthesized:    true,
 		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
 	}
@@ -101,8 +101,8 @@ func TestStaleStatus(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-	assert.False(t, comp.Status.CurrentState.Reconciled)
-	assert.False(t, comp.Status.CurrentState.Ready)
+	assert.False(t, comp.Status.CurrentSynthesis.Reconciled)
+	assert.False(t, comp.Status.CurrentSynthesis.Ready)
 }
 
 func TestCleanupSafety(t *testing.T) {
@@ -122,7 +122,7 @@ func TestCleanupSafety(t *testing.T) {
 	comp.Name = "test"
 	comp.Namespace = "default"
 	comp.Finalizers = []string{"test"}
-	comp.Status.CurrentState = &apiv1.Synthesis{
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
 		Synthesized:    true,
 		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
 	}
@@ -136,6 +136,6 @@ func TestCleanupSafety(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-	assert.False(t, comp.Status.CurrentState.Reconciled)
-	assert.True(t, comp.Status.CurrentState.Ready)
+	assert.False(t, comp.Status.CurrentSynthesis.Reconciled)
+	assert.True(t, comp.Status.CurrentSynthesis.Ready)
 }

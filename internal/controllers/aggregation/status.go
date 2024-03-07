@@ -34,13 +34,13 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition: %w", err))
 	}
-	if comp.Status.CurrentState == nil || !comp.Status.CurrentState.Synthesized || (comp.Status.CurrentState.Ready && comp.Status.CurrentState.Reconciled) {
+	if comp.Status.CurrentSynthesis == nil || !comp.Status.CurrentSynthesis.Synthesized || (comp.Status.CurrentSynthesis.Ready && comp.Status.CurrentSynthesis.Reconciled) {
 		return ctrl.Result{}, nil
 	}
 
 	ready := true
 	reconciled := true
-	for _, ref := range comp.Status.CurrentState.ResourceSlices {
+	for _, ref := range comp.Status.CurrentSynthesis.ResourceSlices {
 		slice := &apiv1.ResourceSlice{}
 		slice.Name = ref.Name
 		slice.Namespace = comp.Namespace
@@ -69,12 +69,12 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 	}
 
-	if comp.Status.CurrentState.Reconciled == reconciled && comp.Status.CurrentState.Ready == ready {
+	if comp.Status.CurrentSynthesis.Reconciled == reconciled && comp.Status.CurrentSynthesis.Ready == ready {
 		return ctrl.Result{}, nil
 	}
 
-	comp.Status.CurrentState.Ready = ready
-	comp.Status.CurrentState.Reconciled = reconciled
+	comp.Status.CurrentSynthesis.Ready = ready
+	comp.Status.CurrentSynthesis.Reconciled = reconciled
 	err = s.client.Status().Update(ctx, comp)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)

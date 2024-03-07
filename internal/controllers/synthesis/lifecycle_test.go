@@ -52,13 +52,13 @@ func TestCompositionDeletion(t *testing.T) {
 	// Create the composition's resource slice
 	testutil.Eventually(t, func() bool {
 		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-		return comp.Status.CurrentState != nil && len(comp.Status.CurrentState.ResourceSlices) > 0
+		return comp.Status.CurrentSynthesis != nil && len(comp.Status.CurrentSynthesis.ResourceSlices) > 0
 	})
 
 	// Wait for the resource slice to be created
 	testutil.Eventually(t, func() bool {
 		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSlices != nil
+		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ResourceSlices != nil
 	})
 
 	// Delete the composition
@@ -68,7 +68,7 @@ func TestCompositionDeletion(t *testing.T) {
 	// The generation should be updated
 	testutil.Eventually(t, func() bool {
 		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration >= deleteGen
+		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration >= deleteGen
 	})
 
 	// The composition should still exist after a bit
@@ -79,7 +79,7 @@ func TestCompositionDeletion(t *testing.T) {
 	// Mark the composition as reconciled
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Status.CurrentState.Reconciled = true
+		comp.Status.CurrentSynthesis.Reconciled = true
 		return cli.Status().Update(ctx, comp)
 	})
 	require.NoError(t, err)
@@ -144,7 +144,7 @@ var shouldDeletePodTests = []struct {
 				Generation: 2,
 			},
 			Status: apiv1.CompositionStatus{
-				CurrentState: &apiv1.Synthesis{
+				CurrentSynthesis: &apiv1.Synthesis{
 					Synthesized: true,
 				},
 			},
@@ -172,7 +172,7 @@ var shouldDeletePodTests = []struct {
 				Generation: 2,
 			},
 			Status: apiv1.CompositionStatus{
-				CurrentState: &apiv1.Synthesis{
+				CurrentSynthesis: &apiv1.Synthesis{
 					Synthesized: true,
 				},
 			},

@@ -200,11 +200,11 @@ func (m *Manager) GetCurrentResourceSlices(ctx context.Context) ([]*apiv1.Resour
 	if l := len(comps.Items); l != 1 {
 		return nil, fmt.Errorf("expected one composition, found %d", l)
 	}
-	if !comps.Items[0].Status.CurrentState.Synthesized {
+	if !comps.Items[0].Status.CurrentSynthesis.Synthesized {
 		return nil, fmt.Errorf("composition is still being synthesized")
 	}
 
-	synthesis := comps.Items[0].Status.CurrentState
+	synthesis := comps.Items[0].Status.CurrentSynthesis
 	if synthesis == nil {
 		return nil, fmt.Errorf("synthesis hasn't completed yet")
 	}
