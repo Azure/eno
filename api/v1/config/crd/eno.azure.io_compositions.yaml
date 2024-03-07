@@ -85,7 +85,8 @@ spec:
                     format: date-time
                     type: string
                   ready:
-                    type: boolean
+                    format: date-time
+                    type: string
                   reconciled:
                     format: date-time
                     type: string
@@ -114,7 +115,8 @@ spec:
                     format: date-time
                     type: string
                   ready:
-                    type: boolean
+                    format: date-time
+                    type: string
                   reconciled:
                     format: date-time
                     type: string
