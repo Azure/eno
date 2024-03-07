@@ -50,8 +50,8 @@ type ResourceInputRef struct {
 }
 
 type CompositionStatus struct {
-	CurrentState  *Synthesis `json:"currentState,omitempty"`
-	PreviousState *Synthesis `json:"previousState,omitempty"`
+	CurrentSynthesis  *Synthesis `json:"currentSynthesis,omitempty"`
+	PreviousSynthesis *Synthesis `json:"previousSynthesis,omitempty"`
 }
 
 // Synthesis represents a Synthesizer's specific synthesis of a given Composition.

@@ -63,11 +63,11 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	ctx = logr.NewContext(ctx, logger)
 
 	// We populate the cache with both the previous and current syntheses
-	prevReqs, err := r.populateCache(ctx, comp, comp.Status.PreviousState)
+	prevReqs, err := r.populateCache(ctx, comp, comp.Status.PreviousSynthesis)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("processing previous state: %w", err)
 	}
-	currentReqs, err := r.populateCache(ctx, comp, comp.Status.CurrentState)
+	currentReqs, err := r.populateCache(ctx, comp, comp.Status.CurrentSynthesis)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("processing current state: %w", err)
 	}

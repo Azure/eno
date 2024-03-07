@@ -478,7 +478,7 @@ func TestReconcileStatus(t *testing.T) {
 	}
 	require.NoError(t, upstream.Create(ctx, slice))
 
-	comp.Status.CurrentState = &apiv1.Synthesis{
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
 		Synthesized:    true,
 		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
 	}
@@ -623,7 +623,7 @@ func TestMidSynthesisDeletion(t *testing.T) {
 
 	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Status.CurrentState = &apiv1.Synthesis{
+		comp.Status.CurrentSynthesis = &apiv1.Synthesis{
 			ObservedCompositionGeneration: comp.Generation,
 			ObservedSynthesizerGeneration: syn.Generation,
 			Synthesized:                   true,
@@ -653,7 +653,7 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	// Wait for the state to be swapped
 	testutil.Eventually(t, func() bool {
 		err = upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentState != nil && !comp.Status.CurrentState.Synthesized
+		return err == nil && comp.Status.CurrentSynthesis != nil && !comp.Status.CurrentSynthesis.Synthesized
 	})
 
 	// Delete the composition
@@ -742,7 +742,7 @@ func TestResourceReadiness(t *testing.T) {
 
 	testutil.Eventually(t, func() bool {
 		err = upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentState != nil && !comp.Status.CurrentState.Ready
+		return err == nil && comp.Status.CurrentSynthesis != nil && !comp.Status.CurrentSynthesis.Ready
 	})
 
 	// Update resource to meet readiness criteria
@@ -766,7 +766,7 @@ func TestResourceReadiness(t *testing.T) {
 	// The composition should also be updated
 	testutil.Eventually(t, func() bool {
 		err = upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentState != nil && comp.Status.CurrentState.Ready
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready
 	})
 
 	// Update resource to not meet readiness criteria
@@ -780,7 +780,7 @@ func TestResourceReadiness(t *testing.T) {
 	// The composition status should revert back to not ready when re-synthesized
 	testutil.Eventually(t, func() bool {
 		err = upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentState != nil && !comp.Status.CurrentState.Ready
+		return err == nil && comp.Status.CurrentSynthesis != nil && !comp.Status.CurrentSynthesis.Ready
 	})
 }
 

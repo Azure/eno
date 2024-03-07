@@ -71,7 +71,7 @@ spec:
             type: object
           status:
             properties:
-              currentState:
+              currentSynthesis:
                 description: Synthesis represents a Synthesizer's specific synthesis
                   of a given Composition.
                 properties:
@@ -98,7 +98,7 @@ spec:
                   synthesized:
                     type: boolean
                 type: object
-              previousState:
+              previousSynthesis:
                 description: Synthesis represents a Synthesizer's specific synthesis
                   of a given Composition.
                 properties:

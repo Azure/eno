@@ -67,11 +67,11 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	)
 	logger.WithValues("synthesizerGeneration", synGen, "compositionGeneration", compGen)
 	if shouldWriteStatus(comp, compGen) {
-		if comp.Status.CurrentState == nil {
-			comp.Status.CurrentState = &apiv1.Synthesis{}
+		if comp.Status.CurrentSynthesis == nil {
+			comp.Status.CurrentSynthesis = &apiv1.Synthesis{}
 		}
-		comp.Status.CurrentState.PodCreation = &pod.CreationTimestamp
-		comp.Status.CurrentState.ObservedSynthesizerGeneration = synGen
+		comp.Status.CurrentSynthesis.PodCreation = &pod.CreationTimestamp
+		comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration = synGen
 
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
@@ -98,6 +98,6 @@ func (c *statusController) removeFinalizer(ctx context.Context, pod *corev1.Pod)
 }
 
 func shouldWriteStatus(comp *apiv1.Composition, podCompGen int64) bool {
-	current := comp.Status.CurrentState
+	current := comp.Status.CurrentSynthesis
 	return current == nil || (current.ObservedCompositionGeneration == podCompGen && (current.PodCreation == nil || current.ObservedSynthesizerGeneration == 0))
 }

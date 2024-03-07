@@ -64,11 +64,11 @@ func TestExecIntegrationHappyPath(t *testing.T) {
 	// The pod eventually performs the synthesis
 	testutil.SomewhatEventually(t, time.Second*30, func() bool {
 		err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized
 	})
 
 	// The resulting input slice should contain a copy of the input
-	sliceRef := comp.Status.CurrentState.ResourceSlices[0]
+	sliceRef := comp.Status.CurrentSynthesis.ResourceSlices[0]
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = sliceRef.Name
 	slice.Namespace = comp.Namespace

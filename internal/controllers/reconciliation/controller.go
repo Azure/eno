@@ -71,10 +71,10 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 	logger := logr.FromContextOrDiscard(ctx).WithValues("compositionGeneration", comp.Generation)
 
-	if comp.Status.CurrentState == nil {
+	if comp.Status.CurrentSynthesis == nil {
 		return ctrl.Result{}, nil // nothing to do
 	}
-	logger = logger.WithValues("synthesizerName", comp.Spec.Synthesizer.Name, "synthesizerGeneration", comp.Status.CurrentState.ObservedSynthesizerGeneration)
+	logger = logger.WithValues("synthesizerName", comp.Spec.Synthesizer.Name, "synthesizerGeneration", comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration)
 	ctx = logr.NewContext(ctx, logger)
 
 	// Find the current and (optionally) previous desired states in the cache
@@ -88,8 +88,8 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 
 	var prev *reconstitution.Resource
-	if comp.Status.PreviousState != nil {
-		compRef.Generation = comp.Status.PreviousState.ObservedCompositionGeneration
+	if comp.Status.PreviousSynthesis != nil {
+		compRef.Generation = comp.Status.PreviousSynthesis.ObservedCompositionGeneration
 		prev, _ = c.resourceClient.Get(ctx, compRef, &req.Resource)
 	}
 

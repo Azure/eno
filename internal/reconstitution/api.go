@@ -102,8 +102,8 @@ type CompositionRef struct {
 
 func NewCompositionRef(comp *apiv1.Composition) *CompositionRef {
 	c := &CompositionRef{Name: comp.Name, Namespace: comp.Namespace}
-	if comp.Status.CurrentState != nil {
-		c.Generation = comp.Status.CurrentState.ObservedCompositionGeneration
+	if comp.Status.CurrentSynthesis != nil {
+		c.Generation = comp.Status.CurrentSynthesis.ObservedCompositionGeneration
 	}
 	return c
 }
