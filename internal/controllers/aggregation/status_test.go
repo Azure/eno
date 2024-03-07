@@ -43,7 +43,7 @@ func testAggregation(t *testing.T, ready *bool, reconciled bool) {
 	require.NoError(t, err)
 
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-	assert.Equal(t, reconciled, comp.Status.CurrentSynthesis.Reconciled)
+	assert.Equal(t, reconciled, comp.Status.CurrentSynthesis.Reconciled != nil)
 	if ready == nil {
 		assert.False(t, comp.Status.CurrentSynthesis.Ready)
 	} else {
@@ -104,7 +104,7 @@ func TestStaleStatus(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-	assert.False(t, comp.Status.CurrentSynthesis.Reconciled)
+	assert.Nil(t, comp.Status.CurrentSynthesis.Reconciled)
 	assert.False(t, comp.Status.CurrentSynthesis.Ready)
 }
 
@@ -140,6 +140,6 @@ func TestCleanupSafety(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-	assert.False(t, comp.Status.CurrentSynthesis.Reconciled)
+	assert.Nil(t, comp.Status.CurrentSynthesis.Reconciled)
 	assert.True(t, comp.Status.CurrentSynthesis.Ready)
 }

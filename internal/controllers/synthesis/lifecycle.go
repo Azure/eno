@@ -114,7 +114,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation {
 			comp.Status.CurrentSynthesis.ObservedCompositionGeneration = comp.Generation
 			comp.Status.CurrentSynthesis.Ready = false
-			comp.Status.CurrentSynthesis.Reconciled = false
+			comp.Status.CurrentSynthesis.Reconciled = nil
 			now := metav1.Now()
 			comp.Status.CurrentSynthesis.Synthesized = &now // in case the previous synthesis failed (TODO I don't think this actually works)
 			err = c.client.Status().Update(ctx, comp)
@@ -126,7 +126,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		}
 
 		// Remove the finalizer when all pods and slices have been deleted
-		if comp.Status.CurrentSynthesis != nil && (!comp.Status.CurrentSynthesis.Reconciled) || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation {
+		if comp.Status.CurrentSynthesis != nil && (comp.Status.CurrentSynthesis.Reconciled == nil) || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation {
 			logger.V(1).Info("refusing to remove composition finalizer because it is still being reconciled")
 			return ctrl.Result{}, nil
 		}

@@ -87,7 +87,8 @@ spec:
                   ready:
                     type: boolean
                   reconciled:
-                    type: boolean
+                    format: date-time
+                    type: string
                   resourceSlices:
                     items:
                       properties:
@@ -115,7 +116,8 @@ spec:
                   ready:
                     type: boolean
                   reconciled:
-                    type: boolean
+                    format: date-time
+                    type: string
                   resourceSlices:
                     items:
                       properties:

@@ -325,6 +325,10 @@ func (in *Synthesis) DeepCopyInto(out *Synthesis) {
 		in, out := &in.Synthesized, &out.Synthesized
 		*out = (*in).DeepCopy()
 	}
+	if in.Reconciled != nil {
+		in, out := &in.Reconciled, &out.Reconciled
+		*out = (*in).DeepCopy()
+	}
 	if in.ResourceSlices != nil {
 		in, out := &in.ResourceSlices, &out.ResourceSlices
 		*out = make([]*ResourceSliceRef, len(*in))

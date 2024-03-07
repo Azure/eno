@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -34,7 +35,7 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition: %w", err))
 	}
-	if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || (comp.Status.CurrentSynthesis.Ready && comp.Status.CurrentSynthesis.Reconciled) {
+	if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || (comp.Status.CurrentSynthesis.Ready && comp.Status.CurrentSynthesis.Reconciled != nil) {
 		return ctrl.Result{}, nil
 	}
 
@@ -69,12 +70,17 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 	}
 
-	if comp.Status.CurrentSynthesis.Reconciled == reconciled && comp.Status.CurrentSynthesis.Ready == ready {
+	if (comp.Status.CurrentSynthesis.Reconciled != nil) == reconciled && comp.Status.CurrentSynthesis.Ready == ready {
 		return ctrl.Result{}, nil
 	}
 
+	now := metav1.Now()
 	comp.Status.CurrentSynthesis.Ready = ready
-	comp.Status.CurrentSynthesis.Reconciled = reconciled
+	if reconciled {
+		comp.Status.CurrentSynthesis.Reconciled = &now
+	} else {
+		comp.Status.CurrentSynthesis.Reconciled = nil
+	}
 	err = s.client.Status().Update(ctx, comp)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
