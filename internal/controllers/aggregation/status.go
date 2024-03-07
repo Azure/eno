@@ -39,6 +39,7 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, nil
 	}
 
+	var maxReadyTime *metav1.Time
 	ready := true
 	reconciled := true
 	for _, ref := range comp.Status.CurrentSynthesis.ResourceSlices {
@@ -58,6 +59,7 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 
 		for _, state := range slice.Status.Resources {
+			state := state
 			// Sync
 			if !state.Reconciled || (comp.DeletionTimestamp != nil && !state.Deleted) {
 				reconciled = false
@@ -66,6 +68,9 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			// Readiness
 			if state.Ready == nil {
 				ready = false
+			}
+			if state.Ready != nil && (maxReadyTime == nil || maxReadyTime.Before(state.Ready)) {
+				maxReadyTime = state.Ready
 			}
 		}
 	}
@@ -76,7 +81,7 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	now := metav1.Now()
 	if ready {
-		comp.Status.CurrentSynthesis.Ready = &now
+		comp.Status.CurrentSynthesis.Ready = maxReadyTime
 	} else {
 		comp.Status.CurrentSynthesis.Ready = nil
 	}
