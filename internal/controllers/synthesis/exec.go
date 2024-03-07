@@ -79,7 +79,7 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	logger = logger.WithValues("synthesizerName", syn.Name)
 	ctx = logr.NewContext(ctx, logger)
 
-	if compGen < comp.Generation || (comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized) || comp.DeletionTimestamp != nil {
+	if compGen < comp.Generation || (comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil) || comp.DeletionTimestamp != nil {
 		return ctrl.Result{}, nil // old pod - don't bother synthesizing. The lifecycle controller will delete it
 	}
 
@@ -257,10 +257,11 @@ func (c *execController) writeSuccessStatus(ctx context.Context, comp *apiv1.Com
 		if comp.Status.CurrentSynthesis == nil {
 			comp.Status.CurrentSynthesis = &apiv1.Synthesis{}
 		}
-		if comp.Status.CurrentSynthesis.Synthesized {
+		if comp.Status.CurrentSynthesis.Synthesized != nil {
 			return nil // no updates needed
 		}
-		comp.Status.CurrentSynthesis.Synthesized = true
+		now := metav1.Now()
+		comp.Status.CurrentSynthesis.Synthesized = &now
 		comp.Status.CurrentSynthesis.ResourceSlices = refs
 
 		err = c.client.Status().Update(ctx, comp)

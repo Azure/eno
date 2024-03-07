@@ -6,6 +6,7 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -25,11 +26,12 @@ func testAggregation(t *testing.T, ready *bool, reconciled bool) {
 	require.NoError(t, cli.Create(ctx, slice))
 	require.NoError(t, cli.Status().Update(ctx, slice))
 
+	now := metav1.Now()
 	comp := &apiv1.Composition{}
 	comp.Name = "test"
 	comp.Namespace = "default"
 	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
-		Synthesized:    true,
+		Synthesized:    &now,
 		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
 	}
 	require.NoError(t, cli.Create(ctx, comp))
@@ -85,11 +87,12 @@ func TestStaleStatus(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, slice))
 	require.NoError(t, cli.Status().Update(ctx, slice))
 
+	now := metav1.Now()
 	comp := &apiv1.Composition{}
 	comp.Name = "test"
 	comp.Namespace = "default"
 	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
-		Synthesized:    true,
+		Synthesized:    &now,
 		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
 	}
 	require.NoError(t, cli.Create(ctx, comp))
@@ -118,12 +121,13 @@ func TestCleanupSafety(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, slice))
 	require.NoError(t, cli.Status().Update(ctx, slice))
 
+	now := metav1.Now()
 	comp := &apiv1.Composition{}
 	comp.Name = "test"
 	comp.Namespace = "default"
 	comp.Finalizers = []string{"test"}
 	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
-		Synthesized:    true,
+		Synthesized:    &now,
 		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
 	}
 	require.NoError(t, cli.Create(ctx, comp))

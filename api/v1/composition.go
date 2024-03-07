@@ -59,10 +59,11 @@ type Synthesis struct {
 	ObservedCompositionGeneration int64 `json:"observedCompositionGeneration,omitempty"`
 	ObservedSynthesizerGeneration int64 `json:"observedSynthesizerGeneration,omitempty"`
 
-	PodCreation    *metav1.Time        `json:"podCreation,omitempty"`
+	PodCreation *metav1.Time `json:"podCreation,omitempty"`
+	Synthesized *metav1.Time `json:"synthesized,omitempty"`
+
 	ResourceSlices []*ResourceSliceRef `json:"resourceSlices,omitempty"`
 
-	Synthesized bool `json:"synthesized,omitempty"`
-	Ready       bool `json:"ready,omitempty"`
-	Reconciled  bool `json:"reconciled,omitempty"`
+	Ready      bool `json:"ready,omitempty"`
+	Reconciled bool `json:"reconciled,omitempty"`
 }

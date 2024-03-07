@@ -321,6 +321,10 @@ func (in *Synthesis) DeepCopyInto(out *Synthesis) {
 		in, out := &in.PodCreation, &out.PodCreation
 		*out = (*in).DeepCopy()
 	}
+	if in.Synthesized != nil {
+		in, out := &in.Synthesized, &out.Synthesized
+		*out = (*in).DeepCopy()
+	}
 	if in.ResourceSlices != nil {
 		in, out := &in.ResourceSlices, &out.ResourceSlices
 		*out = make([]*ResourceSliceRef, len(*in))

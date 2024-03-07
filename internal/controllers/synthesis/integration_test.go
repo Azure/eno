@@ -47,7 +47,7 @@ func TestControllerHappyPath(t *testing.T) {
 		// The pod eventually performs the synthesis
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized
+			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
 		})
 	})
 
@@ -160,7 +160,7 @@ func TestControllerRollout(t *testing.T) {
 	t.Run("initial creation", func(t *testing.T) {
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized
+			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
 		})
 	})
 

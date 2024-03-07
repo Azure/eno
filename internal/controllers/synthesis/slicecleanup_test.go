@@ -5,7 +5,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -31,7 +33,7 @@ func TestSliceCleanupControllerOrphanedSlice(t *testing.T) {
 			return err
 		}
 		comp.Status.CurrentSynthesis = &apiv1.Synthesis{
-			Synthesized: true,
+			Synthesized: ptr.To(metav1.Now()),
 		}
 		return mgr.GetClient().Status().Update(ctx, comp)
 	})

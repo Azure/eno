@@ -87,7 +87,7 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis) ([]*Request, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	if synthesis == nil || !synthesis.Synthesized {
+	if synthesis == nil || synthesis.Synthesized == nil {
 		// synthesis is still in progress
 		return nil, nil
 	}

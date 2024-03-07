@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/flowcontrol"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -95,7 +96,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	if comp.DeletionTimestamp != nil {
 		// If the composition was being synthesized at the time of deletion we need to swap the previous
 		// state back to current. Otherwise we'll get stuck waiting for a synthesis that can't happen.
-		if comp.Status.CurrentSynthesis == nil || !comp.Status.CurrentSynthesis.Synthesized {
+		if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil {
 			comp.Status.CurrentSynthesis = comp.Status.PreviousSynthesis
 			comp.Status.PreviousSynthesis = nil
 			err = c.client.Status().Update(ctx, comp)
@@ -114,7 +115,8 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 			comp.Status.CurrentSynthesis.ObservedCompositionGeneration = comp.Generation
 			comp.Status.CurrentSynthesis.Ready = false
 			comp.Status.CurrentSynthesis.Reconciled = false
-			comp.Status.CurrentSynthesis.Synthesized = true // in case the previous synthesis failed (TODO I don't think this actually works)
+			now := metav1.Now()
+			comp.Status.CurrentSynthesis.Synthesized = &now // in case the previous synthesis failed (TODO I don't think this actually works)
 			err = c.client.Status().Update(ctx, comp)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("updating current composition generation: %w", err)
@@ -155,7 +157,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// No need to create a pod if everything is in sync
-	if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized || comp.DeletionTimestamp != nil {
+	if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil || comp.DeletionTimestamp != nil {
 		return ctrl.Result{}, nil
 	}
 
@@ -203,7 +205,7 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 		}
 
 		// Synthesis is done
-		if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized {
+		if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil {
 			if comp.Status.CurrentSynthesis.PodCreation != nil {
 				logger = logger.WithValues("latency", time.Since(comp.Status.CurrentSynthesis.PodCreation.Time).Milliseconds())
 			}
@@ -227,7 +229,7 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 
 func swapStates(comp *apiv1.Composition) {
 	// If the previous state has been synthesized but not the current, keep the previous to avoid orphaning deleted resources
-	if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized {
+	if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil {
 		comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
 	}
 	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
