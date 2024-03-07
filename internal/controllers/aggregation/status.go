@@ -34,7 +34,7 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition: %w", err))
 	}
-	if comp.Status.CurrentSynthesis == nil || !comp.Status.CurrentSynthesis.Synthesized || (comp.Status.CurrentSynthesis.Ready && comp.Status.CurrentSynthesis.Reconciled) {
+	if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || (comp.Status.CurrentSynthesis.Ready && comp.Status.CurrentSynthesis.Reconciled) {
 		return ctrl.Result{}, nil
 	}
 

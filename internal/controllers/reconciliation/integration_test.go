@@ -478,8 +478,9 @@ func TestReconcileStatus(t *testing.T) {
 	}
 	require.NoError(t, upstream.Create(ctx, slice))
 
+	now := metav1.Now()
 	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
-		Synthesized:    true,
+		Synthesized:    &now,
 		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
 	}
 	require.NoError(t, upstream.Status().Update(ctx, comp))
@@ -623,10 +624,11 @@ func TestMidSynthesisDeletion(t *testing.T) {
 
 	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		now := metav1.Now()
 		comp.Status.CurrentSynthesis = &apiv1.Synthesis{
 			ObservedCompositionGeneration: comp.Generation,
 			ObservedSynthesizerGeneration: syn.Generation,
-			Synthesized:                   true,
+			Synthesized:                   &now,
 			ResourceSlices:                []*apiv1.ResourceSliceRef{{Name: rs.Name}},
 		}
 		return upstream.Status().Update(ctx, comp)
@@ -653,7 +655,7 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	// Wait for the state to be swapped
 	testutil.Eventually(t, func() bool {
 		err = upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentSynthesis != nil && !comp.Status.CurrentSynthesis.Synthesized
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized == nil
 	})
 
 	// Delete the composition

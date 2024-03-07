@@ -5,7 +5,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -32,7 +34,7 @@ func TestReconstituterIntegration(t *testing.T) {
 	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
 		ObservedCompositionGeneration: comp.Generation,
 		ResourceSlices:                []*apiv1.ResourceSliceRef{{Name: "test-slice"}},
-		Synthesized:                   true,
+		Synthesized:                   ptr.To(metav1.Now()),
 	}
 	require.NoError(t, client.Status().Update(ctx, comp))
 	compRef := NewCompositionRef(comp)

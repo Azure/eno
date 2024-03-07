@@ -96,7 +96,8 @@ spec:
                       type: object
                     type: array
                   synthesized:
-                    type: boolean
+                    format: date-time
+                    type: string
                 type: object
               previousSynthesis:
                 description: Synthesis represents a Synthesizer's specific synthesis
@@ -123,7 +124,8 @@ spec:
                       type: object
                     type: array
                   synthesized:
-                    type: boolean
+                    format: date-time
+                    type: string
                 type: object
             type: object
         type: object

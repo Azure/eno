@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -35,7 +37,7 @@ func TestManagerBasics(t *testing.T) {
 	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
 		ObservedCompositionGeneration: comp.Generation,
 		ResourceSlices:                []*apiv1.ResourceSliceRef{{Name: "test-slice"}},
-		Synthesized:                   true,
+		Synthesized:                   ptr.To(metav1.Now()),
 	}
 	require.NoError(t, client.Status().Update(ctx, comp))
 	tr.comp = NewCompositionRef(comp)

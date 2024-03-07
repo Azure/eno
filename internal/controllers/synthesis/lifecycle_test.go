@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -145,7 +146,7 @@ var shouldDeletePodTests = []struct {
 			},
 			Status: apiv1.CompositionStatus{
 				CurrentSynthesis: &apiv1.Synthesis{
-					Synthesized: true,
+					Synthesized: ptr.To(metav1.Now()),
 				},
 			},
 		},
@@ -173,7 +174,7 @@ var shouldDeletePodTests = []struct {
 			},
 			Status: apiv1.CompositionStatus{
 				CurrentSynthesis: &apiv1.Synthesis{
-					Synthesized: true,
+					Synthesized: ptr.To(metav1.Now()),
 				},
 			},
 		},

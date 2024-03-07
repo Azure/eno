@@ -64,7 +64,7 @@ func TestExecIntegrationHappyPath(t *testing.T) {
 	// The pod eventually performs the synthesis
 	testutil.SomewhatEventually(t, time.Second*30, func() bool {
 		err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
 	})
 
 	// The resulting input slice should contain a copy of the input
