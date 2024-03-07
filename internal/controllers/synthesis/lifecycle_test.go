@@ -80,7 +80,7 @@ func TestCompositionDeletion(t *testing.T) {
 	// Mark the composition as reconciled
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Status.CurrentSynthesis.Reconciled = true
+		comp.Status.CurrentSynthesis.Reconciled = ptr.To(metav1.Now())
 		return cli.Status().Update(ctx, comp)
 	})
 	require.NoError(t, err)
