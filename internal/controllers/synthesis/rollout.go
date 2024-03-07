@@ -98,6 +98,7 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if syn.Status.CurrentGeneration != syn.Generation {
 		previousTime := syn.Status.LastRolloutTime
 		now := metav1.Now()
+		syn.Status.LastRolloutTime = &now
 		syn.Status.CurrentGeneration = syn.Generation
 		if err := c.client.Status().Update(ctx, syn); err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating synthesizer's current generation: %w", err)
