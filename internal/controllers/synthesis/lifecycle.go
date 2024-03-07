@@ -113,7 +113,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		// the status without actually synthesizing.
 		if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation {
 			comp.Status.CurrentSynthesis.ObservedCompositionGeneration = comp.Generation
-			comp.Status.CurrentSynthesis.Ready = false
+			comp.Status.CurrentSynthesis.Ready = nil
 			comp.Status.CurrentSynthesis.Reconciled = nil
 			now := metav1.Now()
 			comp.Status.CurrentSynthesis.Synthesized = &now // in case the previous synthesis failed (TODO I don't think this actually works)
