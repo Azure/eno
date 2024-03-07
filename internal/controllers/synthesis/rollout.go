@@ -90,7 +90,7 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
 		}
-		logger.Info("advancing synthesizer rollout process")
+		logger.V(0).Info("advancing synthesizer rollout process")
 		return ctrl.Result{RequeueAfter: syn.Spec.RolloutCooldown.Duration}, nil
 	}
 
@@ -108,7 +108,7 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			logger = logger.WithValues("latency", now.Sub(previousTime.Time).Milliseconds())
 		}
 		if len(compList.Items) > 0 { // log doesn't make sense if the synthesizer wasn't actually rolled out
-			logger.Info("finished rolling out latest synthesizer version")
+			logger.V(0).Info("finished rolling out latest synthesizer version")
 		}
 		return ctrl.Result{}, nil
 	}

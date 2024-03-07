@@ -40,7 +40,7 @@ func (c *execController) buildInputsJson(ctx context.Context, comp *apiv1.Compos
 		}
 		appendInputNameAnnotation(&ref, input)
 
-		logger.V(1).Info("retrieved input resource", "resourceName", input.GetName(), "resourceNamespace", input.GetNamespace(), "resourceKind", input.GetKind(), "latency", time.Since(start).Milliseconds())
+		logger.V(0).Info("retrieved input resource", "resourceName", input.GetName(), "resourceNamespace", input.GetNamespace(), "resourceKind", input.GetKind(), "latency", time.Since(start).Milliseconds())
 		inputs = append(inputs, input)
 	}
 
@@ -100,7 +100,7 @@ func (c *execController) writeOutputToSlices(ctx context.Context, comp *apiv1.Co
 			return nil, fmt.Errorf("creating resource slice %d: %w", i, err)
 		}
 
-		logger.V(1).Info("wrote resource slice", "resourceSliceName", slice.Name, "latency", time.Since(start).Milliseconds())
+		logger.V(0).Info("wrote resource slice", "resourceSliceName", slice.Name, "latency", time.Since(start).Milliseconds())
 		sliceRefs[i] = &apiv1.ResourceSliceRef{Name: slice.Name}
 	}
 
