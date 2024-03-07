@@ -58,7 +58,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating composition: %w", err)
 		}
-		logger.Info("added cleanup finalizer to composition")
+		logger.V(1).Info("added cleanup finalizer to composition")
 		return ctrl.Result{}, nil
 	}
 
@@ -84,7 +84,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		if err := c.client.Delete(ctx, toDelete); err != nil {
 			return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("deleting pod: %w", err))
 		}
-		logger.Info("deleted synthesizer pod", "podName", toDelete.Name)
+		logger.V(0).Info("deleted synthesizer pod", "podName", toDelete.Name)
 		return ctrl.Result{}, nil
 	}
 	if exists {
@@ -103,7 +103,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("reverting swapped status for deletion: %w", err)
 			}
-			logger.Info("reverted swapped status for deletion")
+			logger.V(0).Info("reverted swapped status for deletion")
 			return ctrl.Result{}, nil
 		}
 
@@ -121,7 +121,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("updating current composition generation: %w", err)
 			}
-			logger.Info("updated composition status to reflect deletion")
+			logger.V(0).Info("updated composition status to reflect deletion")
 			return ctrl.Result{}, nil
 		}
 
@@ -140,7 +140,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 				return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
 			}
 
-			logger.Info("removed finalizer from composition")
+			logger.V(0).Info("removed finalizer from composition")
 		}
 
 		return ctrl.Result{}, nil
@@ -152,7 +152,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
 		}
-		logger.Info("start to synthesize")
+		logger.V(0).Info("start to synthesize")
 		return ctrl.Result{}, nil
 	}
 
@@ -167,7 +167,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreAlreadyExists(fmt.Errorf("creating pod: %w", err))
 	}
-	logger.Info("created synthesizer pod", "podName", pod.Name)
+	logger.V(0).Info("created synthesizer pod", "podName", pod.Name)
 	sytheses.Inc()
 
 	return ctrl.Result{}, nil

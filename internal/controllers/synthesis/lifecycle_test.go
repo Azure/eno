@@ -346,7 +346,7 @@ func TestShouldDeletePod(t *testing.T) {
 			logger, pod, exists := shouldDeletePod(logger, tc.Composition, tc.Synth, &corev1.PodList{Items: tc.Pods})
 			assert.Equal(t, tc.PodShouldExist, exists)
 			assert.Equal(t, tc.PodShouldBeDeleted, pod != nil)
-			logger.Info("logging to see the appended fields for debugging purposes")
+			logger.V(0).Info("logging to see the appended fields for debugging purposes")
 		})
 	}
 }

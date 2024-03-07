@@ -95,7 +95,7 @@ func (c *cache) Fill(ctx context.Context, comp *apiv1.Composition, synthesis *ap
 	compNSN := types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
 	c.synthesesByComposition[compNSN] = append(c.synthesesByComposition[compNSN], synKey.Generation)
 
-	logger.Info("cache filled")
+	logger.V(0).Info("cache filled")
 	return requests, nil
 }
 

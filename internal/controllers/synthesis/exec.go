@@ -141,7 +141,7 @@ func (c *execController) fetchPreviousSlices(ctx context.Context, comp *apiv1.Co
 		slice.Namespace = comp.Namespace
 		err := c.client.Get(ctx, client.ObjectKeyFromObject(slice), slice)
 		if errors.IsNotFound(err) {
-			logger.Info("resource slice referenced by composition was not found - skipping", "resourceSliceName", slice.Name)
+			logger.V(0).Info("resource slice referenced by composition was not found - skipping", "resourceSliceName", slice.Name)
 			continue
 		}
 		if err != nil {
@@ -269,7 +269,7 @@ func (c *execController) writeSuccessStatus(ctx context.Context, comp *apiv1.Com
 			return err
 		}
 
-		logger.V(1).Info("composition status has been updated following successful synthesis")
+		logger.V(0).Info("composition status has been updated following successful synthesis")
 		return nil
 	})
 }
