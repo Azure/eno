@@ -23,14 +23,21 @@ func main() {
 	}
 }
 
+// TODO: Handle case where resource slices are already deleted but comp still references them
+
 func run() error {
 	ctx := ctrl.SetupSignalHandler()
 	var (
 		debugLogging bool
 		synconf      = &synthesis.Config{}
+
+		mgrOpts = &manager.Options{
+			Rest: ctrl.GetConfigOrDie(),
+		}
 	)
 	flag.Float64Var(&synconf.SliceCreationQPS, "slice-creation-qps", 5, "Max QPS for writing synthesized resources into resource slices")
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
+	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 
 	zapCfg := zap.NewProductionConfig()
@@ -43,9 +50,7 @@ func run() error {
 	}
 	logger := zapr.NewLogger(zl)
 
-	mgr, err := manager.New(logger, &manager.Options{
-		Rest: ctrl.GetConfigOrDie(),
-	})
+	mgr, err := manager.New(logger, mgrOpts)
 	if err != nil {
 		return fmt.Errorf("constructing manager: %w", err)
 	}
