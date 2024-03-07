@@ -82,11 +82,21 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	now := metav1.Now()
 	if ready {
 		comp.Status.CurrentSynthesis.Ready = maxReadyTime
+
+		if synthed := comp.Status.CurrentSynthesis.Synthesized; synthed != nil {
+			latency := maxReadyTime.Sub(synthed.Time)
+			logger.V(0).Info("composition became ready", "latency", latency.Milliseconds())
+		}
 	} else {
 		comp.Status.CurrentSynthesis.Ready = nil
 	}
 	if reconciled {
 		comp.Status.CurrentSynthesis.Reconciled = &now
+
+		if synthed := comp.Status.CurrentSynthesis.Synthesized; synthed != nil {
+			latency := now.Sub(synthed.Time)
+			logger.V(0).Info("composition was reconciled", "latency", latency.Milliseconds())
+		}
 	} else {
 		comp.Status.CurrentSynthesis.Reconciled = nil
 	}
