@@ -26,17 +26,20 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// TODO: Set per-operation context timeouts
+
 var insecureLogPatch = os.Getenv("INSECURE_LOG_PATCH") == "true"
 
 type Controller struct {
-	client         client.Client
-	resourceClient reconstitution.Client
+	client                client.Client
+	resourceClient        reconstitution.Client
+	readinessPollInterval time.Duration
 
 	upstreamClient client.Client
 	discovery      *discoveryCache
 }
 
-func New(mgr *reconstitution.Manager, downstream *rest.Config, discoveryRPS float32, rediscoverWhenNotFound bool) error {
+func New(mgr *reconstitution.Manager, downstream *rest.Config, discoveryRPS float32, rediscoverWhenNotFound bool, readinessPollInterval time.Duration) error {
 	upstreamClient, err := client.New(downstream, client.Options{
 		Scheme: runtime.NewScheme(), // empty scheme since we shouldn't rely on compile-time types
 	})
@@ -50,10 +53,11 @@ func New(mgr *reconstitution.Manager, downstream *rest.Config, discoveryRPS floa
 	}
 
 	return mgr.Add(&Controller{
-		client:         mgr.Manager.GetClient(),
-		resourceClient: mgr.GetClient(),
-		upstreamClient: upstreamClient,
-		discovery:      disc,
+		client:                mgr.Manager.GetClient(),
+		resourceClient:        mgr.GetClient(),
+		readinessPollInterval: readinessPollInterval,
+		upstreamClient:        upstreamClient,
+		discovery:             disc,
 	})
 }
 
@@ -127,18 +131,47 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		}
 	}
 
+	// Evaluate resource readiness
+	// - Readiness checks are skipped when this version of the resource's desired state has already become ready
+	// - Readiness checks are skipped when the resource hasn't changed since the last check
+	// - Readiness defaults to true if no checks are given
+	ready := true
+	if hasChanged && len(resource.ReadinessChecks) > 0 {
+		slice := &apiv1.ResourceSlice{}
+		err = c.client.Get(ctx, req.Manifest.Slice, slice)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
+		}
+		if len(slice.Status.Resources) > req.Manifest.Index {
+			status := slice.Status.Resources[req.Manifest.Index]
+			if status.Ready == nil || !*status.Ready {
+				for _, check := range resource.ReadinessChecks {
+					if r := check.Eval(ctx, current); !r {
+						ready = false
+					}
+				}
+			}
+		} else {
+			ready = false
+		}
+	}
+
+	// Store the results
 	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) *apiv1.ResourceState {
-		if rs.Deleted == resource.Deleted() && rs.Reconciled {
+		if rs.Deleted == resource.Deleted() && rs.Reconciled && rs.Ready != nil && *rs.Ready == ready {
 			return nil
 		}
 		return &apiv1.ResourceState{
 			Deleted:    resource.Deleted(),
+			Ready:      &ready,
 			Reconciled: true,
 		}
 	})
-
 	if modified {
 		return ctrl.Result{Requeue: true}, nil
+	}
+	if !ready {
+		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}
 	if resource != nil && !resource.Deleted() && resource.Manifest.ReconcileInterval != nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(resource.Manifest.ReconcileInterval.Duration, 0.1)}, nil
@@ -200,7 +233,7 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 		logger.V(1).Info("skipping empty patch")
 		return false, nil
 	}
-  reconciliationActions.WithLabelValues("patch").Inc()
+	reconciliationActions.WithLabelValues("patch").Inc()
 	if insecureLogPatch {
 		logger.V(1).Info("INSECURE logging patch", "patch", string(patch))
 	}

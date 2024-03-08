@@ -12,8 +12,15 @@ var (
 			Help: "Count of batch updates to resource slice status",
 		},
 	)
+
+	celEvalCost = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "eno_cel_eval_cost_total",
+			Help: "Total cost of all evaluated CEL expressions",
+		},
+	)
 )
 
 func init() {
-	metrics.Registry.MustRegister(discoveryCacheChanges)
+	metrics.Registry.MustRegister(discoveryCacheChanges, celEvalCost)
 }

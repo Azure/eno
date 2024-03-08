@@ -5,12 +5,14 @@ import (
 	"sync"
 	"time"
 
+	celtypes "github.com/google/cel-go/common/types"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/google/cel-go/cel"
 )
 
 // Reconciler is implemented by types that can reconcile individual, reconstituted resources.
@@ -38,10 +40,11 @@ type Resource struct {
 	lastSeenMeta
 	lastReconciledMeta
 
-	Ref          ResourceRef
-	Manifest     *apiv1.Manifest
-	GVK          schema.GroupVersionKind
-	SliceDeleted bool
+	Ref             ResourceRef
+	Manifest        *apiv1.Manifest
+	GVK             schema.GroupVersionKind
+	SliceDeleted    bool
+	ReadinessChecks []*ReadinessCheck
 }
 
 func (r *Resource) Deleted() bool { return r.SliceDeleted || r.Manifest.Deleted }
@@ -49,6 +52,41 @@ func (r *Resource) Deleted() bool { return r.SliceDeleted || r.Manifest.Deleted 
 func (r *Resource) Parse() (*unstructured.Unstructured, error) {
 	u := &unstructured.Unstructured{}
 	return u, u.UnmarshalJSON([]byte(r.Manifest.Manifest))
+}
+
+type ReadinessCheck struct {
+	Name    string
+	program cel.Program
+	env     *cel.Env
+}
+
+func newReadinessCheck(env *cel.Env, expr string) (*ReadinessCheck, error) {
+	ast, iss := env.Compile(expr)
+	if iss != nil && iss.Err() != nil {
+		return nil, iss.Err()
+	}
+	prgm, err := env.Program(ast) // TODO: Set InterruptCheckFrequency
+	if err != nil {
+		return nil, err
+	}
+	return &ReadinessCheck{program: prgm, env: env}, nil
+}
+
+func (r *ReadinessCheck) Eval(ctx context.Context, resource *unstructured.Unstructured) bool {
+	if resource == nil {
+		return false
+	}
+	val, details, err := r.program.ContextEval(ctx, map[string]any{"self": resource.Object})
+	if details != nil {
+		cost := details.ActualCost()
+		if cost != nil {
+			celEvalCost.Add(float64(*cost))
+		}
+	}
+	if err != nil {
+		return false
+	}
+	return val == celtypes.True
 }
 
 // ResourceRef refers to a specific synthesized resource.

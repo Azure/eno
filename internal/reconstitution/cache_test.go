@@ -46,6 +46,9 @@ func TestCacheBasics(t *testing.T) {
 		assert.Equal(t, "ConfigMap", resource.GVK.Kind)
 		assert.Equal(t, "slice-0-resource-0", resource.Ref.Name)
 		assert.False(t, resource.Manifest.Deleted)
+		assert.Len(t, resource.ReadinessChecks, 2)
+		assert.Equal(t, "default", resource.ReadinessChecks[0].Name)
+		assert.Equal(t, "test-check", resource.ReadinessChecks[1].Name)
 
 		// negative
 		copy := *compRef
@@ -203,6 +206,10 @@ func newCacheTestFixtures(sliceCount, resPerSliceCount int) (*apiv1.Composition,
 			resource.Namespace = "resource-ns"
 			resource.Kind = "ConfigMap"
 			resource.APIVersion = "v1"
+			resource.Annotations = map[string]string{
+				"eno.azure.io/readiness":            "self.foo > self.bar",
+				"eno.azure.io/readiness-test-check": "self.bar > self.baz",
+			}
 			js, _ := json.Marshal(resource)
 
 			slice.Spec.Resources[j] = apiv1.Manifest{
