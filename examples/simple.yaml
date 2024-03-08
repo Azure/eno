@@ -19,7 +19,7 @@ spec:
             "kind":"ConfigMap",
             "metadata":{
               "name":"some-config",
-              "namespace": "default",
+              "namespace": "default"
             }
           }
         ]
