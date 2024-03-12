@@ -106,8 +106,6 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, nil
 		}
 
-		// TODO: Is it possible to delete before the first synthesis?
-
 		// Deletion increments the composition's generation, but the reconstitution cache is only invalidated
 		// when the synthesized generation (from the status) changes, which will never happen because synthesis
 		// is righly disabled for deleted compositions. We break out of this deadlock condition by updating
@@ -127,7 +125,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 
 		// Remove the finalizer when all pods and slices have been deleted
 		if comp.Status.CurrentState != nil && (!comp.Status.CurrentState.Reconciled) || comp.Status.CurrentState.ObservedCompositionGeneration != comp.Generation {
-			logger.V(1).Info("refusing to remove composition finalizer because some resources have not yet been cleaned up")
+			logger.V(1).Info("refusing to remove composition finalizer because it is still being reconciled")
 			return ctrl.Result{}, nil
 		}
 		if hasRunningPod(pods) {

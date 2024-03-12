@@ -58,12 +58,12 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 		for _, state := range slice.Status.Resources {
 			// Sync
-			if reconciled && (!state.Reconciled || (comp.DeletionTimestamp != nil && !state.Deleted)) {
+			if !state.Reconciled || (comp.DeletionTimestamp != nil && !state.Deleted) {
 				reconciled = false
 			}
 
 			// Readiness
-			if ready && state.Ready == nil || !*state.Ready {
+			if state.Ready == nil || !*state.Ready {
 				ready = false
 			}
 		}
