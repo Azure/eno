@@ -108,6 +108,7 @@ func NewManager(t *testing.T) *Manager {
 		RestConfig:           cfg,
 		DownstreamRestConfig: cfg, // possible override below
 		DownstreamClient:     mgr.GetClient(),
+		DownstreamEnv:        env,
 	}
 
 	dir := os.Getenv("DOWNSTREAM_KUBEBUILDER_ASSETS")
@@ -142,6 +143,7 @@ func NewManager(t *testing.T) *Manager {
 	})
 	m.DownstreamRestConfig, err = downstreamEnv.Start()
 	require.NoError(t, err)
+	m.DownstreamEnv = downstreamEnv
 
 	m.DownstreamClient, err = client.New(m.DownstreamRestConfig, client.Options{Scheme: mgr.GetScheme()})
 	require.NoError(t, err)
@@ -177,6 +179,7 @@ type Manager struct {
 	RestConfig           *rest.Config
 	DownstreamRestConfig *rest.Config  // may or may not == RestConfig
 	DownstreamClient     client.Client // may or may not == Manager.GetClient()
+	DownstreamEnv        *envtest.Environment
 }
 
 func (m *Manager) Start(t *testing.T) {

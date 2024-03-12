@@ -126,7 +126,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	// Skip without logging since this is a very hot path
 	var modified bool
 	if hasChanged {
-		modified, err = c.reconcileResource(ctx, prev, resource, current)
+		modified, err = c.reconcileResource(ctx, comp, prev, resource, current)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -178,7 +178,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	return ctrl.Result{}, nil
 }
 
-func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) (bool, error) {
+func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composition, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) (bool, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 	start := time.Now()
 	defer func() {
@@ -188,6 +188,9 @@ func (c *Controller) reconcileResource(ctx context.Context, prev, resource *reco
 	if resource.Deleted() {
 		if current == nil || current.GetDeletionTimestamp() != nil {
 			return false, nil // already deleted - nothing to do
+		}
+		if comp.Annotations["eno.azure.io/deletion-strategy"] == "orphan" {
+			return true, nil // signal that we deleted without actually doing so
 		}
 
 		reconciliationActions.WithLabelValues("delete").Inc()
