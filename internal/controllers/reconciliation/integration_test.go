@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/controllers/aggregation"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/reconstitution"
@@ -511,6 +512,7 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
+	require.NoError(t, aggregation.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
 		obj := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
@@ -586,6 +588,7 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
+	require.NoError(t, aggregation.NewStatusController(mgr.Manager))
 
 	// Test subject
 	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
@@ -682,6 +685,7 @@ func TestResourceReadiness(t *testing.T) {
 	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
+	require.NoError(t, aggregation.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
 		obj := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
@@ -736,6 +740,11 @@ func TestResourceReadiness(t *testing.T) {
 		return len(slices[0].Status.Resources) > 0 && isNotReady(slices[0].Status.Resources[0])
 	})
 
+	testutil.Eventually(t, func() bool {
+		err = upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentState != nil && !comp.Status.CurrentState.Ready
+	})
+
 	// Update resource to meet readiness criteria
 	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		err = upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn)
@@ -752,6 +761,26 @@ func TestResourceReadiness(t *testing.T) {
 			return false
 		}
 		return len(slices[0].Status.Resources) > 0 && isReady(slices[0].Status.Resources[0])
+	})
+
+	// The composition should also be updated
+	testutil.Eventually(t, func() bool {
+		err = upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentState != nil && comp.Status.CurrentState.Ready
+	})
+
+	// Update resource to not meet readiness criteria
+	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		err = upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+		syn.Spec.Image = "bar"
+		return upstream.Update(ctx, syn)
+	})
+	require.NoError(t, err)
+
+	// The composition status should revert back to not ready when re-synthesized
+	testutil.Eventually(t, func() bool {
+		err = upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentState != nil && !comp.Status.CurrentState.Ready
 	})
 }
 

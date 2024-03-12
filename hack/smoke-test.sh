@@ -23,8 +23,7 @@ while true; do
     json=$(kubectl get composition test-comp -o=json)
     echo "${json}"
 
-    # TODO: Check for readiness once supported
-    echo $json | jq --exit-status '.status.currentState.synthesized'
+    echo $json | jq --exit-status '.status.currentState.ready'
     if [[ $? -eq 0 ]]; then
         break
     else

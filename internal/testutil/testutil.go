@@ -47,7 +47,7 @@ func NewClientWithInterceptors(t testing.TB, ict *interceptor.Funcs) client.Clie
 
 	builder := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithStatusSubresource(&apiv1.ResourceSlice{})
+		WithStatusSubresource(&apiv1.ResourceSlice{}, &apiv1.Composition{})
 
 	if ict != nil {
 		builder.WithInterceptorFuncs(*ict)

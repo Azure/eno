@@ -35,7 +35,6 @@ func NewPodLifecycleController(mgr ctrl.Manager, cfg *Config) error {
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
-		Owns(&apiv1.ResourceSlice{}).
 		Owns(&corev1.Pod{}).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "podLifecycleController")).
 		Complete(c)
@@ -94,14 +93,6 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if comp.DeletionTimestamp != nil {
-		sliceList := &apiv1.ResourceSliceList{}
-		err = c.client.List(ctx, sliceList, client.MatchingFields{
-			manager.IdxResourceSlicesByComposition: comp.Name,
-		})
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("listing resource slices: %w", err)
-		}
-
 		// If the composition was being synthesized at the time of deletion we need to swap the previous
 		// state back to current. Otherwise we'll get stuck waiting for a synthesis that can't happen.
 		if comp.Status.CurrentState == nil || !comp.Status.CurrentState.Synthesized {
@@ -121,7 +112,9 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		// the status without actually synthesizing.
 		if comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration != comp.Generation {
 			comp.Status.CurrentState.ObservedCompositionGeneration = comp.Generation
-			comp.Status.CurrentState.Synthesized = true // in case the previous synthesis failed
+			comp.Status.CurrentState.Ready = false
+			comp.Status.CurrentState.Reconciled = false
+			comp.Status.CurrentState.Synthesized = true // in case the previous synthesis failed (TODO I don't think this actually works)
 			err = c.client.Status().Update(ctx, comp)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("updating current composition generation: %w", err)
@@ -131,9 +124,13 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		}
 
 		// Remove the finalizer when all pods and slices have been deleted
-		if len(sliceList.Items) > 0 || len(pods.Items) > 0 {
-			logger.V(1).Info(fmt.Sprintf("refusing to remove composition finalizer because %d associated resource slices and %d pods still exist", len(sliceList.Items), len(pods.Items)))
-			return ctrl.Result{}, nil // some resources still exist
+		if comp.Status.CurrentState != nil && (!comp.Status.CurrentState.Reconciled) || comp.Status.CurrentState.ObservedCompositionGeneration != comp.Generation {
+			logger.V(1).Info("refusing to remove composition finalizer because it is still being reconciled")
+			return ctrl.Result{}, nil
+		}
+		if hasRunningPod(pods) {
+			logger.V(1).Info("refusing to remove composition finalizer because at least one synthesizer pod still exists")
+			return ctrl.Result{}, nil
 		}
 		if controllerutil.RemoveFinalizer(comp, "eno.azure.io/cleanup") {
 			err = c.client.Update(ctx, comp)
@@ -141,7 +138,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 				return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
 			}
 
-			logger.Info("removed finalizer from composition because none of its resource slices or synthesizer pods remain")
+			logger.Info("removed finalizer from composition")
 		}
 
 		return ctrl.Result{}, nil
@@ -236,4 +233,13 @@ func swapStates(comp *apiv1.Composition) {
 	comp.Status.CurrentState = &apiv1.Synthesis{
 		ObservedCompositionGeneration: comp.Generation,
 	}
+}
+
+func hasRunningPod(list *corev1.PodList) bool {
+	for _, pod := range list.Items {
+		if pod.DeletionTimestamp == nil {
+			return true
+		}
+	}
+	return false
 }
