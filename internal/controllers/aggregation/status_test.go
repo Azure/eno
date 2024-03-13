@@ -138,6 +138,41 @@ func TestMissingResourceSlice(t *testing.T) {
 	assert.False(t, comp.Status.CurrentState.Ready)
 }
 
+func TestMissingResourceSliceDeleting(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+
+	ready := true
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-slice-1"
+	slice.Namespace = "default"
+	slice.Spec.Resources = []apiv1.Manifest{{Manifest: "{}"}}
+	slice.Status.Resources = []apiv1.ResourceState{{Ready: &ready, Reconciled: true}}
+	require.NoError(t, cli.Create(ctx, slice))
+	require.NoError(t, cli.Status().Update(ctx, slice))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test"
+	comp.Namespace = "default"
+	comp.Finalizers = []string{"never-delete"}
+	comp.Status.CurrentState = &apiv1.Synthesis{
+		Synthesized:    true,
+		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}, {Name: "does-not-exist"}},
+	}
+	require.NoError(t, cli.Create(ctx, comp))
+	require.NoError(t, cli.Status().Update(ctx, comp))
+	require.NoError(t, cli.Delete(ctx, comp))
+
+	a := &statusController{client: cli}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
+	_, err := a.Reconcile(ctx, req)
+	require.NoError(t, err)
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	assert.True(t, comp.Status.CurrentState.Reconciled)
+	assert.True(t, comp.Status.CurrentState.Ready)
+}
+
 func TestCleanupSafety(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)

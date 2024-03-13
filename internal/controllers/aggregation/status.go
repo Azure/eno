@@ -47,8 +47,8 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		slice.Namespace = comp.Namespace
 		err := s.client.Get(ctx, client.ObjectKeyFromObject(slice), slice)
 		if errors.IsNotFound(err) {
-			ready = false
-			reconciled = false
+			ready = comp.DeletionTimestamp != nil
+			reconciled = comp.DeletionTimestamp != nil
 			continue
 		}
 		if err != nil {
