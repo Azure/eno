@@ -117,12 +117,10 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 	logger := logr.FromContextOrDiscard(ctx)
 
 	slice := &apiv1.ResourceSlice{}
-	err := w.client.Get(ctx, sliceNSN, slice)
-	if errors.IsNotFound(err) {
-		logger.V(0).Info("slice has been deleted - dropping status update")
-		return true
-	}
-	if err != nil {
+	slice.Name = sliceNSN.Name
+	slice.Namespace = sliceNSN.Namespace
+	err := w.client.Get(ctx, client.ObjectKeyFromObject(slice), slice)
+	if client.IgnoreNotFound(err) != nil {
 		logger.Error(err, "unable to get resource slice")
 		return false
 	}
@@ -133,6 +131,10 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 		copy := slice.DeepCopy()
 		copy.Status.Resources = make([]apiv1.ResourceState, len(slice.Spec.Resources))
 		err = w.client.Status().Update(ctx, copy)
+		if errors.IsNotFound(err) {
+			logger.V(0).Info("resource slice has been deleted - dropping enqueued status update")
+			return true
+		}
 		if err != nil {
 			logger.Error(err, "unable to update resource slice")
 			return false
