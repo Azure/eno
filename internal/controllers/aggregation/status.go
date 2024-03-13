@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -45,6 +46,11 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		slice.Name = ref.Name
 		slice.Namespace = comp.Namespace
 		err := s.client.Get(ctx, client.ObjectKeyFromObject(slice), slice)
+		if errors.IsNotFound(err) {
+			ready = false
+			reconciled = false
+			continue
+		}
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
 		}
