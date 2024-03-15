@@ -62,6 +62,18 @@ type ReadinessCheck struct {
 	env     *cel.Env
 }
 
+func MustReadinessCheckTest(expr string) *ReadinessCheck {
+	env, err := newCelEnv()
+	if err != nil {
+		panic(err)
+	}
+	check, err := newReadinessCheck(env, expr)
+	if err != nil {
+		panic(err)
+	}
+	return check
+}
+
 func newReadinessCheck(env *cel.Env, expr string) (*ReadinessCheck, error) {
 	ast, iss := env.Compile(expr)
 	if iss != nil && iss.Err() != nil {
@@ -74,9 +86,9 @@ func newReadinessCheck(env *cel.Env, expr string) (*ReadinessCheck, error) {
 	return &ReadinessCheck{program: prgm, env: env}, nil
 }
 
-func (r *ReadinessCheck) Eval(ctx context.Context, resource *unstructured.Unstructured) *metav1.Time {
+func (r *ReadinessCheck) Eval(ctx context.Context, resource *unstructured.Unstructured) (*Readiness, bool) {
 	if resource == nil {
-		return nil
+		return nil, false
 	}
 	val, details, err := r.program.ContextEval(ctx, map[string]any{"self": resource.Object})
 	if details != nil {
@@ -86,7 +98,7 @@ func (r *ReadinessCheck) Eval(ctx context.Context, resource *unstructured.Unstru
 		}
 	}
 	if err != nil {
-		return nil
+		return nil, false
 	}
 
 	// Support matching on condition structs.
@@ -102,17 +114,21 @@ func (r *ReadinessCheck) Eval(ctx context.Context, resource *unstructured.Unstru
 							ts.Time = parsed
 						}
 					}
-					return &ts
+					return &Readiness{ReadyTime: ts, PreciseTime: true}, true
 				}
 			}
 		}
 	}
 
 	if val == celtypes.True {
-		now := metav1.Now()
-		return &now
+		return &Readiness{ReadyTime: metav1.Now()}, true
 	}
-	return nil
+	return nil, false
+}
+
+type Readiness struct {
+	ReadyTime   metav1.Time
+	PreciseTime bool // true when time came from a condition, not the controller's metav1.Now
 }
 
 // ResourceRef refers to a specific synthesized resource.

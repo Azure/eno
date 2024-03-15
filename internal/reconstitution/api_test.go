@@ -37,10 +37,11 @@ var simpleConditionStatus = map[string]any{
 }
 
 var readinessEvalTests = []struct {
-	Name     string
-	Resource *unstructured.Unstructured
-	Expr     string
-	Expect   bool
+	Name          string
+	Resource      *unstructured.Unstructured
+	Expr          string
+	Expect        bool
+	ExpectPrecise bool
 }{
 	{
 		Name:     "empty",
@@ -93,10 +94,11 @@ var readinessEvalTests = []struct {
 		Expect: false,
 	},
 	{
-		Name:     "magic-condition-matcher-her",
-		Resource: &unstructured.Unstructured{Object: simpleConditionStatus},
-		Expr:     "self.status.conditions.filter(item, item.type == 'Test' && item.status == 'True')",
-		Expect:   true,
+		Name:          "magic-condition-matcher-her",
+		Resource:      &unstructured.Unstructured{Object: simpleConditionStatus},
+		Expr:          "self.status.conditions.filter(item, item.type == 'Test' && item.status == 'True')",
+		Expect:        true,
+		ExpectPrecise: true,
 	},
 }
 
@@ -109,12 +111,16 @@ func TestReadinessEval(t *testing.T) {
 			r, err := newReadinessCheck(env, tc.Expr)
 			require.NoError(t, err)
 
-			time := r.Eval(context.Background(), tc.Resource)
+			time, ok := r.Eval(context.Background(), tc.Resource)
 			assert.Equal(t, tc.Expect, time != nil)
+			assert.Equal(t, time != nil, ok)
+			assert.Equal(t, tc.ExpectPrecise, time != nil && time.PreciseTime)
 
 			// Make sure every program can be evaluated multiple times
-			time = r.Eval(context.Background(), tc.Resource)
+			time, ok = r.Eval(context.Background(), tc.Resource)
 			assert.Equal(t, tc.Expect, time != nil)
+			assert.Equal(t, time != nil, ok)
+			assert.Equal(t, tc.ExpectPrecise, time != nil && time.PreciseTime)
 		})
 	}
 }
