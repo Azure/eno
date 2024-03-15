@@ -1,7 +1,6 @@
 package synthesis
 
 import (
-	"fmt"
 	"math/rand"
 	"testing"
 	"time"
@@ -9,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -55,7 +55,7 @@ func TestControllerHappyPath(t *testing.T) {
 		// Updating the composition should cause re-synthesis
 		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			comp.Spec.Inputs = []apiv1.InputRef{{Name: "anything"}}
+			comp.Spec.ReconcileInterval = &metav1.Duration{Duration: time.Minute}
 			return cli.Update(ctx, comp)
 		})
 		require.NoError(t, err)
@@ -118,9 +118,7 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 			if client.IgnoreNotFound(err) != nil {
 				return err
 			}
-			comp.Spec.Inputs = []apiv1.InputRef{{
-				Name: fmt.Sprintf("some-unique-value-%d", i),
-			}}
+			comp.Spec.ReconcileInterval = &metav1.Duration{Duration: time.Minute * time.Duration(i)}
 			return cli.Update(ctx, comp)
 		})
 		require.NoError(t, err)
