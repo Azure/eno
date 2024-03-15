@@ -32,25 +32,6 @@ spec:
             type: object
           spec:
             properties:
-              inputs:
-                description: Inputs are given to the Synthesizer during synthesis.
-                items:
-                  properties:
-                    name:
-                      type: string
-                    resource:
-                      properties:
-                        apiVersion:
-                          type: string
-                        kind:
-                          type: string
-                        name:
-                          type: string
-                        namespace:
-                          type: string
-                      type: object
-                  type: object
-                type: array
               reconcileInterval:
                 description: Synthesized resources can optionally be reconciled at
                   a given interval. Per-resource jitter will be applied to avoid spikes

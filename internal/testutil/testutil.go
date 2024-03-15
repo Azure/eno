@@ -294,7 +294,7 @@ type ExecConn struct {
 	Calls atomic.Int64
 }
 
-func (e *ExecConn) Synthesize(ctx context.Context, syn *apiv1.Synthesizer, pod *corev1.Pod, inputsJson []byte) (io.Reader, error) {
+func (e *ExecConn) Synthesize(ctx context.Context, syn *apiv1.Synthesizer, pod *corev1.Pod) (io.Reader, error) {
 	defer e.Calls.Add(1)
 
 	objs := []client.Object{}

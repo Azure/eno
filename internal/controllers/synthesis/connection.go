@@ -21,7 +21,7 @@ import (
 )
 
 type SynthesizerConnection interface {
-	Synthesize(ctx context.Context, syn *apiv1.Synthesizer, pod *corev1.Pod, inputsJson []byte) (io.Reader, error)
+	Synthesize(ctx context.Context, syn *apiv1.Synthesizer, pod *corev1.Pod) (io.Reader, error)
 }
 
 type SynthesizerConnectionFunc func(ctx context.Context, syn *apiv1.Synthesizer, pod *corev1.Pod, inputsJson []byte) (io.Reader, error)
@@ -50,7 +50,7 @@ func NewSynthesizerConnection(mgr ctrl.Manager) (*SynthesizerPodConnection, erro
 	}, nil
 }
 
-func (s *SynthesizerPodConnection) Synthesize(ctx context.Context, syn *apiv1.Synthesizer, pod *corev1.Pod, inputsJson []byte) (io.Reader, error) {
+func (s *SynthesizerPodConnection) Synthesize(ctx context.Context, syn *apiv1.Synthesizer, pod *corev1.Pod) (io.Reader, error) {
 	req := s.execClient.
 		Post().
 		Namespace(pod.Namespace).
@@ -77,7 +77,6 @@ func (s *SynthesizerPodConnection) Synthesize(ctx context.Context, syn *apiv1.Sy
 	stderr := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 	err = executor.StreamWithContext(streamCtx, remotecommand.StreamOptions{
-		Stdin:  bytes.NewBuffer(append(inputsJson, '\x00')),
 		Stdout: stdout,
 		Stderr: stderr,
 	})
