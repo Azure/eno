@@ -321,3 +321,38 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 		assert.NotEqual(t, comp.Status.CurrentSynthesis.ResourceSlices, initialSlices)
 	})
 }
+
+func TestControllerBackoff(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	cli := mgr.GetClient()
+
+	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
+	require.NoError(t, NewStatusController(mgr.Manager))
+	require.NoError(t, NewRolloutController(mgr.Manager))
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn-1"
+	syn.Spec.Image = "initial-image"
+	syn.Spec.PodTimeout = &metav1.Duration{Duration: time.Millisecond * 2}
+	syn.Spec.ExecTimeout = &metav1.Duration{Duration: time.Millisecond}
+	require.NoError(t, cli.Create(ctx, syn))
+
+	start := time.Now()
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	t.Run("initial creation", func(t *testing.T) {
+		testutil.Eventually(t, func() bool {
+			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
+			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Attempts >= 3
+		})
+
+		// It shouldn't be possible to try three times within 1s
+		assert.Greater(t, int(time.Since(start).Milliseconds()), 1000)
+	})
+}

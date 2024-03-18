@@ -56,6 +56,8 @@ spec:
                 description: Synthesis represents a Synthesizer's specific synthesis
                   of a given Composition.
                 properties:
+                  attempts:
+                    type: integer
                   observedCompositionGeneration:
                     format: int64
                     type: integer
@@ -88,6 +90,8 @@ spec:
                 description: Synthesis represents a Synthesizer's specific synthesis
                   of a given Composition.
                 properties:
+                  attempts:
+                    type: integer
                   observedCompositionGeneration:
                     format: int64
                     type: integer

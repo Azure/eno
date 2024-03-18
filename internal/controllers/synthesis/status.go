@@ -8,6 +8,7 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -66,12 +67,13 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		synGen, _  = strconv.ParseInt(pod.Annotations["eno.azure.io/synthesizer-generation"], 10, 0)
 	)
 	logger.WithValues("synthesizerGeneration", synGen, "compositionGeneration", compGen)
-	if shouldWriteStatus(comp, compGen) {
+	if shouldWriteStatus(comp, compGen, pod.CreationTimestamp) {
 		if comp.Status.CurrentSynthesis == nil {
 			comp.Status.CurrentSynthesis = &apiv1.Synthesis{}
 		}
 		comp.Status.CurrentSynthesis.PodCreation = &pod.CreationTimestamp
 		comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration = synGen
+		comp.Status.CurrentSynthesis.Attempts++
 
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
@@ -97,7 +99,7 @@ func (c *statusController) removeFinalizer(ctx context.Context, pod *corev1.Pod)
 	return ctrl.Result{Requeue: true}, nil
 }
 
-func shouldWriteStatus(comp *apiv1.Composition, podCompGen int64) bool {
+func shouldWriteStatus(comp *apiv1.Composition, podCompGen int64, ctime metav1.Time) bool {
 	current := comp.Status.CurrentSynthesis
-	return current == nil || (current.ObservedCompositionGeneration == podCompGen && (current.PodCreation == nil || current.ObservedSynthesizerGeneration == 0))
+	return current == nil || (current.ObservedCompositionGeneration == podCompGen && (current.PodCreation == nil || current.ObservedSynthesizerGeneration == 0 || !current.PodCreation.Equal(&ctime)))
 }
