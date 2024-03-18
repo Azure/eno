@@ -77,6 +77,7 @@ func (s *SynthesizerPodConnection) Synthesize(ctx context.Context, syn *apiv1.Sy
 	stderr := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 	err = executor.StreamWithContext(streamCtx, remotecommand.StreamOptions{
+		Stdin:  bytes.NewBuffer([]byte{'\x00'}),
 		Stdout: stdout,
 		Stderr: stderr,
 	})
