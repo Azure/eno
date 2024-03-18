@@ -607,21 +607,11 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	comp.Spec.Synthesizer.Name = syn.Name
 	require.NoError(t, upstream.Create(ctx, comp))
 
-	sliceName := "test-slice-1"
-	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Status.CurrentState = &apiv1.Synthesis{
-			ObservedCompositionGeneration: comp.Generation,
-			ObservedSynthesizerGeneration: syn.Generation,
-			Synthesized:                   true,
-			ResourceSlices:                []*apiv1.ResourceSliceRef{{Name: sliceName}},
-		}
-		return upstream.Status().Update(ctx, comp)
-	})
-	require.NoError(t, err)
+	// Some controllers assume compositions will precede resource slices since that will always be true in real life
+	time.Sleep(time.Millisecond * 100)
 
 	rs := &apiv1.ResourceSlice{}
-	rs.Name = sliceName
+	rs.GenerateName = "test-"
 	rs.Namespace = "default"
 	rs.Finalizers = []string{"eno.azure.io/cleanup"}
 	rs.Spec.CompositionGeneration = comp.Generation
@@ -630,6 +620,18 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	}}
 	controllerutil.SetControllerReference(comp, rs, mgr.GetScheme())
 	require.NoError(t, upstream.Create(ctx, rs))
+
+	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Status.CurrentState = &apiv1.Synthesis{
+			ObservedCompositionGeneration: comp.Generation,
+			ObservedSynthesizerGeneration: syn.Generation,
+			Synthesized:                   true,
+			ResourceSlices:                []*apiv1.ResourceSliceRef{{Name: rs.Name}},
+		}
+		return upstream.Status().Update(ctx, comp)
+	})
+	require.NoError(t, err)
 
 	// Wait for resource to be created
 	obj := &corev1.ConfigMap{}
