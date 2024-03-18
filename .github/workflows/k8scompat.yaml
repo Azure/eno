@@ -37,6 +37,7 @@ jobs:
         downstreamApiserverMinorVersion: ${{ fromJson(needs.buildMatrix.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v3
+      - uses: azure/setup-helm@v4.1.0
 
       - name: Set up Go
         uses: actions/setup-go@v4

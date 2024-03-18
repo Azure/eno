@@ -8,6 +8,7 @@ jobs:
       APISERVER_VERSION: 1.28.x
     steps:
       - uses: actions/checkout@v3
+      - uses: azure/setup-helm@v4.1.0
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -20,4 +21,3 @@ jobs:
 
       - name: Run tests
         run: go test -v ./...
-
