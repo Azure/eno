@@ -32,6 +32,7 @@ func init() {
 
 var defaultConf = &synthesis.Config{
 	SliceCreationQPS: 20,
+	PodNamespace:     "default",
 }
 
 type crudTestCase struct {
