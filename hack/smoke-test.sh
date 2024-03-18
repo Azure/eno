@@ -12,7 +12,7 @@ done
 
 # Start Eno
 kubectl apply -f api/v1/config/crd
-go run ./cmd/eno-controller --health-probe-addr=:0 --metrics-addr=:0 &
+go run ./cmd/eno-controller --health-probe-addr=:0 --metrics-addr=:0 --synthesizer-pod-namespace=default &
 go run ./cmd/eno-reconciler --health-probe-addr=:0 --metrics-addr=:0 &
 
 # Apply example
@@ -23,7 +23,7 @@ while true; do
     json=$(kubectl get composition test-comp -o=json)
     echo "${json}"
 
-    echo $json | jq --exit-status '.status.currentState.ready'
+    echo $json | jq --exit-status '.status.currentSynthesis.ready'
     if [[ $? -eq 0 ]]; then
         break
     else
