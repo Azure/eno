@@ -606,9 +606,7 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	comp.Finalizers = []string{"eno.azure.io/cleanup"}
 	comp.Spec.Synthesizer.Name = syn.Name
 	require.NoError(t, upstream.Create(ctx, comp))
-
-	// Some controllers assume compositions will precede resource slices since that will always be true in real life
-	time.Sleep(time.Millisecond * 100)
+	comp.ResourceVersion = "" // forget this version so the next write guarantees sync'd informer
 
 	rs := &apiv1.ResourceSlice{}
 	rs.GenerateName = "test-"
