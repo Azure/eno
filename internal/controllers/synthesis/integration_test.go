@@ -18,6 +18,7 @@ import (
 
 var minimalTestConfig = &Config{
 	SliceCreationQPS: 15,
+	PodNamespace:     "default",
 }
 
 func TestControllerHappyPath(t *testing.T) {

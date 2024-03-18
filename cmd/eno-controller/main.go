@@ -36,9 +36,14 @@ func run() error {
 		}
 	)
 	flag.Float64Var(&synconf.SliceCreationQPS, "slice-creation-qps", 5, "Max QPS for writing synthesized resources into resource slices")
+	flag.StringVar(&synconf.PodNamespace, "synthesizer-pod-namespace", os.Getenv("POD_NAMESPACE"), "Namespace to create synthesizer pods in. Defaults to POD_NAMESPACE.")
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
+
+	if synconf.PodNamespace == "" {
+		return fmt.Errorf("a value is required in --synthesizer-pod-namespace or POD_NAMESPACE")
+	}
 
 	zapCfg := zap.NewProductionConfig()
 	if debugLogging {
