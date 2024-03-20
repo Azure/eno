@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -34,13 +35,14 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition: %w", err))
 	}
-	if comp.Status.CurrentState == nil || !comp.Status.CurrentState.Synthesized || (comp.Status.CurrentState.Ready && comp.Status.CurrentState.Reconciled) {
+	if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || (comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.Reconciled != nil) {
 		return ctrl.Result{}, nil
 	}
 
+	var maxReadyTime *metav1.Time
 	ready := true
 	reconciled := true
-	for _, ref := range comp.Status.CurrentState.ResourceSlices {
+	for _, ref := range comp.Status.CurrentSynthesis.ResourceSlices {
 		slice := &apiv1.ResourceSlice{}
 		slice.Name = ref.Name
 		slice.Namespace = comp.Namespace
@@ -57,29 +59,52 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 
 		for _, state := range slice.Status.Resources {
+			state := state
 			// Sync
 			if !state.Reconciled || (comp.DeletionTimestamp != nil && !state.Deleted) {
 				reconciled = false
 			}
 
 			// Readiness
-			if state.Ready == nil || !*state.Ready {
+			if state.Ready == nil {
 				ready = false
+			}
+			if state.Ready != nil && (maxReadyTime == nil || maxReadyTime.Before(state.Ready)) {
+				maxReadyTime = state.Ready
 			}
 		}
 	}
 
-	if comp.Status.CurrentState.Reconciled == reconciled && comp.Status.CurrentState.Ready == ready {
+	if (comp.Status.CurrentSynthesis.Reconciled != nil) == reconciled && (comp.Status.CurrentSynthesis.Ready != nil) == ready {
 		return ctrl.Result{}, nil
 	}
 
-	comp.Status.CurrentState.Ready = ready
-	comp.Status.CurrentState.Reconciled = reconciled
+	now := metav1.Now()
+	if ready {
+		comp.Status.CurrentSynthesis.Ready = maxReadyTime
+
+		if synthed := comp.Status.CurrentSynthesis.Synthesized; synthed != nil {
+			latency := maxReadyTime.Sub(synthed.Time)
+			logger.V(0).Info("composition became ready", "latency", latency.Milliseconds())
+		}
+	} else {
+		comp.Status.CurrentSynthesis.Ready = nil
+	}
+	if reconciled {
+		comp.Status.CurrentSynthesis.Reconciled = &now
+
+		if synthed := comp.Status.CurrentSynthesis.Synthesized; synthed != nil {
+			latency := now.Sub(synthed.Time)
+			logger.V(0).Info("composition was reconciled", "latency", latency.Milliseconds())
+		}
+	} else {
+		comp.Status.CurrentSynthesis.Reconciled = nil
+	}
 	err = s.client.Status().Update(ctx, comp)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 	}
-	logger.Info("aggregated resource status into composition")
+	logger.V(0).Info("aggregated resource status into composition")
 
 	return ctrl.Result{}, nil
 }

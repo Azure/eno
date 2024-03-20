@@ -26,6 +26,10 @@ spec:
         env:
           - name: PPROF_ADDR
             value: ":8888"
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
 
 ---
 

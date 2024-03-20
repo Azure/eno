@@ -43,7 +43,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, nil
 	}
 	if pod.Annotations == nil {
-		logger.V(1).Info("synthesizer pod without any annotations was found - removing its finalizer")
+		logger.V(0).Info("synthesizer pod without any annotations was found - removing its finalizer")
 		return c.removeFinalizer(ctx, pod)
 	}
 
@@ -52,7 +52,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	comp.Namespace = pod.Namespace
 	err = c.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 	if errors.IsNotFound(err) {
-		logger.V(1).Info("composition was deleted unexpectedly - releasing synthesizer pod")
+		logger.V(0).Info("composition was deleted unexpectedly - releasing synthesizer pod")
 		return c.removeFinalizer(ctx, pod)
 	}
 	if err != nil {
@@ -67,16 +67,16 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	)
 	logger.WithValues("synthesizerGeneration", synGen, "compositionGeneration", compGen)
 	if shouldWriteStatus(comp, compGen) {
-		if comp.Status.CurrentState == nil {
-			comp.Status.CurrentState = &apiv1.Synthesis{}
+		if comp.Status.CurrentSynthesis == nil {
+			comp.Status.CurrentSynthesis = &apiv1.Synthesis{}
 		}
-		comp.Status.CurrentState.PodCreation = &pod.CreationTimestamp
-		comp.Status.CurrentState.ObservedSynthesizerGeneration = synGen
+		comp.Status.CurrentSynthesis.PodCreation = &pod.CreationTimestamp
+		comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration = synGen
 
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 		}
-		logger.V(1).Info("wrote synthesizer pod metadata to composition")
+		logger.V(0).Info("wrote synthesizer pod metadata to composition")
 		return ctrl.Result{Requeue: true}, nil
 	}
 
@@ -93,11 +93,11 @@ func (c *statusController) removeFinalizer(ctx context.Context, pod *corev1.Pod)
 	if err := c.client.Update(ctx, pod); err != nil {
 		return ctrl.Result{}, fmt.Errorf("removing pod finalizer: %w", err)
 	}
-	logger.V(1).Info("synthesizer pod can safely be deleted")
+	logger.V(0).Info("released synthesizer pod finalizer")
 	return ctrl.Result{Requeue: true}, nil
 }
 
 func shouldWriteStatus(comp *apiv1.Composition, podCompGen int64) bool {
-	current := comp.Status.CurrentState
+	current := comp.Status.CurrentSynthesis
 	return current == nil || (current.ObservedCompositionGeneration == podCompGen && (current.PodCreation == nil || current.ObservedSynthesizerGeneration == 0))
 }

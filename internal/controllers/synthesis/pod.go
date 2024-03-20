@@ -15,7 +15,7 @@ import (
 func newPod(cfg *Config, scheme *runtime.Scheme, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev1.Pod {
 	pod := &corev1.Pod{}
 	pod.GenerateName = "synthesis-"
-	pod.Namespace = comp.Namespace
+	pod.Namespace = cfg.PodNamespace
 	pod.Finalizers = []string{"eno.azure.io/cleanup"}
 	pod.Labels = map[string]string{manager.ManagerLabelKey: manager.ManagerLabelValue}
 	pod.Annotations = map[string]string{

@@ -2,10 +2,12 @@ package aggregation
 
 import (
 	"testing"
+	"time"
 
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -13,23 +15,30 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 )
 
-func testAggregation(t *testing.T, ready *bool, reconciled bool) {
+func testAggregation(t *testing.T, ready bool, reconciled bool) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
+
+	var readyTime *metav1.Time
+	if ready {
+		now := metav1.Now()
+		readyTime = &now
+	}
 
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = "test-slice-1"
 	slice.Namespace = "default"
 	slice.Spec.Resources = []apiv1.Manifest{{Manifest: "{}"}}
-	slice.Status.Resources = []apiv1.ResourceState{{Ready: ready, Reconciled: reconciled}}
+	slice.Status.Resources = []apiv1.ResourceState{{Ready: readyTime, Reconciled: reconciled}}
 	require.NoError(t, cli.Create(ctx, slice))
 	require.NoError(t, cli.Status().Update(ctx, slice))
 
+	now := metav1.Now()
 	comp := &apiv1.Composition{}
 	comp.Name = "test"
 	comp.Namespace = "default"
-	comp.Status.CurrentState = &apiv1.Synthesis{
-		Synthesized:    true,
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		Synthesized:    &now,
 		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
 	}
 	require.NoError(t, cli.Create(ctx, comp))
@@ -41,36 +50,24 @@ func testAggregation(t *testing.T, ready *bool, reconciled bool) {
 	require.NoError(t, err)
 
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-	assert.Equal(t, reconciled, comp.Status.CurrentState.Reconciled)
-	if ready == nil {
-		assert.False(t, comp.Status.CurrentState.Ready)
-	} else {
-		assert.Equal(t, *ready, comp.Status.CurrentState.Ready)
-	}
+	assert.Equal(t, reconciled, comp.Status.CurrentSynthesis.Reconciled != nil)
+	assert.Equal(t, ready, comp.Status.CurrentSynthesis.Ready != nil)
 }
 
 func TestAggregationHappyPath(t *testing.T) {
-	ready := true
-	testAggregation(t, &ready, true)
+	testAggregation(t, true, true)
 }
 
 func TestAggregationNegative(t *testing.T) {
-	ready := false
-	testAggregation(t, &ready, false)
-}
-
-func TestAggregationReadinessUnknown(t *testing.T) {
-	testAggregation(t, nil, false)
+	testAggregation(t, false, false)
 }
 
 func TestAggregationReadyNotReconciled(t *testing.T) {
-	ready := true
-	testAggregation(t, &ready, false)
+	testAggregation(t, true, false)
 }
 
 func TestAggregationReconciledNotReady(t *testing.T) {
-	ready := false
-	testAggregation(t, &ready, true)
+	testAggregation(t, false, true)
 }
 
 func TestStaleStatus(t *testing.T) {
@@ -85,11 +82,12 @@ func TestStaleStatus(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, slice))
 	require.NoError(t, cli.Status().Update(ctx, slice))
 
+	now := metav1.Now()
 	comp := &apiv1.Composition{}
 	comp.Name = "test"
 	comp.Namespace = "default"
-	comp.Status.CurrentState = &apiv1.Synthesis{
-		Synthesized:    true,
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		Synthesized:    &now,
 		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
 	}
 	require.NoError(t, cli.Create(ctx, comp))
@@ -101,20 +99,20 @@ func TestStaleStatus(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-	assert.False(t, comp.Status.CurrentState.Reconciled)
-	assert.False(t, comp.Status.CurrentState.Ready)
+	assert.Nil(t, comp.Status.CurrentSynthesis.Reconciled)
+	assert.Nil(t, comp.Status.CurrentSynthesis.Ready)
 }
 
 func TestCleanupSafety(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
 
-	ready := true
+	now := metav1.Now()
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = "test-slice-1"
 	slice.Namespace = "default"
 	slice.Spec.Resources = []apiv1.Manifest{{Manifest: "{}"}}
-	slice.Status.Resources = []apiv1.ResourceState{{Ready: &ready, Reconciled: true}}
+	slice.Status.Resources = []apiv1.ResourceState{{Ready: &now, Reconciled: true}}
 	require.NoError(t, cli.Create(ctx, slice))
 	require.NoError(t, cli.Status().Update(ctx, slice))
 
@@ -122,8 +120,8 @@ func TestCleanupSafety(t *testing.T) {
 	comp.Name = "test"
 	comp.Namespace = "default"
 	comp.Finalizers = []string{"test"}
-	comp.Status.CurrentState = &apiv1.Synthesis{
-		Synthesized:    true,
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		Synthesized:    &now,
 		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
 	}
 	require.NoError(t, cli.Create(ctx, comp))
@@ -136,6 +134,44 @@ func TestCleanupSafety(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-	assert.False(t, comp.Status.CurrentState.Reconciled)
-	assert.True(t, comp.Status.CurrentState.Ready)
+	assert.Nil(t, comp.Status.CurrentSynthesis.Reconciled)
+	assert.NotNil(t, comp.Status.CurrentSynthesis.Ready)
+}
+
+func TestReadyTimeAggregation(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+
+	now := metav1.Now()
+	latestReadyTime := metav1.NewTime(now.Add(time.Hour))
+
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-slice-1"
+	slice.Namespace = "default"
+	slice.Spec.Resources = []apiv1.Manifest{{Manifest: "{}"}, {Manifest: "{}"}}
+	slice.Status.Resources = []apiv1.ResourceState{
+		{Ready: &latestReadyTime, Reconciled: true},
+		{Ready: &now, Reconciled: true},
+	}
+	require.NoError(t, cli.Create(ctx, slice))
+	require.NoError(t, cli.Status().Update(ctx, slice))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test"
+	comp.Namespace = "default"
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		Synthesized:    &now,
+		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
+	}
+	require.NoError(t, cli.Create(ctx, comp))
+	require.NoError(t, cli.Status().Update(ctx, comp))
+
+	a := &statusController{client: cli}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
+	_, err := a.Reconcile(ctx, req)
+	require.NoError(t, err)
+
+	// The max latest time is taken even though it was listed before the others
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	assert.Equal(t, latestReadyTime.Round(time.Minute), comp.Status.CurrentSynthesis.Ready.Round(time.Minute))
 }

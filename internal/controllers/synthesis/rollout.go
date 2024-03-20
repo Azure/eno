@@ -70,7 +70,7 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		// - They haven't ever been synthesized (they'll use the new synthesizer version anyway)
 		// - They are currently being synthesized
 		// - They've been synthesized by this or a newer version
-		if time.Since(comp.CreationTimestamp.Time) < syn.Spec.RolloutCooldown.Duration || comp.Spec.Synthesizer.MinGeneration >= syn.Generation || comp.Status.CurrentState == nil || !comp.Status.CurrentState.Synthesized || comp.Status.CurrentState.ObservedSynthesizerGeneration >= syn.Generation {
+		if time.Since(comp.CreationTimestamp.Time) < syn.Spec.RolloutCooldown.Duration || comp.Spec.Synthesizer.MinGeneration >= syn.Generation || comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration >= syn.Generation {
 			continue
 		}
 
@@ -90,7 +90,7 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
 		}
-		logger.Info("advancing synthesizer rollout process")
+		logger.V(0).Info("advancing synthesizer rollout process")
 		return ctrl.Result{RequeueAfter: syn.Spec.RolloutCooldown.Duration}, nil
 	}
 
@@ -98,6 +98,7 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if syn.Status.CurrentGeneration != syn.Generation {
 		previousTime := syn.Status.LastRolloutTime
 		now := metav1.Now()
+		syn.Status.LastRolloutTime = &now
 		syn.Status.CurrentGeneration = syn.Generation
 		if err := c.client.Status().Update(ctx, syn); err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating synthesizer's current generation: %w", err)
@@ -107,7 +108,7 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			logger = logger.WithValues("latency", now.Sub(previousTime.Time).Milliseconds())
 		}
 		if len(compList.Items) > 0 { // log doesn't make sense if the synthesizer wasn't actually rolled out
-			logger.Info("finished rolling out latest synthesizer version")
+			logger.V(0).Info("finished rolling out latest synthesizer version")
 		}
 		return ctrl.Result{}, nil
 	}

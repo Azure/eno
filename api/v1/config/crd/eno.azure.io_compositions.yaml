@@ -32,25 +32,6 @@ spec:
             type: object
           spec:
             properties:
-              inputs:
-                description: Inputs are given to the Synthesizer during synthesis.
-                items:
-                  properties:
-                    name:
-                      type: string
-                    resource:
-                      properties:
-                        apiVersion:
-                          type: string
-                        kind:
-                          type: string
-                        name:
-                          type: string
-                        namespace:
-                          type: string
-                      type: object
-                  type: object
-                type: array
               reconcileInterval:
                 description: Synthesized resources can optionally be reconciled at
                   a given interval. Per-resource jitter will be applied to avoid spikes
@@ -71,7 +52,7 @@ spec:
             type: object
           status:
             properties:
-              currentState:
+              currentSynthesis:
                 description: Synthesis represents a Synthesizer's specific synthesis
                   of a given Composition.
                 properties:
@@ -85,9 +66,11 @@ spec:
                     format: date-time
                     type: string
                   ready:
-                    type: boolean
+                    format: date-time
+                    type: string
                   reconciled:
-                    type: boolean
+                    format: date-time
+                    type: string
                   resourceSlices:
                     items:
                       properties:
@@ -96,9 +79,10 @@ spec:
                       type: object
                     type: array
                   synthesized:
-                    type: boolean
+                    format: date-time
+                    type: string
                 type: object
-              previousState:
+              previousSynthesis:
                 description: Synthesis represents a Synthesizer's specific synthesis
                   of a given Composition.
                 properties:
@@ -112,9 +96,11 @@ spec:
                     format: date-time
                     type: string
                   ready:
-                    type: boolean
+                    format: date-time
+                    type: string
                   reconciled:
-                    type: boolean
+                    format: date-time
+                    type: string
                   resourceSlices:
                     items:
                       properties:
@@ -123,7 +109,8 @@ spec:
                       type: object
                     type: array
                   synthesized:
-                    type: boolean
+                    format: date-time
+                    type: string
                 type: object
             type: object
         type: object

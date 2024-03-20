@@ -1,7 +1,6 @@
 package synthesis
 
 import (
-	"fmt"
 	"math/rand"
 	"testing"
 	"time"
@@ -9,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -18,6 +18,7 @@ import (
 
 var minimalTestConfig = &Config{
 	SliceCreationQPS: 15,
+	PodNamespace:     "default",
 }
 
 func TestControllerHappyPath(t *testing.T) {
@@ -47,7 +48,7 @@ func TestControllerHappyPath(t *testing.T) {
 		// The pod eventually performs the synthesis
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-			return comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized
+			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
 		})
 	})
 
@@ -55,7 +56,7 @@ func TestControllerHappyPath(t *testing.T) {
 		// Updating the composition should cause re-synthesis
 		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			comp.Spec.Inputs = []apiv1.InputRef{{Name: "anything"}}
+			comp.Spec.ReconcileInterval = &metav1.Duration{Duration: time.Minute}
 			return cli.Update(ctx, comp)
 		})
 		require.NoError(t, err)
@@ -63,11 +64,11 @@ func TestControllerHappyPath(t *testing.T) {
 		latest := comp.Generation
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration >= latest
+			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration >= latest
 		})
 
 		// The previous state is retained
-		if comp.Status.PreviousState == nil {
+		if comp.Status.PreviousSynthesis == nil {
 			t.Error("state wasn't swapped to previous")
 		}
 	})
@@ -118,9 +119,7 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 			if client.IgnoreNotFound(err) != nil {
 				return err
 			}
-			comp.Spec.Inputs = []apiv1.InputRef{{
-				Name: fmt.Sprintf("some-unique-value-%d", i),
-			}}
+			comp.Spec.ReconcileInterval = &metav1.Duration{Duration: time.Minute * time.Duration(i)}
 			return cli.Update(ctx, comp)
 		})
 		require.NoError(t, err)
@@ -130,7 +129,7 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 	latest := comp.Generation
 	testutil.Eventually(t, func() bool {
 		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration == latest
+		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == latest
 	})
 }
 
@@ -160,7 +159,7 @@ func TestControllerRollout(t *testing.T) {
 	t.Run("initial creation", func(t *testing.T) {
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-			return comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized
+			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
 		})
 	})
 
@@ -176,7 +175,7 @@ func TestControllerRollout(t *testing.T) {
 
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedSynthesizerGeneration >= syn.Generation
+			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration >= syn.Generation
 		})
 	})
 }
@@ -207,7 +206,7 @@ func TestControllerSynthesizerRolloutCooldown(t *testing.T) {
 	// Wait for initial sync
 	testutil.Eventually(t, func() bool {
 		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
+		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
 	})
 
 	// First synthesizer update
@@ -223,7 +222,7 @@ func TestControllerSynthesizerRolloutCooldown(t *testing.T) {
 	// The first synthesizer update should be applied to the composition
 	testutil.Eventually(t, func() bool {
 		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedSynthesizerGeneration == syn.Generation
+		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
 	})
 
 	// Wait for the informer cache to know about the last update
@@ -299,9 +298,9 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 	t.Run("initial creation", func(t *testing.T) {
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSlices != nil
+			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ResourceSlices != nil
 		})
-		initialSlices = comp.Status.CurrentState.ResourceSlices
+		initialSlices = comp.Status.CurrentSynthesis.ResourceSlices
 		initialGen = comp.Generation
 	})
 
@@ -317,8 +316,8 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration > initialGen
+			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration > initialGen
 		})
-		assert.NotEqual(t, comp.Status.CurrentState.ResourceSlices, initialSlices)
+		assert.NotEqual(t, comp.Status.CurrentSynthesis.ResourceSlices, initialSlices)
 	})
 }

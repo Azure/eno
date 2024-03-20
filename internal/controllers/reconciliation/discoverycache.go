@@ -44,7 +44,7 @@ func (d *discoveryCache) Get(ctx context.Context, gvk schema.GroupVersionKind) (
 	// However, on newer versions we expect every resource to exist in the spec so retries are safe and often necessary.
 	for i := 0; i < 2; i++ {
 		if d.current == nil {
-			logger.V(1).Info("filling discovery cache")
+			logger.V(0).Info("filling discovery cache")
 			if err := d.fillUnlocked(); err != nil {
 				return nil, err
 			}

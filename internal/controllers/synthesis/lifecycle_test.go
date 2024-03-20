@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -52,13 +53,13 @@ func TestCompositionDeletion(t *testing.T) {
 	// Create the composition's resource slice
 	testutil.Eventually(t, func() bool {
 		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-		return comp.Status.CurrentState != nil && len(comp.Status.CurrentState.ResourceSlices) > 0
+		return comp.Status.CurrentSynthesis != nil && len(comp.Status.CurrentSynthesis.ResourceSlices) > 0
 	})
 
 	// Wait for the resource slice to be created
 	testutil.Eventually(t, func() bool {
 		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ResourceSlices != nil
+		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ResourceSlices != nil
 	})
 
 	// Delete the composition
@@ -68,7 +69,7 @@ func TestCompositionDeletion(t *testing.T) {
 	// The generation should be updated
 	testutil.Eventually(t, func() bool {
 		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-		return comp.Status.CurrentState != nil && comp.Status.CurrentState.ObservedCompositionGeneration >= deleteGen
+		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration >= deleteGen
 	})
 
 	// The composition should still exist after a bit
@@ -79,7 +80,7 @@ func TestCompositionDeletion(t *testing.T) {
 	// Mark the composition as reconciled
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Status.CurrentState.Reconciled = true
+		comp.Status.CurrentSynthesis.Reconciled = ptr.To(metav1.Now())
 		return cli.Status().Update(ctx, comp)
 	})
 	require.NoError(t, err)
@@ -144,8 +145,8 @@ var shouldDeletePodTests = []struct {
 				Generation: 2,
 			},
 			Status: apiv1.CompositionStatus{
-				CurrentState: &apiv1.Synthesis{
-					Synthesized: true,
+				CurrentSynthesis: &apiv1.Synthesis{
+					Synthesized: ptr.To(metav1.Now()),
 				},
 			},
 		},
@@ -172,8 +173,8 @@ var shouldDeletePodTests = []struct {
 				Generation: 2,
 			},
 			Status: apiv1.CompositionStatus{
-				CurrentState: &apiv1.Synthesis{
-					Synthesized: true,
+				CurrentSynthesis: &apiv1.Synthesis{
+					Synthesized: ptr.To(metav1.Now()),
 				},
 			},
 		},
@@ -345,7 +346,7 @@ func TestShouldDeletePod(t *testing.T) {
 			logger, pod, exists := shouldDeletePod(logger, tc.Composition, tc.Synth, &corev1.PodList{Items: tc.Pods})
 			assert.Equal(t, tc.PodShouldExist, exists)
 			assert.Equal(t, tc.PodShouldBeDeleted, pod != nil)
-			logger.Info("logging to see the appended fields for debugging purposes")
+			logger.V(0).Info("logging to see the appended fields for debugging purposes")
 		})
 	}
 }

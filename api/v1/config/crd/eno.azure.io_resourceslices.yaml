@@ -60,20 +60,11 @@ spec:
                 items:
                   properties:
                     deleted:
-                      description: Deleted is true when the resource has been cleaned
-                        up, either because spec.deleted == true or the parent composition
-                        has been deleted.
                       type: boolean
                     ready:
-                      description: nil if Eno is unable to determine the readiness
-                        of this resource. Otherwise it is true when the resource is
-                        ready, false otherwise. Like Reconciled, it latches and will
-                        never transition from true->false.
-                      type: boolean
+                      format: date-time
+                      type: string
                     reconciled:
-                      description: 'True when the resource has been sync''d to the
-                        specified manifest. This property latches: it will remain
-                        true if it has ever been true in the life of this resource.'
                       type: boolean
                   type: object
                 type: array

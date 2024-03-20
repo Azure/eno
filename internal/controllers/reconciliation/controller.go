@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -71,10 +72,10 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 	logger := logr.FromContextOrDiscard(ctx).WithValues("compositionGeneration", comp.Generation)
 
-	if comp.Status.CurrentState == nil {
+	if comp.Status.CurrentSynthesis == nil {
 		return ctrl.Result{}, nil // nothing to do
 	}
-	logger = logger.WithValues("synthesizerName", comp.Spec.Synthesizer.Name, "synthesizerGeneration", comp.Status.CurrentState.ObservedSynthesizerGeneration)
+	logger = logger.WithValues("synthesizerName", comp.Spec.Synthesizer.Name, "synthesizerGeneration", comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration)
 	ctx = logr.NewContext(ctx, logger)
 
 	// Find the current and (optionally) previous desired states in the cache
@@ -88,8 +89,8 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 
 	var prev *reconstitution.Resource
-	if comp.Status.PreviousState != nil {
-		compRef.Generation = comp.Status.PreviousState.ObservedCompositionGeneration
+	if comp.Status.PreviousSynthesis != nil {
+		compRef.Generation = comp.Status.PreviousSynthesis.ObservedCompositionGeneration
 		prev, _ = c.resourceClient.Get(ctx, compRef, &req.Resource)
 	}
 
@@ -135,42 +136,40 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	// - Readiness checks are skipped when this version of the resource's desired state has already become ready
 	// - Readiness checks are skipped when the resource hasn't changed since the last check
 	// - Readiness defaults to true if no checks are given
-	ready := true
-	if hasChanged && len(resource.ReadinessChecks) > 0 {
-		slice := &apiv1.ResourceSlice{}
-		err = c.client.Get(ctx, req.Manifest.Slice, slice)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
-		}
-		if len(slice.Status.Resources) > req.Manifest.Index {
-			status := slice.Status.Resources[req.Manifest.Index]
-			if status.Ready == nil || !*status.Ready {
-				for _, check := range resource.ReadinessChecks {
-					if r := check.Eval(ctx, current); !r {
-						ready = false
-					}
-				}
-			}
+	slice := &apiv1.ResourceSlice{}
+	err = c.client.Get(ctx, req.Manifest.Slice, slice)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
+	}
+	var ready *metav1.Time
+	if len(slice.Status.Resources) > req.Manifest.Index {
+		status := slice.Status.Resources[req.Manifest.Index]
+		ready = status.Ready
+	}
+	if ready == nil {
+		if len(resource.ReadinessChecks) == 0 {
+			now := metav1.Now()
+			ready = &now
 		} else {
-			ready = false
+			ready = evalReadinessChecks(ctx, resource, current)
 		}
 	}
 
 	// Store the results
 	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) *apiv1.ResourceState {
-		if rs.Deleted == resource.Deleted() && rs.Reconciled && rs.Ready != nil && *rs.Ready == ready {
+		if rs.Deleted == resource.Deleted() && rs.Reconciled && rs.Ready != nil && *rs.Ready == *ready {
 			return nil
 		}
 		return &apiv1.ResourceState{
 			Deleted:    resource.Deleted(),
-			Ready:      &ready,
+			Ready:      ready,
 			Reconciled: true,
 		}
 	})
 	if modified {
 		return ctrl.Result{Requeue: true}, nil
 	}
-	if !ready {
+	if ready == nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}
 	if resource != nil && !resource.Deleted() && resource.Manifest.ReconcileInterval != nil {
@@ -329,4 +328,34 @@ func mungePatch(patch []byte, rv string) ([]byte, error) {
 	}
 
 	return json.Marshal(patchMap)
+}
+
+// evalReadinessChecks evaluates and prioritizes readiness checks.
+// - Nil is returned when less than all of the checks are ready
+// - If some precise and some inprecise times are given, the precise times are favored
+// - Within precise or non-precise times, the max of that group is always used
+func evalReadinessChecks(ctx context.Context, resource *reconstitution.Resource, current *unstructured.Unstructured) *metav1.Time {
+	var all []*reconstitution.Readiness
+	for _, check := range resource.ReadinessChecks {
+		if r, ok := check.Eval(ctx, current); ok {
+			all = append(all, r)
+		}
+	}
+	if len(all) == 0 || len(all) != len(resource.ReadinessChecks) {
+		return nil
+	}
+
+	sort.Slice(all, func(i, j int) bool { return all[j].ReadyTime.Before(&all[i].ReadyTime) })
+
+	// Use the max precise time if any are precise
+	for _, ready := range all {
+		ready := ready
+		if !ready.PreciseTime {
+			continue
+		}
+		return &ready.ReadyTime
+	}
+
+	// We don't have any precise times, fall back to the max
+	return &all[0].ReadyTime
 }

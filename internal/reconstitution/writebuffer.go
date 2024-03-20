@@ -104,7 +104,6 @@ func (w *writeBuffer) processQueueItem(ctx context.Context) bool {
 	}
 
 	// Put the updates back in the buffer to retry on the next attempt
-	logger.V(1).Info("update failed - adding updates back to the buffer")
 	w.mut.Lock()
 	w.state[sliceNSN] = append(updates, w.state[sliceNSN]...)
 	w.mut.Unlock()
@@ -132,7 +131,7 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 		copy.Status.Resources = make([]apiv1.ResourceState, len(slice.Spec.Resources))
 		err = w.client.Status().Update(ctx, copy)
 		if errors.IsNotFound(err) {
-			logger.V(0).Info("resource slice has been deleted - dropping enqueued status update")
+			logger.V(1).Info("resource slice has been deleted - dropping enqueued status update")
 			return true
 		}
 		if err != nil {

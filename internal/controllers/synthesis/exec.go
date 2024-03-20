@@ -79,7 +79,7 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	logger = logger.WithValues("synthesizerName", syn.Name)
 	ctx = logr.NewContext(ctx, logger)
 
-	if compGen < comp.Generation || (comp.Status.CurrentState != nil && comp.Status.CurrentState.Synthesized) || comp.DeletionTimestamp != nil {
+	if compGen < comp.Generation || (comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil) || comp.DeletionTimestamp != nil {
 		return ctrl.Result{}, nil // old pod - don't bother synthesizing. The lifecycle controller will delete it
 	}
 
@@ -103,16 +103,11 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer, comp *apiv1.Composition, pod *corev1.Pod) ([]*apiv1.ResourceSliceRef, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	inputsJson, err := c.buildInputsJson(ctx, comp)
-	if err != nil {
-		return nil, fmt.Errorf("building inputs: %w", err)
-	}
-
 	synctx, done := context.WithTimeout(ctx, syn.Spec.ExecTimeout.Duration)
 	defer done()
 
 	start := time.Now()
-	stdout, err := c.conn.Synthesize(synctx, syn, pod, inputsJson)
+	stdout, err := c.conn.Synthesize(synctx, syn, pod)
 	if err != nil {
 		return nil, err
 	}
@@ -129,19 +124,19 @@ func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer,
 }
 
 func (c *execController) fetchPreviousSlices(ctx context.Context, comp *apiv1.Composition) ([]*apiv1.ResourceSlice, error) {
-	if comp.Status.PreviousState == nil {
+	if comp.Status.PreviousSynthesis == nil {
 		return nil, nil // nothing to fetch
 	}
 	logger := logr.FromContextOrDiscard(ctx)
 
 	slices := []*apiv1.ResourceSlice{}
-	for _, ref := range comp.Status.PreviousState.ResourceSlices {
+	for _, ref := range comp.Status.PreviousSynthesis.ResourceSlices {
 		slice := &apiv1.ResourceSlice{}
 		slice.Name = ref.Name
 		slice.Namespace = comp.Namespace
 		err := c.client.Get(ctx, client.ObjectKeyFromObject(slice), slice)
 		if errors.IsNotFound(err) {
-			logger.Info("resource slice referenced by composition was not found - skipping", "resourceSliceName", slice.Name)
+			logger.V(0).Info("resource slice referenced by composition was not found - skipping", "resourceSliceName", slice.Name)
 			continue
 		}
 		if err != nil {
@@ -254,21 +249,22 @@ func (c *execController) writeSuccessStatus(ctx context.Context, comp *apiv1.Com
 			return nil
 		}
 
-		if comp.Status.CurrentState == nil {
-			comp.Status.CurrentState = &apiv1.Synthesis{}
+		if comp.Status.CurrentSynthesis == nil {
+			comp.Status.CurrentSynthesis = &apiv1.Synthesis{}
 		}
-		if comp.Status.CurrentState.Synthesized {
+		if comp.Status.CurrentSynthesis.Synthesized != nil {
 			return nil // no updates needed
 		}
-		comp.Status.CurrentState.Synthesized = true
-		comp.Status.CurrentState.ResourceSlices = refs
+		now := metav1.Now()
+		comp.Status.CurrentSynthesis.Synthesized = &now
+		comp.Status.CurrentSynthesis.ResourceSlices = refs
 
 		err = c.client.Status().Update(ctx, comp)
 		if err != nil {
 			return err
 		}
 
-		logger.V(1).Info("composition status has been updated following successful synthesis")
+		logger.V(0).Info("composition status has been updated following successful synthesis")
 		return nil
 	})
 }

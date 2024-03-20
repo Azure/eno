@@ -6,6 +6,8 @@ import (
 	"time"
 
 	celtypes "github.com/google/cel-go/common/types"
+	"github.com/google/cel-go/common/types/ref"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -60,6 +62,18 @@ type ReadinessCheck struct {
 	env     *cel.Env
 }
 
+func MustReadinessCheckTest(expr string) *ReadinessCheck {
+	env, err := newCelEnv()
+	if err != nil {
+		panic(err)
+	}
+	check, err := newReadinessCheck(env, expr)
+	if err != nil {
+		panic(err)
+	}
+	return check
+}
+
 func newReadinessCheck(env *cel.Env, expr string) (*ReadinessCheck, error) {
 	ast, iss := env.Compile(expr)
 	if iss != nil && iss.Err() != nil {
@@ -72,9 +86,9 @@ func newReadinessCheck(env *cel.Env, expr string) (*ReadinessCheck, error) {
 	return &ReadinessCheck{program: prgm, env: env}, nil
 }
 
-func (r *ReadinessCheck) Eval(ctx context.Context, resource *unstructured.Unstructured) bool {
+func (r *ReadinessCheck) Eval(ctx context.Context, resource *unstructured.Unstructured) (*Readiness, bool) {
 	if resource == nil {
-		return false
+		return nil, false
 	}
 	val, details, err := r.program.ContextEval(ctx, map[string]any{"self": resource.Object})
 	if details != nil {
@@ -84,9 +98,37 @@ func (r *ReadinessCheck) Eval(ctx context.Context, resource *unstructured.Unstru
 		}
 	}
 	if err != nil {
-		return false
+		return nil, false
 	}
-	return val == celtypes.True
+
+	// Support matching on condition structs.
+	// This allows us to grab the transition time instead of just using the current time.
+	if list, ok := val.Value().([]ref.Val); ok {
+		for _, ref := range list {
+			if mp, ok := ref.Value().(map[string]any); ok {
+				if mp != nil && mp["status"] == "True" && mp["type"] != "" && mp["reason"] != "" {
+					ts := metav1.Now()
+					if str, ok := mp["lastTransitionTime"].(string); ok {
+						parsed, err := time.Parse(time.RFC3339, str)
+						if err == nil {
+							ts.Time = parsed
+						}
+					}
+					return &Readiness{ReadyTime: ts, PreciseTime: true}, true
+				}
+			}
+		}
+	}
+
+	if val == celtypes.True {
+		return &Readiness{ReadyTime: metav1.Now()}, true
+	}
+	return nil, false
+}
+
+type Readiness struct {
+	ReadyTime   metav1.Time
+	PreciseTime bool // true when time came from a condition, not the controller's metav1.Now
 }
 
 // ResourceRef refers to a specific synthesized resource.
@@ -102,8 +144,8 @@ type CompositionRef struct {
 
 func NewCompositionRef(comp *apiv1.Composition) *CompositionRef {
 	c := &CompositionRef{Name: comp.Name, Namespace: comp.Namespace}
-	if comp.Status.CurrentState != nil {
-		c.Generation = comp.Status.CurrentState.ObservedCompositionGeneration
+	if comp.Status.CurrentSynthesis != nil {
+		c.Generation = comp.Status.CurrentSynthesis.ObservedCompositionGeneration
 	}
 	return c
 }
