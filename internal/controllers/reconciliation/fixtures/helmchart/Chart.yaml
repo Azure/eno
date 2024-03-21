@@ -1,0 +1,7 @@
+apiVersion: v2
+name: foo
+description: I can't believe it's not foo!
+
+type: application
+version: 0.1.0
+appVersion: "1.16.0"

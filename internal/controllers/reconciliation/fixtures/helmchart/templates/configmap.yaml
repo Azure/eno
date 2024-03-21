@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-obj
+  annotations:
+    helm.sh/resource-policy: keep
+data:
+  foo: bar
