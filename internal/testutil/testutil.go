@@ -193,6 +193,9 @@ func (m *Manager) Start(t *testing.T) {
 			panic(fmt.Sprintf("error while starting manager: %s", err))
 		}
 	}()
+	t.Logf("warming caches")
+	m.Manager.GetCache().WaitForCacheSync(context.Background())
+	t.Logf("warmed caches")
 }
 
 func (m *Manager) GetCurrentResourceSlices(ctx context.Context) ([]*apiv1.ResourceSlice, error) {
