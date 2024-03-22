@@ -78,6 +78,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 	logger = logger.WithValues("synthesizerName", comp.Spec.Synthesizer.Name, "synthesizerGeneration", comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration)
 	ctx = logr.NewContext(ctx, logger)
+	logger.Info("TODO starting to reconcile")
 
 	// Find the current and (optionally) previous desired states in the cache
 	compRef := reconstitution.NewCompositionRef(comp)
@@ -88,12 +89,14 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		logger.V(1).Info("dropping work item because the corresponding manifest generation no longer exists in the cache")
 		return ctrl.Result{}, nil
 	}
+	logger.Info("TODO starting to reconcile 1")
 
 	var prev *reconstitution.Resource
 	if comp.Status.PreviousSynthesis != nil {
 		compRef.Generation = comp.Status.PreviousSynthesis.ObservedCompositionGeneration
 		prev, _ = c.resourceClient.Get(ctx, compRef, &req.Resource)
 	}
+	logger.Info("TODO starting to reconcile 2")
 
 	// Keep track of the last reconciliation time and report on it relative to the resource's reconcile interval
 	// This is useful for identifying cases where the loop can't keep up
@@ -104,6 +107,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 			reconciliationScheduleDelta.Observe(delta.Seconds())
 		}
 	}
+	logger.Info("TODO starting to reconcile 3")
 
 	// The current and previous resource can both be nil,
 	// so we need to check both to find the apiVersion
@@ -116,12 +120,14 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		logger.Error(errors.New("no apiVersion provided"), "neither the current or previous resource have an apiVersion")
 		return ctrl.Result{}, nil
 	}
+	logger.Info("TODO starting to reconcile 4")
 
 	// Fetch the current resource
 	current, hasChanged, err := c.getCurrent(ctx, resource, apiVersion)
 	if client.IgnoreNotFound(err) != nil {
 		return ctrl.Result{}, fmt.Errorf("getting current state: %w", err)
 	}
+	logger.Info("TODO starting to reconcile 5")
 
 	// Nil current struct means the resource version hasn't changed since it was last observed
 	// Skip without logging since this is a very hot path
@@ -132,6 +138,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 			return ctrl.Result{}, err
 		}
 	}
+	logger.Info("TODO starting to reconcile 6")
 
 	// Evaluate resource readiness
 	// - Readiness checks are skipped when this version of the resource's desired state has already become ready
@@ -155,6 +162,10 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 			ready = evalReadinessChecks(ctx, resource, current)
 		}
 	}
+
+	// TODO: Sometimes the TestResourceReadiness times out while waiting for resource to be created.
+	// - It shows the finished roll out message, nothing else ever happens
+	logger.Info("TODO starting to reconcile 7")
 
 	// Store the results
 	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) *apiv1.ResourceState {
