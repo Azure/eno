@@ -118,12 +118,12 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		// when the synthesized generation (from the status) changes, which will never happen because synthesis
 		// is righly disabled for deleted compositions. We break out of this deadlock condition by updating
 		// the status without actually synthesizing.
-		if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation {
+		if comp.Status.CurrentSynthesis != nil && (comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation || comp.Status.CurrentSynthesis.Synthesized == nil) {
 			comp.Status.CurrentSynthesis.ObservedCompositionGeneration = comp.Generation
 			comp.Status.CurrentSynthesis.Ready = nil
 			comp.Status.CurrentSynthesis.Reconciled = nil
 			now := metav1.Now()
-			comp.Status.CurrentSynthesis.Synthesized = &now // in case the previous synthesis failed (TODO I don't think this actually works)
+			comp.Status.CurrentSynthesis.Synthesized = &now
 			err = c.client.Status().Update(ctx, comp)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("updating current composition generation: %w", err)
