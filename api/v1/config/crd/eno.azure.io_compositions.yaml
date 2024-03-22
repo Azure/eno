@@ -78,9 +78,6 @@ spec:
                           type: string
                       type: object
                     type: array
-                  started:
-                    format: date-time
-                    type: string
                   synthesized:
                     format: date-time
                     type: string
@@ -113,9 +110,6 @@ spec:
                           type: string
                       type: object
                     type: array
-                  started:
-                    format: date-time
-                    type: string
                   synthesized:
                     format: date-time
                     type: string

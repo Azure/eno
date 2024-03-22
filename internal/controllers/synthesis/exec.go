@@ -10,7 +10,6 @@ import (
 	"github.com/Azure/eno/internal/manager"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/go-logr/logr"
-	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -250,8 +249,7 @@ func (c *execController) writeSuccessStatus(ctx context.Context, comp *apiv1.Com
 		}
 
 		if comp.Status.CurrentSynthesis == nil {
-			logger.V(1).Info("synthesis was missing which shouldn't be possible at this point")
-			comp.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: uuid.Must(uuid.NewRandom()).String()}
+			comp.Status.CurrentSynthesis = &apiv1.Synthesis{}
 		}
 		if comp.Status.CurrentSynthesis.Synthesized != nil {
 			return nil // no updates needed

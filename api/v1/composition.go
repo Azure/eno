@@ -39,7 +39,6 @@ type Synthesis struct {
 	ObservedCompositionGeneration int64  `json:"observedCompositionGeneration,omitempty"`
 	ObservedSynthesizerGeneration int64  `json:"observedSynthesizerGeneration,omitempty"`
 
-	Started     *metav1.Time `json:"started,omitempty"`
 	PodCreation *metav1.Time `json:"podCreation,omitempty"`
 	Synthesized *metav1.Time `json:"synthesized,omitempty"`
 	Reconciled  *metav1.Time `json:"reconciled,omitempty"`

@@ -490,7 +490,7 @@ func TestReconcileStatus(t *testing.T) {
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		comp.Status.CurrentSynthesis = &apiv1.Synthesis{
-			UUID:           uuid.Must(uuid.NewRandom()).String(),
+			UUID:           uuid.NewString(),
 			Synthesized:    &now,
 			ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
 		}
@@ -637,7 +637,7 @@ func TestMidSynthesisDeletion(t *testing.T) {
 		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		now := metav1.Now()
 		comp.Status.CurrentSynthesis = &apiv1.Synthesis{
-			UUID:                          uuid.Must(uuid.NewRandom()).String(),
+			UUID:                          uuid.NewString(),
 			ObservedCompositionGeneration: comp.Generation,
 			ObservedSynthesizerGeneration: syn.Generation,
 			Synthesized:                   &now,
