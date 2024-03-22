@@ -9,6 +9,7 @@ import (
 	"sort"
 	"time"
 
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -69,9 +70,13 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, types.NamespacedName{Name: req.Composition.Name, Namespace: req.Composition.Namespace}, comp)
 	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			logr.FromContextOrDiscard(ctx).Info("TODO was not found")
+		}
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition: %w", err))
 	}
 	logger := logr.FromContextOrDiscard(ctx).WithValues("compositionGeneration", comp.Generation)
+	logger.Info("TODO syncing")
 
 	if comp.Status.CurrentSynthesis == nil {
 		return ctrl.Result{}, nil // nothing to do
