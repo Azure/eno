@@ -79,7 +79,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	syn.Name = comp.Spec.Synthesizer.Name
 	err = c.client.Get(ctx, client.ObjectKeyFromObject(syn), syn)
 	if err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting synthesizer: %w", err))
+		return ctrl.Result{}, fmt.Errorf("getting synthesizer: %w", err)
 	}
 	logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
 
