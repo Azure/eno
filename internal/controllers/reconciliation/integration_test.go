@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -174,6 +175,7 @@ func TestCRUD(t *testing.T) {
 			syn := &apiv1.Synthesizer{}
 			syn.Name = "test-syn"
 			syn.Spec.Image = "create"
+			syn.Spec.RolloutCooldown = &metav1.Duration{Duration: time.Millisecond}
 			require.NoError(t, upstream.Create(ctx, syn))
 
 			comp := &apiv1.Composition{}
@@ -193,7 +195,7 @@ func TestCRUD(t *testing.T) {
 
 			if test.ApplyExternalUpdate != nil {
 				t.Logf("starting external update")
-				err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+				err := retry.RetryOnConflict(testutil.Backoff, func() error {
 					obj, err := test.Get(downstream)
 					require.NoError(t, err)
 
@@ -252,7 +254,7 @@ func (c *crudTestCase) Get(downstream client.Client) (client.Object, error) {
 }
 
 func setImage(t *testing.T, upstream client.Client, syn *apiv1.Synthesizer, image string) {
-	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
 		if err := upstream.Get(context.Background(), client.ObjectKeyFromObject(syn), syn); err != nil {
 			return err
 		}
@@ -442,7 +444,7 @@ func TestReconcileCacheRace(t *testing.T) {
 
 	// Update frequently, it shouldn't panic
 	for i := 0; i < 20; i++ {
-		err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		err = retry.RetryOnConflict(testutil.Backoff, func() error {
 			err = upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn)
 			syn.Spec.Command = []string{fmt.Sprintf("any-unique-value-%d", i)}
 			return upstream.Update(ctx, syn)
@@ -472,6 +474,7 @@ func TestReconcileStatus(t *testing.T) {
 	comp.Name = "test-comp"
 	comp.Namespace = "default"
 	require.NoError(t, upstream.Create(ctx, comp))
+	comp.ResourceVersion = "1"
 
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = "test-slice"
@@ -484,11 +487,16 @@ func TestReconcileStatus(t *testing.T) {
 	require.NoError(t, upstream.Create(ctx, slice))
 
 	now := metav1.Now()
-	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
-		Synthesized:    &now,
-		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
-	}
-	require.NoError(t, upstream.Status().Update(ctx, comp))
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+			UUID:           uuid.Must(uuid.NewRandom()).String(),
+			Synthesized:    &now,
+			ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
+		}
+		return upstream.Status().Update(ctx, comp)
+	})
+	require.NoError(t, err)
 
 	// Status should eventually reflect the reconciliation state
 	testutil.Eventually(t, func() bool {
@@ -612,7 +620,7 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	comp.Finalizers = []string{"eno.azure.io/cleanup"}
 	comp.Spec.Synthesizer.Name = syn.Name
 	require.NoError(t, upstream.Create(ctx, comp))
-	comp.ResourceVersion = "" // forget this version so the next write guarantees sync'd informer
+	comp.ResourceVersion = "1" // forget this version so the next write guarantees sync'd informer
 
 	rs := &apiv1.ResourceSlice{}
 	rs.GenerateName = "test-"
@@ -625,10 +633,11 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	controllerutil.SetControllerReference(comp, rs, mgr.GetScheme())
 	require.NoError(t, upstream.Create(ctx, rs))
 
-	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		now := metav1.Now()
 		comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+			UUID:                          uuid.Must(uuid.NewRandom()).String(),
 			ObservedCompositionGeneration: comp.Generation,
 			ObservedSynthesizerGeneration: syn.Generation,
 			Synthesized:                   &now,
@@ -648,7 +657,7 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	})
 
 	// Start re-synthesizing
-	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		comp.Spec.Synthesizer.MinGeneration = 10
 		return upstream.Update(ctx, comp)
@@ -718,6 +727,7 @@ func TestResourceReadiness(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "bar"
+	syn.Spec.RolloutCooldown = &metav1.Duration{Duration: time.Millisecond}
 	require.NoError(t, upstream.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}
@@ -751,7 +761,7 @@ func TestResourceReadiness(t *testing.T) {
 	})
 
 	// Update resource to meet readiness criteria
-	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		err = upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn)
 		syn.Spec.Image = "baz"
 		return upstream.Update(ctx, syn)
@@ -775,7 +785,7 @@ func TestResourceReadiness(t *testing.T) {
 	})
 
 	// Update resource to not meet readiness criteria
-	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		err = upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn)
 		syn.Spec.Image = "bar"
 		return upstream.Update(ctx, syn)
@@ -893,8 +903,7 @@ func TestHelmOwnershipTransfer(t *testing.T) {
 
 	// Wait for the composition to be sync'd - it shouldn't delete the resource
 	testutil.Eventually(t, func() bool {
-		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == comp.Generation && comp.Status.CurrentSynthesis.Reconciled != nil
+		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 	})
 	obj.SetName("test-obj")
 	obj.SetNamespace("default")

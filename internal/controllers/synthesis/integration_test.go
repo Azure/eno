@@ -54,7 +54,7 @@ func TestControllerHappyPath(t *testing.T) {
 
 	t.Run("composition update", func(t *testing.T) {
 		// Updating the composition should cause re-synthesis
-		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		err := retry.RetryOnConflict(testutil.Backoff, func() error {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 			comp.Spec.ReconcileInterval = &metav1.Duration{Duration: time.Minute}
 			return cli.Update(ctx, comp)
@@ -114,7 +114,7 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 
 	// Send a bunch of updates in a row
 	for i := 0; i < 10; i++ {
-		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		err := retry.RetryOnConflict(testutil.Backoff, func() error {
 			err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 			if client.IgnoreNotFound(err) != nil {
 				return err
@@ -147,7 +147,7 @@ func TestControllerRollout(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "test-syn-image"
-	syn.Spec.RolloutCooldown.Duration = time.Millisecond * 10
+	syn.Spec.RolloutCooldown = &metav1.Duration{Duration: time.Millisecond * 10}
 	require.NoError(t, cli.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}
@@ -164,7 +164,7 @@ func TestControllerRollout(t *testing.T) {
 	})
 
 	t.Run("synthesizer update", func(t *testing.T) {
-		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		err := retry.RetryOnConflict(testutil.Backoff, func() error {
 			if err := cli.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
 				return err
 			}
@@ -194,7 +194,7 @@ func TestControllerSynthesizerRolloutCooldown(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "test-syn-image"
-	syn.Spec.RolloutCooldown.Duration = time.Millisecond * 10
+	syn.Spec.RolloutCooldown = &metav1.Duration{Duration: time.Millisecond * 10}
 	require.NoError(t, cli.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}
@@ -210,7 +210,7 @@ func TestControllerSynthesizerRolloutCooldown(t *testing.T) {
 	})
 
 	// First synthesizer update
-	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
 		if err := cli.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
 			return err
 		}
@@ -232,7 +232,7 @@ func TestControllerSynthesizerRolloutCooldown(t *testing.T) {
 	})
 
 	// Second synthesizer update
-	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		if err := cli.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
 			return err
 		}
@@ -278,13 +278,13 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 	syn1 := &apiv1.Synthesizer{}
 	syn1.Name = "test-syn-1"
 	syn1.Spec.Image = "initial-image"
-	syn1.Spec.RolloutCooldown.Duration = time.Millisecond * 10
+	syn1.Spec.RolloutCooldown = &metav1.Duration{Duration: time.Millisecond * 10}
 	require.NoError(t, cli.Create(ctx, syn1))
 
 	syn2 := &apiv1.Synthesizer{}
 	syn2.Name = "test-syn-2"
 	syn2.Spec.Image = "updated-image"
-	syn2.Spec.RolloutCooldown.Duration = time.Millisecond * 10
+	syn1.Spec.RolloutCooldown = &metav1.Duration{Duration: time.Millisecond * 10}
 	require.NoError(t, cli.Create(ctx, syn2))
 
 	comp := &apiv1.Composition{}
@@ -305,7 +305,7 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 	})
 
 	t.Run("update synthesizer name", func(t *testing.T) {
-		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		err := retry.RetryOnConflict(testutil.Backoff, func() error {
 			if err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp); err != nil {
 				return err
 			}

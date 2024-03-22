@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/go-logr/logr"
+	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -68,7 +69,8 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	logger.WithValues("synthesizerGeneration", synGen, "compositionGeneration", compGen)
 	if shouldWriteStatus(comp, compGen) {
 		if comp.Status.CurrentSynthesis == nil {
-			comp.Status.CurrentSynthesis = &apiv1.Synthesis{}
+			logger.V(1).Info("synthesis was missing which shouldn't be possible at this point")
+			comp.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: uuid.Must(uuid.NewRandom()).String()}
 		}
 		comp.Status.CurrentSynthesis.PodCreation = &pod.CreationTimestamp
 		comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration = synGen

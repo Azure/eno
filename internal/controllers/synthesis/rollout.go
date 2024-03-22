@@ -14,6 +14,7 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
+	"github.com/Azure/eno/internal/testutil"
 )
 
 type rolloutController struct {
@@ -43,6 +44,9 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerNamespace", syn.Namespace, "synthesizerGeneration", syn.Generation)
 
 	if syn.Status.LastRolloutTime != nil && syn.Status.CurrentGeneration != syn.Generation {
+		if syn.Spec.RolloutCooldown == nil {
+			return ctrl.Result{}, nil // not configured
+		}
 		remainingCooldown := syn.Spec.RolloutCooldown.Duration - time.Since(syn.Status.LastRolloutTime.Time)
 		if remainingCooldown > 0 {
 			return ctrl.Result{RequeueAfter: remainingCooldown}, nil // not ready to continue rollout yet
@@ -80,7 +84,7 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, fmt.Errorf("advancing last rollout time: %w", err)
 		}
 
-		err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		err = retry.RetryOnConflict(testutil.Backoff, func() error {
 			if err := c.client.Get(ctx, client.ObjectKeyFromObject(&comp), &comp); err != nil {
 				return err
 			}

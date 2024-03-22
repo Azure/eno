@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"net/http"
 	_ "net/http/pprof"
@@ -76,6 +77,7 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 		return nil, err
 	}
 
+	resync := time.Second
 	mgrOpts := manager.Options{
 		Logger:                 logger,
 		HealthProbeBindAddress: opts.HealthProbeAddr,
@@ -87,7 +89,8 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 			return logr.NewContext(context.Background(), logger)
 		},
 		Cache: cache.Options{
-			ByObject: make(map[client.Object]cache.ByObject),
+			ByObject:   make(map[client.Object]cache.ByObject),
+			SyncPeriod: &resync,
 		},
 	}
 

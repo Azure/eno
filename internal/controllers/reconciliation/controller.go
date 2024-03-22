@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -139,7 +140,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	slice := &apiv1.ResourceSlice{}
 	err = c.client.Get(ctx, req.Manifest.Slice, slice)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
+		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting resource slice: %w", err))
 	}
 	var ready *metav1.Time
 	if len(slice.Status.Resources) > req.Manifest.Index {
@@ -157,7 +158,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	// Store the results
 	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) *apiv1.ResourceState {
-		if rs.Deleted == resource.Deleted() && rs.Reconciled && rs.Ready != nil && *rs.Ready == *ready {
+		if rs != nil && rs.Deleted == resource.Deleted() && rs.Reconciled && ptr.Deref(rs.Ready, metav1.Time{}) == ptr.Deref(ready, metav1.Time{}) {
 			return nil
 		}
 		return &apiv1.ResourceState{

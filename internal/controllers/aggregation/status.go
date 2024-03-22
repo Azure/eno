@@ -48,7 +48,7 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		slice.Namespace = comp.Namespace
 		err := s.client.Get(ctx, client.ObjectKeyFromObject(slice), slice)
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
+			return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting resource slice: %w", err))
 		}
 
 		// Status might be lagging behind

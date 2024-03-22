@@ -107,8 +107,7 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 		slice.Namespace = comp.Namespace
 		err := r.nonCachedReader.Get(ctx, client.ObjectKeyFromObject(&slice), &slice)
 		if err != nil {
-			// TODO: Handle 404?
-			return nil, fmt.Errorf("unable to get resource slice: %w", err)
+			return nil, client.IgnoreNotFound(fmt.Errorf("unable to get resource slice: %w", err))
 		}
 		slices[i] = slice
 	}

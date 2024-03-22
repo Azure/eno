@@ -8,7 +8,9 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
+	"github.com/Azure/eno/internal/testutil"
 	"github.com/go-logr/logr"
+	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -103,11 +105,8 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer, comp *apiv1.Composition, pod *corev1.Pod) ([]*apiv1.ResourceSliceRef, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	synctx, done := context.WithTimeout(ctx, syn.Spec.ExecTimeout.Duration)
-	defer done()
-
 	start := time.Now()
-	stdout, err := c.conn.Synthesize(synctx, syn, pod)
+	stdout, err := c.conn.Synthesize(ctx, syn, pod)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +134,8 @@ func (c *execController) fetchPreviousSlices(ctx context.Context, comp *apiv1.Co
 		slice.Name = ref.Name
 		slice.Namespace = comp.Namespace
 		err := c.client.Get(ctx, client.ObjectKeyFromObject(slice), slice)
-		if errors.IsNotFound(err) {
+		if errors.IsNotFound(err) && comp.Status.PreviousSynthesis.Synthesized != nil && time.Since(comp.Status.PreviousSynthesis.Synthesized.Time) > time.Minute*5 {
+			// It's possible that the informer is just stale, set some arbitrary period after synthesis at which the resource slices are expected to exist in cache.
 			logger.V(0).Info("resource slice referenced by composition was not found - skipping", "resourceSliceName", slice.Name)
 			continue
 		}
@@ -238,7 +238,7 @@ func (c *execController) writeResourceSlice(ctx context.Context, slice *apiv1.Re
 
 func (c *execController) writeSuccessStatus(ctx context.Context, comp *apiv1.Composition, compGen int64, refs []*apiv1.ResourceSliceRef) error {
 	logger := logr.FromContextOrDiscard(ctx)
-	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+	return retry.RetryOnConflict(testutil.Backoff, func() error {
 		err := c.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		if err != nil {
 			return err
@@ -250,7 +250,8 @@ func (c *execController) writeSuccessStatus(ctx context.Context, comp *apiv1.Com
 		}
 
 		if comp.Status.CurrentSynthesis == nil {
-			comp.Status.CurrentSynthesis = &apiv1.Synthesis{}
+			logger.V(1).Info("synthesis was missing which shouldn't be possible at this point")
+			comp.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: uuid.Must(uuid.NewRandom()).String()}
 		}
 		if comp.Status.CurrentSynthesis.Synthesized != nil {
 			return nil // no updates needed

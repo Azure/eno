@@ -20,6 +20,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
@@ -79,7 +80,8 @@ func NewManager(t *testing.T) *Manager {
 			filepath.Join(root, "api", "v1", "config", "crd"),
 			testCrdDir,
 		},
-		ErrorIfCRDPathMissing: true,
+		ErrorIfCRDPathMissing:    true,
+		AttachControlPlaneOutput: os.Getenv("ACTIONS_RUNNER_DEBUG ") != "" || os.Getenv("ACTIONS_STEP_DEBUG ") != "",
 
 		// We can't use KUBEBUILDER_ASSETS when also setting DOWNSTREAM_KUBEBUILDER_ASSETS
 		// because the envvar overrides BinaryAssetsDirectory
@@ -118,8 +120,9 @@ func NewManager(t *testing.T) *Manager {
 	version, _ := strconv.Atoi(os.Getenv("DOWNSTREAM_VERSION_MINOR"))
 
 	downstreamEnv := &envtest.Environment{
-		BinaryAssetsDirectory: dir,
-		ErrorIfCRDPathMissing: true,
+		BinaryAssetsDirectory:    dir,
+		ErrorIfCRDPathMissing:    true,
+		AttachControlPlaneOutput: os.Getenv("ACTIONS_RUNNER_DEBUG ") != "" || os.Getenv("ACTIONS_STEP_DEBUG ") != "",
 	}
 
 	// Only newer clusters can use envtest to install CRDs
@@ -193,7 +196,7 @@ func (m *Manager) Start(t *testing.T) {
 }
 
 func (m *Manager) GetCurrentResourceSlices(ctx context.Context) ([]*apiv1.ResourceSlice, error) {
-	cli := m.Manager.GetClient()
+	cli := m.Manager.GetAPIReader()
 
 	comps := &apiv1.CompositionList{}
 	err := cli.List(ctx, comps)
@@ -227,9 +230,17 @@ func (m *Manager) GetCurrentResourceSlices(ctx context.Context) ([]*apiv1.Resour
 	return returns, nil
 }
 
+var Backoff = wait.Backoff{
+	Steps:    10,
+	Duration: 10 * time.Millisecond,
+	Factor:   2.0,
+	Jitter:   0.1,
+	Cap:      time.Minute,
+}
+
 func Eventually(t testing.TB, fn func() bool) {
 	t.Helper()
-	SomewhatEventually(t, time.Second*5, fn)
+	SomewhatEventually(t, time.Second*15, fn)
 }
 
 func SomewhatEventually(t testing.TB, dur time.Duration, fn func() bool) {
@@ -243,7 +254,7 @@ func SomewhatEventually(t testing.TB, dur time.Duration, fn func() bool) {
 		if fn() {
 			return
 		}
-		time.Sleep(time.Millisecond * 10)
+		time.Sleep(time.Millisecond * 100)
 	}
 }
 

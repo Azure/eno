@@ -3,10 +3,12 @@ package synthesis
 import (
 	"context"
 	"fmt"
+	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -47,6 +49,10 @@ func (c *sliceCleanupController) Reconcile(ctx context.Context, req ctrl.Request
 		comp.Name = owner.Name
 		comp.Namespace = slice.Namespace
 		err = c.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if errors.IsNotFound(err) && time.Since(slice.CreationTimestamp.Time) < time.Minute {
+			logger.V(1).Info("didn't find a composition for this resource slice - ignoring because resource slice is new so informer may just be stale")
+			return ctrl.Result{}, nil
+		}
 		if client.IgnoreNotFound(err) != nil {
 			return ctrl.Result{}, fmt.Errorf("getting composition: %w", err)
 		}
