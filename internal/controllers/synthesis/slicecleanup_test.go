@@ -33,7 +33,8 @@ func TestSliceCleanupControllerOrphanedSlice(t *testing.T) {
 			return err
 		}
 		comp.Status.CurrentSynthesis = &apiv1.Synthesis{
-			Synthesized: ptr.To(metav1.Now()),
+			Synthesized:                   ptr.To(metav1.Now()),
+			ObservedCompositionGeneration: comp.Generation,
 		}
 		return mgr.GetClient().Status().Update(ctx, comp)
 	})
@@ -44,6 +45,7 @@ func TestSliceCleanupControllerOrphanedSlice(t *testing.T) {
 	slice.Name = "test-1"
 	slice.Namespace = "default"
 	slice.Finalizers = []string{"eno.azure.io/cleanup"}
+	slice.Spec.CompositionGeneration = comp.Generation - 1 // it's out of date
 	require.NoError(t, controllerutil.SetControllerReference(comp, slice, mgr.GetScheme()))
 	require.NoError(t, mgr.GetClient().Create(ctx, slice))
 
