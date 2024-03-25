@@ -61,7 +61,7 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		for _, state := range slice.Status.Resources {
 			state := state
 			// Sync
-			if !state.Reconciled || (comp.DeletionTimestamp != nil && !state.Deleted) {
+			if (comp.DeletionTimestamp != nil && !state.Deleted) || !state.Reconciled {
 				reconciled = false
 			}
 
