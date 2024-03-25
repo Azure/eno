@@ -104,7 +104,7 @@ func shouldReleaseFinalizer(comp *apiv1.Composition, slice *apiv1.ResourceSlice)
 	if comp.Status.CurrentSynthesis != nil && slice.Spec.CompositionGeneration > comp.Status.CurrentSynthesis.ObservedCompositionGeneration && owner.UID == comp.UID {
 		return false // stale informer
 	}
-	return comp.DeletionTimestamp != nil && (!resourcesRemain(slice) || (!synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) && !synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice)))
+	return !resourcesRemain(comp, slice) || (!synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) && !synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice))
 }
 
 func synthesisReferencesSlice(syn *apiv1.Synthesis, slice *apiv1.ResourceSlice) bool {
@@ -119,12 +119,13 @@ func synthesisReferencesSlice(syn *apiv1.Synthesis, slice *apiv1.ResourceSlice) 
 	return false
 }
 
-func resourcesRemain(slice *apiv1.ResourceSlice) bool {
+func resourcesRemain(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
 	if len(slice.Status.Resources) == 0 && len(slice.Spec.Resources) > 0 {
 		return true // status is lagging behind
 	}
+	shouldOrphan := comp != nil && comp.Annotations != nil && comp.Annotations["eno.azure.io/deletion-strategy"] == "orphan"
 	for _, state := range slice.Status.Resources {
-		if !state.Deleted {
+		if !state.Deleted && !shouldOrphan {
 			return true
 		}
 	}

@@ -157,19 +157,20 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 
 	// Store the results
+	if modified {
+		return ctrl.Result{Requeue: true}, nil
+	}
+	deleted := current == nil || current.GetDeletionTimestamp() != nil
 	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) *apiv1.ResourceState {
-		if rs != nil && rs.Deleted == resource.Deleted() && rs.Reconciled && ptr.Deref(rs.Ready, metav1.Time{}) == ptr.Deref(ready, metav1.Time{}) {
+		if rs != nil && rs.Deleted == deleted && rs.Reconciled && ptr.Deref(rs.Ready, metav1.Time{}) == ptr.Deref(ready, metav1.Time{}) {
 			return nil
 		}
 		return &apiv1.ResourceState{
-			Deleted:    resource.Deleted(),
+			Deleted:    deleted,
 			Ready:      ready,
 			Reconciled: true,
 		}
 	})
-	if modified {
-		return ctrl.Result{Requeue: true}, nil
-	}
 	if ready == nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}
@@ -191,7 +192,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 			return false, nil // already deleted - nothing to do
 		}
 		if comp.Annotations["eno.azure.io/deletion-strategy"] == "orphan" {
-			return true, nil // signal that we deleted without actually doing so
+			return false, nil
 		}
 
 		reconciliationActions.WithLabelValues("delete").Inc()

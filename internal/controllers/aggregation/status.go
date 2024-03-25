@@ -38,6 +38,7 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || (comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.Reconciled != nil) {
 		return ctrl.Result{}, nil
 	}
+	shouldOrphan := comp.Annotations != nil && comp.Annotations["eno.azure.io/deletion-strategy"] == "orphan"
 
 	var maxReadyTime *metav1.Time
 	ready := true
@@ -61,7 +62,7 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		for _, state := range slice.Status.Resources {
 			state := state
 			// Sync
-			if (comp.DeletionTimestamp != nil && !state.Deleted) || !state.Reconciled {
+			if (comp.DeletionTimestamp != nil && (!state.Deleted && !shouldOrphan)) || !state.Reconciled {
 				reconciled = false
 			}
 
