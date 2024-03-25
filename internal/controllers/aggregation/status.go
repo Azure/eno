@@ -68,8 +68,9 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 		for _, state := range slice.Status.Resources {
 			state := state
-			// Sync
-			if (comp.DeletionTimestamp != nil && (!state.Deleted && !shouldOrphan)) || !state.Reconciled {
+			// A resource is reconciled when it's... been reconciled OR when the composition is deleting and it's been deleted.
+			// One more special case: it's also been reconciled when it still exists but the composition is deleting and is configured to orphan resources.
+			if !state.Reconciled || (!state.Deleted && !shouldOrphan && comp.DeletionTimestamp != nil) {
 				reconciled = false
 			}
 
