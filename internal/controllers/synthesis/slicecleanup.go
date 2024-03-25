@@ -91,8 +91,7 @@ func (c *sliceCleanupController) Reconcile(ctx context.Context, req ctrl.Request
 }
 
 func shouldDelete(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
-	owner := metav1.GetControllerOf(slice)
-	if comp.Status.CurrentSynthesis != nil && slice.Spec.CompositionGeneration > comp.Status.CurrentSynthesis.ObservedCompositionGeneration && owner.UID == comp.UID {
+	if comp.Status.CurrentSynthesis != nil && slice.Spec.CompositionGeneration > comp.Status.CurrentSynthesis.ObservedCompositionGeneration {
 		return false // stale informer
 	}
 	isReferenced := synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) || synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice)
@@ -100,8 +99,7 @@ func shouldDelete(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
 }
 
 func shouldReleaseFinalizer(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
-	owner := metav1.GetControllerOf(slice)
-	if comp.Status.CurrentSynthesis != nil && slice.Spec.CompositionGeneration > comp.Status.CurrentSynthesis.ObservedCompositionGeneration && owner.UID == comp.UID {
+	if comp.Status.CurrentSynthesis != nil && slice.Spec.CompositionGeneration > comp.Status.CurrentSynthesis.ObservedCompositionGeneration {
 		return false // stale informer
 	}
 	return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil && (!resourcesRemain(comp, slice) || (!synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) && !synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice)))
