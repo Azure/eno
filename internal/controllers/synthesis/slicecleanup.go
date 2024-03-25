@@ -104,7 +104,7 @@ func shouldReleaseFinalizer(comp *apiv1.Composition, slice *apiv1.ResourceSlice)
 	}
 	println("TODO", "!synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice)", !synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice))
 	println("TODO", "!synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice)", !synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice))
-	return !resourcesRemain(comp, slice) || (!synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) && !synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice))
+	return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil && (!resourcesRemain(comp, slice) || (!synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) && !synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice)))
 }
 
 func synthesisReferencesSlice(syn *apiv1.Synthesis, slice *apiv1.ResourceSlice) bool {

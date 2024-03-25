@@ -177,6 +177,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		return ctrl.Result{Requeue: true}, nil
 	}
 	deleted := current == nil || current.GetDeletionTimestamp() != nil
+	logger.Info(fmt.Sprintf("TODO setting status deleted=%t", deleted))
 	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) *apiv1.ResourceState {
 		if rs != nil && rs.Deleted == deleted && rs.Reconciled && ptr.Deref(rs.Ready, metav1.Time{}) == ptr.Deref(ready, metav1.Time{}) {
 			return nil

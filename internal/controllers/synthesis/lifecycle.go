@@ -103,7 +103,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	if comp.DeletionTimestamp != nil {
 		// If the composition was being synthesized at the time of deletion we need to swap the previous
 		// state back to current. Otherwise we'll get stuck waiting for a synthesis that can't happen.
-		if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil {
+		if comp.Status.PreviousSynthesis != nil && (comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil) {
 			comp.Status.CurrentSynthesis = comp.Status.PreviousSynthesis
 			comp.Status.PreviousSynthesis = nil
 			err = c.client.Status().Update(ctx, comp)
@@ -113,6 +113,9 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 			logger.V(0).Info("reverted swapped status for deletion")
 			return ctrl.Result{}, nil
 		}
+
+		// TODO: as soon as we did the above, the slice was released. Then it is again needed below.
+		// THe status controller didn't do it.
 
 		// Deletion increments the composition's generation, but the reconstitution cache is only invalidated
 		// when the synthesized generation (from the status) changes, which will never happen because synthesis
