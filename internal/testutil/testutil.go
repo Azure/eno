@@ -87,7 +87,7 @@ func NewManager(t *testing.T) *Manager {
 			testCrdDir,
 		},
 		ErrorIfCRDPathMissing:    true,
-		AttachControlPlaneOutput: os.Getenv("ACTIONS_RUNNER_DEBUG ") != "" || os.Getenv("ACTIONS_STEP_DEBUG ") != "",
+		AttachControlPlaneOutput: os.Getenv("ACTIONS_RUNNER_DEBUG") != "" || os.Getenv("ACTIONS_STEP_DEBUG") != "",
 
 		// We can't use KUBEBUILDER_ASSETS when also setting DOWNSTREAM_KUBEBUILDER_ASSETS
 		// because the envvar overrides BinaryAssetsDirectory
