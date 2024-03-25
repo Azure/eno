@@ -102,6 +102,8 @@ func shouldReleaseFinalizer(comp *apiv1.Composition, slice *apiv1.ResourceSlice)
 	if comp.Status.CurrentSynthesis != nil && slice.Spec.CompositionGeneration > comp.Status.CurrentSynthesis.ObservedCompositionGeneration {
 		return false // stale informer
 	}
+	println("TODO", "!synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice)", !synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice))
+	println("TODO", "!synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice)", !synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice))
 	return comp.DeletionTimestamp != nil && (!resourcesRemain(slice) || (!synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) && !synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice)))
 }
 
