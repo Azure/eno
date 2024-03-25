@@ -114,9 +114,6 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, nil
 		}
 
-		// TODO: as soon as we did the above, the slice was released. Then it is again needed below.
-		// THe status controller didn't do it.
-
 		// Deletion increments the composition's generation, but the reconstitution cache is only invalidated
 		// when the synthesized generation (from the status) changes, which will never happen because synthesis
 		// is righly disabled for deleted compositions. We break out of this deadlock condition by updating
