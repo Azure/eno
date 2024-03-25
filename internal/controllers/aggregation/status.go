@@ -35,6 +35,7 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition: %w", err))
 	}
+	logger.Info(fmt.Sprint("TODO TOP", comp.Status.CurrentSynthesis != nil, comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil))
 	if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || (comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.Reconciled != nil) {
 		return ctrl.Result{}, nil
 	}
@@ -62,6 +63,7 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		for _, state := range slice.Status.Resources {
 			state := state
 			// Sync
+			logger.Info(fmt.Sprint("TODO MDL", comp.DeletionTimestamp != nil, state.Deleted, shouldOrphan, state.Reconciled))
 			if (comp.DeletionTimestamp != nil && (!state.Deleted && !shouldOrphan)) || !state.Reconciled {
 				reconciled = false
 			}
