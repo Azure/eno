@@ -103,7 +103,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	if comp.DeletionTimestamp != nil {
 		// If the composition was being synthesized at the time of deletion we need to swap the previous
 		// state back to current. Otherwise we'll get stuck waiting for a synthesis that can't happen.
-		if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil {
+		if comp.Status.PreviousSynthesis != nil && (comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil) {
 			comp.Status.CurrentSynthesis = comp.Status.PreviousSynthesis
 			comp.Status.PreviousSynthesis = nil
 			err = c.client.Status().Update(ctx, comp)
