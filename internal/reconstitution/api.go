@@ -106,7 +106,7 @@ func (r *ReadinessCheck) Eval(ctx context.Context, resource *unstructured.Unstru
 	if list, ok := val.Value().([]ref.Val); ok {
 		for _, ref := range list {
 			if mp, ok := ref.Value().(map[string]any); ok {
-				if mp != nil && mp["status"] == "True" && mp["type"] != "" && mp["reason"] != "" {
+				if mp != nil && mp["status"] == "True" && mp["type"] != nil && mp["reason"] != nil {
 					ts := metav1.Now()
 					if str, ok := mp["lastTransitionTime"].(string); ok {
 						parsed, err := time.Parse(time.RFC3339, str)
@@ -114,7 +114,7 @@ func (r *ReadinessCheck) Eval(ctx context.Context, resource *unstructured.Unstru
 							ts.Time = parsed
 						}
 					}
-					return &Readiness{ReadyTime: ts, PreciseTime: true}, true
+					return &Readiness{ReadyTime: ts, PreciseTime: err == nil}, true
 				}
 			}
 		}

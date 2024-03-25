@@ -103,11 +103,8 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer, comp *apiv1.Composition, pod *corev1.Pod) ([]*apiv1.ResourceSliceRef, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	synctx, done := context.WithTimeout(ctx, syn.Spec.ExecTimeout.Duration)
-	defer done()
-
 	start := time.Now()
-	stdout, err := c.conn.Synthesize(synctx, syn, pod)
+	stdout, err := c.conn.Synthesize(ctx, syn, pod)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +132,8 @@ func (c *execController) fetchPreviousSlices(ctx context.Context, comp *apiv1.Co
 		slice.Name = ref.Name
 		slice.Namespace = comp.Namespace
 		err := c.client.Get(ctx, client.ObjectKeyFromObject(slice), slice)
-		if errors.IsNotFound(err) {
+		if errors.IsNotFound(err) && comp.Status.PreviousSynthesis.Synthesized != nil && time.Since(comp.Status.PreviousSynthesis.Synthesized.Time) > time.Minute*5 {
+			// It's possible that the informer is just stale, set some arbitrary period after synthesis at which the resource slices are expected to exist in cache.
 			logger.V(0).Info("resource slice referenced by composition was not found - skipping", "resourceSliceName", slice.Name)
 			continue
 		}

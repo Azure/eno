@@ -35,8 +35,9 @@ type CompositionStatus struct {
 
 // Synthesis represents a Synthesizer's specific synthesis of a given Composition.
 type Synthesis struct {
-	ObservedCompositionGeneration int64 `json:"observedCompositionGeneration,omitempty"`
-	ObservedSynthesizerGeneration int64 `json:"observedSynthesizerGeneration,omitempty"`
+	UUID                          string `json:"uuid,omitempty"`
+	ObservedCompositionGeneration int64  `json:"observedCompositionGeneration,omitempty"`
+	ObservedSynthesizerGeneration int64  `json:"observedSynthesizerGeneration,omitempty"`
 
 	PodCreation *metav1.Time `json:"podCreation,omitempty"`
 	Synthesized *metav1.Time `json:"synthesized,omitempty"`

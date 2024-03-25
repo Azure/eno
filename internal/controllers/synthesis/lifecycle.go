@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/flowcontrol"
@@ -25,6 +26,7 @@ type Config struct {
 type podLifecycleController struct {
 	config           *Config
 	client           client.Client
+	noCacheReader    client.Reader
 	createSliceLimit flowcontrol.RateLimiter
 }
 
@@ -33,6 +35,7 @@ func NewPodLifecycleController(mgr ctrl.Manager, cfg *Config) error {
 	c := &podLifecycleController{
 		config:           cfg,
 		client:           mgr.GetClient(),
+		noCacheReader:    mgr.GetAPIReader(),
 		createSliceLimit: flowcontrol.NewTokenBucketRateLimiter(float32(cfg.SliceCreationQPS), 1),
 	}
 	return ctrl.NewControllerManagedBy(mgr).
@@ -76,7 +79,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	syn.Name = comp.Spec.Synthesizer.Name
 	err = c.client.Get(ctx, client.ObjectKeyFromObject(syn), syn)
 	if err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting synthesizer: %w", err))
+		return ctrl.Result{}, fmt.Errorf("getting synthesizer: %w", err)
 	}
 	logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
 
@@ -91,13 +94,16 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	if exists {
 		// The pod is still running.
 		// Poll periodically to check if has timed out.
+		if syn.Spec.PodTimeout == nil {
+			return ctrl.Result{}, nil
+		}
 		return ctrl.Result{RequeueAfter: syn.Spec.PodTimeout.Duration}, nil
 	}
 
 	if comp.DeletionTimestamp != nil {
 		// If the composition was being synthesized at the time of deletion we need to swap the previous
 		// state back to current. Otherwise we'll get stuck waiting for a synthesis that can't happen.
-		if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil {
+		if comp.Status.PreviousSynthesis != nil && (comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil) {
 			comp.Status.CurrentSynthesis = comp.Status.PreviousSynthesis
 			comp.Status.PreviousSynthesis = nil
 			err = c.client.Status().Update(ctx, comp)
@@ -112,12 +118,12 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		// when the synthesized generation (from the status) changes, which will never happen because synthesis
 		// is righly disabled for deleted compositions. We break out of this deadlock condition by updating
 		// the status without actually synthesizing.
-		if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation {
+		if comp.Status.CurrentSynthesis != nil && (comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation || comp.Status.CurrentSynthesis.Synthesized == nil) {
 			comp.Status.CurrentSynthesis.ObservedCompositionGeneration = comp.Generation
 			comp.Status.CurrentSynthesis.Ready = nil
 			comp.Status.CurrentSynthesis.Reconciled = nil
 			now := metav1.Now()
-			comp.Status.CurrentSynthesis.Synthesized = &now // in case the previous synthesis failed (TODO I don't think this actually works)
+			comp.Status.CurrentSynthesis.Synthesized = &now
 			err = c.client.Status().Update(ctx, comp)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("updating current composition generation: %w", err)
@@ -158,15 +164,48 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// No need to create a pod if everything is in sync
-	if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil || comp.DeletionTimestamp != nil {
+	if comp.Status.CurrentSynthesis.Synthesized != nil || comp.DeletionTimestamp != nil {
 		return ctrl.Result{}, nil
+	}
+
+	// Don't attempt to synthesize a composition that doesn't reference a synthesizer.
+	if comp.Spec.Synthesizer.Name == "" {
+		return ctrl.Result{}, nil
+	}
+
+	// Before it's safe to create a pod, we need to write _something_ back to the composition.
+	// This will fail if another write has already hit the resource i.e. synthesis completion.
+	// Otherwise it's possible for pod deletion event to land before the synthesis complete event.
+	// In that case a new pod would be created even though the synthesis just completed.
+	if comp.Status.CurrentSynthesis.UUID == "" {
+		comp.Status.CurrentSynthesis.UUID = uuid.NewString()
+		if err := c.client.Status().Update(ctx, comp); err != nil {
+			return ctrl.Result{}, fmt.Errorf("writing started timestamp to status: %w", err)
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Confirm that a pod doesn't already exist for this synthesis without trusting informers.
+	// This protects against cases where synthesis has recently started and something causes
+	// another tick of this loop before the pod write hits the informer.
+	err = c.noCacheReader.List(ctx, pods, client.MatchingLabels{
+		"eno.azure.io/synthesis-uuid": comp.Status.CurrentSynthesis.UUID,
+	})
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("checking for existing pod: %w", err)
+	}
+	for _, pod := range pods.Items {
+		if pod.DeletionTimestamp == nil {
+			logger.V(0).Info(fmt.Sprintf("refusing to create new synthesizer pod because the pod %q already exists and has not been deleted", pod.Name))
+			return ctrl.Result{}, nil
+		}
 	}
 
 	// If we made it this far it's safe to create a pod
 	pod := newPod(c.config, c.client.Scheme(), comp, syn)
 	err = c.client.Create(ctx, pod)
 	if err != nil {
-		return ctrl.Result{}, client.IgnoreAlreadyExists(fmt.Errorf("creating pod: %w", err))
+		return ctrl.Result{}, fmt.Errorf("creating pod: %w", err)
 	}
 	logger.V(0).Info("created synthesizer pod", "podName", pod.Name)
 	sytheses.Inc()

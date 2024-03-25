@@ -3,6 +3,7 @@ package reconstitution
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -16,7 +17,7 @@ var simpleConditionStatus = map[string]any{
 			{
 				"message":            "foo bar",
 				"reason":             "Testing",
-				"lastTransitionTime": metav1.Now().String(),
+				"lastTransitionTime": metav1.Now().Format(time.RFC3339),
 				"status":             "True",
 				"type":               "Test",
 			},
@@ -31,6 +32,13 @@ var simpleConditionStatus = map[string]any{
 				"reason":  "Testing",
 				"status":  "False",
 				"type":    "Test3",
+			},
+			{
+				"message":            "foo bar",
+				"reason":             "Testing",
+				"status":             "False",
+				"lastTransitionTime": 123,
+				"type":               "Test4",
 			},
 		},
 	},
@@ -68,14 +76,14 @@ var readinessEvalTests = []struct {
 	{
 		Name:     "condition-miss",
 		Resource: &unstructured.Unstructured{Object: simpleConditionStatus},
-		Expr:     "self.status.conditions.exists(item, item.type == 'Test' && item.status == 'True')",
-		Expect:   true,
+		Expr:     "self.status.conditions.exists(item, item.type == 'Test' && item.status == 'False')",
+		Expect:   false,
 	},
 	{
 		Name:     "condition-hit",
 		Resource: &unstructured.Unstructured{Object: simpleConditionStatus},
-		Expr:     "self.status.conditions.exists(item, item.type == 'Test' && item.status == 'False')",
-		Expect:   false,
+		Expr:     "self.status.conditions.exists(item, item.type == 'Test' && item.status == 'True')",
+		Expect:   true,
 	},
 	{
 		Name:     "condition-missing",
@@ -99,6 +107,13 @@ var readinessEvalTests = []struct {
 		Expr:          "self.status.conditions.filter(item, item.type == 'Test' && item.status == 'True')",
 		Expect:        true,
 		ExpectPrecise: true,
+	},
+	{
+		Name:          "magic-condition-matcher-wrong-type",
+		Resource:      &unstructured.Unstructured{Object: simpleConditionStatus},
+		Expr:          "self.status.conditions.filter(item, item.type == 'Test4')",
+		Expect:        false,
+		ExpectPrecise: false,
 	},
 }
 

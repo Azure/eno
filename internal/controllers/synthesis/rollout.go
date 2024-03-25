@@ -43,6 +43,9 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerNamespace", syn.Namespace, "synthesizerGeneration", syn.Generation)
 
 	if syn.Status.LastRolloutTime != nil && syn.Status.CurrentGeneration != syn.Generation {
+		if syn.Spec.RolloutCooldown == nil {
+			return ctrl.Result{}, nil // not configured
+		}
 		remainingCooldown := syn.Spec.RolloutCooldown.Duration - time.Since(syn.Status.LastRolloutTime.Time)
 		if remainingCooldown > 0 {
 			return ctrl.Result{RequeueAfter: remainingCooldown}, nil // not ready to continue rollout yet

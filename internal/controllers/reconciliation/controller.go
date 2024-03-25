@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -139,7 +140,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	slice := &apiv1.ResourceSlice{}
 	err = c.client.Get(ctx, req.Manifest.Slice, slice)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
+		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting resource slice: %w", err))
 	}
 	var ready *metav1.Time
 	if len(slice.Status.Resources) > req.Manifest.Index {
@@ -156,19 +157,20 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 
 	// Store the results
+	if modified {
+		return ctrl.Result{Requeue: true}, nil
+	}
+	deleted := current == nil || current.GetDeletionTimestamp() != nil
 	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) *apiv1.ResourceState {
-		if rs.Deleted == resource.Deleted() && rs.Reconciled && rs.Ready != nil && *rs.Ready == *ready {
+		if rs != nil && rs.Deleted == deleted && rs.Reconciled && ptr.Deref(rs.Ready, metav1.Time{}) == ptr.Deref(ready, metav1.Time{}) {
 			return nil
 		}
 		return &apiv1.ResourceState{
-			Deleted:    resource.Deleted(),
+			Deleted:    deleted,
 			Ready:      ready,
 			Reconciled: true,
 		}
 	})
-	if modified {
-		return ctrl.Result{Requeue: true}, nil
-	}
 	if ready == nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}
@@ -190,7 +192,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 			return false, nil // already deleted - nothing to do
 		}
 		if comp.Annotations["eno.azure.io/deletion-strategy"] == "orphan" {
-			return true, nil // signal that we deleted without actually doing so
+			return false, nil
 		}
 
 		reconciliationActions.WithLabelValues("delete").Inc()

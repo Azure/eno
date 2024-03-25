@@ -17,7 +17,10 @@ func newPod(cfg *Config, scheme *runtime.Scheme, comp *apiv1.Composition, syn *a
 	pod.GenerateName = "synthesis-"
 	pod.Namespace = cfg.PodNamespace
 	pod.Finalizers = []string{"eno.azure.io/cleanup"}
-	pod.Labels = map[string]string{manager.ManagerLabelKey: manager.ManagerLabelValue}
+	pod.Labels = map[string]string{
+		manager.ManagerLabelKey:       manager.ManagerLabelValue,
+		"eno.azure.io/synthesis-uuid": comp.Status.CurrentSynthesis.UUID,
+	}
 	pod.Annotations = map[string]string{
 		"eno.azure.io/composition-generation": strconv.FormatInt(comp.Generation, 10),
 		"eno.azure.io/synthesizer-generation": strconv.FormatInt(syn.Generation, 10),

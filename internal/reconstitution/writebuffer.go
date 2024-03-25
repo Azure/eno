@@ -124,6 +124,16 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 		return false
 	}
 
+	// Sending an empty resource version in update requests never returns 404 or 409.
+	// Instead, input validation will fail for every request regardless of the resource's actual state.
+	// So we need to set an incorrect but valid resource version in order for the 404 checks below to work.
+	//
+	// This is necessary because we can't trust that the informer's 404 means the resource is actually deleted - its cache may just be stale.
+	// So we defer the 404 check to the update.
+	if errors.IsNotFound(err) {
+		slice.ResourceVersion = "1"
+	}
+
 	// It's easier to pre-allocate the entire status slice before sending patches
 	// since the "replace" op requires an existing item.
 	if len(slice.Status.Resources) == 0 {

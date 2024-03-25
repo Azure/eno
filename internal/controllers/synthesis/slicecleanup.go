@@ -3,10 +3,12 @@ package synthesis
 import (
 	"context"
 	"fmt"
+	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -47,6 +49,10 @@ func (c *sliceCleanupController) Reconcile(ctx context.Context, req ctrl.Request
 		comp.Name = owner.Name
 		comp.Namespace = slice.Namespace
 		err = c.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if errors.IsNotFound(err) && time.Since(slice.CreationTimestamp.Time) < time.Minute {
+			logger.V(1).Info("didn't find a composition for this resource slice - ignoring because resource slice is new so informer may just be stale")
+			return ctrl.Result{}, nil
+		}
 		if client.IgnoreNotFound(err) != nil {
 			return ctrl.Result{}, fmt.Errorf("getting composition: %w", err)
 		}
@@ -85,20 +91,18 @@ func (c *sliceCleanupController) Reconcile(ctx context.Context, req ctrl.Request
 }
 
 func shouldDelete(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
-	owner := metav1.GetControllerOf(slice)
-	if comp.Status.CurrentSynthesis != nil && slice.Spec.CompositionGeneration > comp.Status.CurrentSynthesis.ObservedCompositionGeneration && owner.UID == comp.UID {
+	if comp.Status.CurrentSynthesis != nil && slice.Spec.CompositionGeneration > comp.Status.CurrentSynthesis.ObservedCompositionGeneration {
 		return false // stale informer
 	}
 	isReferenced := synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) || synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice)
-	return comp.DeletionTimestamp != nil || (!isReferenced && slice.Spec.CompositionGeneration < comp.Generation)
+	return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil && comp.DeletionTimestamp != nil || (!isReferenced && slice.Spec.CompositionGeneration < comp.Generation)
 }
 
 func shouldReleaseFinalizer(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
-	owner := metav1.GetControllerOf(slice)
-	if comp.Status.CurrentSynthesis != nil && slice.Spec.CompositionGeneration > comp.Status.CurrentSynthesis.ObservedCompositionGeneration && owner.UID == comp.UID {
+	if comp.Status.CurrentSynthesis != nil && slice.Spec.CompositionGeneration > comp.Status.CurrentSynthesis.ObservedCompositionGeneration {
 		return false // stale informer
 	}
-	return !resourcesRemain(slice) || (!synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) && !synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice))
+	return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil && (!resourcesRemain(comp, slice) || (!synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) && !synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice)))
 }
 
 func synthesisReferencesSlice(syn *apiv1.Synthesis, slice *apiv1.ResourceSlice) bool {
@@ -113,12 +117,13 @@ func synthesisReferencesSlice(syn *apiv1.Synthesis, slice *apiv1.ResourceSlice) 
 	return false
 }
 
-func resourcesRemain(slice *apiv1.ResourceSlice) bool {
+func resourcesRemain(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
 	if len(slice.Status.Resources) == 0 && len(slice.Spec.Resources) > 0 {
 		return true // status is lagging behind
 	}
+	shouldOrphan := comp != nil && comp.Annotations != nil && comp.Annotations["eno.azure.io/deletion-strategy"] == "orphan"
 	for _, state := range slice.Status.Resources {
-		if !state.Deleted {
+		if !state.Deleted && !shouldOrphan {
 			return true
 		}
 	}

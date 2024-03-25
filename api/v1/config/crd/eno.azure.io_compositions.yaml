@@ -81,6 +81,8 @@ spec:
                   synthesized:
                     format: date-time
                     type: string
+                  uuid:
+                    type: string
                 type: object
               previousSynthesis:
                 description: Synthesis represents a Synthesizer's specific synthesis
@@ -110,6 +112,8 @@ spec:
                     type: array
                   synthesized:
                     format: date-time
+                    type: string
+                  uuid:
                     type: string
                 type: object
             type: object

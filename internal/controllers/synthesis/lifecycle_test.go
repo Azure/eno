@@ -78,7 +78,7 @@ func TestCompositionDeletion(t *testing.T) {
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 
 	// Mark the composition as reconciled
-	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		comp.Status.CurrentSynthesis.Reconciled = ptr.To(metav1.Now())
 		return cli.Status().Update(ctx, comp)
@@ -124,7 +124,7 @@ var shouldDeletePodTests = []struct {
 		},
 		Synth: &apiv1.Synthesizer{
 			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: metav1.Duration{Duration: time.Hour},
+				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
 			},
 		},
 		PodShouldExist:     true,
@@ -152,7 +152,7 @@ var shouldDeletePodTests = []struct {
 		},
 		Synth: &apiv1.Synthesizer{
 			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: metav1.Duration{Duration: time.Hour},
+				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
 			},
 		},
 		PodShouldExist:     true,
@@ -180,7 +180,7 @@ var shouldDeletePodTests = []struct {
 		},
 		Synth: &apiv1.Synthesizer{
 			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: metav1.Duration{Duration: time.Hour},
+				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
 			},
 		},
 		PodShouldExist:     true,
@@ -203,7 +203,7 @@ var shouldDeletePodTests = []struct {
 		},
 		Synth: &apiv1.Synthesizer{
 			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: metav1.Duration{Duration: time.Minute},
+				PodTimeout: ptr.To(metav1.Duration{Duration: time.Minute}),
 			},
 		},
 		PodShouldExist:     true,
@@ -227,7 +227,7 @@ var shouldDeletePodTests = []struct {
 		},
 		Synth: &apiv1.Synthesizer{
 			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: metav1.Duration{Duration: time.Hour},
+				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
 			},
 		},
 		PodShouldExist:     true,
@@ -251,7 +251,7 @@ var shouldDeletePodTests = []struct {
 		},
 		Synth: &apiv1.Synthesizer{
 			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: metav1.Duration{Duration: time.Hour},
+				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
 			},
 		},
 		PodShouldExist:     false,
@@ -286,7 +286,7 @@ var shouldDeletePodTests = []struct {
 		},
 		Synth: &apiv1.Synthesizer{
 			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: metav1.Duration{Duration: time.Hour},
+				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
 			},
 		},
 		PodShouldExist:     true,
@@ -330,7 +330,7 @@ var shouldDeletePodTests = []struct {
 		},
 		Synth: &apiv1.Synthesizer{
 			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: metav1.Duration{Duration: time.Hour},
+				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
 			},
 		},
 		PodShouldExist:     true,

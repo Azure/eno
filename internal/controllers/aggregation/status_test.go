@@ -175,3 +175,117 @@ func TestReadyTimeAggregation(t *testing.T) {
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 	assert.Equal(t, latestReadyTime.Round(time.Minute), comp.Status.CurrentSynthesis.Ready.Round(time.Minute))
 }
+
+func TestNoSlices(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+
+	now := metav1.Now()
+	comp := &apiv1.Composition{}
+	comp.Name = "test"
+	comp.Namespace = "default"
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		Synthesized:    &now,
+		ResourceSlices: []*apiv1.ResourceSliceRef{},
+	}
+	require.NoError(t, cli.Create(ctx, comp))
+	require.NoError(t, cli.Status().Update(ctx, comp))
+
+	a := &statusController{client: cli}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
+	_, err := a.Reconcile(ctx, req)
+	require.NoError(t, err)
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	assert.Nil(t, comp.Status.CurrentSynthesis.Ready)
+	assert.NotNil(t, comp.Status.CurrentSynthesis.Reconciled)
+}
+
+func TestMissingSlice(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+
+	now := metav1.Now()
+	comp := &apiv1.Composition{}
+	comp.Name = "test"
+	comp.Namespace = "default"
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		Synthesized:    &now,
+		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: "nawr"}},
+	}
+	require.NoError(t, cli.Create(ctx, comp))
+	require.NoError(t, cli.Status().Update(ctx, comp))
+
+	a := &statusController{client: cli}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
+	_, err := a.Reconcile(ctx, req)
+	require.NoError(t, err)
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	assert.Nil(t, comp.Status.CurrentSynthesis.Ready)
+	assert.Nil(t, comp.Status.CurrentSynthesis.Reconciled)
+}
+
+func TestMissingSliceWhileDeleting(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+
+	now := metav1.Now()
+	comp := &apiv1.Composition{}
+	comp.Name = "test"
+	comp.Namespace = "default"
+	comp.Finalizers = []string{"anything"}
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		Synthesized:    &now,
+		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: "nawr"}},
+	}
+	require.NoError(t, cli.Create(ctx, comp))
+	require.NoError(t, cli.Status().Update(ctx, comp))
+	require.NoError(t, cli.Delete(ctx, comp))
+
+	a := &statusController{client: cli}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
+	_, err := a.Reconcile(ctx, req)
+	require.NoError(t, err)
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	assert.Nil(t, comp.Status.CurrentSynthesis.Ready)
+	assert.NotNil(t, comp.Status.CurrentSynthesis.Reconciled)
+}
+
+func TestOrphanedOnPurpose(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+
+	now := metav1.Now()
+
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-slice-1"
+	slice.Namespace = "default"
+	slice.Spec.Resources = []apiv1.Manifest{{Manifest: "{}", Deleted: true}}
+	slice.Status.Resources = []apiv1.ResourceState{{Reconciled: true}}
+	require.NoError(t, cli.Create(ctx, slice))
+	require.NoError(t, cli.Status().Update(ctx, slice))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test"
+	comp.Namespace = "default"
+	comp.Annotations = map[string]string{"eno.azure.io/deletion-strategy": "orphan"}
+	comp.Finalizers = []string{"anything"}
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		Synthesized:    &now,
+		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
+	}
+	require.NoError(t, cli.Create(ctx, comp))
+	require.NoError(t, cli.Status().Update(ctx, comp))
+	require.NoError(t, cli.Delete(ctx, comp))
+
+	a := &statusController{client: cli}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
+	_, err := a.Reconcile(ctx, req)
+	require.NoError(t, err)
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	assert.Nil(t, comp.Status.CurrentSynthesis.Ready)
+	assert.NotNil(t, comp.Status.CurrentSynthesis.Reconciled)
+}
