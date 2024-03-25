@@ -104,7 +104,7 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 	}
-	logger.V(0).Info("aggregated resource status into composition")
+	logger.V(0).Info(fmt.Sprintf("aggregated resource status into composition ready=%t reconciled=%t", ready, reconciled))
 
 	return ctrl.Result{}, nil
 }
