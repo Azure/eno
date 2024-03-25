@@ -14,7 +14,6 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
-	"github.com/Azure/eno/internal/testutil"
 )
 
 type rolloutController struct {
@@ -84,7 +83,7 @@ func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, fmt.Errorf("advancing last rollout time: %w", err)
 		}
 
-		err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 			if err := c.client.Get(ctx, client.ObjectKeyFromObject(&comp), &comp); err != nil {
 				return err
 			}

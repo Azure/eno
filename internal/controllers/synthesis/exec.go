@@ -8,7 +8,6 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
-	"github.com/Azure/eno/internal/testutil"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -237,7 +236,7 @@ func (c *execController) writeResourceSlice(ctx context.Context, slice *apiv1.Re
 
 func (c *execController) writeSuccessStatus(ctx context.Context, comp *apiv1.Composition, compGen int64, refs []*apiv1.ResourceSliceRef) error {
 	logger := logr.FromContextOrDiscard(ctx)
-	return retry.RetryOnConflict(testutil.Backoff, func() error {
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		err := c.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		if err != nil {
 			return err
