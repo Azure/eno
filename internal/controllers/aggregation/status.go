@@ -90,7 +90,7 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	now := metav1.Now()
-	if ready {
+	if ready && maxReadyTime != nil {
 		comp.Status.CurrentSynthesis.Ready = maxReadyTime
 
 		if synthed := comp.Status.CurrentSynthesis.Synthesized; synthed != nil {
