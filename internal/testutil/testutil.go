@@ -99,7 +99,16 @@ func NewManager(t *testing.T) *Manager {
 			panic(err)
 		}
 	})
-	cfg, err := env.Start()
+	var cfg *rest.Config
+	var err error
+	for i := 0; i < 2; i++ {
+		cfg, err = env.Start()
+		if err != nil {
+			t.Logf("failed to start test environment: %s", err)
+			continue
+		}
+		break
+	}
 	require.NoError(t, err)
 
 	mgr, err := manager.NewTest(logr.FromContextOrDiscard(NewContext(t)), &manager.Options{
@@ -150,7 +159,14 @@ func NewManager(t *testing.T) *Manager {
 			panic(err)
 		}
 	})
-	m.DownstreamRestConfig, err = downstreamEnv.Start()
+	for i := 0; i < 2; i++ {
+		m.DownstreamRestConfig, err = downstreamEnv.Start()
+		if err != nil {
+			t.Logf("failed to start downstream test environment: %s", err)
+			continue
+		}
+		break
+	}
 	require.NoError(t, err)
 	m.DownstreamEnv = downstreamEnv
 
