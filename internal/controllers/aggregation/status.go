@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -49,6 +50,11 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		slice.Name = ref.Name
 		slice.Namespace = comp.Namespace
 		err := s.client.Get(ctx, client.ObjectKeyFromObject(slice), slice)
+		if comp.DeletionTimestamp != nil && errors.IsNotFound(err) {
+			// It's possible for resource slices to be deleted before we have time to aggregate their status into the composition,
+			// but that shouldn't break the deletion flow. Missing resource slice means its been cleaned up when the comp is deleting.
+			continue
+		}
 		if err != nil {
 			return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting resource slice: %w", err))
 		}
@@ -82,7 +88,7 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	now := metav1.Now()
-	if ready {
+	if ready && maxReadyTime != nil {
 		comp.Status.CurrentSynthesis.Ready = maxReadyTime
 
 		if synthed := comp.Status.CurrentSynthesis.Synthesized; synthed != nil {
