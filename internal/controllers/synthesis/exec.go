@@ -94,10 +94,6 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 	}
 
-	// Let the informers catch up
-	// Obviously this isn't ideal, consider a lamport clock in memory
-	time.Sleep(time.Millisecond * 100)
-
 	return ctrl.Result{}, nil
 }
 
