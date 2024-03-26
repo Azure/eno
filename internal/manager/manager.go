@@ -21,12 +21,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 )
+
+func init() {
+	log.SetLogger(zap.New(zap.WriteTo(os.Stdout)))
+}
 
 // IMPORTANT: There are several things to know about how controller-runtime is configured:
 // - Resource slices are only watched by the reconciler process to avoid the cost of watching all of them in the controller
