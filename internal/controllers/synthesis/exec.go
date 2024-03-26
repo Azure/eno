@@ -20,8 +20,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
-// TODO: Limit the max number of pods that can be running concurrently?
-
 // maxSliceJsonBytes is the max sum of a resource slice's manifests. It's set to 1mb, which leaves 512kb of space for the resource's status, encoding overhead, etc.
 const maxSliceJsonBytes = 1024 * 768
 
