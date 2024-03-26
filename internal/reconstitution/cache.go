@@ -12,14 +12,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/readiness"
 	"github.com/go-logr/logr"
-	"github.com/google/cel-go/cel"
 )
 
 // cache maintains a fast index of (ResourceRef + Composition + Synthesis) -> Resource.
 type cache struct {
 	client client.Client
-	celEnv *cel.Env
+	renv   *readiness.Env
 
 	mut                    sync.Mutex
 	resources              map[CompositionRef]map[ResourceRef]*Resource
@@ -27,20 +27,16 @@ type cache struct {
 }
 
 func newCache(client client.Client) *cache {
-	env, err := newCelEnv()
+	renv, err := readiness.NewEnv()
 	if err != nil {
-		panic(fmt.Sprintf("error setting up cel env: %s", err))
+		panic(fmt.Sprintf("error setting up readiness expression env: %s", err))
 	}
 	return &cache{
 		client:                 client,
-		celEnv:                 env,
+		renv:                   renv,
 		resources:              make(map[CompositionRef]map[ResourceRef]*Resource),
 		synthesesByComposition: make(map[types.NamespacedName][]int64),
 	}
-}
-
-func newCelEnv() (*cel.Env, error) {
-	return cel.NewEnv(cel.Variable("self", cel.DynType))
 }
 
 func (c *cache) Get(ctx context.Context, comp *CompositionRef, ref *ResourceRef) (*Resource, bool) {
@@ -169,7 +165,7 @@ func (c *cache) buildResource(ctx context.Context, slice *apiv1.ResourceSlice, r
 			name = "default"
 		}
 
-		check, err := newReadinessCheck(c.celEnv, value)
+		check, err := readiness.ParseCheck(c.renv, value)
 		if err != nil {
 			logger.Error(err, "invalid cel expression")
 			continue
