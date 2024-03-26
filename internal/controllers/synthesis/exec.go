@@ -25,6 +25,7 @@ const maxSliceJsonBytes = 1024 * 512
 
 type execController struct {
 	client           client.Client
+	noCacheClient    client.Reader
 	conn             SynthesizerConnection
 	createSliceLimit flowcontrol.RateLimiter
 }
@@ -35,6 +36,7 @@ func NewExecController(mgr ctrl.Manager, cfg *Config, conn SynthesizerConnection
 		WithLogConstructor(manager.NewLogConstructor(mgr, "execController")).
 		Complete(&execController{
 			client:           mgr.GetClient(),
+			noCacheClient:    mgr.GetAPIReader(),
 			conn:             conn,
 			createSliceLimit: flowcontrol.NewTokenBucketRateLimiter(float32(cfg.SliceCreationQPS), 1),
 		})
@@ -129,7 +131,7 @@ func (c *execController) fetchPreviousSlices(ctx context.Context, comp *apiv1.Co
 		slice := &apiv1.ResourceSlice{}
 		slice.Name = ref.Name
 		slice.Namespace = comp.Namespace
-		err := c.client.Get(ctx, client.ObjectKeyFromObject(slice), slice)
+		err := c.noCacheClient.Get(ctx, client.ObjectKeyFromObject(slice), slice)
 		if errors.IsNotFound(err) && comp.Status.PreviousSynthesis.Synthesized != nil && time.Since(comp.Status.PreviousSynthesis.Synthesized.Time) > time.Minute*5 {
 			// It's possible that the informer is just stale, set some arbitrary period after synthesis at which the resource slices are expected to exist in cache.
 			logger.V(0).Info("resource slice referenced by composition was not found - skipping", "resourceSliceName", slice.Name)
