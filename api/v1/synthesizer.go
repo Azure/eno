@@ -46,6 +46,10 @@ type SynthesizerSpec struct {
 	//
 	// +kubebuilder:default="30s"
 	RolloutCooldown *metav1.Duration `json:"rolloutCooldown,omitempty"`
+
+	// Refs define the Synthesizer's input schema without binding it to specific
+	// resources.
+	Refs []ResourceRef `json:"refs,omitempty"`
 }
 
 type SynthesizerStatus struct {

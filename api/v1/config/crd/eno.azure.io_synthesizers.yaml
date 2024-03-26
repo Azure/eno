@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.13.0
+    controller-gen.kubebuilder.io/version: v0.14.0
   name: synthesizers.eno.azure.io
 spec:
   group: eno.azure.io
@@ -19,14 +19,19 @@ spec:
       openAPIV3Schema:
         properties:
           apiVersion:
-            description: 'APIVersion defines the versioned schema of this representation
-              of an object. Servers should convert recognized schemas to the latest
-              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
           kind:
-            description: 'Kind is a string value representing the REST resource this
-              object represents. Servers may infer this from the endpoint the client
-              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
           metadata:
             type: object
@@ -46,15 +51,29 @@ spec:
                 type: string
               podTimeout:
                 default: 2m
-                description: Pods are recreated after they've existed for at least
-                  the pod timeout interval. This helps close the loop in failure modes
-                  where a pod may be considered ready but not actually able to run.
+                description: |-
+                  Pods are recreated after they've existed for at least the pod timeout interval.
+                  This helps close the loop in failure modes where a pod may be considered ready but not actually able to run.
                 type: string
+              refs:
+                description: |-
+                  Refs define the Synthesizer's input schema without binding it to specific
+                  resources.
+                items:
+                  properties:
+                    group:
+                      type: string
+                    kind:
+                      type: string
+                  required:
+                  - kind
+                  type: object
+                type: array
               rolloutCooldown:
                 default: 30s
-                description: Any changes to the synthesizer will be propagated to
-                  compositions that reference it. This property controls how long
-                  Eno will wait between each composition update.
+                description: |-
+                  Any changes to the synthesizer will be propagated to compositions that reference it.
+                  This property controls how long Eno will wait between each composition update.
                 type: string
             type: object
             x-kubernetes-validations:
@@ -63,16 +82,16 @@ spec:
           status:
             properties:
               currentGeneration:
-                description: The metadata.generation of this resource at the oldest
-                  version currently used by any Generations. This will equal the current
-                  generation when slow rollout of an update to the Generations is
-                  complete.
+                description: |-
+                  The metadata.generation of this resource at the oldest version currently used by any Generations.
+                  This will equal the current generation when slow rollout of an update to the Generations is complete.
                 format: int64
                 type: integer
               lastRolloutTime:
-                description: LastRolloutTime is the timestamp of the last pod creation
-                  caused by a change to this resource. Should not be updated due to
-                  Composotion changes. Used to calculate rollout cooldown period.
+                description: |-
+                  LastRolloutTime is the timestamp of the last pod creation caused by a change to this resource.
+                  Should not be updated due to Composotion changes.
+                  Used to calculate rollout cooldown period.
                 format: date-time
                 type: string
             type: object
