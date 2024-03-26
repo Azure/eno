@@ -15,6 +15,8 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 )
 
+// TestSliceCleanupControllerOrphanedSlice proves that slices owned by a composition that
+// does not reference them will eventually be GC'd.
 func TestSliceCleanupControllerOrphanedSlice(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)

@@ -18,6 +18,8 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 )
 
+// TestCompositionDeletion proves that a composition's status is eventually updated to reflect its deletion.
+// This is necessary to unblock finalizer removal, since we don't synthesize deleted compositions.
 func TestCompositionDeletion(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
