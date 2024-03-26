@@ -44,7 +44,7 @@ var simpleConditionStatus = map[string]any{
 	},
 }
 
-var readinessCheckEvalTests = []struct {
+var evalCheckTests = []struct {
 	Name          string
 	Resource      *unstructured.Unstructured
 	Expr          string
@@ -117,11 +117,11 @@ var readinessCheckEvalTests = []struct {
 	},
 }
 
-func TestReadinessCheckEval(t *testing.T) {
+func TestEvalCheck(t *testing.T) {
 	env, err := NewEnv()
 	require.NoError(t, err)
 
-	for _, tc := range readinessCheckEvalTests {
+	for _, tc := range evalCheckTests {
 		t.Run(tc.Name, func(t *testing.T) {
 			r, err := ParseCheck(env, tc.Expr)
 			require.NoError(t, err)
@@ -140,9 +140,9 @@ func TestReadinessCheckEval(t *testing.T) {
 	}
 }
 
-var readinessChecksEvalTests = []struct {
+var evalChecksTests = []struct {
 	Name         string
-	Checks       ReadinessChecks
+	Checks       Checks
 	Resource     *unstructured.Unstructured
 	ExpectedTime string
 }{
@@ -153,14 +153,14 @@ var readinessChecksEvalTests = []struct {
 	},
 	{
 		Name: "one-negative",
-		Checks: ReadinessChecks{
+		Checks: Checks{
 			mustParse("false"),
 		},
 		Resource: &unstructured.Unstructured{},
 	},
 	{
 		Name: "one-positive",
-		Checks: ReadinessChecks{
+		Checks: Checks{
 			mustParse("true"),
 		},
 		Resource:     &unstructured.Unstructured{},
@@ -168,7 +168,7 @@ var readinessChecksEvalTests = []struct {
 	},
 	{
 		Name: "two-positive",
-		Checks: ReadinessChecks{
+		Checks: Checks{
 			mustParse("true"),
 			mustParse("true"),
 		},
@@ -177,7 +177,7 @@ var readinessChecksEvalTests = []struct {
 	},
 	{
 		Name: "one-positive-one-negative",
-		Checks: ReadinessChecks{
+		Checks: Checks{
 			mustParse("true"),
 			mustParse("false"),
 		},
@@ -185,7 +185,7 @@ var readinessChecksEvalTests = []struct {
 	},
 	{
 		Name: "one-positive-condition",
-		Checks: ReadinessChecks{
+		Checks: Checks{
 			mustParse("self.conditions.filter(item, item.type == 'Test' && item.status == 'True')"),
 		},
 		Resource: &unstructured.Unstructured{
@@ -205,7 +205,7 @@ var readinessChecksEvalTests = []struct {
 	},
 	{
 		Name: "one-low-one-high-precision",
-		Checks: ReadinessChecks{
+		Checks: Checks{
 			mustParse("self.conditions.filter(item, item.type == 'Test' && item.status == 'True')"),
 			mustParse("true"),
 		},
@@ -227,7 +227,7 @@ var readinessChecksEvalTests = []struct {
 	},
 	{
 		Name: "two-high-precision",
-		Checks: ReadinessChecks{
+		Checks: Checks{
 			mustParse("self.conditions.filter(item, item.type == 'Test' && item.status == 'True')"),
 			mustParse("self.conditions.filter(item, item.type == 'Test2' && item.status == 'True')"),
 		},
@@ -256,8 +256,8 @@ var readinessChecksEvalTests = []struct {
 	},
 }
 
-func TestReadinessChecksEval(t *testing.T) {
-	for _, tc := range readinessChecksEvalTests {
+func TestEvalChecks(t *testing.T) {
+	for _, tc := range evalChecksTests {
 		t.Run(tc.Name, func(t *testing.T) {
 			actual, ok := tc.Checks.Eval(context.Background(), tc.Resource)
 			assert.Equal(t, ok, actual != nil)
@@ -274,7 +274,7 @@ func TestReadinessChecksEval(t *testing.T) {
 	}
 }
 
-func mustParse(expr string) *ReadinessCheck {
+func mustParse(expr string) *Check {
 	e, err := NewEnv()
 	if err != nil {
 		panic(err)

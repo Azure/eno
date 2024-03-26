@@ -43,7 +43,7 @@ type Resource struct {
 	Manifest        *apiv1.Manifest
 	GVK             schema.GroupVersionKind
 	SliceDeleted    bool
-	ReadinessChecks readiness.ReadinessChecks
+	ReadinessChecks readiness.Checks
 }
 
 func (r *Resource) Deleted() bool { return r.SliceDeleted || r.Manifest.Deleted }
