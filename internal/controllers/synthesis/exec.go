@@ -20,8 +20,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
-// maxSliceJsonBytes is the max sum of a resource slice's manifests. It's set to 1mb, which leaves 512kb of space for the resource's status, encoding overhead, etc.
-const maxSliceJsonBytes = 1024 * 768
+// maxSliceJsonBytes is the max sum of a resource slice's manifests.
+const maxSliceJsonBytes = 1024 * 512
 
 type execController struct {
 	client           client.Client

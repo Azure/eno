@@ -44,6 +44,7 @@ func run() error {
 	if synconf.PodNamespace == "" {
 		return fmt.Errorf("a value is required in --synthesizer-pod-namespace or POD_NAMESPACE")
 	}
+	mgrOpts.SynthesizerPodNamespace = synconf.PodNamespace
 
 	zapCfg := zap.NewProductionConfig()
 	if debugLogging {

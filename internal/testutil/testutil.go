@@ -112,9 +112,10 @@ func NewManager(t *testing.T) *Manager {
 	require.NoError(t, err)
 
 	mgr, err := manager.NewTest(logr.FromContextOrDiscard(NewContext(t)), &manager.Options{
-		Rest:            cfg,
-		HealthProbeAddr: "127.0.0.1:0",
-		MetricsAddr:     "127.0.0.1:0",
+		Rest:                    cfg,
+		HealthProbeAddr:         "127.0.0.1:0",
+		MetricsAddr:             "127.0.0.1:0",
+		SynthesizerPodNamespace: "default",
 	})
 	require.NoError(t, err)
 	require.NoError(t, testv1.SchemeBuilder.AddToScheme(mgr.GetScheme())) // test-specific CRDs

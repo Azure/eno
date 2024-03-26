@@ -10,12 +10,13 @@ import (
 )
 
 type Options struct {
-	Rest            *rest.Config
-	FieldSelector   string
-	LabelSelector   string
-	HealthProbeAddr string
-	MetricsAddr     string
-	qps             float64 // flags don't support float32, bind to this value and copy over to Rest.QPS during initialization
+	Rest                    *rest.Config
+	FieldSelector           string
+	LabelSelector           string
+	HealthProbeAddr         string
+	MetricsAddr             string
+	SynthesizerPodNamespace string  // set in cmd from synthesis config
+	qps                     float64 // flags don't support float32, bind to this value and copy over to Rest.QPS during initialization
 }
 
 func (o *Options) Bind(set *flag.FlagSet) {

@@ -19,7 +19,6 @@ type ResourceSlice struct {
 	Status ResourceSliceStatus `json:"status,omitempty"`
 }
 
-// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable"
 type ResourceSliceSpec struct {
 	CompositionGeneration int64      `json:"compositionGeneration,omitempty"`
 	Resources             []Manifest `json:"resources,omitempty"`

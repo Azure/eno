@@ -102,14 +102,14 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 	}
 	mgrOpts.Cache.DefaultFieldSelector = fieldSelector
 
-	podLabelSelector := labels.SelectorFromSet(labels.Set{ManagerLabelKey: ManagerLabelValue})
-
 	if isController {
-		// We do not honor the configured label selector, because these pods will only ever have labels set by Eno.
-		// But we _do_ honor the field selector since it may reduce the namespace scope, etc.
+		// Only cache pods in the synthesizer pod namespace and owned by this controller
 		mgrOpts.Cache.ByObject[&corev1.Pod{}] = cache.ByObject{
-			Label: podLabelSelector,
-			Field: fieldSelector,
+			Namespaces: map[string]cache.Config{
+				opts.SynthesizerPodNamespace: {
+					LabelSelector: labels.SelectorFromSet(labels.Set{ManagerLabelKey: ManagerLabelValue}),
+				},
+			},
 		}
 	}
 
@@ -122,8 +122,8 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 				if !ok {
 					return obj, nil
 				}
-				for _, res := range slice.Spec.Resources {
-					res.Manifest = "" // remove big manifest that we don't need
+				for i := range slice.Spec.Resources {
+					slice.Spec.Resources[i].Manifest = "" // remove big manifest that we don't need
 				}
 				return slice, nil
 			},
@@ -149,6 +149,7 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 			return nil, err
 		}
 	}
+
 	if isReconciler {
 		err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, IdxResourceSlicesByComposition, indexController())
 		if err != nil {
