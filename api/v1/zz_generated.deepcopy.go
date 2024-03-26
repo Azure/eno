@@ -511,7 +511,7 @@ func (in *SynthesizerSpec) DeepCopyInto(out *SynthesizerSpec) {
 	}
 	if in.Refs != nil {
 		in, out := &in.Refs, &out.Refs
-		*out = make([]ResourceRef, len(*in))
+		*out = make([]Ref, len(*in))
 		copy(*out, *in)
 	}
 }

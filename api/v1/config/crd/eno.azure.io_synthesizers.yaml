@@ -61,12 +61,26 @@ spec:
                   resources.
                 items:
                   properties:
-                    group:
+                    defer:
+                      description: |-
+                        Allows control over re-synthesis when inputs changed.
+                        A non-deferred input will trigger a synthesis immediately, whereas a
+                        deferred input will respect the cooldown period.
+                      type: boolean
+                    key:
                       type: string
-                    kind:
-                      type: string
+                    resource:
+                      properties:
+                        group:
+                          type: string
+                        kind:
+                          type: string
+                      required:
+                      - kind
+                      type: object
                   required:
-                  - kind
+                  - key
+                  - resource
                   type: object
                 type: array
               rolloutCooldown:
