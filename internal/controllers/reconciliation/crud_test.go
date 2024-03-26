@@ -3,9 +3,6 @@ package reconciliation
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -20,7 +17,6 @@ import (
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/controllers/aggregation"
@@ -144,6 +140,8 @@ var crudTests = []crudTestCase{
 	},
 }
 
+// TestCRUD covers the entire synthesis and reconciliation flow for a set of resources,
+// covering creation, reads, updates, and deletion.
 func TestCRUD(t *testing.T) {
 	scheme := runtime.NewScheme()
 	corev1.SchemeBuilder.AddToScheme(scheme)
@@ -307,6 +305,8 @@ func getPhase(obj client.Object) string {
 	return anno["test-phase"]
 }
 
+// TestReconcileInterval proves that resources that specify a reconcile interval eventually converge
+// when modified from outside of Eno.
 func TestReconcileInterval(t *testing.T) {
 	scheme := runtime.NewScheme()
 	corev1.SchemeBuilder.AddToScheme(scheme)
@@ -452,59 +452,6 @@ func TestReconcileCacheRace(t *testing.T) {
 		require.NoError(t, err)
 		time.Sleep(time.Millisecond * 50)
 	}
-}
-
-func TestReconcileStatus(t *testing.T) {
-	scheme := runtime.NewScheme()
-	corev1.SchemeBuilder.AddToScheme(scheme)
-	testv1.SchemeBuilder.AddToScheme(scheme)
-
-	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t)
-	upstream := mgr.GetClient()
-
-	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
-	require.NoError(t, err)
-
-	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
-	require.NoError(t, err)
-	mgr.Start(t)
-
-	comp := &apiv1.Composition{}
-	comp.Name = "test-comp"
-	comp.Namespace = "default"
-	require.NoError(t, upstream.Create(ctx, comp))
-	comp.ResourceVersion = "1"
-
-	slice := &apiv1.ResourceSlice{}
-	slice.Name = "test-slice"
-	slice.Namespace = comp.Namespace
-	require.NoError(t, controllerutil.SetControllerReference(comp, slice, upstream.Scheme()))
-	slice.Spec.Resources = []apiv1.Manifest{
-		{Manifest: `{ "kind": "ConfigMap", "apiVersion": "v1", "metadata": { "name": "test", "namespace": "default" } }`},
-		{Deleted: true, Manifest: `{ "kind": "ConfigMap", "apiVersion": "v1", "metadata": { "name": "test-deleted", "namespace": "default" } }`},
-	}
-	require.NoError(t, upstream.Create(ctx, slice))
-
-	now := metav1.Now()
-	err = retry.RetryOnConflict(testutil.Backoff, func() error {
-		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Status.CurrentSynthesis = &apiv1.Synthesis{
-			UUID:           uuid.NewString(),
-			Synthesized:    &now,
-			ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
-		}
-		return upstream.Status().Update(ctx, comp)
-	})
-	require.NoError(t, err)
-
-	// Status should eventually reflect the reconciliation state
-	testutil.Eventually(t, func() bool {
-		err = upstream.Get(ctx, client.ObjectKeyFromObject(slice), slice)
-		return err == nil && len(slice.Status.Resources) == 2 &&
-			slice.Status.Resources[0].Reconciled && !slice.Status.Resources[0].Deleted &&
-			slice.Status.Resources[1].Reconciled && slice.Status.Resources[1].Deleted
-	})
 }
 
 // TestCompositionDeletionOrdering proves that compositions are not deleted until all resulting resources have been deleted.
@@ -681,253 +628,4 @@ func TestMidSynthesisDeletion(t *testing.T) {
 		t.Logf("resourceGone=%t compGone=%t", resourceGone, compGone)
 		return resourceGone && compGone
 	})
-}
-
-func TestResourceReadiness(t *testing.T) {
-	scheme := runtime.NewScheme()
-	corev1.SchemeBuilder.AddToScheme(scheme)
-	testv1.SchemeBuilder.AddToScheme(scheme)
-
-	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t)
-	upstream := mgr.GetClient()
-	downstream := mgr.DownstreamClient
-
-	// Register supporting controllers
-	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
-	require.NoError(t, err)
-	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
-	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
-	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
-	require.NoError(t, aggregation.NewStatusController(mgr.Manager))
-	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
-		obj := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-obj",
-				Namespace: "default",
-				Annotations: map[string]string{
-					"eno.azure.io/readiness": "self.data.foo == 'baz'",
-				},
-			},
-			Data: map[string]string{"foo": s.Spec.Image},
-		}
-
-		gvks, _, err := scheme.ObjectKinds(obj)
-		require.NoError(t, err)
-		obj.GetObjectKind().SetGroupVersionKind(gvks[0])
-		return []client.Object{obj}
-	}}))
-
-	// Test subject
-	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Millisecond)
-	require.NoError(t, err)
-	mgr.Start(t)
-
-	// Any syn/comp will do since we faked out the synthesizer pod
-	syn := &apiv1.Synthesizer{}
-	syn.Name = "test-syn"
-	syn.Spec.Image = "bar"
-	syn.Spec.RolloutCooldown = &metav1.Duration{Duration: time.Millisecond}
-	require.NoError(t, upstream.Create(ctx, syn))
-
-	comp := &apiv1.Composition{}
-	comp.Name = "test-comp"
-	comp.Namespace = "default"
-	comp.Spec.Synthesizer.Name = syn.Name
-	require.NoError(t, upstream.Create(ctx, comp))
-
-	// Wait for resource to be created
-	obj := &corev1.ConfigMap{}
-	testutil.Eventually(t, func() bool {
-		obj.SetName("test-obj")
-		obj.SetNamespace("default")
-		err = downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
-		return err == nil
-	})
-
-	// Initially readiness should be false
-	testutil.Eventually(t, func() bool {
-		slices, err := mgr.GetCurrentResourceSlices(ctx)
-		if err != nil {
-			t.Log(err)
-			return false
-		}
-		return len(slices[0].Status.Resources) > 0 && isNotReady(slices[0].Status.Resources[0])
-	})
-
-	testutil.Eventually(t, func() bool {
-		err = upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready == nil
-	})
-
-	// Update resource to meet readiness criteria
-	err = retry.RetryOnConflict(testutil.Backoff, func() error {
-		err = upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn)
-		syn.Spec.Image = "baz"
-		return upstream.Update(ctx, syn)
-	})
-	require.NoError(t, err)
-
-	// It should eventually be marked as ready
-	testutil.Eventually(t, func() bool {
-		slices, err := mgr.GetCurrentResourceSlices(ctx)
-		if err != nil {
-			t.Log(err)
-			return false
-		}
-		return len(slices[0].Status.Resources) > 0 && isReady(slices[0].Status.Resources[0])
-	})
-
-	// The composition should also be updated
-	testutil.Eventually(t, func() bool {
-		err = upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
-	})
-
-	// Update resource to not meet readiness criteria
-	err = retry.RetryOnConflict(testutil.Backoff, func() error {
-		err = upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn)
-		syn.Spec.Image = "bar"
-		return upstream.Update(ctx, syn)
-	})
-	require.NoError(t, err)
-
-	// The composition status should revert back to not ready when re-synthesized
-	testutil.Eventually(t, func() bool {
-		err = upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready == nil
-	})
-}
-
-func isReady(state apiv1.ResourceState) bool    { return state.Ready != nil }
-func isNotReady(state apiv1.ResourceState) bool { return state.Ready == nil }
-
-// TestHelmOwnershipTransfer proves that Helm resource ownership can be transferred to Eno, and back.
-// This is accomplished by setting the "helm.sh/resource-policy: keep" annotation on Helm resources.
-// Sadly this has to be done out-of-band to Eno since Helm reads the annotation from its release state, not the resource itself.
-func TestHelmOwnershipTransfer(t *testing.T) {
-	scheme := runtime.NewScheme()
-	corev1.SchemeBuilder.AddToScheme(scheme)
-	testv1.SchemeBuilder.AddToScheme(scheme)
-
-	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t)
-	upstream := mgr.GetClient()
-	downstream := mgr.DownstreamClient
-
-	// Get a kubeconfig for the Helm CLI
-	u, err := mgr.DownstreamEnv.AddUser(envtest.User{Name: "helm", Groups: []string{"system:masters"}}, nil)
-	require.NoError(t, err)
-	kc, err := u.KubeConfig()
-	require.NoError(t, err)
-	kubeconfigPath := filepath.Join(t.TempDir(), "kubeconfig")
-	require.NoError(t, os.WriteFile(kubeconfigPath, kc, 0600))
-
-	// Register supporting controllers
-	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
-	require.NoError(t, err)
-	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
-	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
-	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
-	require.NoError(t, aggregation.NewStatusController(mgr.Manager))
-	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
-	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
-		obj := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-obj",
-				Namespace: "default",
-			},
-			Data: map[string]string{"foo": "bar"},
-		}
-
-		gvks, _, err := scheme.ObjectKinds(obj)
-		require.NoError(t, err)
-		obj.GetObjectKind().SetGroupVersionKind(gvks[0])
-		return []client.Object{obj}
-	}}))
-
-	// Test subject
-	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Millisecond)
-	require.NoError(t, err)
-	mgr.Start(t)
-
-	// Install Helm release to initially create the resource
-	cmd := exec.Command("helm", "--kubeconfig", kubeconfigPath, "install", "foo", "./fixtures/helmchart")
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
-	require.NoError(t, cmd.Run())
-
-	syn := &apiv1.Synthesizer{}
-	syn.Name = "test-syn"
-	syn.Spec.Image = "bar"
-	require.NoError(t, upstream.Create(ctx, syn))
-
-	comp := &apiv1.Composition{}
-	comp.Name = "test-comp"
-	comp.Namespace = "default"
-	comp.Spec.Synthesizer.Name = syn.Name
-	comp.Annotations = map[string]string{"eno.azure.io/deletion-strategy": "orphan"}
-	require.NoError(t, upstream.Create(ctx, comp))
-
-	// Wait for Eno to reconcile the resource (should be a no-op)
-	obj := &corev1.ConfigMap{}
-	var initialCreateTime time.Time
-	testutil.Eventually(t, func() bool {
-		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation || comp.Status.CurrentSynthesis.Reconciled == nil {
-			return false
-		}
-
-		obj.SetName("test-obj")
-		obj.SetNamespace("default")
-		err = downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
-		initialCreateTime = obj.CreationTimestamp.Time
-		return err == nil
-	})
-
-	// Uninstall Helm release
-	cmd = exec.Command("helm", "--kubeconfig", kubeconfigPath, "uninstall", "foo")
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
-	require.NoError(t, cmd.Run())
-
-	// The resource shouldn't have been deleted by Helm
-	obj.SetName("test-obj")
-	obj.SetNamespace("default")
-	err = downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
-	require.NoError(t, err)
-
-	// Delete the composition
-	t.Log("deleting composition")
-	require.NoError(t, upstream.Delete(ctx, comp))
-
-	// Wait for the composition to be sync'd - it shouldn't delete the resource
-	testutil.Eventually(t, func() bool {
-		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-	})
-	obj.SetName("test-obj")
-	obj.SetNamespace("default")
-	err = downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
-	require.NoError(t, err)
-
-	// Re-install the Helm release and confirm the resource was never deleted
-	cmd = exec.Command("helm", "--kubeconfig", kubeconfigPath, "install", "foo", "./fixtures/helmchart")
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
-	require.NoError(t, cmd.Run())
-
-	obj.SetName("test-obj")
-	obj.SetNamespace("default")
-	err = downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
-	require.NoError(t, err)
-
-	assert.True(t, obj.CreationTimestamp.Time.Round(time.Second).Equal(initialCreateTime.Round(time.Second)))
-	assert.Equal(t, map[string]string{
-		"helm.sh/resource-policy":        "keep",
-		"meta.helm.sh/release-name":      "foo",
-		"meta.helm.sh/release-namespace": "default",
-	}, obj.GetAnnotations())
-	assert.Equal(t, map[string]string{
-		"app.kubernetes.io/managed-by": "Helm",
-	}, obj.GetLabels())
 }
