@@ -49,7 +49,7 @@ type SynthesizerSpec struct {
 
 	// Refs define the Synthesizer's input schema without binding it to specific
 	// resources.
-	Refs []ResourceRef `json:"refs,omitempty"`
+	Refs []Ref `json:"refs,omitempty"`
 }
 
 type SynthesizerStatus struct {
