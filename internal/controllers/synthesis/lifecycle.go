@@ -155,7 +155,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Swap the state to prepare for resynthesis if needed
 	if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation {
-		swapStates(comp)
+		swapStates(comp, syn)
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
 		}
@@ -183,6 +183,17 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, fmt.Errorf("writing started timestamp to status: %w", err)
 		}
 		return ctrl.Result{}, nil
+	}
+
+	// Back off to avoid constantly re-synthesizing impossible compositions (unlikely but possible)
+	if current := comp.Status.CurrentSynthesis; current != nil && current.Attempts > 0 && current.PodCreation != nil {
+		const base = time.Millisecond * 250
+		wait := base * time.Duration(comp.Status.CurrentSynthesis.Attempts)
+		nextAttempt := current.PodCreation.Time.Add(wait)
+		if time.Since(nextAttempt) < 0 { // positive when past the nextAttempt
+			logger.V(1).Info("backing off pod creation", "latency", wait.Milliseconds())
+			return ctrl.Result{RequeueAfter: wait}, nil
+		}
 	}
 
 	// Confirm that a pod doesn't already exist for this synthesis without trusting informers.
@@ -267,13 +278,21 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 	return logger, nil, false
 }
 
-func swapStates(comp *apiv1.Composition) {
+func swapStates(comp *apiv1.Composition, syn *apiv1.Synthesizer) {
+	// Reset the current attempts counter when the composition or synthesizer have changed or synthesis was successful
+	attempts := 0
+	if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized == nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == comp.Generation && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation {
+		attempts = comp.Status.CurrentSynthesis.Attempts
+	}
+
 	// If the previous state has been synthesized but not the current, keep the previous to avoid orphaning deleted resources
 	if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil {
 		comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
 	}
+
 	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
 		ObservedCompositionGeneration: comp.Generation,
+		Attempts:                      attempts,
 	}
 }
 
