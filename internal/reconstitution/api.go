@@ -34,6 +34,14 @@ type ManifestRef struct {
 	Index int // position of this manifest within the slice
 }
 
+func (m *ManifestRef) FindStatus(slice *apiv1.ResourceSlice) *apiv1.ResourceState {
+	if len(slice.Status.Resources) <= m.Index {
+		return nil
+	}
+	state := slice.Status.Resources[m.Index]
+	return &state
+}
+
 // Resource is the controller's internal representation of a single resource out of a ResourceSlice.
 type Resource struct {
 	lastSeenMeta
