@@ -7,9 +7,11 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/leaderelection"
 )
 
 type Options struct {
+	leaderelection.Options
 	Rest                    *rest.Config
 	FieldSelector           string
 	LabelSelector           string
@@ -26,6 +28,10 @@ func (o *Options) Bind(set *flag.FlagSet) {
 	set.Float64Var(&o.qps, "qps", 20, "Max requests per second to apiserver")
 	set.StringVar(&o.FieldSelector, "watch-field-selector", "", "Only reconcile resources that match the given field selector")
 	set.StringVar(&o.LabelSelector, "watch-label-selector", "", "Only reconcile resiurces that match the given label selector")
+	set.BoolVar(&o.LeaderElection, "leader-election", false, "Enable leader election")
+	set.StringVar(&o.LeaderElectionNamespace, "leader-election-namespace", "", "Determines the namespace in which the leader election resource will be created")
+	set.StringVar(&o.LeaderElectionResourceLock, "leader-election-resource-lock", "", "Determines which resource lock to use for leader election")
+	set.StringVar(&o.LeaderElectionID, "leader-election-id", "", "Determines the name of the resource that leader election will use for holding the leader lock")
 }
 
 func (o *Options) getDefaultLabelSelector() (labels.Selector, error) {
