@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TODO: Add an integration test that verifies input usage end to end.
 func TestBuildPodInput(t *testing.T) {
 	tcs := []struct {
 		name        string

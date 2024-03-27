@@ -21,16 +21,13 @@ func buildPodInput(comp *apiv1.Composition, syn *apiv1.Synthesizer) ([]byte, err
 		b := b
 		bindings[b.Key] = &b
 	}
-	refs := map[string]*apiv1.Ref{}
-	for _, r := range syn.Spec.Refs {
-		r := r
-		refs[r.Key] = &r
-	}
 
 	inputs := []*unstructured.Unstructured{}
-	for key, r := range refs {
+	for _, r := range syn.Spec.Refs {
+		key := r.Key
 		b, ok := bindings[key]
 		if !ok {
+			// TODO: This validation is best suited for a webhook.
 			return nil, fmt.Errorf("input %q is referenced, but not bound", key)
 		}
 		input := apiv1.NewInput(key, apiv1.InputResource{
