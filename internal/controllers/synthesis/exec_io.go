@@ -11,8 +11,40 @@ import (
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
+
+func buildPodInput(comp *apiv1.Composition, syn *apiv1.Synthesizer) ([]byte, error) {
+	bindings := map[string]*apiv1.Binding{}
+	for _, b := range comp.Spec.Bindings {
+		b := b
+		bindings[b.Key] = &b
+	}
+
+	inputs := []*unstructured.Unstructured{}
+	for _, r := range syn.Spec.Refs {
+		key := r.Key
+		b, ok := bindings[key]
+		if !ok {
+			// TODO: This validation is best suited for a webhook.
+			return nil, fmt.Errorf("input %q is referenced, but not bound", key)
+		}
+		input := apiv1.NewInput(key, apiv1.InputResource{
+			Name:      b.Resource.Name,
+			Namespace: b.Resource.Namespace,
+			Group:     r.Resource.Group,
+			Kind:      r.Resource.Kind,
+		})
+		u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&input)
+		if err != nil {
+			return nil, fmt.Errorf("input %q could not be converted to Unstructured: %w", key, err)
+		}
+		inputs = append(inputs, &unstructured.Unstructured{Object: u})
+
+	}
+	return serializeInputs(inputs)
+}
 
 func serializeInputs(inputs []*unstructured.Unstructured) ([]byte, error) {
 	rl := &krmv1.ResourceList{
