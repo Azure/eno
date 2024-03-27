@@ -102,56 +102,8 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if comp.DeletionTimestamp != nil {
-		// If the composition was being synthesized at the time of deletion we need to swap the previous
-		// state back to current. Otherwise we'll get stuck waiting for a synthesis that can't happen.
-		if comp.Status.PreviousSynthesis != nil && (comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil) {
-			comp.Status.CurrentSynthesis = comp.Status.PreviousSynthesis
-			comp.Status.PreviousSynthesis = nil
-			err = c.client.Status().Update(ctx, comp)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("reverting swapped status for deletion: %w", err)
-			}
-			logger.V(0).Info("reverted swapped status for deletion")
-			return ctrl.Result{}, nil
-		}
-
-		// Deletion increments the composition's generation, but the reconstitution cache is only invalidated
-		// when the synthesized generation (from the status) changes, which will never happen because synthesis
-		// is righly disabled for deleted compositions. We break out of this deadlock condition by updating
-		// the status without actually synthesizing.
-		if comp.Status.CurrentSynthesis != nil && (comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation || comp.Status.CurrentSynthesis.Synthesized == nil) {
-			comp.Status.CurrentSynthesis.ObservedCompositionGeneration = comp.Generation
-			comp.Status.CurrentSynthesis.Ready = nil
-			comp.Status.CurrentSynthesis.Reconciled = nil
-			now := metav1.Now()
-			comp.Status.CurrentSynthesis.Synthesized = &now
-			err = c.client.Status().Update(ctx, comp)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("updating current composition generation: %w", err)
-			}
-			logger.V(0).Info("updated composition status to reflect deletion")
-			return ctrl.Result{}, nil
-		}
-
-		// Remove the finalizer when all pods and slices have been deleted
-		if comp.Status.CurrentSynthesis != nil && (comp.Status.CurrentSynthesis.Reconciled == nil) || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation {
-			logger.V(1).Info("refusing to remove composition finalizer because it is still being reconciled")
-			return ctrl.Result{}, nil
-		}
-		if hasRunningPod(pods) {
-			logger.V(1).Info("refusing to remove composition finalizer because at least one synthesizer pod still exists")
-			return ctrl.Result{}, nil
-		}
-		if controllerutil.RemoveFinalizer(comp, "eno.azure.io/cleanup") {
-			err = c.client.Update(ctx, comp)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
-			}
-
-			logger.V(0).Info("removed finalizer from composition")
-		}
-
-		return ctrl.Result{}, nil
+		ctx = logr.NewContext(ctx, logger)
+		return c.reconcileDeletedComposition(ctx, comp, pods)
 	}
 
 	// Swap the state to prepare for resynthesis if needed
@@ -187,10 +139,10 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Back off to avoid constantly re-synthesizing impossible compositions (unlikely but possible)
-	if current := comp.Status.CurrentSynthesis; current != nil && current.Attempts > 0 && current.PodCreation != nil {
+	if shouldBackOffPodCreation(comp) {
 		const base = time.Millisecond * 250
 		wait := base * time.Duration(comp.Status.CurrentSynthesis.Attempts)
-		nextAttempt := current.PodCreation.Time.Add(wait)
+		nextAttempt := comp.Status.CurrentSynthesis.PodCreation.Time.Add(wait)
 		if time.Since(nextAttempt) < 0 { // positive when past the nextAttempt
 			logger.V(1).Info("backing off pod creation", "latency", wait.Milliseconds())
 			return ctrl.Result{RequeueAfter: wait}, nil
@@ -221,6 +173,61 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	logger.V(0).Info("created synthesizer pod", "podName", pod.Name)
 	sytheses.Inc()
+
+	return ctrl.Result{}, nil
+}
+
+func (c *podLifecycleController) reconcileDeletedComposition(ctx context.Context, comp *apiv1.Composition, pods *corev1.PodList) (ctrl.Result, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+
+	// If the composition was being synthesized at the time of deletion we need to swap the previous
+	// state back to current. Otherwise we'll get stuck waiting for a synthesis that can't happen.
+	if shouldRevertStateSwap(comp) {
+		comp.Status.CurrentSynthesis = comp.Status.PreviousSynthesis
+		comp.Status.PreviousSynthesis = nil
+		err := c.client.Status().Update(ctx, comp)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("reverting swapped status for deletion: %w", err)
+		}
+		logger.V(0).Info("reverted swapped status for deletion")
+		return ctrl.Result{}, nil
+	}
+
+	// Deletion increments the composition's generation, but the reconstitution cache is only invalidated
+	// when the synthesized generation (from the status) changes, which will never happen because synthesis
+	// is righly disabled for deleted compositions. We break out of this deadlock condition by updating
+	// the status without actually synthesizing.
+	if shouldUpdateDeletedCompositionStatus(comp) {
+		comp.Status.CurrentSynthesis.ObservedCompositionGeneration = comp.Generation
+		comp.Status.CurrentSynthesis.Ready = nil
+		comp.Status.CurrentSynthesis.Reconciled = nil
+		now := metav1.Now()
+		comp.Status.CurrentSynthesis.Synthesized = &now
+		err := c.client.Status().Update(ctx, comp)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("updating current composition generation: %w", err)
+		}
+		logger.V(0).Info("updated composition status to reflect deletion")
+		return ctrl.Result{}, nil
+	}
+
+	// Remove the finalizer when all pods and slices have been deleted
+	if isReconciling(comp) {
+		logger.V(1).Info("refusing to remove composition finalizer because it is still being reconciled")
+		return ctrl.Result{}, nil
+	}
+	if hasRunningPod(pods) {
+		logger.V(1).Info("refusing to remove composition finalizer because at least one synthesizer pod still exists")
+		return ctrl.Result{}, nil
+	}
+	if controllerutil.RemoveFinalizer(comp, "eno.azure.io/cleanup") {
+		err := c.client.Update(ctx, comp)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
+		}
+
+		logger.V(0).Info("removed finalizer from composition")
+	}
 
 	return ctrl.Result{}, nil
 }
@@ -304,4 +311,21 @@ func hasRunningPod(list *corev1.PodList) bool {
 		}
 	}
 	return false
+}
+
+func shouldBackOffPodCreation(comp *apiv1.Composition) bool {
+	current := comp.Status.CurrentSynthesis
+	return current != nil && current.Attempts > 0 && current.PodCreation != nil
+}
+
+func shouldRevertStateSwap(comp *apiv1.Composition) bool {
+	return comp.Status.PreviousSynthesis != nil && (comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil)
+}
+
+func shouldUpdateDeletedCompositionStatus(comp *apiv1.Composition) bool {
+	return comp.Status.CurrentSynthesis != nil && (comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation || comp.Status.CurrentSynthesis.Synthesized == nil)
+}
+
+func isReconciling(comp *apiv1.Composition) bool {
+	return comp.Status.CurrentSynthesis != nil && (comp.Status.CurrentSynthesis.Reconciled == nil) || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation
 }

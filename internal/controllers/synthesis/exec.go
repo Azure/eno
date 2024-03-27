@@ -185,10 +185,10 @@ func (c *execController) writeSuccessStatus(ctx context.Context, comp *apiv1.Com
 		if comp.Status.CurrentSynthesis.Synthesized != nil {
 			return nil // no updates needed
 		}
+
 		now := metav1.Now()
 		comp.Status.CurrentSynthesis.Synthesized = &now
 		comp.Status.CurrentSynthesis.ResourceSlices = refs
-
 		err = c.client.Status().Update(ctx, comp)
 		if err != nil {
 			return err
