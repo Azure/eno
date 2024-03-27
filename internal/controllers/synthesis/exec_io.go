@@ -8,6 +8,7 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/resource"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -72,7 +73,7 @@ func (c *execController) writeOutputToSlices(ctx context.Context, comp *apiv1.Co
 		return nil, err
 	}
 
-	slices, err := buildResourceSlices(comp, previous, outputs, maxSliceJsonBytes)
+	slices, err := resource.Slice(comp, previous, outputs, maxSliceJsonBytes)
 	if err != nil {
 		return nil, err
 	}

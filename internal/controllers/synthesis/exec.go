@@ -12,12 +12,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 // maxSliceJsonBytes is the max sum of a resource slice's manifests.
@@ -137,8 +135,7 @@ func (c *execController) fetchPreviousSlices(ctx context.Context, comp *apiv1.Co
 		slice.Name = ref.Name
 		slice.Namespace = comp.Namespace
 		err := c.noCacheClient.Get(ctx, client.ObjectKeyFromObject(slice), slice)
-		if errors.IsNotFound(err) && comp.Status.PreviousSynthesis.Synthesized != nil && time.Since(comp.Status.PreviousSynthesis.Synthesized.Time) > time.Minute*5 {
-			// It's possible that the informer is just stale, set some arbitrary period after synthesis at which the resource slices are expected to exist in cache.
+		if errors.IsNotFound(err) {
 			logger.V(0).Info("resource slice referenced by composition was not found - skipping", "resourceSliceName", slice.Name)
 			continue
 		}
@@ -146,76 +143,6 @@ func (c *execController) fetchPreviousSlices(ctx context.Context, comp *apiv1.Co
 			return nil, fmt.Errorf("fetching current resource slice %q: %w", slice.Name, err)
 		}
 		slices = append(slices, slice)
-	}
-
-	return slices, nil
-}
-
-func buildResourceSlices(comp *apiv1.Composition, previous []*apiv1.ResourceSlice, outputs []*unstructured.Unstructured, maxJsonBytes int) ([]*apiv1.ResourceSlice, error) {
-	// Encode the given resources into manifest structs
-	refs := map[resourceRef]struct{}{}
-	manifests := []apiv1.Manifest{}
-	for i, output := range outputs {
-		reconcileInterval := consumeReconcileIntervalAnnotation(output)
-		js, err := output.MarshalJSON()
-		if err != nil {
-			return nil, reconcile.TerminalError(fmt.Errorf("encoding output %d: %w", i, err))
-		}
-		manifests = append(manifests, apiv1.Manifest{
-			Manifest:          string(js),
-			ReconcileInterval: reconcileInterval,
-		})
-		refs[newResourceRef(output)] = struct{}{}
-	}
-
-	// Build tombstones by diffing the new state against the current state
-	// Existing tombstones are passed down if they haven't yet been reconciled to avoid orphaning resources
-	for _, slice := range previous {
-		for i, res := range slice.Spec.Resources {
-			res := res
-			obj := &unstructured.Unstructured{}
-			err := obj.UnmarshalJSON([]byte(res.Manifest))
-			if err != nil {
-				return nil, reconcile.TerminalError(fmt.Errorf("decoding resource %d of slice %s: %w", i, slice.Name, err))
-			}
-
-			// We don't need a tombstone once the deleted resource has been reconciled
-			if _, ok := refs[newResourceRef(obj)]; ok || ((res.Deleted || slice.DeletionTimestamp != nil) && slice.Status.Resources != nil && slice.Status.Resources[i].Reconciled) {
-				continue // still exists or has already been deleted
-			}
-
-			res.Deleted = true
-			manifests = append(manifests, res)
-		}
-	}
-
-	// Build the slice resources
-	var (
-		slices             []*apiv1.ResourceSlice
-		sliceBytes         int
-		slice              *apiv1.ResourceSlice
-		blockOwnerDeletion = true
-	)
-	for _, manifest := range manifests {
-		if slice == nil || sliceBytes >= maxJsonBytes {
-			sliceBytes = 0
-			slice = &apiv1.ResourceSlice{}
-			slice.GenerateName = comp.Name + "-"
-			slice.Namespace = comp.Namespace
-			slice.Finalizers = []string{"eno.azure.io/cleanup"}
-			slice.OwnerReferences = []metav1.OwnerReference{{
-				APIVersion:         apiv1.SchemeGroupVersion.Identifier(),
-				Kind:               "Composition",
-				Name:               comp.Name,
-				UID:                comp.UID,
-				BlockOwnerDeletion: &blockOwnerDeletion, // we need the composition in order to successfully delete its resource slices
-				Controller:         &blockOwnerDeletion,
-			}}
-			slice.Spec.CompositionGeneration = comp.Generation
-			slices = append(slices, slice)
-		}
-		sliceBytes += len(manifest.Manifest)
-		slice.Spec.Resources = append(slice.Spec.Resources, manifest)
 	}
 
 	return slices, nil
@@ -286,41 +213,4 @@ func truncateString(str string, length int) (out string) {
 		}
 	}
 	return out + "[truncated]"
-}
-
-func consumeReconcileIntervalAnnotation(obj client.Object) *metav1.Duration {
-	const key = "eno.azure.io/reconcile-interval"
-	anno := obj.GetAnnotations()
-	if anno == nil {
-		return nil
-	}
-	str := anno[key]
-	if str == "" {
-		return nil
-	}
-	delete(anno, key)
-
-	if len(anno) == 0 {
-		anno = nil // apiserver treats an empty annotation map as nil, we must as well to avoid constant patches
-	}
-	obj.SetAnnotations(anno)
-
-	dur, err := time.ParseDuration(str)
-	if err != nil {
-		return nil
-	}
-	return &metav1.Duration{Duration: dur}
-}
-
-type resourceRef struct {
-	Name, Namespace, Kind, Group string
-}
-
-func newResourceRef(obj *unstructured.Unstructured) resourceRef {
-	return resourceRef{
-		Name:      obj.GetName(),
-		Namespace: obj.GetNamespace(),
-		Kind:      obj.GetKind(),
-		Group:     obj.GroupVersionKind().Group,
-	}
 }
