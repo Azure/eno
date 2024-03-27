@@ -36,7 +36,7 @@ func TestBuildPodInput(t *testing.T) {
 			synth: apiv1.Synthesizer{
 				Spec: apiv1.SynthesizerSpec{
 					Refs: []apiv1.Ref{
-						{Key: "in", Resource: apiv1.ResourceRef{Kind: "ConfigMap", Group: "core"}},
+						{Key: "in", Resource: apiv1.ResourceRef{Kind: "ConfigMap", Group: ""}},
 					},
 				},
 			},
@@ -47,7 +47,27 @@ func TestBuildPodInput(t *testing.T) {
 					},
 				},
 			},
-			expected: "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[{\"apiVersion\":\"eno.azure.io/v1\",\"key\":\"in\",\"kind\":\"Input\",\"resource\":{\"group\":\"core\",\"kind\":\"ConfigMap\",\"name\":\"some-cm\",\"namespace\":\"default\"}}]}",
+			expected: "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[{\"apiVersion\":\"eno.azure.io/v1\",\"key\":\"in\",\"kind\":\"Input\",\"resource\":{\"group\":\"\",\"kind\":\"ConfigMap\",\"name\":\"some-cm\",\"namespace\":\"default\"}}]}",
+		},
+		{
+			name: "multiple",
+			synth: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "cm", Resource: apiv1.ResourceRef{Kind: "ConfigMap", Group: ""}},
+						{Key: "deploy", Resource: apiv1.ResourceRef{Kind: "Deployment", Group: "apps"}},
+					},
+				},
+			},
+			comp: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{
+						{Key: "deploy", Resource: apiv1.ResourceBinding{Name: "some-deploy", Namespace: "default"}},
+						{Key: "cm", Resource: apiv1.ResourceBinding{Name: "some-cm", Namespace: "some-ns"}},
+					},
+				},
+			},
+			expected: "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[{\"apiVersion\":\"eno.azure.io/v1\",\"key\":\"cm\",\"kind\":\"Input\",\"resource\":{\"group\":\"\",\"kind\":\"ConfigMap\",\"name\":\"some-cm\",\"namespace\":\"some-ns\"}},{\"apiVersion\":\"eno.azure.io/v1\",\"key\":\"deploy\",\"kind\":\"Input\",\"resource\":{\"group\":\"apps\",\"kind\":\"Deployment\",\"name\":\"some-deploy\",\"namespace\":\"default\"}}]}",
 		},
 		{
 			name: "non-referenced binding",
