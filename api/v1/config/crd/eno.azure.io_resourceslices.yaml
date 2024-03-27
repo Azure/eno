@@ -54,9 +54,6 @@ spec:
                   type: object
                 type: array
             type: object
-            x-kubernetes-validations:
-            - message: Value is immutable
-              rule: self == oldSelf
           status:
             properties:
               resources:
