@@ -11,6 +11,7 @@ import (
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -30,21 +31,15 @@ func buildPodInput(comp *apiv1.Composition, syn *apiv1.Synthesizer) ([]byte, err
 		if !ok {
 			return nil, fmt.Errorf("input %q is referenced, but not bound", key)
 		}
-
-		rawU, err := json.Marshal(apiv1.NewInput(key, apiv1.InputResource{
+		input := apiv1.NewInput(key, apiv1.InputResource{
 			Name:      b.Resource.Name,
 			Namespace: b.Resource.Namespace,
 			Group:     r.Resource.Group,
 			Kind:      r.Resource.Kind,
-		}))
+		})
+		u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&input)
 		if err != nil {
-
-		}
-
-		u := map[string]interface{}{}
-		err = json.Unmarshal(rawU, &u)
-		if err != nil {
-
+			return nil, fmt.Errorf("input %q could not be converted to Unstructured: %w", key, err)
 		}
 		inputs = append(inputs, &unstructured.Unstructured{Object: u})
 
