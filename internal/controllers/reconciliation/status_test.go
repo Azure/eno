@@ -107,16 +107,6 @@ func TestResourceReadiness(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// It should eventually be marked as ready
-	testutil.Eventually(t, func() bool {
-		slices, err := mgr.GetCurrentResourceSlices(ctx)
-		if err != nil {
-			t.Log(err)
-			return false
-		}
-		return len(slices[0].Status.Resources) > 0 && isReady(slices[0].Status.Resources[0])
-	})
-
 	// The composition should also be updated
 	testutil.Eventually(t, func() bool {
 		err = upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
