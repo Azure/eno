@@ -61,7 +61,7 @@ func TestBuildPodInput(t *testing.T) {
 				Spec: apiv1.CompositionSpec{
 					Bindings: []apiv1.Binding{
 						{Key: "in", Resource: apiv1.ResourceBinding{Name: "some-cm", Namespace: "default"}},
-						{Key: "in2", Resource: apiv1.ResourceBinding{Name: "some-cm", Namespace: "default"}}, // Safe to specify it, but won't be passed to the the Syhtesis Pod.
+						{Key: "in2", Resource: apiv1.ResourceBinding{Name: "some-other-cm", Namespace: "other-ns"}}, // Safe to specify it, but won't be passed to the the Syhtesis Pod.
 					},
 				},
 			},

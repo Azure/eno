@@ -18,10 +18,12 @@ import (
 func buildPodInput(comp *apiv1.Composition, syn *apiv1.Synthesizer) ([]byte, error) {
 	bindings := map[string]*apiv1.Binding{}
 	for _, b := range comp.Spec.Bindings {
+		b := b
 		bindings[b.Key] = &b
 	}
 	refs := map[string]*apiv1.Ref{}
 	for _, r := range syn.Spec.Refs {
+		r := r
 		refs[r.Key] = &r
 	}
 
