@@ -101,8 +101,13 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer, comp *apiv1.Composition, pod *corev1.Pod) ([]*apiv1.ResourceSliceRef, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
+	input, err := buildPodInput(comp, syn)
+	if err != nil {
+		return nil, fmt.Errorf("building synthesis Pod input: %w", err)
+	}
+
 	start := time.Now()
-	stdout, err := c.conn.Synthesize(ctx, syn, pod)
+	stdout, err := c.conn.Synthesize(ctx, syn, pod, input)
 	if err != nil {
 		return nil, err
 	}

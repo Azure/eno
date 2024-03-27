@@ -14,6 +14,44 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
+func buildPodInput(comp *apiv1.Composition, syn *apiv1.Synthesizer) ([]byte, error) {
+	bindings := map[string]*apiv1.Binding{}
+	for _, b := range comp.Spec.Bindings {
+		bindings[b.Key] = &b
+	}
+	refs := map[string]*apiv1.Ref{}
+	for _, r := range syn.Spec.Refs {
+		refs[r.Key] = &r
+	}
+
+	inputs := []*unstructured.Unstructured{}
+	for key, r := range refs {
+		b, ok := bindings[key]
+		if !ok {
+			return nil, fmt.Errorf("input %q is referenced, but not bound", key)
+		}
+
+		rawU, err := json.Marshal(apiv1.NewInput(key, apiv1.InputResource{
+			Name:      b.Resource.Name,
+			Namespace: b.Resource.Namespace,
+			Group:     r.Resource.Group,
+			Kind:      r.Resource.Kind,
+		}))
+		if err != nil {
+
+		}
+
+		u := map[string]interface{}{}
+		err = json.Unmarshal(rawU, &u)
+		if err != nil {
+
+		}
+		inputs = append(inputs, &unstructured.Unstructured{Object: u})
+
+	}
+	return serializeInputs(inputs)
+}
+
 func serializeInputs(inputs []*unstructured.Unstructured) ([]byte, error) {
 	rl := &krmv1.ResourceList{
 		Kind:       krmv1.ResourceListKind,

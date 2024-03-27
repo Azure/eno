@@ -1,0 +1,81 @@
+package synthesis
+
+import (
+	"testing"
+
+	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/stretchr/testify/require"
+)
+
+func TestBuildPodInput(t *testing.T) {
+	tcs := []struct {
+		name        string
+		comp        apiv1.Composition
+		synth       apiv1.Synthesizer
+		expected    string
+		expectedErr string
+	}{
+		{
+			name:     "no inputs",
+			expected: "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[]}",
+		},
+		{
+			name: "unbound ref",
+			synth: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "in", Resource: apiv1.ResourceRef{Kind: "ConfigMap"}},
+					},
+				},
+			},
+			expectedErr: "referenced, but not bound",
+		},
+		{
+			name: "valid",
+			synth: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "in", Resource: apiv1.ResourceRef{Kind: "ConfigMap", Group: "core"}},
+					},
+				},
+			},
+			comp: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{
+						{Key: "in", Resource: apiv1.ResourceBinding{Name: "some-cm", Namespace: "default"}},
+					},
+				},
+			},
+			expected: "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[{\"apiVersion\":\"eno.azure.io/v1\",\"key\":\"in\",\"kind\":\"Input\",\"resource\":{\"group\":\"core\",\"kind\":\"ConfigMap\",\"name\":\"some-cm\",\"namespace\":\"default\"}}]}",
+		},
+		{
+			name: "non-referenced binding",
+			synth: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "in", Resource: apiv1.ResourceRef{Kind: "ConfigMap", Group: "core"}},
+					},
+				},
+			},
+			comp: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{
+						{Key: "in", Resource: apiv1.ResourceBinding{Name: "some-cm", Namespace: "default"}},
+						{Key: "in2", Resource: apiv1.ResourceBinding{Name: "some-cm", Namespace: "default"}}, // Safe to specify it, but won't be passed to the the Syhtesis Pod.
+					},
+				},
+			},
+			expected: "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[{\"apiVersion\":\"eno.azure.io/v1\",\"key\":\"in\",\"kind\":\"Input\",\"resource\":{\"group\":\"core\",\"kind\":\"ConfigMap\",\"name\":\"some-cm\",\"namespace\":\"default\"}}]}",
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := buildPodInput(&tc.comp, &tc.synth)
+			if tc.expectedErr != "" {
+				require.ErrorContains(t, err, tc.expectedErr)
+				return
+			}
+			require.Equal(t, tc.expected, string(res))
+		})
+	}
+}
