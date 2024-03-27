@@ -19,8 +19,9 @@ import (
 )
 
 type Config struct {
-	SliceCreationQPS float64
-	PodNamespace     string
+	SliceCreationQPS  float64
+	PodNamespace      string
+	PodServiceAccount string
 }
 
 type podLifecycleController struct {
