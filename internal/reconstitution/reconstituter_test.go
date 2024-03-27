@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/resource"
 	"github.com/Azure/eno/internal/testutil"
 )
 
@@ -49,7 +50,7 @@ func TestReconstituterIntegration(t *testing.T) {
 	require.NoError(t, client.Create(ctx, slice))
 
 	// Prove the resource was cached
-	ref := &ResourceRef{
+	ref := &resource.Ref{
 		Name:      "foo",
 		Namespace: "bar",
 		Kind:      "baz",

@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/uuid"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/resource"
 	"github.com/Azure/eno/internal/testutil"
 )
 
@@ -201,25 +202,25 @@ func newCacheTestFixtures(sliceCount, resPerSliceCount int) (*apiv1.Composition,
 		slice.Spec.Resources = make([]apiv1.Manifest, resPerSliceCount)
 
 		for j := 0; j < resPerSliceCount; j++ {
-			resource := &corev1.ConfigMap{}
-			resource.Name = fmt.Sprintf("slice-%d-resource-%d", i, j)
-			resource.Namespace = "resource-ns"
-			resource.Kind = "ConfigMap"
-			resource.APIVersion = "v1"
-			resource.Annotations = map[string]string{
+			obj := &corev1.ConfigMap{}
+			obj.Name = fmt.Sprintf("slice-%d-resource-%d", i, j)
+			obj.Namespace = "resource-ns"
+			obj.Kind = "ConfigMap"
+			obj.APIVersion = "v1"
+			obj.Annotations = map[string]string{
 				"eno.azure.io/readiness":            "self.foo > self.bar",
 				"eno.azure.io/readiness-test-check": "self.bar > self.baz",
 			}
-			js, _ := json.Marshal(resource)
+			js, _ := json.Marshal(obj)
 
 			slice.Spec.Resources[j] = apiv1.Manifest{
 				Manifest: string(js),
 			}
 			requests = append(requests, &Request{
-				Resource: ResourceRef{
-					Name:      resource.Name,
-					Namespace: resource.Namespace,
-					Kind:      resource.Kind,
+				Resource: resource.Ref{
+					Name:      obj.Name,
+					Namespace: obj.Namespace,
+					Kind:      obj.Kind,
 				},
 				Manifest: ManifestRef{
 					Slice: types.NamespacedName{
