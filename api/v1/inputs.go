@@ -31,7 +31,7 @@ type InputResource struct {
 	Namespace string `json:"namespace,omitempty"`
 	// +required
 	Kind  string `json:"kind"`
-	Group string `json:"group,omitempty"`
+	Group string `json:"group"`
 }
 
 type Binding struct {

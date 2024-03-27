@@ -6,7 +6,7 @@ spec:
   refs:
   - key: some-input
     resource:
-      group: someGroup
+      group: ""
       kind: ConfigMap
   image: linuxserver/yq:latest
   command:
