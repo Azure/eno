@@ -1,4 +1,4 @@
-package reconciliation
+package discovery
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 
 func TestDiscoveryCacheRefill(t *testing.T) {
 	client := &fakeDiscovery{}
-	d := &discoveryCache{client: client, fillWhenNotFound: true}
+	d := &Cache{client: client, fillWhenNotFound: true}
 
 	gvk := schema.GroupVersionKind{
 		Group:   "test-group",
@@ -36,7 +36,7 @@ func TestDiscoveryCacheRefill(t *testing.T) {
 
 func TestDiscoveryCacheRefillDisabled(t *testing.T) {
 	client := &fakeDiscovery{}
-	d := &discoveryCache{client: client, fillWhenNotFound: false}
+	d := &Cache{client: client, fillWhenNotFound: false}
 
 	gvk := schema.GroupVersionKind{
 		Group:   "test-group",

@@ -21,13 +21,6 @@ var (
 		},
 	)
 
-	discoveryCacheChanges = prometheus.NewCounter(
-		prometheus.CounterOpts{
-			Name: "eno_discovery_cache_miss_total",
-			Help: "Discovery cache misses excluding fill events (filling cache on startup, etc.)",
-		},
-	)
-
 	reconciliationActions = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "eno_reconciliation_actions_total",
@@ -45,5 +38,5 @@ var (
 )
 
 func init() {
-	metrics.Registry.MustRegister(reconciliationLatency, resourceVersionChanges, discoveryCacheChanges, reconciliationActions, reconciliationScheduleDelta)
+	metrics.Registry.MustRegister(reconciliationLatency, resourceVersionChanges, reconciliationActions, reconciliationScheduleDelta)
 }

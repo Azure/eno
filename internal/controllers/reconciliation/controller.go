@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/discovery"
 	"github.com/Azure/eno/internal/reconstitution"
 	"github.com/go-logr/logr"
 )
@@ -36,7 +37,7 @@ type Controller struct {
 	readinessPollInterval time.Duration
 
 	upstreamClient client.Client
-	discovery      *discoveryCache
+	discovery      *discovery.Cache
 }
 
 func New(mgr *reconstitution.Manager, downstream *rest.Config, discoveryRPS float32, rediscoverWhenNotFound bool, readinessPollInterval time.Duration) error {
@@ -47,7 +48,7 @@ func New(mgr *reconstitution.Manager, downstream *rest.Config, discoveryRPS floa
 		return err
 	}
 
-	disc, err := newDicoveryCache(downstream, discoveryRPS, rediscoverWhenNotFound)
+	disc, err := discovery.NewCache(downstream, discoveryRPS, rediscoverWhenNotFound)
 	if err != nil {
 		return err
 	}
