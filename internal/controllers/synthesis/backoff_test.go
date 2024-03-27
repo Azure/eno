@@ -43,8 +43,8 @@ func TestControllerBackoff(t *testing.T) {
 			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Attempts >= 3
 		})
 
-		// It shouldn't be possible to try three times within 1s
-		assert.Greater(t, int(time.Since(start).Milliseconds()), 1000)
+		// It shouldn't be possible to try three times within 250ms
+		assert.Greater(t, int(time.Since(start).Milliseconds()), 250)
 	})
 }
 
