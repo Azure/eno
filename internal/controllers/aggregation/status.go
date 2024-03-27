@@ -37,10 +37,10 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition: %w", err))
 	}
 	logger = logger.WithValues("compositionGeneration", comp.Generation, "compositionName", comp.Name, "compositionNamespace", comp.Namespace)
-	if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || (comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.Reconciled != nil) {
+
+	if compositionStatusTerminal(comp) {
 		return ctrl.Result{}, nil
 	}
-	shouldOrphan := comp.Annotations != nil && comp.Annotations["eno.azure.io/deletion-strategy"] == "orphan"
 
 	var maxReadyTime *metav1.Time
 	ready := true
@@ -70,7 +70,7 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			state := state
 			// A resource is reconciled when it's... been reconciled OR when the composition is deleting and it's been deleted.
 			// One more special case: it's also been reconciled when it still exists but the composition is deleting and is configured to orphan resources.
-			if !state.Reconciled || (!state.Deleted && !shouldOrphan && comp.DeletionTimestamp != nil) {
+			if resourceNotReconciled(comp, &state) {
 				reconciled = false
 			}
 
@@ -84,7 +84,7 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 	}
 
-	if (comp.Status.CurrentSynthesis.Reconciled != nil) == reconciled && (comp.Status.CurrentSynthesis.Ready != nil) == ready {
+	if compositionStatusInSync(comp, reconciled, ready) {
 		return ctrl.Result{}, nil
 	}
 
@@ -99,6 +99,7 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	} else {
 		comp.Status.CurrentSynthesis.Ready = nil
 	}
+
 	if reconciled {
 		comp.Status.CurrentSynthesis.Reconciled = &now
 
@@ -109,6 +110,7 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	} else {
 		comp.Status.CurrentSynthesis.Reconciled = nil
 	}
+
 	err = s.client.Status().Update(ctx, comp)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
@@ -116,4 +118,24 @@ func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	logger.V(0).Info("aggregated resource status into composition")
 
 	return ctrl.Result{}, nil
+}
+
+// resourceNotReconciled returns true when a resource should be considered reconciled.
+// - When its status has Reconciled == true
+// - When it has been deleted and the composition has also been deleted
+// - When it has been deleted and the composition is configured to orphan resources
+func resourceNotReconciled(comp *apiv1.Composition, state *apiv1.ResourceState) bool {
+	shouldOrphan := comp.Annotations != nil && comp.Annotations["eno.azure.io/deletion-strategy"] == "orphan"
+	return !state.Reconciled || (!state.Deleted && !shouldOrphan && comp.DeletionTimestamp != nil)
+}
+
+// compositionStatusTerminal determines if a status has reached the point that it can no longer
+// progress, from the perspective of the status aggregation controller.
+func compositionStatusTerminal(comp *apiv1.Composition) bool {
+	return comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || (comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.Reconciled != nil)
+}
+
+// compositionStatusInSync compares the given bool representation of a composition's state against its current status struct.
+func compositionStatusInSync(comp *apiv1.Composition, reconciled, ready bool) bool {
+	return (comp.Status.CurrentSynthesis.Reconciled != nil) == reconciled && (comp.Status.CurrentSynthesis.Ready != nil) == ready
 }
