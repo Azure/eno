@@ -1,4 +1,4 @@
-package reconciliation
+package discovery
 
 // Everything in this file was adapted from kubectl's openapi library.
 // It essentially implements the same behavior with various performance optimizations.

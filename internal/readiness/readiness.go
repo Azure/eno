@@ -120,6 +120,14 @@ func (r Checks) Eval(ctx context.Context, resource *unstructured.Unstructured) (
 	return all[0], true
 }
 
+// EvalOptionally is identical to Eval, except it returns the current time in the status if no checks are set.
+func (r Checks) EvalOptionally(ctx context.Context, resource *unstructured.Unstructured) (*Status, bool) {
+	if len(r) == 0 {
+		return &Status{ReadyTime: metav1.Now()}, true
+	}
+	return r.Eval(ctx, resource)
+}
+
 type Status struct {
 	ReadyTime   metav1.Time
 	PreciseTime bool // true when time came from a condition, not the controller's metav1.Now

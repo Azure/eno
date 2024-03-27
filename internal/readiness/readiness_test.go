@@ -147,9 +147,10 @@ var evalChecksTests = []struct {
 	ExpectedTime string
 }{
 	{
-		Name:     "empty",
-		Checks:   nil,
-		Resource: &unstructured.Unstructured{},
+		Name:         "empty",
+		Checks:       nil,
+		Resource:     &unstructured.Unstructured{},
+		ExpectedTime: time.Now().Format(time.RFC3339),
 	},
 	{
 		Name: "one-negative",
@@ -259,7 +260,7 @@ var evalChecksTests = []struct {
 func TestEvalChecks(t *testing.T) {
 	for _, tc := range evalChecksTests {
 		t.Run(tc.Name, func(t *testing.T) {
-			actual, ok := tc.Checks.Eval(context.Background(), tc.Resource)
+			actual, ok := tc.Checks.EvalOptionally(context.Background(), tc.Resource)
 			assert.Equal(t, ok, actual != nil)
 
 			if tc.ExpectedTime == "" {

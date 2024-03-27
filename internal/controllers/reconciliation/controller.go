@@ -3,7 +3,6 @@ package reconciliation
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -23,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/discovery"
 	"github.com/Azure/eno/internal/reconstitution"
 	"github.com/go-logr/logr"
 )
@@ -37,7 +37,7 @@ type Controller struct {
 	readinessPollInterval time.Duration
 
 	upstreamClient client.Client
-	discovery      *discoveryCache
+	discovery      *discovery.Cache
 }
 
 func New(mgr *reconstitution.Manager, downstream *rest.Config, discoveryRPS float32, rediscoverWhenNotFound bool, readinessPollInterval time.Duration) error {
@@ -48,7 +48,7 @@ func New(mgr *reconstitution.Manager, downstream *rest.Config, discoveryRPS floa
 		return err
 	}
 
-	disc, err := newDicoveryCache(downstream, discoveryRPS, rediscoverWhenNotFound)
+	disc, err := discovery.NewCache(downstream, discoveryRPS, rediscoverWhenNotFound)
 	if err != nil {
 		return err
 	}
@@ -104,19 +104,8 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		}
 	}
 
-	// The current and previous resource can both be nil,
-	// so we need to check both to find the apiVersion
-	var apiVersion string
-	if resource != nil {
-		apiVersion, _ = resource.GVK.ToAPIVersionAndKind()
-	} else if prev != nil {
-		apiVersion, _ = prev.GVK.ToAPIVersionAndKind()
-	} else {
-		logger.Error(errors.New("no apiVersion provided"), "neither the current or previous resource have an apiVersion")
-		return ctrl.Result{}, nil
-	}
-
 	// Fetch the current resource
+	apiVersion, _ := resource.GVK.ToAPIVersionAndKind()
 	current, hasChanged, err := c.getCurrent(ctx, resource, apiVersion)
 	if client.IgnoreNotFound(err) != nil {
 		return ctrl.Result{}, fmt.Errorf("getting current state: %w", err)
@@ -142,37 +131,20 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting resource slice: %w", err))
 	}
 	var ready *metav1.Time
-	if len(slice.Status.Resources) > req.Manifest.Index {
-		status := slice.Status.Resources[req.Manifest.Index]
-		ready = status.Ready
-	}
-	if ready == nil {
-		if len(resource.ReadinessChecks) == 0 {
-			now := metav1.Now()
-			ready = &now
-		} else {
-			readiness, ok := resource.ReadinessChecks.Eval(ctx, current)
-			if ok {
-				ready = &readiness.ReadyTime
-			}
+	if status := req.Manifest.FindStatus(slice); status == nil || status.Ready == nil {
+		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, current)
+		if ok {
+			ready = &readiness.ReadyTime
 		}
 	}
 
-	// Store the results
 	if modified {
 		return ctrl.Result{Requeue: true}, nil
 	}
+
+	// Store the results
 	deleted := current == nil || current.GetDeletionTimestamp() != nil
-	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, func(rs *apiv1.ResourceState) *apiv1.ResourceState {
-		if rs != nil && rs.Deleted == deleted && rs.Reconciled && ptr.Deref(rs.Ready, metav1.Time{}) == ptr.Deref(ready, metav1.Time{}) {
-			return nil
-		}
-		return &apiv1.ResourceState{
-			Deleted:    deleted,
-			Ready:      ready,
-			Reconciled: true,
-		}
-	})
+	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, patchResourceState(deleted, ready))
 	if ready == nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}
@@ -335,4 +307,17 @@ func mungePatch(patch []byte, rv string) ([]byte, error) {
 	}
 
 	return json.Marshal(patchMap)
+}
+
+func patchResourceState(deleted bool, ready *metav1.Time) reconstitution.StatusPatchFn {
+	return func(rs *apiv1.ResourceState) *apiv1.ResourceState {
+		if rs != nil && rs.Deleted == deleted && rs.Reconciled && ptr.Deref(rs.Ready, metav1.Time{}) == ptr.Deref(ready, metav1.Time{}) {
+			return nil
+		}
+		return &apiv1.ResourceState{
+			Deleted:    deleted,
+			Ready:      ready,
+			Reconciled: true,
+		}
+	}
 }
