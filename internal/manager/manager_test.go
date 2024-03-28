@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -140,4 +141,96 @@ func TestManagerBasics(t *testing.T) {
 			time.Sleep(time.Millisecond * 50)
 		}
 	})
+}
+
+// TestReconcilerLimitedScope proves that the reconciler can be scoped down to a namespace + label selector.
+func TestReconcilerLimitedScope(t *testing.T) {
+	t.Parallel()
+	_, b, _, _ := runtime.Caller(0)
+	root := filepath.Join(filepath.Dir(b), "..", "..")
+
+	testCrdDir := filepath.Join(root, "internal", "controllers", "reconciliation", "fixtures", "v1", "config", "crd")
+	env := &envtest.Environment{
+		CRDDirectoryPaths: []string{
+			filepath.Join(root, "api", "v1", "config", "crd"),
+			testCrdDir,
+		},
+		ErrorIfCRDPathMissing: true,
+	}
+	t.Cleanup(func() {
+		err := env.Stop()
+		if err != nil {
+			panic(err)
+		}
+	})
+	var cfg *rest.Config
+	var err error
+	for i := 0; i < 2; i++ {
+		cfg, err = env.Start()
+		if err != nil {
+			t.Logf("failed to start test environment: %s", err)
+			continue
+		}
+		break
+	}
+	require.NoError(t, err)
+
+	opts := &Options{
+		Rest:                    cfg,
+		HealthProbeAddr:         ":0",
+		MetricsAddr:             ":0",
+		SynthesizerPodNamespace: "default",
+		CompositionNamespace:    "test-comp-ns",
+		CompositionSelector:     labels.SelectorFromSet(labels.Set{"testkey": "testval"}),
+		qps:                     100,
+	}
+	mgr, err := NewTest(testr.New(t), opts)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go mgr.Start(ctx)
+
+	ns := &corev1.Namespace{}
+	ns.Name = opts.CompositionNamespace
+	err = mgr.GetClient().Create(ctx, ns)
+	require.NoError(t, err)
+
+	comp1 := &apiv1.Composition{}
+	comp1.Name = "in-namespace-with-labels"
+	comp1.Namespace = ns.Name
+	comp1.Labels = map[string]string{"testkey": "testval"}
+	err = mgr.GetClient().Create(ctx, comp1)
+	require.NoError(t, err)
+
+	comp2 := &apiv1.Composition{}
+	comp2.Name = "in-namespace-no-labels"
+	comp2.Namespace = ns.Name
+	err = mgr.GetClient().Create(ctx, comp2)
+	require.NoError(t, err)
+
+	comp3 := &apiv1.Composition{}
+	comp3.Name = "in-different-namespace"
+	comp3.Namespace = "default"
+	err = mgr.GetClient().Create(ctx, comp3)
+	require.NoError(t, err)
+
+	for i := 0; true; i++ {
+		// This composition should eventually exist
+		actual := &apiv1.Composition{}
+		mgr.GetCache().Get(ctx, client.ObjectKeyFromObject(comp1), actual)
+		if actual.ResourceVersion != "" {
+			break
+		}
+
+		// importing testutil would cause a cycle
+		if i > 50 {
+			t.Fatalf("timeout")
+		}
+		time.Sleep(time.Millisecond * 50)
+	}
+
+	// Because informers are ordered per-resource, this would exist in cache by now
+	assert.True(t, errors.IsNotFound(mgr.GetCache().Get(ctx, client.ObjectKeyFromObject(comp2), &apiv1.Composition{})))
+	assert.EqualError(t, mgr.GetCache().Get(ctx, client.ObjectKeyFromObject(comp3), &apiv1.Composition{}), "unable to get: default/in-different-namespace because of unknown namespace for the cache")
 }
