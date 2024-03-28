@@ -58,8 +58,8 @@ func (c *sliceCleanupController) Reconcile(ctx context.Context, req ctrl.Request
 		}
 		if err == nil {
 			logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace)
-			doNotDelete = !shouldDelete(comp, slice)
-			holdFinalizer = !shouldReleaseFinalizer(comp, slice)
+			doNotDelete = !shouldDeleteSlice(comp, slice)
+			holdFinalizer = !shouldReleaseSliceFinalizer(comp, slice)
 		}
 	}
 
@@ -90,19 +90,22 @@ func (c *sliceCleanupController) Reconcile(ctx context.Context, req ctrl.Request
 	return ctrl.Result{}, nil
 }
 
-func shouldDelete(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
+func shouldDeleteSlice(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
 	if comp.Status.CurrentSynthesis != nil && slice.Spec.CompositionGeneration > comp.Status.CurrentSynthesis.ObservedCompositionGeneration {
 		return false // stale informer
 	}
-	isReferenced := synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) || synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice)
-	return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil && comp.DeletionTimestamp != nil || (!isReferenced && slice.Spec.CompositionGeneration < comp.Generation)
+	isReferencedByComp := synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) || synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice)
+	isPendingSynthesis := comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
+	compIsDeleted := comp.DeletionTimestamp != nil
+	return isPendingSynthesis && compIsDeleted || (!isReferencedByComp && slice.Spec.CompositionGeneration < comp.Generation)
 }
 
-func shouldReleaseFinalizer(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
+func shouldReleaseSliceFinalizer(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
 	if comp.Status.CurrentSynthesis != nil && slice.Spec.CompositionGeneration > comp.Status.CurrentSynthesis.ObservedCompositionGeneration {
 		return false // stale informer
 	}
-	return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil && (!resourcesRemain(comp, slice) || (!synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) && !synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice)))
+	isPendingSynthesis := comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
+	return isPendingSynthesis && (!resourcesRemain(comp, slice) || (!synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) && !synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice)))
 }
 
 func synthesisReferencesSlice(syn *apiv1.Synthesis, slice *apiv1.ResourceSlice) bool {

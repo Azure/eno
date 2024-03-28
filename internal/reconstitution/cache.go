@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
-	"strings"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/types"
@@ -13,6 +11,7 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/readiness"
+	"github.com/Azure/eno/internal/resource"
 	"github.com/go-logr/logr"
 )
 
@@ -22,7 +21,7 @@ type cache struct {
 	renv   *readiness.Env
 
 	mut                    sync.Mutex
-	resources              map[CompositionRef]map[ResourceRef]*Resource
+	resources              map[CompositionRef]map[resource.Ref]*Resource
 	synthesesByComposition map[types.NamespacedName][]int64
 }
 
@@ -34,12 +33,12 @@ func newCache(client client.Client) *cache {
 	return &cache{
 		client:                 client,
 		renv:                   renv,
-		resources:              make(map[CompositionRef]map[ResourceRef]*Resource),
+		resources:              make(map[CompositionRef]map[resource.Ref]*Resource),
 		synthesesByComposition: make(map[types.NamespacedName][]int64),
 	}
 }
 
-func (c *cache) Get(ctx context.Context, comp *CompositionRef, ref *ResourceRef) (*Resource, bool) {
+func (c *cache) Get(ctx context.Context, comp *CompositionRef, ref *resource.Ref) (*Resource, bool) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
@@ -95,8 +94,8 @@ func (c *cache) Fill(ctx context.Context, comp *apiv1.Composition, synthesis *ap
 	return requests, nil
 }
 
-func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, items []apiv1.ResourceSlice) (map[ResourceRef]*Resource, []*Request, error) {
-	resources := map[ResourceRef]*Resource{}
+func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, items []apiv1.ResourceSlice) (map[resource.Ref]*Resource, []*Request, error) {
+	resources := map[resource.Ref]*Resource{}
 	requests := []*Request{}
 	for _, slice := range items {
 		slice := slice
@@ -106,10 +105,10 @@ func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 
 		// NOTE: In the future we can build a DAG here to find edges between dependant resources and append them to the Resource structs
 
-		for i, resource := range slice.Spec.Resources {
-			resource := resource
+		for i, obj := range slice.Spec.Resources {
+			obj := obj
 
-			res, err := c.buildResource(ctx, &slice, &resource)
+			res, err := resource.NewResource(ctx, c.renv, &slice, &obj)
 			if err != nil {
 				return nil, nil, fmt.Errorf("building resource at index %d of slice %s: %w", i, slice.Name, err)
 			}
@@ -129,54 +128,6 @@ func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 	}
 
 	return resources, requests, nil
-}
-
-func (c *cache) buildResource(ctx context.Context, slice *apiv1.ResourceSlice, resource *apiv1.Manifest) (*Resource, error) {
-	logger := logr.FromContextOrDiscard(ctx)
-	res := &Resource{
-		Manifest:     resource,
-		SliceDeleted: slice.DeletionTimestamp != nil,
-	}
-
-	parsed, err := res.Parse()
-	if err != nil {
-		return nil, fmt.Errorf("invalid json: %w", err)
-	}
-	gvk := parsed.GroupVersionKind()
-	res.GVK = gvk
-	res.Ref.Name = parsed.GetName()
-	res.Ref.Namespace = parsed.GetNamespace()
-	res.Ref.Kind = parsed.GetKind()
-	logger = logger.WithValues("resourceKind", parsed.GetKind(), "resourceName", parsed.GetName(), "resourceNamespace", parsed.GetNamespace())
-
-	if res.Ref.Name == "" || res.Ref.Kind == "" || parsed.GetAPIVersion() == "" {
-		return nil, fmt.Errorf("missing name, kind, or apiVersion")
-	}
-
-	anno := parsed.GetAnnotations()
-	for key, value := range parsed.GetAnnotations() {
-		if !strings.HasPrefix(key, "eno.azure.io/readiness") {
-			continue
-		}
-		delete(anno, key)
-
-		name := strings.TrimPrefix(key, "eno.azure.io/readiness-")
-		if name == "eno.azure.io/readiness" {
-			name = "default"
-		}
-
-		check, err := readiness.ParseCheck(c.renv, value)
-		if err != nil {
-			logger.Error(err, "invalid cel expression")
-			continue
-		}
-		check.Name = name
-		res.ReadinessChecks = append(res.ReadinessChecks, check)
-	}
-	parsed.SetAnnotations(anno)
-	sort.Slice(res.ReadinessChecks, func(i, j int) bool { return res.ReadinessChecks[i].Name < res.ReadinessChecks[j].Name })
-
-	return res, nil
 }
 
 // Purge removes resources associated with a particular composition synthesis from the cache.

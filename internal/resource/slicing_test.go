@@ -1,4 +1,4 @@
-package synthesis
+package resource
 
 import (
 	"testing"
@@ -10,18 +10,18 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-func TestBuildResourceSlicesOverflow(t *testing.T) {
+func TestSliceOverflow(t *testing.T) {
 	outputs := []*unstructured.Unstructured{}
 	for i := 0; i < 16; i++ {
 		outputs = append(outputs, &unstructured.Unstructured{})
 	}
 
-	slices, err := buildResourceSlices(&apiv1.Composition{}, []*apiv1.ResourceSlice{}, outputs, 20)
+	slices, err := Slice(&apiv1.Composition{}, []*apiv1.ResourceSlice{}, outputs, 20)
 	require.NoError(t, err)
 	assert.Len(t, slices, 4)
 }
 
-func TestBuildResourceSlicesTombstonesBasics(t *testing.T) {
+func TestSliceTombstonesBasics(t *testing.T) {
 	outputs := []*unstructured.Unstructured{{
 		Object: map[string]interface{}{
 			"kind":       "Test",
@@ -33,21 +33,21 @@ func TestBuildResourceSlicesTombstonesBasics(t *testing.T) {
 		},
 	}}
 
-	slices, err := buildResourceSlices(&apiv1.Composition{}, []*apiv1.ResourceSlice{}, outputs, 100000)
+	slices, err := Slice(&apiv1.Composition{}, []*apiv1.ResourceSlice{}, outputs, 100000)
 	require.NoError(t, err)
 	require.Len(t, slices, 1)
 	require.Len(t, slices[0].Spec.Resources, 1)
 	assert.False(t, slices[0].Spec.Resources[0].Deleted)
 
 	// Remove the resource - initial tombstone record is created
-	slices, err = buildResourceSlices(&apiv1.Composition{}, slices, []*unstructured.Unstructured{}, 100000)
+	slices, err = Slice(&apiv1.Composition{}, slices, []*unstructured.Unstructured{}, 100000)
 	require.NoError(t, err)
 	require.Len(t, slices, 1)
 	require.Len(t, slices[0].Spec.Resources, 1)
 	assert.True(t, slices[0].Spec.Resources[0].Deleted)
 
 	// The actual resource hasn't been reconciled (deleted) yet, so the tombstone will persist in new states
-	slices, err = buildResourceSlices(&apiv1.Composition{}, slices, []*unstructured.Unstructured{}, 100000)
+	slices, err = Slice(&apiv1.Composition{}, slices, []*unstructured.Unstructured{}, 100000)
 	require.NoError(t, err)
 	require.Len(t, slices, 1)
 	require.Len(t, slices[0].Spec.Resources, 1)
@@ -55,12 +55,12 @@ func TestBuildResourceSlicesTombstonesBasics(t *testing.T) {
 
 	// The tombstone is removed once it has been reconciled
 	slices[0].Status.Resources = []apiv1.ResourceState{{Reconciled: true}}
-	slices, err = buildResourceSlices(&apiv1.Composition{}, slices, []*unstructured.Unstructured{}, 100000)
+	slices, err = Slice(&apiv1.Composition{}, slices, []*unstructured.Unstructured{}, 100000)
 	require.NoError(t, err)
 	require.Len(t, slices, 0)
 }
 
-func TestBuildResourceSlicesReconcileInterval(t *testing.T) {
+func TestSliceReconcileInterval(t *testing.T) {
 	outputs := []*unstructured.Unstructured{{
 		Object: map[string]interface{}{
 			"kind":       "Test",
@@ -76,7 +76,7 @@ func TestBuildResourceSlicesReconcileInterval(t *testing.T) {
 	}}
 
 	// The reconcile interval is passed from the resource itself to its manifest representation
-	slices, err := buildResourceSlices(&apiv1.Composition{}, []*apiv1.ResourceSlice{}, outputs, 100000)
+	slices, err := Slice(&apiv1.Composition{}, []*apiv1.ResourceSlice{}, outputs, 100000)
 	require.NoError(t, err)
 	require.Len(t, slices, 1)
 	require.Len(t, slices[0].Spec.Resources, 1)
@@ -85,7 +85,7 @@ func TestBuildResourceSlicesReconcileInterval(t *testing.T) {
 	assert.Equal(t, "{\"apiVersion\":\"mygroup/v1\",\"kind\":\"Test\",\"metadata\":{\"name\":\"test-resource\",\"namespace\":\"test-ns\"}}\n", slices[0].Spec.Resources[0].Manifest) // it's not in the resource itself
 }
 
-func TestBuildResourceSlicesTombstonesVersionSemantics(t *testing.T) {
+func TestSliceTombstonesVersionSemantics(t *testing.T) {
 	outputs := []*unstructured.Unstructured{{
 		Object: map[string]interface{}{
 			"kind":       "Test",
@@ -96,7 +96,7 @@ func TestBuildResourceSlicesTombstonesVersionSemantics(t *testing.T) {
 			},
 		},
 	}}
-	slices, err := buildResourceSlices(&apiv1.Composition{}, []*apiv1.ResourceSlice{}, outputs, 100000)
+	slices, err := Slice(&apiv1.Composition{}, []*apiv1.ResourceSlice{}, outputs, 100000)
 	require.NoError(t, err)
 	require.Len(t, slices, 1)
 	require.Len(t, slices[0].Spec.Resources, 1)
@@ -113,7 +113,7 @@ func TestBuildResourceSlicesTombstonesVersionSemantics(t *testing.T) {
 			},
 		},
 	}}
-	slices, err = buildResourceSlices(&apiv1.Composition{}, slices, outputs, 100000)
+	slices, err = Slice(&apiv1.Composition{}, slices, outputs, 100000)
 	require.NoError(t, err)
 	require.Len(t, slices, 1)
 	require.Len(t, slices[0].Spec.Resources, 1)
@@ -130,7 +130,7 @@ func TestBuildResourceSlicesTombstonesVersionSemantics(t *testing.T) {
 			},
 		},
 	}}
-	slices, err = buildResourceSlices(&apiv1.Composition{}, slices, outputs, 100000)
+	slices, err = Slice(&apiv1.Composition{}, slices, outputs, 100000)
 	require.NoError(t, err)
 	require.Len(t, slices, 1)
 	require.Len(t, slices[0].Spec.Resources, 2)
