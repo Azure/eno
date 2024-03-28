@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/go-logr/zapr"
 	"go.uber.org/zap"
@@ -11,10 +12,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/Azure/eno/internal/controllers/synthesis"
+	"github.com/Azure/eno/internal/controllers/watchdog"
 	"github.com/Azure/eno/internal/manager"
 )
-
-// TODO: Expose leader election and other manager options
 
 func main() {
 	if err := run(); err != nil {
@@ -23,13 +23,12 @@ func main() {
 	}
 }
 
-// TODO: Handle case where resource slices are already deleted but comp still references them
-
 func run() error {
 	ctx := ctrl.SetupSignalHandler()
 	var (
-		debugLogging bool
-		synconf      = &synthesis.Config{}
+		debugLogging  bool
+		watchdogThres time.Duration
+		synconf       = &synthesis.Config{}
 
 		mgrOpts = &manager.Options{
 			Rest: ctrl.GetConfigOrDie(),
@@ -39,6 +38,7 @@ func run() error {
 	flag.StringVar(&synconf.PodNamespace, "synthesizer-pod-namespace", os.Getenv("POD_NAMESPACE"), "Namespace to create synthesizer pods in. Defaults to POD_NAMESPACE.")
 	flag.StringVar(&synconf.PodServiceAccount, "synthesizer-pod-service-account", "", "Service account name to be assigned to synthesizer Pods.")
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
+	flag.DurationVar(&watchdogThres, "watchdog-threshold", time.Minute*5, "How long before the watchdog considers a mid-transition resource to be stuck")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 
@@ -85,6 +85,11 @@ func run() error {
 	err = synthesis.NewPodLifecycleController(mgr, synconf)
 	if err != nil {
 		return fmt.Errorf("constructing pod lifecycle controller: %w", err)
+	}
+
+	err = watchdog.NewController(mgr, watchdogThres)
+	if err != nil {
+		return fmt.Errorf("constructing watchdog controller: %w", err)
 	}
 
 	return mgr.Start(ctx)
