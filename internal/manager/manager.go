@@ -101,17 +101,6 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 		LeaderElectionID:           opts.LeaderElectionID,
 	}
 
-	labelSelector, err := opts.getDefaultLabelSelector()
-	if err != nil {
-		return nil, err
-	}
-	mgrOpts.Cache.DefaultLabelSelector = labelSelector
-	fieldSelector, err := opts.getDefaultFieldSelector()
-	if err != nil {
-		return nil, err
-	}
-	mgrOpts.Cache.DefaultFieldSelector = fieldSelector
-
 	if isController {
 		// Only cache pods in the synthesizer pod namespace and owned by this controller
 		mgrOpts.Cache.ByObject[&corev1.Pod{}] = cache.ByObject{
@@ -124,6 +113,14 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 	}
 
 	if isReconciler {
+		mgrOpts.Cache.ByObject[&apiv1.Composition{}] = cache.ByObject{
+			Namespaces: map[string]cache.Config{
+				opts.CompositionNamespace: {
+					LabelSelector: opts.CompositionSelector,
+				},
+			},
+		}
+
 		yespls := true
 		mgrOpts.Cache.ByObject[&apiv1.ResourceSlice{}] = cache.ByObject{
 			UnsafeDisableDeepCopy: &yespls,
