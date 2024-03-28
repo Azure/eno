@@ -39,7 +39,7 @@ func (r *Resource) Parse() (*unstructured.Unstructured, error) {
 	return u, u.UnmarshalJSON([]byte(r.Manifest.Manifest))
 }
 
-func New(ctx context.Context, renv *readiness.Env, slice *apiv1.ResourceSlice, resource *apiv1.Manifest) (*Resource, error) {
+func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.ResourceSlice, resource *apiv1.Manifest) (*Resource, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 	res := &Resource{
 		Manifest:     resource,

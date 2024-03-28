@@ -108,7 +108,7 @@ func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 		for i, obj := range slice.Spec.Resources {
 			obj := obj
 
-			res, err := resource.New(ctx, c.renv, &slice, &obj)
+			res, err := resource.NewResource(ctx, c.renv, &slice, &obj)
 			if err != nil {
 				return nil, nil, fmt.Errorf("building resource at index %d of slice %s: %w", i, slice.Name, err)
 			}
