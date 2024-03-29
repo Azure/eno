@@ -8,6 +8,7 @@ import (
 	"github.com/Azure/eno/internal/controllers/aggregation"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
 	"github.com/Azure/eno/internal/controllers/synthesis"
+	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/reconstitution"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/google/uuid"
@@ -33,7 +34,7 @@ func TestResourceReadiness(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
+	rm, err := reconstitution.New(mgr.Manager)
 	require.NoError(t, err)
 	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
@@ -58,7 +59,8 @@ func TestResourceReadiness(t *testing.T) {
 	}}))
 
 	// Test subject
-	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Millisecond)
+	rswb := flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager, time.Millisecond, 1)
+	err = New(rm, rswb, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Millisecond)
 	require.NoError(t, err)
 	mgr.Start(t)
 
@@ -138,10 +140,11 @@ func TestReconcileStatus(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
 
-	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
+	rm, err := reconstitution.New(mgr.Manager)
 	require.NoError(t, err)
 
-	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
+	rswb := flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager, time.Hour, 1)
+	err = New(rm, rswb, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
 	require.NoError(t, err)
 	mgr.Start(t)
 

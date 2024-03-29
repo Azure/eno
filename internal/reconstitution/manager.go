@@ -2,7 +2,6 @@ package reconstitution
 
 import (
 	"context"
-	"time"
 
 	"github.com/go-logr/logr"
 	"k8s.io/client-go/util/workqueue"
@@ -12,12 +11,10 @@ import (
 
 // New creates a new Manager, which is responsible for "reconstituting" resources
 // i.e. allowing controllers to treat them as individual resources instead of their storage representation (ResourceSlice).
-func New(mgr ctrl.Manager, writeBatchInterval time.Duration) (*Manager, error) {
+func New(mgr ctrl.Manager) (*Manager, error) {
 	m := &Manager{
 		Manager: mgr,
 	}
-	m.writeBuffer = newWriteBuffer(mgr.GetClient(), writeBatchInterval, 2)
-	mgr.Add(m.writeBuffer)
 
 	var err error
 	m.reconstituter, err = newReconstituter(mgr)
@@ -31,7 +28,6 @@ func New(mgr ctrl.Manager, writeBatchInterval time.Duration) (*Manager, error) {
 type Manager struct {
 	ctrl.Manager
 	*reconstituter
-	*writeBuffer
 }
 
 func (m *Manager) GetClient() Client { return m }

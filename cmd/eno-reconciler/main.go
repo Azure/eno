@@ -16,6 +16,7 @@ import (
 	"github.com/Azure/eno/internal/controllers/aggregation"
 	"github.com/Azure/eno/internal/controllers/reconciliation"
 	"github.com/Azure/eno/internal/controllers/synthesis"
+	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/k8s"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/Azure/eno/internal/reconstitution"
@@ -82,7 +83,7 @@ func run() error {
 		return fmt.Errorf("constructing manager: %w", err)
 	}
 
-	recmgr, err := reconstitution.New(mgr, writeBatchInterval)
+	recmgr, err := reconstitution.New(mgr)
 	if err != nil {
 		return fmt.Errorf("constructing reconstitution manager: %w", err)
 	}
@@ -106,7 +107,9 @@ func run() error {
 			remoteConfig.QPS = float32(remoteQPS)
 		}
 	}
-	err = reconciliation.New(recmgr, remoteConfig, discoveryMaxRPS, rediscoverWhenNotFound, readinessPollInterval)
+
+	writeBuffer := flowcontrol.NewResourceSliceWriteBufferForManager(mgr, writeBatchInterval, 1)
+	err = reconciliation.New(recmgr, writeBuffer, remoteConfig, discoveryMaxRPS, rediscoverWhenNotFound, readinessPollInterval)
 	if err != nil {
 		return fmt.Errorf("constructing reconciliation controller: %w", err)
 	}

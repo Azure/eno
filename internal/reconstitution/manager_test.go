@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,7 +20,7 @@ func TestManagerBasics(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	client := mgr.GetClient()
 
-	rm, err := New(mgr.Manager, time.Millisecond)
+	rm, err := New(mgr.Manager)
 	require.NoError(t, err)
 
 	tr := &testReconciler{mgr: rm}

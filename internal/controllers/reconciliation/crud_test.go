@@ -22,6 +22,7 @@ import (
 	"github.com/Azure/eno/internal/controllers/aggregation"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
 	"github.com/Azure/eno/internal/controllers/synthesis"
+	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/reconstitution"
 	"github.com/Azure/eno/internal/testutil"
 )
@@ -156,7 +157,7 @@ func TestCRUD(t *testing.T) {
 			downstream := mgr.DownstreamClient
 
 			// Register supporting controllers
-			rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
+			rm, err := reconstitution.New(mgr.Manager)
 			require.NoError(t, err)
 			require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
 			require.NoError(t, synthesis.NewStatusController(mgr.Manager))
@@ -165,7 +166,8 @@ func TestCRUD(t *testing.T) {
 
 			// Test subject
 			// Only enable rediscoverWhenNotFound on k8s versions that can support it.
-			err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
+			rswb := flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager, time.Hour, 1)
+			err = New(rm, rswb, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
 			require.NoError(t, err)
 			mgr.Start(t)
 
@@ -318,7 +320,7 @@ func TestReconcileInterval(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
+	rm, err := reconstitution.New(mgr.Manager)
 	require.NoError(t, err)
 	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
@@ -342,7 +344,8 @@ func TestReconcileInterval(t *testing.T) {
 	}}))
 
 	// Test subject
-	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
+	rswb := flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager, time.Hour, 1)
+	err = New(rm, rswb, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
 	require.NoError(t, err)
 	mgr.Start(t)
 
@@ -391,7 +394,7 @@ func TestReconcileCacheRace(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
+	rm, err := reconstitution.New(mgr.Manager)
 	require.NoError(t, err)
 	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
@@ -417,7 +420,8 @@ func TestReconcileCacheRace(t *testing.T) {
 	}}))
 
 	// Test subject
-	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
+	rswb := flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager, time.Millisecond, 1)
+	err = New(rm, rswb, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
 	require.NoError(t, err)
 	mgr.Start(t)
 
@@ -467,7 +471,7 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
+	rm, err := reconstitution.New(mgr.Manager)
 	require.NoError(t, err)
 	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
@@ -493,7 +497,8 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 	}}))
 
 	// Test subject
-	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
+	rswb := flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager, time.Millisecond, 1)
+	err = New(rm, rswb, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
 	require.NoError(t, err)
 	mgr.Start(t)
 
@@ -544,7 +549,7 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
+	rm, err := reconstitution.New(mgr.Manager)
 	require.NoError(t, err)
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
@@ -552,7 +557,8 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	require.NoError(t, aggregation.NewStatusController(mgr.Manager))
 
 	// Test subject
-	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
+	rswb := flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager, time.Millisecond, 1)
+	err = New(rm, rswb, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
 	require.NoError(t, err)
 	mgr.Start(t)
 
