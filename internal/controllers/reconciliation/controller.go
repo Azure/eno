@@ -28,21 +28,19 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// TODO: Set per-operation context timeouts
-
 var insecureLogPatch = os.Getenv("INSECURE_LOG_PATCH") == "true"
 
 type Controller struct {
 	client                client.Client
 	writeBuffer           *flowcontrol.ResourceSliceWriteBuffer
 	resourceClient        reconstitution.Client
+	timeout               time.Duration
 	readinessPollInterval time.Duration
-
-	upstreamClient client.Client
-	discovery      *discovery.Cache
+	upstreamClient        client.Client
+	discovery             *discovery.Cache
 }
 
-func New(mgr *reconstitution.Manager, rswb *flowcontrol.ResourceSliceWriteBuffer, downstream *rest.Config, dc *discovery.Cache, readinessPollInterval time.Duration) (*Controller, error) {
+func New(mgr *reconstitution.Manager, rswb *flowcontrol.ResourceSliceWriteBuffer, downstream *rest.Config, dc *discovery.Cache, timeout, readinessPollInterval time.Duration) (*Controller, error) {
 	upstreamClient, err := client.New(downstream, client.Options{
 		Scheme: runtime.NewScheme(), // empty scheme since we shouldn't rely on compile-time types
 	})
@@ -54,6 +52,7 @@ func New(mgr *reconstitution.Manager, rswb *flowcontrol.ResourceSliceWriteBuffer
 		client:                mgr.Manager.GetClient(),
 		writeBuffer:           rswb,
 		resourceClient:        mgr.GetClient(),
+		timeout:               timeout,
 		readinessPollInterval: readinessPollInterval,
 		upstreamClient:        upstreamClient,
 		discovery:             dc,
@@ -61,6 +60,9 @@ func New(mgr *reconstitution.Manager, rswb *flowcontrol.ResourceSliceWriteBuffer
 }
 
 func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request) (ctrl.Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, types.NamespacedName{Name: req.Composition.Name, Namespace: req.Composition.Namespace}, comp)
 	if err != nil {

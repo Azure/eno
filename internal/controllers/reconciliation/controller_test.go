@@ -34,7 +34,7 @@ func setupTestSubject(t *testing.T, mgr *testutil.Manager) *Controller {
 	cache, err := discovery.NewCache(mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15))
 	require.NoError(t, err)
 
-	ctmp, err := New(rm, rswb, mgr.DownstreamRestConfig, cache, time.Hour)
+	ctmp, err := New(rm, rswb, mgr.DownstreamRestConfig, cache, time.Minute, time.Hour)
 	require.NoError(t, err)
 	c = *ctmp
 

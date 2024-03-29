@@ -39,6 +39,7 @@ func run() error {
 		debugLogging           bool
 		remoteKubeconfigFile   string
 		remoteQPS              float64
+		timeout                time.Duration
 		readinessPollInterval  time.Duration
 		compositionSelector    string
 		compositionNamespace   string
@@ -52,6 +53,7 @@ func run() error {
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.StringVar(&remoteKubeconfigFile, "remote-kubeconfig", "", "Path to the kubeconfig of the apiserver where the resources will be reconciled. The config from the environment is used if this is not provided")
 	flag.Float64Var(&remoteQPS, "remote-qps", 0, "Max requests per second to the remote apiserver")
+	flag.DurationVar(&timeout, "timeout", time.Minute, "Per-resource reconciliation timeout. Avoids cases where client retries/timeouts are configured poorly and the loop gets blocked")
 	flag.DurationVar(&readinessPollInterval, "readiness-poll-interval", time.Second*5, "Interval at which non-ready resources will be checked for readiness")
 	flag.StringVar(&compositionSelector, "composition-label-selector", labels.Everything().String(), "Optional label selector for compositions to be reconciled")
 	flag.StringVar(&compositionNamespace, "composition-namespace", metav1.NamespaceAll, "Optional namespace to limit compositions that will be reconciled")
@@ -117,7 +119,7 @@ func run() error {
 		return fmt.Errorf("constructing discovery cache: %w", err)
 	}
 
-	reconcilerTmp, err := reconciliation.New(recMgr, writeBuffer, remoteConfig, cache, readinessPollInterval)
+	reconcilerTmp, err := reconciliation.New(recMgr, writeBuffer, remoteConfig, cache, timeout, readinessPollInterval)
 	if err != nil {
 		return fmt.Errorf("constructing reconciliation controller: %w", err)
 	}
