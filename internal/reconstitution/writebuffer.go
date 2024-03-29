@@ -184,7 +184,7 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 	}
 
 	logger.V(0).Info(fmt.Sprintf("updated the status of %d resources in slice", len(updates)))
-	discoveryCacheChanges.Inc()
+	sliceStatusUpdates.Inc()
 	return true
 }
 

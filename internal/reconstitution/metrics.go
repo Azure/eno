@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	discoveryCacheChanges = prometheus.NewCounter(
+	sliceStatusUpdates = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "eno_resource_slice_status_update_total",
 			Help: "Count of batch updates to resource slice status",
@@ -15,5 +15,5 @@ var (
 )
 
 func init() {
-	metrics.Registry.MustRegister(discoveryCacheChanges)
+	metrics.Registry.MustRegister(sliceStatusUpdates)
 }
