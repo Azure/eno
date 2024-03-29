@@ -110,7 +110,7 @@ func run() error {
 	writeBuffer := flowcontrol.NewResourceSliceWriteBufferForManager(mgr, writeBatchInterval, 1)
 
 	rCache := reconstitution.NewCache(mgr.GetClient())
-	reconciler, err := reconciliation.New(mgr, rCache, writeBuffer, remoteConfig, discoveryMaxRPS, rediscoverWhenNotFound, readinessPollInterval)
+	reconciler, err := reconciliation.New(mgr, rCache, writeBuffer, remoteConfig, discoveryMaxRPS, rediscoverWhenNotFound, timeout, readinessPollInterval)
 	if err != nil {
 		return fmt.Errorf("constructing reconciliation controller: %w", err)
 	}
@@ -119,19 +119,5 @@ func run() error {
 		return fmt.Errorf("constructing reconstitution manager: %w", err)
 	}
 
-<<<<<<< HEAD
-=======
-	cache, err := discovery.NewCache(remoteConfig, discoveryMaxRPS, rediscoverWhenNotFound)
-	if err != nil {
-		return fmt.Errorf("constructing discovery cache: %w", err)
-	}
-
-	reconcilerTmp, err := reconciliation.New(recMgr, writeBuffer, remoteConfig, cache, timeout, readinessPollInterval)
-	if err != nil {
-		return fmt.Errorf("constructing reconciliation controller: %w", err)
-	}
-	reconciler = *reconcilerTmp
-
->>>>>>> fe7e6c9 (Add timeouts)
 	return mgr.Start(ctx)
 }
