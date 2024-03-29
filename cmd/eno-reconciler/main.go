@@ -103,6 +103,8 @@ func run() error {
 		}
 	}
 
+	// Burst of 1 allows the first write to happen immediately, while subsequent writes are debounced/batched at writeBatchInterval.
+	// This provides quick feedback in cases where only a few resources have changed.
 	writeBuffer := flowcontrol.NewResourceSliceWriteBufferForManager(mgr, writeBatchInterval, 1)
 
 	var reconciler reconciliation.Controller
