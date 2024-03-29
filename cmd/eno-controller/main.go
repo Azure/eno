@@ -9,7 +9,6 @@ import (
 	"github.com/go-logr/zapr"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"k8s.io/apimachinery/pkg/labels"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/Azure/eno/internal/controllers/synthesis"
@@ -27,11 +26,9 @@ func main() {
 func run() error {
 	ctx := ctrl.SetupSignalHandler()
 	var (
-		debugLogging         bool
-		watchdogThres        time.Duration
-		compositionSelector  string
-		compositionNamespace string
-		synconf              = &synthesis.Config{}
+		debugLogging  bool
+		watchdogThres time.Duration
+		synconf       = &synthesis.Config{}
 
 		mgrOpts = &manager.Options{
 			Rest: ctrl.GetConfigOrDie(),
@@ -42,8 +39,6 @@ func run() error {
 	flag.StringVar(&synconf.PodServiceAccount, "synthesizer-pod-service-account", "", "Service account name to be assigned to synthesizer Pods.")
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.DurationVar(&watchdogThres, "watchdog-threshold", time.Minute*5, "How long before the watchdog considers a mid-transition resource to be stuck")
-	flag.StringVar(&compositionSelector, "composition-label-selector", "", "Optional label selector for compositions to be reconciled")
-	flag.StringVar(&compositionNamespace, "composition-namespace", "", "Optional namespace to limit compositions that will be reconciled")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 
@@ -51,17 +46,6 @@ func run() error {
 		return fmt.Errorf("a value is required in --synthesizer-pod-namespace or POD_NAMESPACE")
 	}
 	mgrOpts.SynthesizerPodNamespace = synconf.PodNamespace
-	mgrOpts.CompositionNamespace = compositionNamespace
-
-	if compositionSelector != "" {
-		var err error
-		mgrOpts.CompositionSelector, err = labels.Parse(compositionSelector)
-		if err != nil {
-			return fmt.Errorf("invalid composition label selector: %w", err)
-		}
-	} else {
-		mgrOpts.CompositionSelector = labels.Everything()
-	}
 
 	zapCfg := zap.NewProductionConfig()
 	if debugLogging {
