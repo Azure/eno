@@ -42,15 +42,10 @@ type Controller struct {
 	discovery      *discovery.Cache
 }
 
-func New(mgr *reconstitution.Manager, rswb *flowcontrol.ResourceSliceWriteBuffer, downstream *rest.Config, discoveryRPS float32, rediscoverWhenNotFound bool, readinessPollInterval time.Duration) (*Controller, error) {
+func New(mgr *reconstitution.Manager, rswb *flowcontrol.ResourceSliceWriteBuffer, downstream *rest.Config, dc *discovery.Cache, readinessPollInterval time.Duration) (*Controller, error) {
 	upstreamClient, err := client.New(downstream, client.Options{
 		Scheme: runtime.NewScheme(), // empty scheme since we shouldn't rely on compile-time types
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	disc, err := discovery.NewCache(downstream, discoveryRPS, rediscoverWhenNotFound)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +56,7 @@ func New(mgr *reconstitution.Manager, rswb *flowcontrol.ResourceSliceWriteBuffer
 		resourceClient:        mgr.GetClient(),
 		readinessPollInterval: readinessPollInterval,
 		upstreamClient:        upstreamClient,
-		discovery:             disc,
+		discovery:             dc,
 	}, nil
 }
 

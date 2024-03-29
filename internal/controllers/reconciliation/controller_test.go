@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Azure/eno/internal/discovery"
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/reconstitution"
 	"github.com/Azure/eno/internal/testutil"
@@ -30,7 +31,10 @@ func setupTestSubject(t *testing.T, mgr *testutil.Manager) *Controller {
 	rm, err := reconstitution.New(mgr.Manager, &c)
 	require.NoError(t, err)
 
-	ctmp, err := New(rm, rswb, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
+	cache, err := discovery.NewCache(mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15))
+	require.NoError(t, err)
+
+	ctmp, err := New(rm, rswb, mgr.DownstreamRestConfig, cache, time.Hour)
 	require.NoError(t, err)
 	c = *ctmp
 

@@ -16,6 +16,7 @@ import (
 	"github.com/Azure/eno/internal/controllers/aggregation"
 	"github.com/Azure/eno/internal/controllers/reconciliation"
 	"github.com/Azure/eno/internal/controllers/synthesis"
+	"github.com/Azure/eno/internal/discovery"
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/k8s"
 	"github.com/Azure/eno/internal/manager"
@@ -111,7 +112,12 @@ func run() error {
 		return fmt.Errorf("constructing reconstitution manager: %w", err)
 	}
 
-	reconcilerTmp, err := reconciliation.New(recMgr, writeBuffer, remoteConfig, discoveryMaxRPS, rediscoverWhenNotFound, readinessPollInterval)
+	cache, err := discovery.NewCache(remoteConfig, discoveryMaxRPS, rediscoverWhenNotFound)
+	if err != nil {
+		return fmt.Errorf("constructing discovery cache: %w", err)
+	}
+
+	reconcilerTmp, err := reconciliation.New(recMgr, writeBuffer, remoteConfig, cache, readinessPollInterval)
 	if err != nil {
 		return fmt.Errorf("constructing reconciliation controller: %w", err)
 	}
