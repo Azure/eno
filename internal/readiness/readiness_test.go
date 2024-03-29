@@ -275,6 +275,16 @@ func TestEvalChecks(t *testing.T) {
 	}
 }
 
+func TestTimeouts(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Microsecond)
+	defer cancel()
+
+	check := mustParse("self.filter(item, item == 0)")
+	set := make([]int64, 10000000)
+	_, _, err := check.program.ContextEval(ctx, map[string]any{"self": set})
+	require.EqualError(t, err, "operation interrupted")
+}
+
 func mustParse(expr string) *Check {
 	e, err := NewEnv()
 	if err != nil {
