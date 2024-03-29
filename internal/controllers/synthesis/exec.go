@@ -21,6 +21,10 @@ import (
 // maxSliceJsonBytes is the max sum of a resource slice's manifests.
 const maxSliceJsonBytes = 1024 * 512
 
+const execStartAnnotation = "eno.azure.io/exec-start-time"
+
+const debouncePeriod = time.Millisecond * 250
+
 type execController struct {
 	client           client.Client
 	noCacheClient    client.Reader
@@ -100,6 +104,18 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 	}
 
+	// Reset the debounce annotation after synthesis, since the process likely took
+	// longer than the initial debounce period
+	pod.Annotations[execStartAnnotation] = time.Now().Format(time.RFC3339)
+	err = c.client.Update(ctx, pod)
+	if err != nil {
+		// Default to waiting the full debounce period on errors, since it's
+		// likely that the error represents a conflict that would otherwise
+		// result in immediately re-entering the loop and skipping the debounce
+		logger.Error(err, "error while setting pod annotation after synthesis")
+		return ctrl.Result{RequeueAfter: debouncePeriod}, nil
+	}
+
 	return ctrl.Result{}, nil
 }
 
@@ -113,24 +129,21 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 // pod has changed since our cached version. So if the lifecycle controller has already deleted it we will
 // re-enter the loop and skip synthesis.
 func (c *execController) shouldDebounce(ctx context.Context, pod *corev1.Pod) (time.Duration, bool, error) {
-	const key = "eno.azure.io/exec-start-time"
-	const min = time.Millisecond * 250
-
 	if pod.Annotations == nil {
 		pod.Annotations = map[string]string{}
 	}
 
 	// Defer the operation if within the debounce period
-	last, err := time.Parse(time.RFC3339, pod.Annotations[key])
+	last, err := time.Parse(time.RFC3339, pod.Annotations[execStartAnnotation])
 	if err == nil {
 		delta := time.Since(last)
-		if delta < min {
-			return min - delta, false, nil
+		if delta < debouncePeriod {
+			return debouncePeriod - delta, false, nil
 		}
 	}
 
 	// Set the annotation and continue
-	pod.Annotations[key] = time.Now().Format(time.RFC3339)
+	pod.Annotations[execStartAnnotation] = time.Now().Format(time.RFC3339)
 	err = c.client.Update(ctx, pod)
 	if err != nil {
 		return 0, false, fmt.Errorf("writing annotation: %w", err)
