@@ -81,6 +81,15 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, nil // old pod - don't bother synthesizing. The lifecycle controller will delete it
 	}
 
+	wait, ok, err := c.shouldDebounce(ctx, pod)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if !ok {
+		logger.V(1).Info(fmt.Sprintf("tried to re-exec too soon - will wait %dms before retrying", wait.Milliseconds()))
+		return ctrl.Result{RequeueAfter: wait}, nil
+	}
+
 	refs, err := c.synthesize(ctx, syn, comp, pod)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("executing synthesizer: %w", err)
@@ -91,11 +100,43 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 	}
 
-	// Let the informers catch up
-	// Obviously this isn't ideal, consider a lamport clock in memory
-	time.Sleep(time.Millisecond * 100)
-
 	return ctrl.Result{}, nil
+}
+
+// shouldDebounce defers exec attempts that occur within a hardcoded debounce period.
+// The idea is to protect against accidentally invoking a synthesizer process a second time in cases where
+// the pod changed during the initial synthesis. The composition status write is unlikely to hit the informer
+// cache before the next pod reconcile, so this controller will always run a second synthesis.
+// The actual debounce time isn't important - it just needs to be greater than informer latency most of the time.
+//
+// A nice side effect of this approach: the update coordinates with apiserver i.e. it will fail if the
+// pod has changed since our cached version. So if the lifecycle controller has already deleted it we will
+// re-enter the loop and skip synthesis.
+func (c *execController) shouldDebounce(ctx context.Context, pod *corev1.Pod) (time.Duration, bool, error) {
+	const key = "eno.azure.io/exec-start-time"
+	const min = time.Millisecond * 250
+
+	if pod.Annotations == nil {
+		pod.Annotations = map[string]string{}
+	}
+
+	// Defer the operation if within the debounce period
+	last, err := time.Parse(time.RFC3339, pod.Annotations[key])
+	if err == nil {
+		delta := time.Since(last)
+		if delta < min {
+			return min - delta, false, nil
+		}
+	}
+
+	// Set the annotation and continue
+	pod.Annotations[key] = time.Now().Format(time.RFC3339)
+	err = c.client.Update(ctx, pod)
+	if err != nil {
+		return 0, false, fmt.Errorf("writing annotation: %w", err)
+	}
+
+	return 0, true, nil
 }
 
 func (c *execController) synthesize(ctx context.Context, syn *apiv1.Synthesizer, comp *apiv1.Composition, pod *corev1.Pod) ([]*apiv1.ResourceSliceRef, error) {
