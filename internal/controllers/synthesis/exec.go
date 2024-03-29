@@ -106,7 +106,7 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	// Reset the debounce annotation after synthesis, since the process likely took
 	// longer than the initial debounce period
-	pod.Annotations[execStartAnnotation] = time.Now().Format(time.RFC3339)
+	pod.Annotations[execStartAnnotation] = time.Now().UTC().Format(time.RFC3339)
 	err = c.client.Update(ctx, pod)
 	if err != nil {
 		// Default to waiting the full debounce period on errors, since it's
@@ -143,7 +143,7 @@ func (c *execController) shouldDebounce(ctx context.Context, pod *corev1.Pod) (t
 	}
 
 	// Set the annotation and continue
-	pod.Annotations[execStartAnnotation] = time.Now().Format(time.RFC3339)
+	pod.Annotations[execStartAnnotation] = time.Now().UTC().Format(time.RFC3339)
 	err = c.client.Update(ctx, pod)
 	if err != nil {
 		return 0, false, fmt.Errorf("writing annotation: %w", err)
