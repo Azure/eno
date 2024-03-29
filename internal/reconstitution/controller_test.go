@@ -14,12 +14,12 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 )
 
-func TestReconstituterIntegration(t *testing.T) {
+func TestControllerIntegration(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	client := mgr.GetClient()
 
-	r, err := newReconstituter(mgr.Manager)
+	r, err := newController(mgr.Manager)
 	require.NoError(t, err)
 	mgr.Start(t)
 

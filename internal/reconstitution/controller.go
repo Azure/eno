@@ -14,17 +14,17 @@ import (
 	"github.com/Azure/eno/internal/manager"
 )
 
-// reconstituter reconstitutes individual resources from resource slices.
+// controller reconstitutes individual resources from resource slices.
 // Similar to an informer but with extra logic to handle expanding the slice resources.
-type reconstituter struct {
+type controller struct {
 	*cache          // embedded because caching is logically part of the reconstituter's functionality
 	client          client.Client
 	nonCachedReader client.Reader
 	queue           workqueue.RateLimitingInterface
 }
 
-func newReconstituter(mgr ctrl.Manager) (*reconstituter, error) {
-	r := &reconstituter{
+func newController(mgr ctrl.Manager) (*controller, error) {
+	r := &controller{
 		cache:           newCache(mgr.GetClient()),
 		client:          mgr.GetClient(),
 		nonCachedReader: mgr.GetAPIReader(),
@@ -42,7 +42,7 @@ func newReconstituter(mgr ctrl.Manager) (*reconstituter, error) {
 		Complete(r)
 }
 
-func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	comp := &apiv1.Composition{}
 	err := r.client.Get(ctx, req.NamespacedName, comp)
 	if k8serrors.IsNotFound(err) {
@@ -75,7 +75,7 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	return ctrl.Result{}, nil
 }
 
-func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis) ([]*Request, error) {
+func (r *controller) populateCache(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis) ([]*Request, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	if synthesis == nil || synthesis.Synthesized == nil {

@@ -65,15 +65,15 @@ func New(mgr ctrl.Manager, rec Reconciler) (*Manager, error) {
 	}
 
 	var err error
-	m.reconstituter, err = newReconstituter(mgr)
+	m.controller, err = newController(mgr)
 	if err != nil {
 		return nil, err
 	}
 
 	qp := &queueProcessor{
 		Client:  m.Manager.GetClient(),
-		Queue:   m.reconstituter.queue,
-		Recon:   m.reconstituter,
+		Queue:   m.controller.queue,
+		Recon:   m.controller,
 		Handler: rec,
 		Logger:  m.Manager.GetLogger().WithValues("controller", "reconciliationController"),
 	}
@@ -84,7 +84,7 @@ func New(mgr ctrl.Manager, rec Reconciler) (*Manager, error) {
 
 type Manager struct {
 	ctrl.Manager
-	*reconstituter
+	*controller
 }
 
 func (m *Manager) GetClient() Client { return m }

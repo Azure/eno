@@ -11,7 +11,7 @@ import (
 type queueProcessor struct {
 	Client  client.Client
 	Queue   workqueue.RateLimitingInterface
-	Recon   *reconstituter
+	Recon   *controller
 	Handler Reconciler
 	Logger  logr.Logger
 }
