@@ -3,11 +3,59 @@ package reconstitution
 import (
 	"context"
 
-	"github.com/go-logr/logr"
-	"k8s.io/client-go/util/workqueue"
+	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/resource"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+type Resource = resource.Resource
+
+// Reconciler is implemented by types that can reconcile individual, reconstituted resources.
+type Reconciler interface {
+	Reconcile(ctx context.Context, req *Request) (ctrl.Result, error)
+}
+
+// Client provides read/write access to a collection of reconstituted resources.
+type Client interface {
+	Get(ctx context.Context, comp *CompositionRef, res *resource.Ref) (*resource.Resource, bool)
+}
+
+// ManifestRef references a particular resource manifest within a resource slice.
+type ManifestRef struct {
+	Slice types.NamespacedName
+	Index int // position of this manifest within the slice
+}
+
+func (m *ManifestRef) FindStatus(slice *apiv1.ResourceSlice) *apiv1.ResourceState {
+	if len(slice.Status.Resources) <= m.Index {
+		return nil
+	}
+	state := slice.Status.Resources[m.Index]
+	return &state
+}
+
+// CompositionRef refers to a specific generation of a composition.
+type CompositionRef struct {
+	Name, Namespace string
+	Generation      int64
+}
+
+func NewCompositionRef(comp *apiv1.Composition) *CompositionRef {
+	c := &CompositionRef{Name: comp.Name, Namespace: comp.Namespace}
+	if comp.Status.CurrentSynthesis != nil {
+		c.Generation = comp.Status.CurrentSynthesis.ObservedCompositionGeneration
+	}
+	return c
+}
+
+// Request is like controller-runtime reconcile.Request but for reconstituted resources.
+// https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/reconcile#Request
+type Request struct {
+	Resource    resource.Ref
+	Manifest    ManifestRef
+	Composition types.NamespacedName
+}
 
 // New creates a new Manager, which is responsible for "reconstituting" resources
 // i.e. allowing controllers to treat them as individual resources instead of their storage representation (ResourceSlice).
@@ -40,58 +88,3 @@ type Manager struct {
 }
 
 func (m *Manager) GetClient() Client { return m }
-
-type queueProcessor struct {
-	Client  client.Client
-	Queue   workqueue.RateLimitingInterface
-	Recon   *reconstituter
-	Handler Reconciler
-	Logger  logr.Logger
-}
-
-func (q *queueProcessor) Start(ctx context.Context) error {
-	go func() {
-		<-ctx.Done()
-		q.Queue.ShutDown()
-	}()
-	for q.processQueueItem(ctx) {
-	}
-	return nil
-}
-
-func (q *queueProcessor) processQueueItem(ctx context.Context) bool {
-	item, shutdown := q.Queue.Get()
-	if shutdown {
-		return false
-	}
-	defer q.Queue.Done(item)
-
-	req, ok := item.(*Request)
-	if !ok {
-		q.Logger.Error(nil, "failed type assertion in queue processor")
-		return false
-	}
-
-	logger := q.Logger.WithValues("compositionName", req.Composition.Name, "compositionNamespace", req.Composition.Namespace, "resourceKind", req.Resource.Kind, "resourceName", req.Resource.Name, "resourceNamespace", req.Resource.Namespace)
-	ctx = logr.NewContext(ctx, logger)
-
-	result, err := q.Handler.Reconcile(ctx, req)
-	if err != nil {
-		q.Queue.AddRateLimited(item)
-		logger.Error(err, "error while processing queue item")
-		return true
-	}
-	if result.Requeue {
-		q.Queue.Forget(item) // TODO: Maybe omit after first retry to avoid getting stuck in a patch tightloop?
-		q.Queue.Add(item)
-		return true
-	}
-	if result.RequeueAfter != 0 {
-		q.Queue.Forget(item)
-		q.Queue.AddAfter(item, result.RequeueAfter)
-		return true
-	}
-
-	q.Queue.Forget(item)
-	return true
-}
