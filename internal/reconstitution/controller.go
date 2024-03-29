@@ -3,7 +3,6 @@ package reconstitution
 import (
 	"context"
 	"fmt"
-	"sync/atomic"
 
 	"github.com/go-logr/logr"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -15,22 +14,25 @@ import (
 	"github.com/Azure/eno/internal/manager"
 )
 
-// reconstituter reconstitutes individual resources from resource slices.
+// controller reconstitutes individual resources from resource slices.
 // Similar to an informer but with extra logic to handle expanding the slice resources.
-type reconstituter struct {
-	*cache          // embedded because caching is logically part of the reconstituter's functionality
+type controller struct {
+	*Cache          // embedded because caching is logically part of the reconstituter's functionality
 	client          client.Client
 	nonCachedReader client.Reader
-	queues          []workqueue.Interface
-	started         atomic.Bool
+	queue           workqueue.RateLimitingInterface
 }
 
-func newReconstituter(mgr ctrl.Manager) (*reconstituter, error) {
-	r := &reconstituter{
-		cache:           newCache(mgr.GetClient()),
+func newController(mgr ctrl.Manager, cache *Cache) (*controller, error) {
+	r := &controller{
+		Cache:           cache,
 		client:          mgr.GetClient(),
 		nonCachedReader: mgr.GetAPIReader(),
 	}
+	rateLimiter := workqueue.DefaultItemBasedRateLimiter()
+	r.queue = workqueue.NewRateLimitingQueueWithConfig(rateLimiter, workqueue.RateLimitingQueueConfig{
+		Name: "reconciliationController",
+	})
 
 	return r, ctrl.NewControllerManagedBy(mgr).
 		Named("reconstituter").
@@ -40,20 +42,11 @@ func newReconstituter(mgr ctrl.Manager) (*reconstituter, error) {
 		Complete(r)
 }
 
-func (r *reconstituter) AddQueue(queue workqueue.Interface) {
-	if r.started.Load() {
-		panic("AddQueue must be called before any resources are reconciled")
-	}
-	r.queues = append(r.queues, queue)
-}
-
-func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	r.started.Store(true)
-
+func (r *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	comp := &apiv1.Composition{}
 	err := r.client.Get(ctx, req.NamespacedName, comp)
 	if k8serrors.IsNotFound(err) {
-		r.cache.Purge(ctx, req.NamespacedName, nil)
+		r.Cache.purge(req.NamespacedName, nil)
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
@@ -72,11 +65,9 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, fmt.Errorf("processing current state: %w", err)
 	}
 	for _, req := range append(prevReqs, currentReqs...) {
-		for _, queue := range r.queues {
-			queue.Add(req)
-		}
+		r.queue.Add(req)
 	}
-	r.cache.Purge(ctx, req.NamespacedName, comp)
+	r.Cache.purge(req.NamespacedName, comp)
 
 	if len(currentReqs)+len(prevReqs) > 0 {
 		return ctrl.Result{Requeue: true}, nil
@@ -84,7 +75,7 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	return ctrl.Result{}, nil
 }
 
-func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis) ([]*Request, error) {
+func (r *controller) populateCache(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis) ([]*Request, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	if synthesis == nil || synthesis.Synthesized == nil {
@@ -94,7 +85,7 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 
 	logger = logger.WithValues("synthesisCompositionGeneration", synthesis.ObservedCompositionGeneration)
 	ctx = logr.NewContext(ctx, logger)
-	if r.cache.HasSynthesis(ctx, comp, synthesis) {
+	if r.Cache.hasSynthesis(comp, synthesis) {
 		return nil, nil
 	}
 
@@ -112,5 +103,5 @@ func (r *reconstituter) populateCache(ctx context.Context, comp *apiv1.Compositi
 		slices[i] = slice
 	}
 
-	return r.cache.Fill(ctx, comp, synthesis, slices)
+	return r.Cache.fill(ctx, comp, synthesis, slices)
 }

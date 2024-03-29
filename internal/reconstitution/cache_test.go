@@ -21,22 +21,22 @@ func TestCacheBasics(t *testing.T) {
 	ctx := testutil.NewContext(t)
 
 	client := testutil.NewClient(t)
-	c := newCache(client)
+	c := NewCache(client)
 
 	comp, synth, resources, expectedReqs := newCacheTestFixtures(2, 3)
 	compRef := NewCompositionRef(comp)
 	t.Run("fill", func(t *testing.T) {
-		reqs, err := c.Fill(ctx, comp, synth, resources)
+		reqs, err := c.fill(ctx, comp, synth, resources)
 		require.NoError(t, err)
 		assert.Equal(t, expectedReqs, reqs)
 	})
 
 	t.Run("check", func(t *testing.T) {
 		// positive
-		assert.True(t, c.HasSynthesis(ctx, comp, synth))
+		assert.True(t, c.hasSynthesis(comp, synth))
 
 		// negative
-		assert.False(t, c.HasSynthesis(ctx, comp, &apiv1.Synthesis{ObservedCompositionGeneration: 123}))
+		assert.False(t, c.hasSynthesis(comp, &apiv1.Synthesis{ObservedCompositionGeneration: 123}))
 	})
 
 	t.Run("get", func(t *testing.T) {
@@ -59,7 +59,7 @@ func TestCacheBasics(t *testing.T) {
 	})
 
 	t.Run("purge", func(t *testing.T) {
-		c.Purge(ctx, types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}, nil)
+		c.purge(types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}, nil)
 
 		// confirm
 		_, exists := c.Get(ctx, compRef, &expectedReqs[0].Resource)
@@ -73,7 +73,7 @@ func TestCacheCleanup(t *testing.T) {
 	ctx := testutil.NewContext(t)
 
 	client := testutil.NewClient(t)
-	c := newCache(client)
+	c := NewCache(client)
 
 	now := metav1.Now()
 	comp, synth, resources, expectedReqs := newCacheTestFixtures(2, 3)
@@ -82,7 +82,7 @@ func TestCacheCleanup(t *testing.T) {
 		resources[i].DeletionTimestamp = &now
 	}
 	t.Run("fill", func(t *testing.T) {
-		reqs, err := c.Fill(ctx, comp, synth, resources)
+		reqs, err := c.fill(ctx, comp, synth, resources)
 		require.NoError(t, err)
 		assert.Equal(t, expectedReqs, reqs)
 	})
@@ -98,12 +98,12 @@ func TestCacheCleanup(t *testing.T) {
 	})
 
 	t.Run("partial purge", func(t *testing.T) {
-		c.Purge(ctx, types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}, comp)
+		c.purge(types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}, comp)
 		assert.Len(t, c.resources, 1)
 	})
 
 	t.Run("purge", func(t *testing.T) {
-		c.Purge(ctx, types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}, nil)
+		c.purge(types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}, nil)
 		assert.Len(t, c.resources, 0)
 	})
 }
@@ -112,12 +112,12 @@ func TestCacheInvalidManifest(t *testing.T) {
 	ctx := testutil.NewContext(t)
 
 	client := testutil.NewClient(t)
-	c := newCache(client)
+	c := NewCache(client)
 
 	comp, synth, resources, _ := newCacheTestFixtures(1, 1)
 	resources[0].Spec.Resources[0].Manifest = "not valid json"
 
-	_, err := c.Fill(ctx, comp, synth, resources)
+	_, err := c.fill(ctx, comp, synth, resources)
 	require.ErrorContains(t, err, "invalid json:")
 }
 
@@ -125,12 +125,12 @@ func TestCacheManifestMissingName(t *testing.T) {
 	ctx := testutil.NewContext(t)
 
 	client := testutil.NewClient(t)
-	c := newCache(client)
+	c := NewCache(client)
 
 	comp, synth, resources, _ := newCacheTestFixtures(1, 1)
 	resources[0].Spec.Resources[0].Manifest = `{"kind":"ConfigMap"}`
 
-	_, err := c.Fill(ctx, comp, synth, resources)
+	_, err := c.fill(ctx, comp, synth, resources)
 	require.ErrorContains(t, err, "missing name, kind, or apiVersion")
 }
 
@@ -138,11 +138,11 @@ func TestCachePartialPurge(t *testing.T) {
 	ctx := testutil.NewContext(t)
 
 	client := testutil.NewClient(t)
-	c := newCache(client)
+	c := NewCache(client)
 
 	// Fill our main composition
 	comp, synth, resources, _ := newCacheTestFixtures(3, 4)
-	_, err := c.Fill(ctx, comp, synth, resources)
+	_, err := c.fill(ctx, comp, synth, resources)
 	require.NoError(t, err)
 	originalGen := synth.ObservedCompositionGeneration
 	compNSN := types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
@@ -151,7 +151,7 @@ func TestCachePartialPurge(t *testing.T) {
 	_, _, resources, expectedReqs := newCacheTestFixtures(1, 1)
 	synth.ObservedCompositionGeneration++
 	expectedReqs[0].Composition = types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
-	_, err = c.Fill(ctx, comp, synth, resources)
+	_, err = c.fill(ctx, comp, synth, resources)
 	require.NoError(t, err)
 	compRef := NewCompositionRef(comp)
 
@@ -159,7 +159,7 @@ func TestCachePartialPurge(t *testing.T) {
 	var toBePreserved *Request
 	{
 		comp, synth, resources, expectedReqs := newCacheTestFixtures(3, 4)
-		_, err := c.Fill(ctx, comp, synth, resources)
+		_, err := c.fill(ctx, comp, synth, resources)
 		require.NoError(t, err)
 		toBePreserved = expectedReqs[0]
 	}
@@ -167,7 +167,7 @@ func TestCachePartialPurge(t *testing.T) {
 	comp.Status.CurrentSynthesis = synth // only reference the most recent synthesis
 
 	// Purge only a single synthesis of a generation
-	c.Purge(ctx, compNSN, comp)
+	c.purge(compNSN, comp)
 
 	// The newer resource should still exist
 	_, exists := c.Get(ctx, compRef, &expectedReqs[0].Resource)

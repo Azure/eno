@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,11 +20,11 @@ func TestManagerBasics(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	client := mgr.GetClient()
 
-	rm, err := New(mgr.Manager, time.Millisecond)
+	cache := NewCache(client)
+	tr := &testReconciler{cache: cache}
+	err := New(mgr.Manager, cache, tr)
 	require.NoError(t, err)
 
-	tr := &testReconciler{mgr: rm}
-	rm.Add(tr)
 	mgr.Start(t)
 
 	// Create one composition that has one synthesis of a single resource
@@ -59,15 +58,13 @@ func TestManagerBasics(t *testing.T) {
 }
 
 type testReconciler struct {
-	mgr          *Manager
+	cache        *Cache
 	comp         *CompositionRef
 	lastResource atomic.Pointer[Resource]
 }
 
-func (t *testReconciler) Name() string { return "testReconciler" }
-
 func (t *testReconciler) Reconcile(ctx context.Context, req *Request) (ctrl.Result, error) {
-	resource, exists := t.mgr.GetClient().Get(ctx, t.comp, &req.Resource)
+	resource, exists := t.cache.Get(ctx, t.comp, &req.Resource)
 	if !exists {
 		panic("resource should exist in cache")
 	}

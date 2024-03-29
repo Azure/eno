@@ -23,6 +23,7 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/discovery"
+	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/reconstitution"
 	"github.com/go-logr/logr"
 )
@@ -33,6 +34,7 @@ var insecureLogPatch = os.Getenv("INSECURE_LOG_PATCH") == "true"
 
 type Controller struct {
 	client                client.Client
+	writeBuffer           *flowcontrol.ResourceSliceWriteBuffer
 	resourceClient        reconstitution.Client
 	readinessPollInterval time.Duration
 
@@ -40,29 +42,28 @@ type Controller struct {
 	discovery      *discovery.Cache
 }
 
-func New(mgr *reconstitution.Manager, downstream *rest.Config, discoveryRPS float32, rediscoverWhenNotFound bool, readinessPollInterval time.Duration) error {
+func New(mgr ctrl.Manager, rc *reconstitution.Cache, rswb *flowcontrol.ResourceSliceWriteBuffer, downstream *rest.Config, discoveryRPS float32, rediscoverWhenNotFound bool, readinessPollInterval time.Duration) (*Controller, error) {
 	upstreamClient, err := client.New(downstream, client.Options{
 		Scheme: runtime.NewScheme(), // empty scheme since we shouldn't rely on compile-time types
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	disc, err := discovery.NewCache(downstream, discoveryRPS, rediscoverWhenNotFound)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return mgr.Add(&Controller{
-		client:                mgr.Manager.GetClient(),
-		resourceClient:        mgr.GetClient(),
+	return &Controller{
+		client:                mgr.GetClient(),
+		writeBuffer:           rswb,
+		resourceClient:        rc,
 		readinessPollInterval: readinessPollInterval,
 		upstreamClient:        upstreamClient,
 		discovery:             disc,
-	})
+	}, nil
 }
-
-func (c *Controller) Name() string { return "reconciliationController" }
 
 func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request) (ctrl.Result, error) {
 	comp := &apiv1.Composition{}
@@ -144,7 +145,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	// Store the results
 	deleted := current == nil || current.GetDeletionTimestamp() != nil
-	c.resourceClient.PatchStatusAsync(ctx, &req.Manifest, patchResourceState(deleted, ready))
+	c.writeBuffer.PatchStatusAsync(ctx, &req.Manifest, patchResourceState(deleted, ready))
 	if ready == nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}
@@ -309,7 +310,7 @@ func mungePatch(patch []byte, rv string) ([]byte, error) {
 	return json.Marshal(patchMap)
 }
 
-func patchResourceState(deleted bool, ready *metav1.Time) reconstitution.StatusPatchFn {
+func patchResourceState(deleted bool, ready *metav1.Time) flowcontrol.StatusPatchFn {
 	return func(rs *apiv1.ResourceState) *apiv1.ResourceState {
 		if rs != nil && rs.Deleted == deleted && rs.Reconciled && ptr.Deref(rs.Ready, metav1.Time{}) == ptr.Deref(ready, metav1.Time{}) {
 			return nil

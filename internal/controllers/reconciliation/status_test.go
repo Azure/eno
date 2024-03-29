@@ -8,7 +8,6 @@ import (
 	"github.com/Azure/eno/internal/controllers/aggregation"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
 	"github.com/Azure/eno/internal/controllers/synthesis"
-	"github.com/Azure/eno/internal/reconstitution"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -33,8 +32,6 @@ func TestResourceReadiness(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
-	require.NoError(t, err)
 	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
@@ -58,8 +55,7 @@ func TestResourceReadiness(t *testing.T) {
 	}}))
 
 	// Test subject
-	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Millisecond)
-	require.NoError(t, err)
+	setupTestSubject(t, mgr)
 	mgr.Start(t)
 
 	// Any syn/comp will do since we faked out the synthesizer pod
@@ -77,6 +73,7 @@ func TestResourceReadiness(t *testing.T) {
 
 	// Wait for resource to be created
 	obj := &corev1.ConfigMap{}
+	var err error
 	testutil.Eventually(t, func() bool {
 		obj.SetName("test-obj")
 		obj.SetNamespace("default")
@@ -138,11 +135,7 @@ func TestReconcileStatus(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
 
-	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
-	require.NoError(t, err)
-
-	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
-	require.NoError(t, err)
+	setupTestSubject(t, mgr)
 	mgr.Start(t)
 
 	comp := &apiv1.Composition{}
@@ -162,7 +155,7 @@ func TestReconcileStatus(t *testing.T) {
 	require.NoError(t, upstream.Create(ctx, slice))
 
 	now := metav1.Now()
-	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
 		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		comp.Status.CurrentSynthesis = &apiv1.Synthesis{
 			UUID:           uuid.NewString(),
@@ -182,5 +175,4 @@ func TestReconcileStatus(t *testing.T) {
 	})
 }
 
-func isReady(state apiv1.ResourceState) bool    { return state.Ready != nil }
 func isNotReady(state apiv1.ResourceState) bool { return state.Ready == nil }

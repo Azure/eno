@@ -16,6 +16,7 @@ import (
 	"github.com/Azure/eno/internal/controllers/aggregation"
 	"github.com/Azure/eno/internal/controllers/reconciliation"
 	"github.com/Azure/eno/internal/controllers/synthesis"
+	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/k8s"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/Azure/eno/internal/reconstitution"
@@ -82,11 +83,6 @@ func run() error {
 		return fmt.Errorf("constructing manager: %w", err)
 	}
 
-	recmgr, err := reconstitution.New(mgr, writeBatchInterval)
-	if err != nil {
-		return fmt.Errorf("constructing reconstitution manager: %w", err)
-	}
-
 	err = aggregation.NewStatusController(mgr)
 	if err != nil {
 		return fmt.Errorf("constructing status aggregation controller: %w", err)
@@ -106,9 +102,19 @@ func run() error {
 			remoteConfig.QPS = float32(remoteQPS)
 		}
 	}
-	err = reconciliation.New(recmgr, remoteConfig, discoveryMaxRPS, rediscoverWhenNotFound, readinessPollInterval)
+
+	// Burst of 1 allows the first write to happen immediately, while subsequent writes are debounced/batched at writeBatchInterval.
+	// This provides quick feedback in cases where only a few resources have changed.
+	writeBuffer := flowcontrol.NewResourceSliceWriteBufferForManager(mgr, writeBatchInterval, 1)
+
+	rCache := reconstitution.NewCache(mgr.GetClient())
+	reconciler, err := reconciliation.New(mgr, rCache, writeBuffer, remoteConfig, discoveryMaxRPS, rediscoverWhenNotFound, readinessPollInterval)
 	if err != nil {
 		return fmt.Errorf("constructing reconciliation controller: %w", err)
+	}
+	err = reconstitution.New(mgr, rCache, reconciler)
+	if err != nil {
+		return fmt.Errorf("constructing reconstitution manager: %w", err)
 	}
 
 	return mgr.Start(ctx)

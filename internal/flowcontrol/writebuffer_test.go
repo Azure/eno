@@ -1,4 +1,4 @@
-package reconstitution
+package flowcontrol
 
 import (
 	"context"
@@ -14,13 +14,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/reconstitution"
 	"github.com/Azure/eno/internal/testutil"
 )
 
-func TestWriteBufferBasics(t *testing.T) {
+func TestResourceSliceStatusUpdateBasics(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
-	w := newWriteBuffer(cli, 0, 1)
+	w := NewResourceSliceWriteBuffer(cli, 0, 1)
 
 	// One resource slice w/ len of 3
 	slice := &apiv1.ResourceSlice{}
@@ -29,7 +30,7 @@ func TestWriteBufferBasics(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, slice))
 
 	// One of the resources has been reconciled
-	req := &ManifestRef{}
+	req := &reconstitution.ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
 	w.PatchStatusAsync(ctx, req, setReconciled())
@@ -48,7 +49,7 @@ func TestWriteBufferBasics(t *testing.T) {
 	assert.Equal(t, 0, w.queue.Len())
 }
 
-func TestWriteBufferBatching(t *testing.T) {
+func TestResourceSliceStatusUpdateBatching(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	var updateCalls atomic.Int32
 	cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
@@ -57,7 +58,7 @@ func TestWriteBufferBatching(t *testing.T) {
 			return client.SubResource(subResourceName).Update(ctx, obj, opts...)
 		},
 	})
-	w := newWriteBuffer(cli, time.Millisecond*2, 1)
+	w := NewResourceSliceWriteBuffer(cli, time.Millisecond*2, 1)
 
 	// One resource slice w/ len of 3
 	slice := &apiv1.ResourceSlice{}
@@ -66,12 +67,12 @@ func TestWriteBufferBatching(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, slice))
 
 	// Two of the resources have been reconciled within the batch interval
-	req := &ManifestRef{}
+	req := &reconstitution.ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
 	w.PatchStatusAsync(ctx, req, setReconciled())
 
-	req = &ManifestRef{}
+	req = &reconstitution.ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 2
 	w.PatchStatusAsync(ctx, req, setReconciled())
@@ -86,10 +87,10 @@ func TestWriteBufferBatching(t *testing.T) {
 	assert.True(t, slice.Status.Resources[2].Reconciled)
 }
 
-func TestWriteBufferNoUpdates(t *testing.T) {
+func TestResourceSliceStatusUpdateNoUpdates(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
-	w := newWriteBuffer(cli, 0, 1)
+	w := NewResourceSliceWriteBuffer(cli, 0, 1)
 
 	// One resource slice w/ len of 3
 	slice := &apiv1.ResourceSlice{}
@@ -98,13 +99,13 @@ func TestWriteBufferNoUpdates(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, slice))
 
 	// One of the resources has been reconciled
-	req := &ManifestRef{}
+	req := &reconstitution.ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
 	w.PatchStatusAsync(ctx, req, setReconciled())
 
 	// Remove the update leaving the queue message in place
-	w.state = map[types.NamespacedName][]*asyncStatusUpdate{}
+	w.state = map[types.NamespacedName][]*ResourceSliceStatusUpdate{}
 
 	// Slice's status should not have been initialized
 	w.processQueueItem(ctx)
@@ -112,12 +113,12 @@ func TestWriteBufferNoUpdates(t *testing.T) {
 	require.Len(t, slice.Status.Resources, 0)
 }
 
-func TestWriteBufferMissingSlice(t *testing.T) {
+func TestResourceSliceStatusUpdateMissingSlice(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
-	w := newWriteBuffer(cli, 0, 1)
+	w := NewResourceSliceWriteBuffer(cli, 0, 1)
 
-	req := &ManifestRef{}
+	req := &reconstitution.ManifestRef{}
 	req.Slice.Name = "test-slice-1" // this doesn't exist
 	w.PatchStatusAsync(ctx, req, setReconciled())
 
@@ -128,7 +129,7 @@ func TestWriteBufferMissingSlice(t *testing.T) {
 	assert.Equal(t, 0, w.queue.Len())
 }
 
-func TestWriteBufferNoChange(t *testing.T) {
+func TestResourceSliceStatusUpdateNoChange(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
 		SubResourceUpdate: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
@@ -136,7 +137,7 @@ func TestWriteBufferNoChange(t *testing.T) {
 			return nil
 		},
 	})
-	w := newWriteBuffer(cli, 0, 1)
+	w := NewResourceSliceWriteBuffer(cli, 0, 1)
 
 	// One resource slice
 	slice := &apiv1.ResourceSlice{}
@@ -147,7 +148,7 @@ func TestWriteBufferNoChange(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, slice))
 
 	// One of the resources has been reconciled
-	req := &ManifestRef{}
+	req := &reconstitution.ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
 	w.PatchStatusAsync(ctx, req, setReconciled())
@@ -155,14 +156,14 @@ func TestWriteBufferNoChange(t *testing.T) {
 	w.processQueueItem(ctx)
 }
 
-func TestWriteBufferUpdateError(t *testing.T) {
+func TestResourceSliceStatusUpdateUpdateError(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
 		SubResourceUpdate: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
 			return errors.New("could be any error")
 		},
 	})
-	w := newWriteBuffer(cli, 0, 1)
+	w := NewResourceSliceWriteBuffer(cli, 0, 1)
 
 	// One resource slice w/ len of 3
 	slice := &apiv1.ResourceSlice{}
@@ -171,7 +172,7 @@ func TestWriteBufferUpdateError(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, slice))
 
 	// One of the resources has been reconciled
-	req := &ManifestRef{}
+	req := &reconstitution.ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
 	w.PatchStatusAsync(ctx, req, setReconciled())

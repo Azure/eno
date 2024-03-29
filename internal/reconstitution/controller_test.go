@@ -6,7 +6,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -15,15 +14,14 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 )
 
-func TestReconstituterIntegration(t *testing.T) {
+func TestControllerIntegration(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	client := mgr.GetClient()
 
-	r, err := newReconstituter(mgr.Manager)
+	cache := NewCache(client)
+	r, err := newController(mgr.Manager, cache)
 	require.NoError(t, err)
-	queue := workqueue.New()
-	r.AddQueue(queue)
 	mgr.Start(t)
 
 	// Create one composition that has one synthesis of a single resource
@@ -68,5 +66,5 @@ func TestReconstituterIntegration(t *testing.T) {
 	})
 
 	// The queue should have been populated
-	assert.Equal(t, 1, queue.Len())
+	assert.Equal(t, 1, r.queue.Len())
 }

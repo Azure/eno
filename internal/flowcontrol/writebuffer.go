@@ -1,4 +1,4 @@
-package reconstitution
+package flowcontrol
 
 import (
 	"context"
@@ -11,33 +11,43 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/reconstitution"
 	"github.com/go-logr/logr"
 )
 
-type asyncStatusUpdate struct {
-	SlicedResource *ManifestRef
+type StatusPatchFn func(*apiv1.ResourceState) *apiv1.ResourceState
+
+type ResourceSliceStatusUpdate struct {
+	SlicedResource *reconstitution.ManifestRef
 	PatchFn        StatusPatchFn
 }
 
-// writeBuffer reduces load on etcd/apiserver by collecting resource slice status
-// updates over a short period of time and applying them in a single update request.
-type writeBuffer struct {
+// ResourceSliceWriteBuffer reduces load on etcd/apiserver by collecting resource slice status
+// updates over a short period of time and applying them in a single patch request.
+type ResourceSliceWriteBuffer struct {
 	client client.Client
 
 	// queue items are per-slice.
 	// the state map collects multiple updates per slice to be dispatched by next queue item.
 	mut   sync.Mutex
-	state map[types.NamespacedName][]*asyncStatusUpdate
+	state map[types.NamespacedName][]*ResourceSliceStatusUpdate
 	queue workqueue.RateLimitingInterface
 }
 
-func newWriteBuffer(cli client.Client, batchInterval time.Duration, burst int) *writeBuffer {
-	return &writeBuffer{
+func NewResourceSliceWriteBufferForManager(mgr ctrl.Manager, batchInterval time.Duration, burst int) *ResourceSliceWriteBuffer {
+	r := NewResourceSliceWriteBuffer(mgr.GetClient(), batchInterval, burst)
+	mgr.Add(r)
+	return r
+}
+
+func NewResourceSliceWriteBuffer(cli client.Client, batchInterval time.Duration, burst int) *ResourceSliceWriteBuffer {
+	return &ResourceSliceWriteBuffer{
 		client: cli,
-		state:  make(map[types.NamespacedName][]*asyncStatusUpdate),
+		state:  make(map[types.NamespacedName][]*ResourceSliceStatusUpdate),
 		queue: workqueue.NewRateLimitingQueueWithConfig(
 			&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Every(batchInterval), burst)},
 			workqueue.RateLimitingQueueConfig{
@@ -46,7 +56,7 @@ func newWriteBuffer(cli client.Client, batchInterval time.Duration, burst int) *
 	}
 }
 
-func (w *writeBuffer) PatchStatusAsync(ctx context.Context, ref *ManifestRef, patchFn StatusPatchFn) {
+func (w *ResourceSliceWriteBuffer) PatchStatusAsync(ctx context.Context, ref *reconstitution.ManifestRef, patchFn StatusPatchFn) {
 	w.mut.Lock()
 	defer w.mut.Unlock()
 
@@ -59,14 +69,14 @@ func (w *writeBuffer) PatchStatusAsync(ctx context.Context, ref *ManifestRef, pa
 		}
 	}
 
-	w.state[key] = append(currentSlice, &asyncStatusUpdate{
+	w.state[key] = append(currentSlice, &ResourceSliceStatusUpdate{
 		SlicedResource: ref,
 		PatchFn:        patchFn,
 	})
 	w.queue.Add(key)
 }
 
-func (w *writeBuffer) Start(ctx context.Context) error {
+func (w *ResourceSliceWriteBuffer) Start(ctx context.Context) error {
 	go func() {
 		<-ctx.Done()
 		w.queue.ShutDown()
@@ -76,7 +86,7 @@ func (w *writeBuffer) Start(ctx context.Context) error {
 	return nil
 }
 
-func (w *writeBuffer) processQueueItem(ctx context.Context) bool {
+func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 	item, shutdown := w.queue.Get()
 	if shutdown {
 		return false
@@ -112,7 +122,7 @@ func (w *writeBuffer) processQueueItem(ctx context.Context) bool {
 	return true
 }
 
-func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.NamespacedName, updates []*asyncStatusUpdate) bool {
+func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN types.NamespacedName, updates []*ResourceSliceStatusUpdate) bool {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	slice := &apiv1.ResourceSlice{}
@@ -184,7 +194,7 @@ func (w *writeBuffer) updateSlice(ctx context.Context, sliceNSN types.Namespaced
 	}
 
 	logger.V(0).Info(fmt.Sprintf("updated the status of %d resources in slice", len(updates)))
-	discoveryCacheChanges.Inc()
+	sliceStatusUpdates.Inc()
 	return true
 }
 

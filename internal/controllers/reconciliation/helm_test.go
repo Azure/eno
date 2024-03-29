@@ -11,7 +11,6 @@ import (
 	"github.com/Azure/eno/internal/controllers/aggregation"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
 	"github.com/Azure/eno/internal/controllers/synthesis"
-	"github.com/Azure/eno/internal/reconstitution"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,8 +44,6 @@ func TestHelmOwnershipTransfer(t *testing.T) {
 	require.NoError(t, os.WriteFile(kubeconfigPath, kc, 0600))
 
 	// Register supporting controllers
-	rm, err := reconstitution.New(mgr.Manager, time.Millisecond)
-	require.NoError(t, err)
 	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
@@ -68,8 +65,7 @@ func TestHelmOwnershipTransfer(t *testing.T) {
 	}}))
 
 	// Test subject
-	err = New(rm, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Millisecond)
-	require.NoError(t, err)
+	setupTestSubject(t, mgr)
 	mgr.Start(t)
 
 	// Install Helm release to initially create the resource
