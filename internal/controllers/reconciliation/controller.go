@@ -30,6 +30,19 @@ import (
 
 var insecureLogPatch = os.Getenv("INSECURE_LOG_PATCH") == "true"
 
+type Options struct {
+	Manager     ctrl.Manager
+	Cache       *reconstitution.Cache
+	WriteBuffer *flowcontrol.ResourceSliceWriteBuffer
+	Downstream  *rest.Config
+
+	DiscoveryRPS           float32
+	RediscoverWhenNotFound bool
+
+	Timeout               time.Duration
+	ReadinessPollInterval time.Duration
+}
+
 type Controller struct {
 	client                client.Client
 	writeBuffer           *flowcontrol.ResourceSliceWriteBuffer
@@ -40,25 +53,25 @@ type Controller struct {
 	discovery             *discovery.Cache
 }
 
-func New(mgr ctrl.Manager, rc *reconstitution.Cache, rswb *flowcontrol.ResourceSliceWriteBuffer, downstream *rest.Config, discoveryRPS float32, rediscoverWhenNotFound bool, timeout, readinessPollInterval time.Duration) (*Controller, error) {
-	upstreamClient, err := client.New(downstream, client.Options{
+func New(opts Options) (*Controller, error) {
+	upstreamClient, err := client.New(opts.Downstream, client.Options{
 		Scheme: runtime.NewScheme(), // empty scheme since we shouldn't rely on compile-time types
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	disc, err := discovery.NewCache(downstream, discoveryRPS, rediscoverWhenNotFound)
+	disc, err := discovery.NewCache(opts.Downstream, opts.DiscoveryRPS, opts.RediscoverWhenNotFound)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Controller{
-		client:                mgr.GetClient(),
-		writeBuffer:           rswb,
-		resourceClient:        rc,
-		timeout:               timeout,
-		readinessPollInterval: readinessPollInterval,
+		client:                opts.Manager.GetClient(),
+		writeBuffer:           opts.WriteBuffer,
+		resourceClient:        opts.Cache,
+		timeout:               opts.Timeout,
+		readinessPollInterval: opts.ReadinessPollInterval,
 		upstreamClient:        upstreamClient,
 		discovery:             disc,
 	}, nil

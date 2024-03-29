@@ -26,7 +26,16 @@ func TestMungePatchEmpty(t *testing.T) {
 func setupTestSubject(t *testing.T, mgr *testutil.Manager) *Controller {
 	rswb := flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager, time.Millisecond*10, 1)
 	cache := reconstitution.NewCache(mgr.GetClient())
-	rc, err := New(mgr.Manager, cache, rswb, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Minute, time.Hour)
+	rc, err := New(Options{
+		Manager:                mgr.Manager,
+		Cache:                  cache,
+		WriteBuffer:            rswb,
+		Downstream:             mgr.DownstreamRestConfig,
+		DiscoveryRPS:           5,
+		RediscoverWhenNotFound: testutil.AtLeastVersion(t, 15),
+		Timeout:                time.Minute,
+		ReadinessPollInterval:  time.Hour,
+	})
 	require.NoError(t, err)
 
 	err = reconstitution.New(mgr.Manager, cache, rc)
