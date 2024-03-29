@@ -32,26 +32,28 @@ func main() {
 func run() error {
 	ctx := ctrl.SetupSignalHandler()
 	var (
-		rediscoverWhenNotFound bool
-		writeBatchInterval     time.Duration
-		discoveryMaxRPS        float32
-		debugLogging           bool
-		remoteKubeconfigFile   string
-		remoteQPS              float64
-		readinessPollInterval  time.Duration
-		compositionSelector    string
-		compositionNamespace   string
+		writeBatchInterval   time.Duration
+		debugLogging         bool
+		remoteKubeconfigFile string
+		remoteQPS            float64
+		compositionSelector  string
+		compositionNamespace string
 
 		mgrOpts = &manager.Options{
 			Rest: ctrl.GetConfigOrDie(),
 		}
+
+		recOpts = reconciliation.Options{
+			DiscoveryRPS: 2,
+		}
 	)
-	flag.BoolVar(&rediscoverWhenNotFound, "rediscover-when-not-found", true, "Invalidate discovery cache when any type is not found in the openapi spec. Set this to false on <= k8s 1.14")
+	flag.BoolVar(&recOpts.RediscoverWhenNotFound, "rediscover-when-not-found", true, "Invalidate discovery cache when any type is not found in the openapi spec. Set this to false on <= k8s 1.14")
 	flag.DurationVar(&writeBatchInterval, "write-batch-interval", time.Second*5, "The max throughput of composition status updates")
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.StringVar(&remoteKubeconfigFile, "remote-kubeconfig", "", "Path to the kubeconfig of the apiserver where the resources will be reconciled. The config from the environment is used if this is not provided")
 	flag.Float64Var(&remoteQPS, "remote-qps", 0, "Max requests per second to the remote apiserver")
-	flag.DurationVar(&readinessPollInterval, "readiness-poll-interval", time.Second*5, "Interval at which non-ready resources will be checked for readiness")
+	flag.DurationVar(&recOpts.Timeout, "timeout", time.Minute, "Per-resource reconciliation timeout. Avoids cases where client retries/timeouts are configured poorly and the loop gets blocked")
+	flag.DurationVar(&recOpts.ReadinessPollInterval, "readiness-poll-interval", time.Second*5, "Interval at which non-ready resources will be checked for readiness")
 	flag.StringVar(&compositionSelector, "composition-label-selector", labels.Everything().String(), "Optional label selector for compositions to be reconciled")
 	flag.StringVar(&compositionNamespace, "composition-namespace", metav1.NamespaceAll, "Optional namespace to limit compositions that will be reconciled")
 	mgrOpts.Bind(flag.CommandLine)
@@ -108,7 +110,11 @@ func run() error {
 	writeBuffer := flowcontrol.NewResourceSliceWriteBufferForManager(mgr, writeBatchInterval, 1)
 
 	rCache := reconstitution.NewCache(mgr.GetClient())
-	reconciler, err := reconciliation.New(mgr, rCache, writeBuffer, remoteConfig, discoveryMaxRPS, rediscoverWhenNotFound, readinessPollInterval)
+	recOpts.Manager = mgr
+	recOpts.Cache = rCache
+	recOpts.WriteBuffer = writeBuffer
+	recOpts.Downstream = remoteConfig
+	reconciler, err := reconciliation.New(recOpts)
 	if err != nil {
 		return fmt.Errorf("constructing reconciliation controller: %w", err)
 	}

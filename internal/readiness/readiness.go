@@ -39,7 +39,7 @@ func ParseCheck(env *Env, expr string) (*Check, error) {
 	if iss != nil && iss.Err() != nil {
 		return nil, iss.Err()
 	}
-	prgm, err := env.cel.Program(ast) // TODO: Set InterruptCheckFrequency
+	prgm, err := env.cel.Program(ast, cel.InterruptCheckFrequency(10))
 	if err != nil {
 		return nil, err
 	}
@@ -51,13 +51,7 @@ func (r *Check) Eval(ctx context.Context, resource *unstructured.Unstructured) (
 	if resource == nil {
 		return nil, false
 	}
-	val, details, err := r.program.ContextEval(ctx, map[string]any{"self": resource.Object})
-	if details != nil {
-		cost := details.ActualCost()
-		if cost != nil {
-			celEvalCost.Add(float64(*cost))
-		}
-	}
+	val, _, err := r.program.ContextEval(ctx, map[string]any{"self": resource.Object})
 	if err != nil {
 		return nil, false
 	}

@@ -28,44 +28,59 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// TODO: Set per-operation context timeouts
-
 var insecureLogPatch = os.Getenv("INSECURE_LOG_PATCH") == "true"
+
+type Options struct {
+	Manager     ctrl.Manager
+	Cache       *reconstitution.Cache
+	WriteBuffer *flowcontrol.ResourceSliceWriteBuffer
+	Downstream  *rest.Config
+
+	DiscoveryRPS           float32
+	RediscoverWhenNotFound bool
+
+	Timeout               time.Duration
+	ReadinessPollInterval time.Duration
+}
 
 type Controller struct {
 	client                client.Client
 	writeBuffer           *flowcontrol.ResourceSliceWriteBuffer
 	resourceClient        reconstitution.Client
+	timeout               time.Duration
 	readinessPollInterval time.Duration
-
-	upstreamClient client.Client
-	discovery      *discovery.Cache
+	upstreamClient        client.Client
+	discovery             *discovery.Cache
 }
 
-func New(mgr ctrl.Manager, rc *reconstitution.Cache, rswb *flowcontrol.ResourceSliceWriteBuffer, downstream *rest.Config, discoveryRPS float32, rediscoverWhenNotFound bool, readinessPollInterval time.Duration) (*Controller, error) {
-	upstreamClient, err := client.New(downstream, client.Options{
+func New(opts Options) (*Controller, error) {
+	upstreamClient, err := client.New(opts.Downstream, client.Options{
 		Scheme: runtime.NewScheme(), // empty scheme since we shouldn't rely on compile-time types
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	disc, err := discovery.NewCache(downstream, discoveryRPS, rediscoverWhenNotFound)
+	disc, err := discovery.NewCache(opts.Downstream, opts.DiscoveryRPS, opts.RediscoverWhenNotFound)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Controller{
-		client:                mgr.GetClient(),
-		writeBuffer:           rswb,
-		resourceClient:        rc,
-		readinessPollInterval: readinessPollInterval,
+		client:                opts.Manager.GetClient(),
+		writeBuffer:           opts.WriteBuffer,
+		resourceClient:        opts.Cache,
+		timeout:               opts.Timeout,
+		readinessPollInterval: opts.ReadinessPollInterval,
 		upstreamClient:        upstreamClient,
 		discovery:             disc,
 	}, nil
 }
 
 func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request) (ctrl.Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, types.NamespacedName{Name: req.Composition.Name, Namespace: req.Composition.Namespace}, comp)
 	if err != nil {

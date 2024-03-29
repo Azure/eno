@@ -93,6 +93,64 @@ func TestCompositionDeletion(t *testing.T) {
 	})
 }
 
+// TestPodConcurrencyLimit proves that Eno will not create more than two concurrent pods per composition.
+func TestPodConcurrencyLimit(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	cli := mgr.GetClient()
+
+	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn-1"
+	syn.Spec.Image = "initial-image"
+	require.NoError(t, cli.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	// Wait for the first pod to be created
+	testutil.Eventually(t, func() bool {
+		pods := &corev1.PodList{}
+		cli.List(ctx, pods)
+		return len(pods.Items) > 0
+	})
+
+	// Change something on the composition
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Spec.ReconcileInterval = &metav1.Duration{Duration: time.Hour}
+		return cli.Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	// Wait for the second pod to be created
+	testutil.Eventually(t, func() bool {
+		pods := &corev1.PodList{}
+		cli.List(ctx, pods)
+		return len(pods.Items) > 1
+	})
+
+	// Change something on the composition again
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Spec.ReconcileInterval = &metav1.Duration{Duration: time.Hour}
+		return cli.Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	// A third pod shouldn't be created
+	time.Sleep(time.Millisecond * 100)
+	pods := &corev1.PodList{}
+	err = cli.List(ctx, pods)
+	require.NoError(t, err)
+	assert.Len(t, pods.Items, 2)
+}
+
 var shouldDeletePodTests = []struct {
 	Name               string
 	Pods               []corev1.Pod
