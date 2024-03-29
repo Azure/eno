@@ -71,9 +71,7 @@ func New(mgr ctrl.Manager, rec Reconciler) (*Manager, error) {
 	}
 
 	qp := &queueProcessor{
-		Client:  m.Manager.GetClient(),
 		Queue:   m.controller.queue,
-		Recon:   m.controller,
 		Handler: rec,
 		Logger:  m.Manager.GetLogger().WithValues("controller", "reconciliationController"),
 	}

@@ -5,13 +5,10 @@ import (
 
 	"github.com/go-logr/logr"
 	"k8s.io/client-go/util/workqueue"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type queueProcessor struct {
-	Client  client.Client
 	Queue   workqueue.RateLimitingInterface
-	Recon   *controller
 	Handler Reconciler
 	Logger  logr.Logger
 }
@@ -48,11 +45,15 @@ func (q *queueProcessor) processQueueItem(ctx context.Context) bool {
 		logger.Error(err, "error while processing queue item")
 		return true
 	}
+
 	if result.Requeue {
-		q.Queue.Forget(item) // TODO: Maybe omit after first retry to avoid getting stuck in a patch tightloop?
-		q.Queue.Add(item)
+		// It's important that we requeue with rate limiting here, to avoid tightloops for resources
+		// that change every time they're reconciled. Note that this diverges from the controller-runtime
+		// controller implementation.
+		q.Queue.AddRateLimited(item)
 		return true
 	}
+
 	if result.RequeueAfter != 0 {
 		q.Queue.Forget(item)
 		q.Queue.AddAfter(item, result.RequeueAfter)
