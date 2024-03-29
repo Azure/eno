@@ -83,11 +83,6 @@ func run() error {
 		return fmt.Errorf("constructing manager: %w", err)
 	}
 
-	recmgr, err := reconstitution.New(mgr)
-	if err != nil {
-		return fmt.Errorf("constructing reconstitution manager: %w", err)
-	}
-
 	err = aggregation.NewStatusController(mgr)
 	if err != nil {
 		return fmt.Errorf("constructing status aggregation controller: %w", err)
@@ -109,10 +104,18 @@ func run() error {
 	}
 
 	writeBuffer := flowcontrol.NewResourceSliceWriteBufferForManager(mgr, writeBatchInterval, 1)
-	err = reconciliation.New(recmgr, writeBuffer, remoteConfig, discoveryMaxRPS, rediscoverWhenNotFound, readinessPollInterval)
+
+	var reconciler reconciliation.Controller
+	recMgr, err := reconstitution.New(mgr, &reconciler)
+	if err != nil {
+		return fmt.Errorf("constructing reconstitution manager: %w", err)
+	}
+
+	reconcilerTmp, err := reconciliation.New(recMgr, writeBuffer, remoteConfig, discoveryMaxRPS, rediscoverWhenNotFound, readinessPollInterval)
 	if err != nil {
 		return fmt.Errorf("constructing reconciliation controller: %w", err)
 	}
+	reconciler = *reconcilerTmp
 
 	return mgr.Start(ctx)
 }

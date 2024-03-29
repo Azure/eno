@@ -11,7 +11,7 @@ import (
 
 // New creates a new Manager, which is responsible for "reconstituting" resources
 // i.e. allowing controllers to treat them as individual resources instead of their storage representation (ResourceSlice).
-func New(mgr ctrl.Manager) (*Manager, error) {
+func New(mgr ctrl.Manager, rec Reconciler) (*Manager, error) {
 	m := &Manager{
 		Manager: mgr,
 	}
@@ -22,6 +22,15 @@ func New(mgr ctrl.Manager) (*Manager, error) {
 		return nil, err
 	}
 
+	qp := &queueProcessor{
+		Client:  m.Manager.GetClient(),
+		Queue:   m.reconstituter.queue,
+		Recon:   m.reconstituter,
+		Handler: rec,
+		Logger:  m.Manager.GetLogger().WithValues("controller", "reconciliationController"),
+	}
+	mgr.Add(qp)
+
 	return m, nil
 }
 
@@ -31,22 +40,6 @@ type Manager struct {
 }
 
 func (m *Manager) GetClient() Client { return m }
-
-func (m *Manager) Add(rec Reconciler) error {
-	rateLimiter := workqueue.DefaultItemBasedRateLimiter()
-	queue := workqueue.NewRateLimitingQueueWithConfig(rateLimiter, workqueue.RateLimitingQueueConfig{
-		Name: rec.Name(),
-	})
-	qp := &queueProcessor{
-		Client:  m.Manager.GetClient(),
-		Queue:   queue,
-		Recon:   m.reconstituter,
-		Handler: rec,
-		Logger:  m.Manager.GetLogger().WithValues("controller", rec.Name()),
-	}
-	m.reconstituter.AddQueue(queue)
-	return m.Manager.Add(qp)
-}
 
 type queueProcessor struct {
 	Client  client.Client

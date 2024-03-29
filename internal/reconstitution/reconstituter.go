@@ -3,7 +3,6 @@ package reconstitution
 import (
 	"context"
 	"fmt"
-	"sync/atomic"
 
 	"github.com/go-logr/logr"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -21,8 +20,7 @@ type reconstituter struct {
 	*cache          // embedded because caching is logically part of the reconstituter's functionality
 	client          client.Client
 	nonCachedReader client.Reader
-	queues          []workqueue.Interface
-	started         atomic.Bool
+	queue           workqueue.RateLimitingInterface
 }
 
 func newReconstituter(mgr ctrl.Manager) (*reconstituter, error) {
@@ -31,6 +29,10 @@ func newReconstituter(mgr ctrl.Manager) (*reconstituter, error) {
 		client:          mgr.GetClient(),
 		nonCachedReader: mgr.GetAPIReader(),
 	}
+	rateLimiter := workqueue.DefaultItemBasedRateLimiter()
+	r.queue = workqueue.NewRateLimitingQueueWithConfig(rateLimiter, workqueue.RateLimitingQueueConfig{
+		Name: "reconciliationController",
+	})
 
 	return r, ctrl.NewControllerManagedBy(mgr).
 		Named("reconstituter").
@@ -40,16 +42,7 @@ func newReconstituter(mgr ctrl.Manager) (*reconstituter, error) {
 		Complete(r)
 }
 
-func (r *reconstituter) AddQueue(queue workqueue.Interface) {
-	if r.started.Load() {
-		panic("AddQueue must be called before any resources are reconciled")
-	}
-	r.queues = append(r.queues, queue)
-}
-
 func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	r.started.Store(true)
-
 	comp := &apiv1.Composition{}
 	err := r.client.Get(ctx, req.NamespacedName, comp)
 	if k8serrors.IsNotFound(err) {
@@ -72,9 +65,7 @@ func (r *reconstituter) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, fmt.Errorf("processing current state: %w", err)
 	}
 	for _, req := range append(prevReqs, currentReqs...) {
-		for _, queue := range r.queues {
-			queue.Add(req)
-		}
+		r.queue.Add(req)
 	}
 	r.cache.Purge(ctx, req.NamespacedName, comp)
 

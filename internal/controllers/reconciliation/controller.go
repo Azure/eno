@@ -42,30 +42,28 @@ type Controller struct {
 	discovery      *discovery.Cache
 }
 
-func New(mgr *reconstitution.Manager, rswb *flowcontrol.ResourceSliceWriteBuffer, downstream *rest.Config, discoveryRPS float32, rediscoverWhenNotFound bool, readinessPollInterval time.Duration) error {
+func New(mgr *reconstitution.Manager, rswb *flowcontrol.ResourceSliceWriteBuffer, downstream *rest.Config, discoveryRPS float32, rediscoverWhenNotFound bool, readinessPollInterval time.Duration) (*Controller, error) {
 	upstreamClient, err := client.New(downstream, client.Options{
 		Scheme: runtime.NewScheme(), // empty scheme since we shouldn't rely on compile-time types
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	disc, err := discovery.NewCache(downstream, discoveryRPS, rediscoverWhenNotFound)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return mgr.Add(&Controller{
+	return &Controller{
 		client:                mgr.Manager.GetClient(),
 		writeBuffer:           rswb,
 		resourceClient:        mgr.GetClient(),
 		readinessPollInterval: readinessPollInterval,
 		upstreamClient:        upstreamClient,
 		discovery:             disc,
-	})
+	}, nil
 }
-
-func (c *Controller) Name() string { return "reconciliationController" }
 
 func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request) (ctrl.Result, error) {
 	comp := &apiv1.Composition{}

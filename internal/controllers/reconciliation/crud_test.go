@@ -22,8 +22,6 @@ import (
 	"github.com/Azure/eno/internal/controllers/aggregation"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
 	"github.com/Azure/eno/internal/controllers/synthesis"
-	"github.com/Azure/eno/internal/flowcontrol"
-	"github.com/Azure/eno/internal/reconstitution"
 	"github.com/Azure/eno/internal/testutil"
 )
 
@@ -157,8 +155,6 @@ func TestCRUD(t *testing.T) {
 			downstream := mgr.DownstreamClient
 
 			// Register supporting controllers
-			rm, err := reconstitution.New(mgr.Manager)
-			require.NoError(t, err)
 			require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
 			require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 			require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
@@ -166,9 +162,7 @@ func TestCRUD(t *testing.T) {
 
 			// Test subject
 			// Only enable rediscoverWhenNotFound on k8s versions that can support it.
-			rswb := flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager, time.Hour, 1)
-			err = New(rm, rswb, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
-			require.NoError(t, err)
+			setupTestSubject(t, mgr)
 			mgr.Start(t)
 
 			// Any syn/comp will do since we faked out the synthesizer pod
@@ -186,6 +180,7 @@ func TestCRUD(t *testing.T) {
 
 			t.Logf("starting creation")
 			var obj client.Object
+			var err error
 			testutil.Eventually(t, func() bool {
 				obj, err = test.Get(downstream)
 				return err == nil
@@ -320,8 +315,6 @@ func TestReconcileInterval(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	rm, err := reconstitution.New(mgr.Manager)
-	require.NoError(t, err)
 	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
@@ -344,9 +337,7 @@ func TestReconcileInterval(t *testing.T) {
 	}}))
 
 	// Test subject
-	rswb := flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager, time.Hour, 1)
-	err = New(rm, rswb, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
-	require.NoError(t, err)
+	setupTestSubject(t, mgr)
 	mgr.Start(t)
 
 	// Any syn/comp will do since we faked out the synthesizer pod
@@ -366,7 +357,7 @@ func TestReconcileInterval(t *testing.T) {
 	testutil.Eventually(t, func() bool {
 		obj.SetName("test-obj")
 		obj.SetNamespace("default")
-		err = downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+		err := downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
 		return err == nil
 	})
 
@@ -376,7 +367,7 @@ func TestReconcileInterval(t *testing.T) {
 
 	// The service should eventually converge with the desired state
 	testutil.Eventually(t, func() bool {
-		err = downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+		err := downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
 		return err == nil && obj.Data["foo"] == "bar"
 	})
 }
@@ -394,8 +385,6 @@ func TestReconcileCacheRace(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	rm, err := reconstitution.New(mgr.Manager)
-	require.NoError(t, err)
 	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
@@ -420,9 +409,7 @@ func TestReconcileCacheRace(t *testing.T) {
 	}}))
 
 	// Test subject
-	rswb := flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager, time.Millisecond, 1)
-	err = New(rm, rswb, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
-	require.NoError(t, err)
+	setupTestSubject(t, mgr)
 	mgr.Start(t)
 
 	// Any syn/comp will do since we faked out the synthesizer pod
@@ -442,14 +429,14 @@ func TestReconcileCacheRace(t *testing.T) {
 	testutil.Eventually(t, func() bool {
 		obj.SetName("test-obj")
 		obj.SetNamespace("default")
-		err = downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+		err := downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
 		return err == nil
 	})
 
 	// Update frequently, it shouldn't panic
 	for i := 0; i < 20; i++ {
-		err = retry.RetryOnConflict(testutil.Backoff, func() error {
-			err = upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+		err := retry.RetryOnConflict(testutil.Backoff, func() error {
+			upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn)
 			syn.Spec.Command = []string{fmt.Sprintf("any-unique-value-%d", i)}
 			return upstream.Update(ctx, syn)
 		})
@@ -471,8 +458,6 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	rm, err := reconstitution.New(mgr.Manager)
-	require.NoError(t, err)
 	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
@@ -497,9 +482,7 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 	}}))
 
 	// Test subject
-	rswb := flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager, time.Millisecond, 1)
-	err = New(rm, rswb, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
-	require.NoError(t, err)
+	setupTestSubject(t, mgr)
 	mgr.Start(t)
 
 	// Any syn/comp will do since we faked out the synthesizer pod
@@ -519,7 +502,7 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 	testutil.Eventually(t, func() bool {
 		obj.SetName("test-obj")
 		obj.SetNamespace("default")
-		err = downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+		err := downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
 		return err == nil
 	})
 
@@ -549,17 +532,13 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	rm, err := reconstitution.New(mgr.Manager)
-	require.NoError(t, err)
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, aggregation.NewStatusController(mgr.Manager))
 
 	// Test subject
-	rswb := flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager, time.Millisecond, 1)
-	err = New(rm, rswb, mgr.DownstreamRestConfig, 5, testutil.AtLeastVersion(t, 15), time.Hour)
-	require.NoError(t, err)
+	setupTestSubject(t, mgr)
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -586,7 +565,7 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	controllerutil.SetControllerReference(comp, rs, mgr.GetScheme())
 	require.NoError(t, upstream.Create(ctx, rs))
 
-	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
 		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		now := metav1.Now()
 		comp.Status.CurrentSynthesis = &apiv1.Synthesis{

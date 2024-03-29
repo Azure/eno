@@ -20,11 +20,11 @@ func TestManagerBasics(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	client := mgr.GetClient()
 
-	rm, err := New(mgr.Manager)
+	tr := &testReconciler{}
+	rm, err := New(mgr.Manager, tr)
+	tr.mgr = rm
 	require.NoError(t, err)
 
-	tr := &testReconciler{mgr: rm}
-	rm.Add(tr)
 	mgr.Start(t)
 
 	// Create one composition that has one synthesis of a single resource
@@ -62,8 +62,6 @@ type testReconciler struct {
 	comp         *CompositionRef
 	lastResource atomic.Pointer[Resource]
 }
-
-func (t *testReconciler) Name() string { return "testReconciler" }
 
 func (t *testReconciler) Reconcile(ctx context.Context, req *Request) (ctrl.Result, error) {
 	resource, exists := t.mgr.GetClient().Get(ctx, t.comp, &req.Resource)

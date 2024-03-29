@@ -14,7 +14,6 @@ type Resource = resource.Resource
 
 // Reconciler is implemented by types that can reconcile individual, reconstituted resources.
 type Reconciler interface {
-	Name() string
 	Reconcile(ctx context.Context, req *Request) (ctrl.Result, error)
 }
 
