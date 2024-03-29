@@ -57,7 +57,7 @@ type Request struct {
 	Composition types.NamespacedName
 }
 
-// New creates a new Manager, which is responsible for "reconstituting" resources
+// New creates a new reconstitution controller, which is responsible for "reconstituting" resources
 // i.e. allowing controllers to treat them as individual resources instead of their storage representation (ResourceSlice).
 func New(mgr ctrl.Manager, cache *Cache, rec Reconciler) error {
 	ctrl, err := newController(mgr, cache)
