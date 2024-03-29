@@ -15,8 +15,8 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// cache maintains a fast index of (ResourceRef + Composition + Synthesis) -> Resource.
-type cache struct {
+// Cache maintains a fast index of (ResourceRef + Composition + Synthesis) -> Resource.
+type Cache struct {
 	client client.Client
 	renv   *readiness.Env
 
@@ -25,12 +25,12 @@ type cache struct {
 	synthesesByComposition map[types.NamespacedName][]int64
 }
 
-func newCache(client client.Client) *cache {
+func NewCache(client client.Client) *Cache {
 	renv, err := readiness.NewEnv()
 	if err != nil {
 		panic(fmt.Sprintf("error setting up readiness expression env: %s", err))
 	}
-	return &cache{
+	return &Cache{
 		client:                 client,
 		renv:                   renv,
 		resources:              make(map[CompositionRef]map[resource.Ref]*Resource),
@@ -38,7 +38,7 @@ func newCache(client client.Client) *cache {
 	}
 }
 
-func (c *cache) Get(ctx context.Context, comp *CompositionRef, ref *resource.Ref) (*Resource, bool) {
+func (c *Cache) Get(ctx context.Context, comp *CompositionRef, ref *resource.Ref) (*Resource, bool) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
@@ -55,9 +55,9 @@ func (c *cache) Get(ctx context.Context, comp *CompositionRef, ref *resource.Ref
 	return res, ok
 }
 
-// HasSynthesis returns true when the cache contains the resulting resources of the given synthesis.
+// hasSynthesis returns true when the cache contains the resulting resources of the given synthesis.
 // This should be called before Fill to determine if filling is necessary.
-func (c *cache) HasSynthesis(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis) bool {
+func (c *Cache) hasSynthesis(comp *apiv1.Composition, synthesis *apiv1.Synthesis) bool {
 	key := CompositionRef{
 		Name:       comp.Name,
 		Namespace:  comp.Namespace,
@@ -70,9 +70,9 @@ func (c *cache) HasSynthesis(ctx context.Context, comp *apiv1.Composition, synth
 	return exists
 }
 
-// Fill populates the cache with all (or no) resources that are part of the given synthesis.
+// fill populates the cache with all (or no) resources that are part of the given synthesis.
 // Requests to be enqueued are returned. Although this arguably violates separation of concerns, it's convenient and efficient.
-func (c *cache) Fill(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis, items []apiv1.ResourceSlice) ([]*Request, error) {
+func (c *Cache) fill(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis, items []apiv1.ResourceSlice) ([]*Request, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	// Building resources can be expensive (json parsing, etc.) so don't hold the lock during this call
@@ -94,7 +94,7 @@ func (c *cache) Fill(ctx context.Context, comp *apiv1.Composition, synthesis *ap
 	return requests, nil
 }
 
-func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, items []apiv1.ResourceSlice) (map[resource.Ref]*Resource, []*Request, error) {
+func (c *Cache) buildResources(ctx context.Context, comp *apiv1.Composition, items []apiv1.ResourceSlice) (map[resource.Ref]*Resource, []*Request, error) {
 	resources := map[resource.Ref]*Resource{}
 	requests := []*Request{}
 	for _, slice := range items {
@@ -130,11 +130,11 @@ func (c *cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 	return resources, requests, nil
 }
 
-// Purge removes resources associated with a particular composition synthesis from the cache.
+// purge removes resources associated with a particular composition synthesis from the cache.
 // If composition is set, resources from the active syntheses will be retained.
 // Otherwise all resources deriving from the referenced composition are removed.
 // This design allows the cache to stay consistent without deletion tombstones.
-func (c *cache) Purge(ctx context.Context, compNSN types.NamespacedName, comp *apiv1.Composition) {
+func (c *Cache) purge(compNSN types.NamespacedName, comp *apiv1.Composition) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 

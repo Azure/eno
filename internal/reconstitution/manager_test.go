@@ -20,9 +20,9 @@ func TestManagerBasics(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	client := mgr.GetClient()
 
-	tr := &testReconciler{}
-	rm, err := New(mgr.Manager, tr)
-	tr.mgr = rm
+	cache := NewCache(client)
+	tr := &testReconciler{cache: cache}
+	err := New(mgr.Manager, cache, tr)
 	require.NoError(t, err)
 
 	mgr.Start(t)
@@ -58,13 +58,13 @@ func TestManagerBasics(t *testing.T) {
 }
 
 type testReconciler struct {
-	mgr          *Manager
+	cache        *Cache
 	comp         *CompositionRef
 	lastResource atomic.Pointer[Resource]
 }
 
 func (t *testReconciler) Reconcile(ctx context.Context, req *Request) (ctrl.Result, error) {
-	resource, exists := t.mgr.GetClient().Get(ctx, t.comp, &req.Resource)
+	resource, exists := t.cache.Get(ctx, t.comp, &req.Resource)
 	if !exists {
 		panic("resource should exist in cache")
 	}

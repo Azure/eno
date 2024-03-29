@@ -59,30 +59,16 @@ type Request struct {
 
 // New creates a new Manager, which is responsible for "reconstituting" resources
 // i.e. allowing controllers to treat them as individual resources instead of their storage representation (ResourceSlice).
-func New(mgr ctrl.Manager, rec Reconciler) (*Manager, error) {
-	m := &Manager{
-		Manager: mgr,
-	}
-
-	var err error
-	m.controller, err = newController(mgr)
+func New(mgr ctrl.Manager, cache *Cache, rec Reconciler) error {
+	ctrl, err := newController(mgr, cache)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	qp := &queueProcessor{
-		Queue:   m.controller.queue,
+		Queue:   ctrl.queue,
 		Handler: rec,
-		Logger:  m.Manager.GetLogger().WithValues("controller", "reconciliationController"),
+		Logger:  mgr.GetLogger().WithValues("controller", "reconciliationController"),
 	}
-	mgr.Add(qp)
-
-	return m, nil
+	return mgr.Add(qp)
 }
-
-type Manager struct {
-	ctrl.Manager
-	*controller
-}
-
-func (m *Manager) GetClient() Client { return m }

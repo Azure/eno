@@ -17,15 +17,15 @@ import (
 // controller reconstitutes individual resources from resource slices.
 // Similar to an informer but with extra logic to handle expanding the slice resources.
 type controller struct {
-	*cache          // embedded because caching is logically part of the reconstituter's functionality
+	*Cache          // embedded because caching is logically part of the reconstituter's functionality
 	client          client.Client
 	nonCachedReader client.Reader
 	queue           workqueue.RateLimitingInterface
 }
 
-func newController(mgr ctrl.Manager) (*controller, error) {
+func newController(mgr ctrl.Manager, cache *Cache) (*controller, error) {
 	r := &controller{
-		cache:           newCache(mgr.GetClient()),
+		Cache:           cache,
 		client:          mgr.GetClient(),
 		nonCachedReader: mgr.GetAPIReader(),
 	}
@@ -46,7 +46,7 @@ func (r *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	comp := &apiv1.Composition{}
 	err := r.client.Get(ctx, req.NamespacedName, comp)
 	if k8serrors.IsNotFound(err) {
-		r.cache.Purge(ctx, req.NamespacedName, nil)
+		r.Cache.purge(req.NamespacedName, nil)
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
@@ -67,7 +67,7 @@ func (r *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	for _, req := range append(prevReqs, currentReqs...) {
 		r.queue.Add(req)
 	}
-	r.cache.Purge(ctx, req.NamespacedName, comp)
+	r.Cache.purge(req.NamespacedName, comp)
 
 	if len(currentReqs)+len(prevReqs) > 0 {
 		return ctrl.Result{Requeue: true}, nil
@@ -85,7 +85,7 @@ func (r *controller) populateCache(ctx context.Context, comp *apiv1.Composition,
 
 	logger = logger.WithValues("synthesisCompositionGeneration", synthesis.ObservedCompositionGeneration)
 	ctx = logr.NewContext(ctx, logger)
-	if r.cache.HasSynthesis(ctx, comp, synthesis) {
+	if r.Cache.hasSynthesis(comp, synthesis) {
 		return nil, nil
 	}
 
@@ -103,5 +103,5 @@ func (r *controller) populateCache(ctx context.Context, comp *apiv1.Composition,
 		slices[i] = slice
 	}
 
-	return r.cache.Fill(ctx, comp, synthesis, slices)
+	return r.Cache.fill(ctx, comp, synthesis, slices)
 }

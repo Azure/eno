@@ -19,7 +19,8 @@ func TestControllerIntegration(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	client := mgr.GetClient()
 
-	r, err := newController(mgr.Manager)
+	cache := NewCache(client)
+	r, err := newController(mgr.Manager, cache)
 	require.NoError(t, err)
 	mgr.Start(t)
 

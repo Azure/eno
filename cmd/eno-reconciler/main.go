@@ -107,17 +107,15 @@ func run() error {
 	// This provides quick feedback in cases where only a few resources have changed.
 	writeBuffer := flowcontrol.NewResourceSliceWriteBufferForManager(mgr, writeBatchInterval, 1)
 
-	var reconciler reconciliation.Controller
-	recMgr, err := reconstitution.New(mgr, &reconciler)
-	if err != nil {
-		return fmt.Errorf("constructing reconstitution manager: %w", err)
-	}
-
-	reconcilerTmp, err := reconciliation.New(recMgr, writeBuffer, remoteConfig, discoveryMaxRPS, rediscoverWhenNotFound, readinessPollInterval)
+	rCache := reconstitution.NewCache(mgr.GetClient())
+	reconciler, err := reconciliation.New(mgr, rCache, writeBuffer, remoteConfig, discoveryMaxRPS, rediscoverWhenNotFound, readinessPollInterval)
 	if err != nil {
 		return fmt.Errorf("constructing reconciliation controller: %w", err)
 	}
-	reconciler = *reconcilerTmp
+	err = reconstitution.New(mgr, rCache, reconciler)
+	if err != nil {
+		return fmt.Errorf("constructing reconstitution manager: %w", err)
+	}
 
 	return mgr.Start(ctx)
 }
