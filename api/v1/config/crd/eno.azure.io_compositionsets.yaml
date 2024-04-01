@@ -4,19 +4,21 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.13.0
-  name: resourceslices.eno.azure.io
+  name: compositionsets.eno.azure.io
 spec:
   group: eno.azure.io
   names:
-    kind: ResourceSlice
-    listKind: ResourceSliceList
-    plural: resourceslices
-    singular: resourceslice
+    kind: CompositionSet
+    listKind: CompositionSetList
+    plural: compositionsets
+    singular: compositionset
   scope: Namespaced
   versions:
   - name: v1
     schema:
       openAPIV3Schema:
+        description: CompositionSet represents a "meta-composition" that spawns a
+          set of child compositions for each in a set of synthesizers.
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation
@@ -32,39 +34,50 @@ spec:
             type: object
           spec:
             properties:
-              compositionGeneration:
-                format: int64
-                type: integer
-              resources:
+              bindings:
                 items:
                   properties:
-                    deleted:
-                      description: Deleted is true when this manifest represents a
-                        "tombstone" - a resource that should no longer exist.
-                      type: boolean
-                    manifest:
+                    key:
                       type: string
-                    reconcileInterval:
+                    resource:
+                      properties:
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                      required:
+                      - name
+                      type: object
+                  required:
+                  - key
+                  - resource
+                  type: object
+                type: array
+              synthesizers:
+                items:
+                  properties:
+                    minGeneration:
+                      description: Compositions will be resynthesized if their status.currentState.observedSynthesizerGeneration
+                        is < the referenced synthesizer's generation. Used to slowly
+                        roll out synthesizer updates across compositions.
+                      format: int64
+                      type: integer
+                    name:
                       type: string
                   type: object
                 type: array
             type: object
           status:
             properties:
-              resources:
-                description: Elements of resources correspond in index to those in
-                  spec.resources at the observed generation.
-                items:
-                  properties:
-                    deleted:
-                      type: boolean
-                    ready:
-                      format: date-time
-                      type: string
-                    reconciled:
-                      type: boolean
-                  type: object
-                type: array
+              ready:
+                format: date-time
+                type: string
+              reconciled:
+                format: date-time
+                type: string
+              synthesized:
+                format: date-time
+                type: string
             type: object
         type: object
     served: true
