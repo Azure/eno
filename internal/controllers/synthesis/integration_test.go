@@ -1,6 +1,7 @@
 package synthesis
 
 import (
+	"fmt"
 	"math/rand"
 	"testing"
 	"time"
@@ -58,7 +59,7 @@ func TestControllerHappyPath(t *testing.T) {
 		// Updating the composition should cause re-synthesis
 		err := retry.RetryOnConflict(testutil.Backoff, func() error {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			comp.Spec.ReconcileInterval = &metav1.Duration{Duration: time.Minute}
+			comp.Spec.Bindings = []apiv1.Binding{{Key: "new-binding", Resource: apiv1.ResourceBinding{Name: "test"}}}
 			return cli.Update(ctx, comp)
 		})
 		require.NoError(t, err)
@@ -123,7 +124,7 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 			if client.IgnoreNotFound(err) != nil {
 				return err
 			}
-			comp.Spec.ReconcileInterval = &metav1.Duration{Duration: time.Minute * time.Duration(i)}
+			comp.Spec.Bindings = []apiv1.Binding{{Key: fmt.Sprintf("test-%d", i), Resource: apiv1.ResourceBinding{Name: "test"}}}
 			return cli.Update(ctx, comp)
 		})
 		require.NoError(t, err)

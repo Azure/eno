@@ -88,11 +88,6 @@ func (in *CompositionList) DeepCopyObject() runtime.Object {
 func (in *CompositionSpec) DeepCopyInto(out *CompositionSpec) {
 	*out = *in
 	out.Synthesizer = in.Synthesizer
-	if in.ReconcileInterval != nil {
-		in, out := &in.ReconcileInterval, &out.ReconcileInterval
-		*out = new(metav1.Duration)
-		**out = **in
-	}
 	if in.Bindings != nil {
 		in, out := &in.Bindings, &out.Bindings
 		*out = make([]Binding, len(*in))
@@ -622,6 +617,11 @@ func (in *SynthesizerSpec) DeepCopyInto(out *SynthesizerSpec) {
 	}
 	if in.RolloutCooldown != nil {
 		in, out := &in.RolloutCooldown, &out.RolloutCooldown
+		*out = new(metav1.Duration)
+		**out = **in
+	}
+	if in.ReconcileInterval != nil {
+		in, out := &in.ReconcileInterval, &out.ReconcileInterval
 		*out = new(metav1.Duration)
 		**out = **in
 	}

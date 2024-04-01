@@ -58,11 +58,6 @@ spec:
                   - resource
                   type: object
                 type: array
-              reconcileInterval:
-                description: |-
-                  Synthesized resources can optionally be reconciled at a given interval.
-                  Per-resource jitter will be applied to avoid spikes in request rate.
-                type: string
               synthesizer:
                 description: Compositions are synthesized by a Synthesizer.
                 properties:

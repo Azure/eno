@@ -47,6 +47,10 @@ type SynthesizerSpec struct {
 	// +kubebuilder:default="30s"
 	RolloutCooldown *metav1.Duration `json:"rolloutCooldown,omitempty"`
 
+	// Synthesized resources can optionally be reconciled at a given interval.
+	// Per-resource jitter will be applied to avoid spikes in request rate.
+	ReconcileInterval *metav1.Duration `json:"reconcileInterval,omitempty"`
+
 	// Refs define the Synthesizer's input schema without binding it to specific
 	// resources.
 	Refs []Ref `json:"refs,omitempty"`

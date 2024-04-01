@@ -23,10 +23,6 @@ type CompositionSpec struct {
 	// Compositions are synthesized by a Synthesizer.
 	Synthesizer SynthesizerRef `json:"synthesizer,omitempty"`
 
-	// Synthesized resources can optionally be reconciled at a given interval.
-	// Per-resource jitter will be applied to avoid spikes in request rate.
-	ReconcileInterval *metav1.Duration `json:"reconcileInterval,omitempty"`
-
 	// Binds the schema defined in a Synthesizer spec to specific resources.
 	Bindings []Binding `json:"bindings,omitempty"`
 }
