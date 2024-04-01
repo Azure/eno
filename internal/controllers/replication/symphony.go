@@ -1,4 +1,4 @@
-package set
+package replication
 
 import (
 	"context"
@@ -14,31 +14,31 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-type compositionSetController struct {
+type symphonyController struct {
 	client client.Client
 }
 
 func NewCompositionSetController(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&apiv1.CompositionSet{}).
+		For(&apiv1.Symphony{}).
 		Owns(&apiv1.Composition{}).
-		WithLogConstructor(manager.NewLogConstructor(mgr, "compositionSetController")).
-		Complete(&compositionSetController{
+		WithLogConstructor(manager.NewLogConstructor(mgr, "symphonyReplicationController")).
+		Complete(&symphonyController{
 			client: mgr.GetClient(),
 		})
 }
 
-func (c *compositionSetController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	set := &apiv1.CompositionSet{}
-	err := c.client.Get(ctx, req.NamespacedName, set)
+	symph := &apiv1.Symphony{}
+	err := c.client.Get(ctx, req.NamespacedName, symph)
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	logger = logger.WithValues("compositionSetName", set.Name, "compositionSetNamespace", set.Namespace)
+	logger = logger.WithValues("compositionSetName", symph.Name, "compositionSetNamespace", symph.Namespace)
 	expectedSynths := map[string]struct{}{}
-	for _, syn := range set.Spec.Synthesizers {
+	for _, syn := range symph.Spec.Synthesizers {
 		expectedSynths[syn.Name] = struct{}{}
 	}
 
@@ -81,14 +81,14 @@ func (c *compositionSetController) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// TODO: Set finalizer
-	for _, synRef := range set.Spec.Synthesizers {
+	for _, synRef := range symph.Spec.Synthesizers {
 		synRef := synRef
 		comp := &apiv1.Composition{}
-		comp.Namespace = set.Namespace
+		comp.Namespace = symph.Namespace
 		comp.GenerateName = synRef.Name + "-"
-		comp.Spec.Bindings = set.Spec.Bindings
+		comp.Spec.Bindings = symph.Spec.Bindings
 		comp.Spec.Synthesizer = synRef
-		err = controllerutil.SetControllerReference(set, comp, c.client.Scheme())
+		err = controllerutil.SetControllerReference(symph, comp, c.client.Scheme())
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("setting composition's controller: %w", err)
 		}

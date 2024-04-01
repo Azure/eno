@@ -1,4 +1,4 @@
-package set
+package replication
 
 import (
 	"reflect"
@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestControllerCRUD(t *testing.T) {
+func TestSymphonyCRUD(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
@@ -17,11 +17,11 @@ func TestControllerCRUD(t *testing.T) {
 	require.NoError(t, err)
 	mgr.Start(t)
 
-	// Create the set
-	set := &apiv1.CompositionSet{}
-	set.Name = "test-set"
-	set.Namespace = "default"
-	set.Spec.Bindings = []apiv1.Binding{
+	// Create the symphony
+	sym := &apiv1.Symphony{}
+	sym.Name = "test-symphony"
+	sym.Namespace = "default"
+	sym.Spec.Bindings = []apiv1.Binding{
 		{
 			Key:      "foo",
 			Resource: apiv1.ResourceBinding{Name: "test-resource-1"},
@@ -31,8 +31,8 @@ func TestControllerCRUD(t *testing.T) {
 			Resource: apiv1.ResourceBinding{Name: "test-resource-2"},
 		},
 	}
-	set.Spec.Synthesizers = []apiv1.SynthesizerRef{{Name: "foosynth"}, {Name: "barsynth"}}
-	err = cli.Create(ctx, set)
+	sym.Spec.Synthesizers = []apiv1.SynthesizerRef{{Name: "foosynth"}, {Name: "barsynth"}}
+	err = cli.Create(ctx, sym)
 	require.NoError(t, err)
 
 	// Exactly one composition should eventually be created for each synth
@@ -45,7 +45,7 @@ func TestControllerCRUD(t *testing.T) {
 		synthsSeen := map[string]struct{}{}
 		for _, comp := range comps.Items {
 			comp := comp
-			if !reflect.DeepEqual(set.Spec.Bindings, comp.Spec.Bindings) {
+			if !reflect.DeepEqual(sym.Spec.Bindings, comp.Spec.Bindings) {
 				t.Logf("composition %q has incorrect bindings", comp.Name)
 				return false
 			}
@@ -55,7 +55,7 @@ func TestControllerCRUD(t *testing.T) {
 			t.Logf("wrong number of synths seen: %d", len(synthsSeen))
 			return false
 		}
-		for _, syn := range set.Spec.Synthesizers {
+		for _, syn := range sym.Spec.Synthesizers {
 			if _, ok := synthsSeen[syn.Name]; !ok {
 				t.Logf("didn't see composition for synth %q", syn.Name)
 				return false
