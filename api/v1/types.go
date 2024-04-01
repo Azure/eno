@@ -17,5 +17,6 @@ var (
 func init() {
 	SchemeBuilder.Register(&SynthesizerList{}, &Synthesizer{})
 	SchemeBuilder.Register(&CompositionList{}, &Composition{})
+	SchemeBuilder.Register(&CompositionSetList{}, &CompositionSet{})
 	SchemeBuilder.Register(&ResourceSliceList{}, &ResourceSlice{})
 }
