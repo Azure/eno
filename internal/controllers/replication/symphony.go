@@ -18,7 +18,7 @@ type symphonyController struct {
 	client client.Client
 }
 
-func NewCompositionSetController(mgr ctrl.Manager) error {
+func NewSymphonyController(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Symphony{}).
 		Owns(&apiv1.Composition{}).

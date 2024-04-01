@@ -19,7 +19,7 @@ func TestSymphonyCRUD(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
-	err := NewCompositionSetController(mgr.Manager)
+	err := NewSymphonyController(mgr.Manager)
 	require.NoError(t, err)
 	mgr.Start(t)
 
