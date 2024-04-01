@@ -155,6 +155,7 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		comp.GenerateName = variation.Synthesizer.Name + "-"
 		comp.Spec.Bindings = symph.Spec.Bindings
 		comp.Spec.Synthesizer = variation.Synthesizer
+		comp.Labels = variation.Labels
 		err := controllerutil.SetControllerReference(symph, comp, c.client.Scheme())
 		if err != nil {
 			return false, fmt.Errorf("setting composition's controller: %w", err)
@@ -163,16 +164,17 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		// Diff and update if needed when the composition for this synthesizer already exists
 		if existings, ok := existingBySynthName[variation.Synthesizer.Name]; ok {
 			existing := existings[0]
-			if equality.Semantic.DeepEqual(comp.Spec, existing.Spec) {
+			if equality.Semantic.DeepEqual(comp.Spec, existing.Spec) && equality.Semantic.DeepEqual(comp.Labels, existing.Labels) {
 				continue // already matches
 			}
 			existing.Spec = comp.Spec
+			existing.Labels = comp.Labels
 			err = c.client.Update(ctx, existing)
 			if err != nil {
 				return false, fmt.Errorf("updating existing composition: %w", err)
 			}
 
-			logger.V(0).Info("updated composition because the set's spec changed", "compositionName", existing.Name, "compositionNamespace", existing.Namespace)
+			logger.V(0).Info("updated composition because its variation changed", "compositionName", existing.Name, "compositionNamespace", existing.Namespace)
 			return true, nil
 		}
 

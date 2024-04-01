@@ -93,6 +93,31 @@ func TestSymphonyCRUD(t *testing.T) {
 		return true
 	})
 
+	// Update the labels and prove they're replicated to the compositions
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(sym), sym)
+		for i := range sym.Spec.Variations {
+			sym.Spec.Variations[i].Labels = map[string]string{"foo": "bar"}
+		}
+		return cli.Update(ctx, sym)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		comps := &apiv1.CompositionList{}
+		err := cli.List(ctx, comps)
+		if err != nil && len(comps.Items) < 2 {
+			return false
+		}
+		for _, comp := range comps.Items {
+			if comp.Labels == nil || comp.Labels["foo"] != "bar" {
+				t.Logf("composition %q doesn't have the expected label", comp.Name)
+				return false
+			}
+		}
+		return true
+	})
+
 	// Test deletion
 	require.NoError(t, cli.Delete(ctx, sym))
 	testutil.Eventually(t, func() bool {
