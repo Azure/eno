@@ -36,7 +36,7 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	logger = logger.WithValues("compositionSetName", symph.Name, "compositionSetNamespace", symph.Namespace)
+	logger = logger.WithValues("symphonyName", symph.Name, "symphonyNamespace", symph.Namespace)
 	ctx = logr.NewContext(ctx, logger)
 
 	existing := &apiv1.CompositionList{}
