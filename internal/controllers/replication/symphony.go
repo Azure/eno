@@ -102,8 +102,8 @@ func (c *symphonyController) reconcileReverse(ctx context.Context, symph *apiv1.
 	logger := logr.FromContextOrDiscard(ctx)
 
 	expectedSynths := map[string]struct{}{}
-	for _, syn := range symph.Spec.Synthesizers {
-		expectedSynths[syn.Name] = struct{}{}
+	for _, variation := range symph.Spec.Variations {
+		expectedSynths[variation.Synthesizer.Name] = struct{}{}
 	}
 
 	// Delete compositions when their synth has been removed from the symphony
@@ -148,20 +148,20 @@ func (c *symphonyController) reconcileReverse(ctx context.Context, symph *apiv1.
 func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.Symphony, existingBySynthName map[string][]*apiv1.Composition) (bool, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	for _, synRef := range symph.Spec.Synthesizers {
-		synRef := synRef
+	for _, variation := range symph.Spec.Variations {
+		variation := variation
 		comp := &apiv1.Composition{}
 		comp.Namespace = symph.Namespace
-		comp.GenerateName = synRef.Name + "-"
+		comp.GenerateName = variation.Synthesizer.Name + "-"
 		comp.Spec.Bindings = symph.Spec.Bindings
-		comp.Spec.Synthesizer = synRef
+		comp.Spec.Synthesizer = variation.Synthesizer
 		err := controllerutil.SetControllerReference(symph, comp, c.client.Scheme())
 		if err != nil {
 			return false, fmt.Errorf("setting composition's controller: %w", err)
 		}
 
 		// Diff and update if needed when the composition for this synthesizer already exists
-		if existings, ok := existingBySynthName[synRef.Name]; ok {
+		if existings, ok := existingBySynthName[variation.Synthesizer.Name]; ok {
 			existing := existings[0]
 			if equality.Semantic.DeepEqual(comp.Spec, existing.Spec) {
 				continue // already matches

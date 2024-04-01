@@ -84,8 +84,8 @@ func (c *symphonyController) buildStatus(symph *apiv1.Symphony, comps *apiv1.Com
 	//
 	// Technically it can still be incorrect in the case of duplicates, but this is very unlikely
 	// since the duplicate would have to live long enough to be synthesized.
-	for _, synth := range symph.Spec.Synthesizers {
-		if _, ok := synthMap[synth.Name]; !ok {
+	for _, v := range symph.Spec.Variations {
+		if _, ok := synthMap[v.Synthesizer.Name]; !ok {
 			return newStatus, false
 		}
 	}

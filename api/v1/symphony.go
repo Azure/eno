@@ -9,8 +9,8 @@ type SymphonyList struct {
 	Items           []Symphony `json:"items"`
 }
 
-// Symphony represents a "meta-composition" that spawns a set of child compositions
-// for each in a set of synthesizers.
+// Symphony is a set of variations on a composition.
+// Useful for creating several compositions that use a common set of bindings but different synthesizers.
 //
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
@@ -23,8 +23,8 @@ type Symphony struct {
 }
 
 type SymphonySpec struct {
-	Synthesizers []SynthesizerRef `json:"synthesizers,omitempty"`
-	Bindings     []Binding        `json:"bindings,omitempty"`
+	Variations []Variation `json:"variations,omitempty"`
+	Bindings   []Binding   `json:"bindings,omitempty"`
 }
 
 type SymphonyStatus struct {
@@ -32,4 +32,9 @@ type SymphonyStatus struct {
 	Reconciled   *metav1.Time     `json:"reconciled,omitempty"`
 	Ready        *metav1.Time     `json:"ready,omitempty"`
 	Synthesizers []SynthesizerRef `json:"synthesizers,omitempty"`
+}
+
+type Variation struct {
+	Labels      map[string]string `json:"labels,omitempty"`
+	Synthesizer SynthesizerRef    `json:"synthesizer,omitempty"`
 }

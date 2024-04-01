@@ -61,7 +61,7 @@ func TestSymphonyIntegration(t *testing.T) {
 	symph := &apiv1.Symphony{}
 	symph.Name = "test-comp"
 	symph.Namespace = "default"
-	symph.Spec.Synthesizers = []apiv1.SynthesizerRef{{Name: syn.Name}}
+	symph.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: syn.Name}}}
 	require.NoError(t, upstream.Create(ctx, symph))
 
 	testutil.Eventually(t, func() bool {

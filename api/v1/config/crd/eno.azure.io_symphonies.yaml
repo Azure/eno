@@ -18,8 +18,8 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          Symphony represents a "meta-composition" that spawns a set of child compositions
-          for each in a set of synthesizers.
+          Symphony is a set of variations on a composition.
+          Useful for creating several compositions that use a common set of bindings but different synthesizers.
         properties:
           apiVersion:
             description: |-
@@ -59,17 +59,24 @@ spec:
                   - resource
                   type: object
                 type: array
-              synthesizers:
+              variations:
                 items:
                   properties:
-                    minGeneration:
-                      description: |-
-                        Compositions will be resynthesized if their status.currentState.observedSynthesizerGeneration is < the referenced synthesizer's generation.
-                        Used to slowly roll out synthesizer updates across compositions.
-                      format: int64
-                      type: integer
-                    name:
-                      type: string
+                    labels:
+                      additionalProperties:
+                        type: string
+                      type: object
+                    synthesizer:
+                      properties:
+                        minGeneration:
+                          description: |-
+                            Compositions will be resynthesized if their status.currentState.observedSynthesizerGeneration is < the referenced synthesizer's generation.
+                            Used to slowly roll out synthesizer updates across compositions.
+                          format: int64
+                          type: integer
+                        name:
+                          type: string
+                      type: object
                   type: object
                 type: array
             type: object

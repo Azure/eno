@@ -15,7 +15,7 @@ func TestBuildSymphonyStatusHappyPath(t *testing.T) {
 	now := metav1.Now()
 
 	symph := &apiv1.Symphony{}
-	symph.Spec.Synthesizers = []apiv1.SynthesizerRef{{Name: "synth1"}, {Name: "synth2"}}
+	symph.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: "synth1"}}, {Synthesizer: apiv1.SynthesizerRef{Name: "synth2"}}}
 
 	comp1 := apiv1.Composition{}
 	comp1.Name = "comp-1"
@@ -57,7 +57,7 @@ func TestBuildSymphonyStatusMissingSynth(t *testing.T) {
 	now := metav1.Now()
 
 	symph := &apiv1.Symphony{}
-	symph.Spec.Synthesizers = []apiv1.SynthesizerRef{{Name: "synth1"}, {Name: "synth2"}}
+	symph.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: "synth1"}}, {Synthesizer: apiv1.SynthesizerRef{Name: "synth2"}}}
 
 	comp1 := apiv1.Composition{}
 	comp1.Name = "comp-1"
@@ -80,7 +80,7 @@ func TestBuildSymphonyStatusMissingSynthesis(t *testing.T) {
 	now := metav1.Now()
 
 	symph := &apiv1.Symphony{}
-	symph.Spec.Synthesizers = []apiv1.SynthesizerRef{{Name: "synth1"}, {Name: "synth2"}}
+	symph.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: "synth1"}}, {Synthesizer: apiv1.SynthesizerRef{Name: "synth2"}}}
 
 	comp1 := apiv1.Composition{}
 	comp1.Name = "comp-1"

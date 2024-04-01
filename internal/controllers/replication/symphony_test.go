@@ -37,7 +37,7 @@ func TestSymphonyCRUD(t *testing.T) {
 			Resource: apiv1.ResourceBinding{Name: "test-resource-2"},
 		},
 	}
-	sym.Spec.Synthesizers = []apiv1.SynthesizerRef{{Name: "foosynth"}, {Name: "barsynth"}}
+	sym.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: "foosynth"}}, {Synthesizer: apiv1.SynthesizerRef{Name: "barsynth"}}}
 	err = cli.Create(ctx, sym)
 	require.NoError(t, err)
 
@@ -61,9 +61,9 @@ func TestSymphonyCRUD(t *testing.T) {
 			t.Logf("wrong number of synths seen: %d", len(synthsSeen))
 			return false
 		}
-		for _, syn := range sym.Spec.Synthesizers {
-			if _, ok := synthsSeen[syn.Name]; !ok {
-				t.Logf("didn't see composition for synth %q", syn.Name)
+		for _, v := range sym.Spec.Variations {
+			if _, ok := synthsSeen[v.Synthesizer.Name]; !ok {
+				t.Logf("didn't see composition for synth %q", v.Synthesizer.Name)
 				return false
 			}
 		}
@@ -114,7 +114,7 @@ func TestSymphonyDuplicateCleanup(t *testing.T) {
 	sym := &apiv1.Symphony{}
 	sym.Name = "test"
 	sym.Namespace = "default"
-	sym.Spec.Synthesizers = []apiv1.SynthesizerRef{{Name: "foo"}}
+	sym.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: "foo"}}}
 	require.NoError(t, cli.Create(ctx, sym))
 
 	comp := apiv1.Composition{}
