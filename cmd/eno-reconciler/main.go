@@ -85,7 +85,7 @@ func run() error {
 		return fmt.Errorf("constructing manager: %w", err)
 	}
 
-	err = aggregation.NewStatusController(mgr)
+	err = aggregation.NewSliceController(mgr)
 	if err != nil {
 		return fmt.Errorf("constructing status aggregation controller: %w", err)
 	}

@@ -14,21 +14,21 @@ import (
 	"github.com/go-logr/logr"
 )
 
-type statusController struct {
+type sliceController struct {
 	client client.Client
 }
 
-func NewStatusController(mgr ctrl.Manager) error {
+func NewSliceController(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
 		Owns(&apiv1.ResourceSlice{}).
-		WithLogConstructor(manager.NewLogConstructor(mgr, "statusAggregationController")).
-		Complete(&statusController{
+		WithLogConstructor(manager.NewLogConstructor(mgr, "sliceAggregationController")).
+		Complete(&sliceController{
 			client: mgr.GetClient(),
 		})
 }
 
-func (s *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	comp := &apiv1.Composition{}
