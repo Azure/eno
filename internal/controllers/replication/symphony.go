@@ -18,8 +18,6 @@ type symphonyController struct {
 	client client.Client
 }
 
-// TODO: Avoid conflicts
-
 func NewCompositionSetController(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Symphony{}).
@@ -49,6 +47,14 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, fmt.Errorf("listing existing compositions: %w", err)
 	}
 
+	modified, err := c.syncStatus(ctx, symph, existing)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if modified {
+		return ctrl.Result{}, nil
+	}
+
 	// Hold a finalizer
 	if controllerutil.AddFinalizer(symph, "eno.azure.io/cleanup") {
 		err := c.client.Update(ctx, symph)
@@ -58,14 +64,21 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, nil
 	}
 
-	existingBySynthName, err := c.reconcileReverse(ctx, symph, existing)
+	existingBySynthName, modified, err := c.reconcileReverse(ctx, symph, existing)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	if modified {
+		return ctrl.Result{}, nil
+	}
+
 	if symph.DeletionTimestamp == nil {
-		err = c.reconcileForward(ctx, symph, existingBySynthName)
+		modified, err := c.reconcileForward(ctx, symph, existingBySynthName)
 		if err != nil {
 			return ctrl.Result{}, err
+		}
+		if modified {
+			return ctrl.Result{}, nil
 		}
 	}
 
@@ -85,7 +98,7 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 	return ctrl.Result{}, nil
 }
 
-func (c *symphonyController) reconcileReverse(ctx context.Context, symph *apiv1.Symphony, comps *apiv1.CompositionList) (map[string][]*apiv1.Composition, error) {
+func (c *symphonyController) reconcileReverse(ctx context.Context, symph *apiv1.Symphony, comps *apiv1.CompositionList) (map[string][]*apiv1.Composition, bool, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	expectedSynths := map[string]struct{}{}
@@ -93,6 +106,7 @@ func (c *symphonyController) reconcileReverse(ctx context.Context, symph *apiv1.
 		expectedSynths[syn.Name] = struct{}{}
 	}
 
+	// Delete compositions when their synth has been removed from the symphony
 	existingBySynthName := map[string][]*apiv1.Composition{}
 	for _, comp := range comps.Items {
 		comp := comp
@@ -101,13 +115,17 @@ func (c *symphonyController) reconcileReverse(ctx context.Context, symph *apiv1.
 		if _, ok := expectedSynths[comp.Spec.Synthesizer.Name]; (ok || comp.DeletionTimestamp == nil) && symph.DeletionTimestamp == nil {
 			continue // should still exist, or already deleting
 		}
+
 		err := c.client.Delete(ctx, &comp)
 		if err != nil {
-			return nil, fmt.Errorf("cleaning up composition: %w", err)
+			return nil, false, fmt.Errorf("cleaning up composition: %w", err)
 		}
+
 		logger.V(0).Info("deleted composition because its synthesizer was removed from the set", "compositionName", comp.Name, "compositionNamespace", comp.Namespace)
+		return existingBySynthName, true, nil
 	}
 
+	// Delete any duplicates we may have created in the past - leave the oldest one
 	for _, comps := range existingBySynthName {
 		if len(comps) < 2 {
 			continue
@@ -117,15 +135,17 @@ func (c *symphonyController) reconcileReverse(ctx context.Context, symph *apiv1.
 
 		err := c.client.Delete(ctx, comps[0])
 		if err != nil {
-			return nil, fmt.Errorf("deleting duplicate composition: %w", err)
+			return nil, false, fmt.Errorf("deleting duplicate composition: %w", err)
 		}
+
 		logger.V(0).Info("deleted composition because it's a duplicate", "compositionName", comps[0].Name, "compositionNamespace", comps[0].Namespace)
+		return existingBySynthName, true, nil
 	}
 
-	return existingBySynthName, nil
+	return existingBySynthName, false, nil
 }
 
-func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.Symphony, existingBySynthName map[string][]*apiv1.Composition) error {
+func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.Symphony, existingBySynthName map[string][]*apiv1.Composition) (bool, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	for _, synRef := range symph.Spec.Synthesizers {
@@ -137,7 +157,7 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		comp.Spec.Synthesizer = synRef
 		err := controllerutil.SetControllerReference(symph, comp, c.client.Scheme())
 		if err != nil {
-			return fmt.Errorf("setting composition's controller: %w", err)
+			return false, fmt.Errorf("setting composition's controller: %w", err)
 		}
 
 		// Diff and update if needed when the composition for this synthesizer already exists
@@ -146,21 +166,56 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 			if equality.Semantic.DeepEqual(comp.Spec, existing.Spec) {
 				continue // already matches
 			}
-
 			existing.Spec = comp.Spec
 			err = c.client.Update(ctx, existing)
 			if err != nil {
-				return fmt.Errorf("updating existing composition: %w", err)
+				return false, fmt.Errorf("updating existing composition: %w", err)
 			}
+
 			logger.V(0).Info("updated composition because the set's spec changed", "compositionName", existing.Name, "compositionNamespace", existing.Namespace)
+			return true, nil
+		}
+
+		// Update the symphony status before creating to avoid conflicts
+		// The next creation will fail if a composition has already been created for this synthesizer ref.
+		symph.Status.Synthesizers = append(symph.Status.Synthesizers, apiv1.SynthesizerRef{Name: comp.Name})
+		sortSynthesizerRefs(symph.Status.Synthesizers)
+		if err := c.client.Status().Update(ctx, symph); err != nil {
+			return false, fmt.Errorf("adding synthesizer to status: %w", err)
 		}
 
 		err = c.client.Create(ctx, comp)
 		if err != nil {
-			return fmt.Errorf("creating composition: %w", err)
+			return false, fmt.Errorf("creating composition: %w", err)
 		}
+
 		logger.V(0).Info("created composition for the set", "compositionName", comp.Name, "compositionNamespace", comp.Namespace)
+		return true, nil
 	}
 
-	return nil
+	return false, nil
+}
+
+func (c *symphonyController) syncStatus(ctx context.Context, symph *apiv1.Symphony, comps *apiv1.CompositionList) (bool, error) {
+	refs := make([]apiv1.SynthesizerRef, len(comps.Items))
+	for i, comp := range comps.Items {
+		refs[i] = apiv1.SynthesizerRef{Name: comp.Spec.Synthesizer.Name}
+	}
+	sortSynthesizerRefs(refs)
+
+	if equality.Semantic.DeepEqual(refs, symph.Status.Synthesizers) {
+		return false, nil
+	}
+
+	symph.Status.Synthesizers = refs
+	if err := c.client.Status().Update(ctx, symph); err != nil {
+		return false, fmt.Errorf("syncing status: %w", err)
+	}
+
+	logr.FromContextOrDiscard(ctx).V(1).Info("sync'd symphony status with composition index")
+	return true, nil
+}
+
+func sortSynthesizerRefs(refs []apiv1.SynthesizerRef) {
+	sort.Slice(refs, func(i, j int) bool { return refs[i].Name < refs[j].Name })
 }

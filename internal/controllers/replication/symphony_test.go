@@ -127,6 +127,6 @@ func TestSymphonyDuplicateCleanup(t *testing.T) {
 	comp2.Name = "bar"
 
 	comps := &apiv1.CompositionList{Items: []apiv1.Composition{comp, comp2}}
-	_, err := s.reconcileReverse(ctx, sym, comps)
+	_, _, err := s.reconcileReverse(ctx, sym, comps)
 	require.EqualError(t, err, `deleting duplicate composition: compositions.eno.azure.io "bar" not found`)
 }

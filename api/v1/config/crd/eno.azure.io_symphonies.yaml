@@ -78,6 +78,19 @@ spec:
               synthesized:
                 format: date-time
                 type: string
+              synthesizers:
+                items:
+                  properties:
+                    minGeneration:
+                      description: Compositions will be resynthesized if their status.currentState.observedSynthesizerGeneration
+                        is < the referenced synthesizer's generation. Used to slowly
+                        roll out synthesizer updates across compositions.
+                      format: int64
+                      type: integer
+                    name:
+                      type: string
+                  type: object
+                type: array
             type: object
         type: object
     served: true
