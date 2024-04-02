@@ -64,6 +64,9 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, nil
 	}
 
+	// We reconcile both "forward" and in "reverse" i.e. creating/updateing and deleting.
+	// The two stages are broken up for the sake of minimizing and documenting state flowing between them.
+	// Any changes cause the controller to return early and catch the next watch event as is expected from controllers.
 	existingBySynthName, modified, err := c.reconcileReverse(ctx, symph, existing)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -71,7 +74,6 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if modified {
 		return ctrl.Result{}, nil
 	}
-
 	if symph.DeletionTimestamp == nil {
 		modified, err := c.reconcileForward(ctx, symph, existingBySynthName)
 		if err != nil {
