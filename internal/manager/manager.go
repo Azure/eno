@@ -42,6 +42,7 @@ func init() {
 const (
 	IdxPodsByComposition           = ".metadata.ownerReferences.composition"
 	IdxCompositionsBySynthesizer   = ".spec.synthesizer"
+	IdxCompositionsBySymphony      = ".compositionsBySymphony"
 	IdxResourceSlicesByComposition = ".resourceSlicesByComposition"
 
 	ManagerLabelKey   = "app.kubernetes.io/managed-by"
@@ -152,6 +153,11 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 			comp := o.(*apiv1.Composition)
 			return []string{comp.Spec.Synthesizer.Name}
 		})
+		if err != nil {
+			return nil, err
+		}
+
+		err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.Composition{}, IdxCompositionsBySymphony, indexController())
 		if err != nil {
 			return nil, err
 		}

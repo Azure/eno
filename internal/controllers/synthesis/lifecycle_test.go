@@ -123,7 +123,7 @@ func TestPodConcurrencyLimit(t *testing.T) {
 	// Change something on the composition
 	err := retry.RetryOnConflict(testutil.Backoff, func() error {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Spec.ReconcileInterval = &metav1.Duration{Duration: time.Hour}
+		comp.Spec.Bindings = []apiv1.Binding{{Key: "new-binding", Resource: apiv1.ResourceBinding{Name: "test"}}}
 		return cli.Update(ctx, comp)
 	})
 	require.NoError(t, err)
@@ -138,7 +138,7 @@ func TestPodConcurrencyLimit(t *testing.T) {
 	// Change something on the composition again
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Spec.ReconcileInterval = &metav1.Duration{Duration: time.Hour}
+		comp.Spec.Bindings = []apiv1.Binding{{Key: "new-binding", Resource: apiv1.ResourceBinding{Name: "test"}}}
 		return cli.Update(ctx, comp)
 	})
 	require.NoError(t, err)

@@ -44,7 +44,7 @@ func testAggregation(t *testing.T, ready bool, reconciled bool) {
 	require.NoError(t, cli.Create(ctx, comp))
 	require.NoError(t, cli.Status().Update(ctx, comp))
 
-	a := &statusController{client: cli}
+	a := &sliceController{client: cli}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	_, err := a.Reconcile(ctx, req)
 	require.NoError(t, err)
@@ -93,7 +93,7 @@ func TestStaleStatus(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, comp))
 	require.NoError(t, cli.Status().Update(ctx, comp))
 
-	a := &statusController{client: cli}
+	a := &sliceController{client: cli}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	_, err := a.Reconcile(ctx, req)
 	require.NoError(t, err)
@@ -128,7 +128,7 @@ func TestCleanupSafety(t *testing.T) {
 	require.NoError(t, cli.Status().Update(ctx, comp))
 	require.NoError(t, cli.Delete(ctx, comp))
 
-	a := &statusController{client: cli}
+	a := &sliceController{client: cli}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	_, err := a.Reconcile(ctx, req)
 	require.NoError(t, err)
@@ -166,7 +166,7 @@ func TestReadyTimeAggregation(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, comp))
 	require.NoError(t, cli.Status().Update(ctx, comp))
 
-	a := &statusController{client: cli}
+	a := &sliceController{client: cli}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	_, err := a.Reconcile(ctx, req)
 	require.NoError(t, err)
@@ -191,7 +191,7 @@ func TestNoSlices(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, comp))
 	require.NoError(t, cli.Status().Update(ctx, comp))
 
-	a := &statusController{client: cli}
+	a := &sliceController{client: cli}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	_, err := a.Reconcile(ctx, req)
 	require.NoError(t, err)
@@ -216,7 +216,7 @@ func TestMissingSlice(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, comp))
 	require.NoError(t, cli.Status().Update(ctx, comp))
 
-	a := &statusController{client: cli}
+	a := &sliceController{client: cli}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	_, err := a.Reconcile(ctx, req)
 	require.NoError(t, err)
@@ -243,7 +243,7 @@ func TestMissingSliceWhileDeleting(t *testing.T) {
 	require.NoError(t, cli.Status().Update(ctx, comp))
 	require.NoError(t, cli.Delete(ctx, comp))
 
-	a := &statusController{client: cli}
+	a := &sliceController{client: cli}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	_, err := a.Reconcile(ctx, req)
 	require.NoError(t, err)
@@ -280,7 +280,7 @@ func TestOrphanedOnPurpose(t *testing.T) {
 	require.NoError(t, cli.Status().Update(ctx, comp))
 	require.NoError(t, cli.Delete(ctx, comp))
 
-	a := &statusController{client: cli}
+	a := &sliceController{client: cli}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	_, err := a.Reconcile(ctx, req)
 	require.NoError(t, err)

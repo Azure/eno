@@ -55,6 +55,11 @@ spec:
                   Pods are recreated after they've existed for at least the pod timeout interval.
                   This helps close the loop in failure modes where a pod may be considered ready but not actually able to run.
                 type: string
+              reconcileInterval:
+                description: |-
+                  Synthesized resources can optionally be reconciled at a given interval.
+                  Per-resource jitter will be applied to avoid spikes in request rate.
+                type: string
               refs:
                 description: |-
                   Refs define the Synthesizer's input schema without binding it to specific

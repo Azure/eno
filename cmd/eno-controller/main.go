@@ -11,6 +11,8 @@ import (
 	"go.uber.org/zap/zapcore"
 	ctrl "sigs.k8s.io/controller-runtime"
 
+	"github.com/Azure/eno/internal/controllers/aggregation"
+	"github.com/Azure/eno/internal/controllers/replication"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/controllers/watchdog"
 	"github.com/Azure/eno/internal/manager"
@@ -90,6 +92,16 @@ func run() error {
 	err = watchdog.NewController(mgr, watchdogThres)
 	if err != nil {
 		return fmt.Errorf("constructing watchdog controller: %w", err)
+	}
+
+	err = replication.NewSymphonyController(mgr)
+	if err != nil {
+		return fmt.Errorf("constructing symphony replication controller: %w", err)
+	}
+
+	err = aggregation.NewSymphonyController(mgr)
+	if err != nil {
+		return fmt.Errorf("constructing symphony aggregation controller: %w", err)
 	}
 
 	return mgr.Start(ctx)
