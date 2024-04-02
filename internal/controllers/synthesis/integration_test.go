@@ -93,15 +93,15 @@ func TestControllerHappyPath(t *testing.T) {
 // TestPodNamespaceOverride proves that synthesis Pods are scheduled on the
 // configured namespace.
 func TestPodNamespaceOverride(t *testing.T) {
-	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t)
-	cli := mgr.GetClient()
-
 	expectedPodNamespace := "eno"
 	var actualPodNamespace atomic.Value
 	podHook := func(p *corev1.Pod) {
 		actualPodNamespace.Store(p.Namespace)
 	}
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t, testutil.WithPodNamespace(expectedPodNamespace))
+	cli := mgr.GetClient()
 
 	lifecycleConfig := *minimalTestConfig
 	lifecycleConfig.PodNamespace = expectedPodNamespace

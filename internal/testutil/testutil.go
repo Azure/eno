@@ -65,11 +65,23 @@ func NewContext(t *testing.T) context.Context {
 	return logr.NewContext(ctx, testr.NewWithOptions(t, testr.Options{Verbosity: 2}))
 }
 
+type TestManagerOption func(*manager.Options)
+
+func (o TestManagerOption) apply(opts *manager.Options) {
+	o(opts)
+}
+
+func WithPodNamespace(ns string) TestManagerOption {
+	return TestManagerOption(func(o *manager.Options) {
+		o.SynthesizerPodNamespace = ns
+	})
+}
+
 // NewManager starts one or two envtest environments depending on the env.
 // This should work seamlessly when run locally assuming binaries have been fetched with setup-envtest.
 // In CI the second environment is used to compatibility test against a matrix of k8s versions.
 // This compatibility testing is tightly coupled to the github action and not expected to work locally.
-func NewManager(t *testing.T) *Manager {
+func NewManager(t *testing.T, testOpts ...TestManagerOption) *Manager {
 	t.Parallel()
 	_, b, _, _ := goruntime.Caller(0)
 	root := filepath.Join(filepath.Dir(b), "..", "..")
@@ -104,13 +116,16 @@ func NewManager(t *testing.T) *Manager {
 		break
 	}
 	require.NoError(t, err)
-
-	mgr, err := manager.NewTest(logr.FromContextOrDiscard(NewContext(t)), &manager.Options{
+	options := &manager.Options{
 		Rest:                    cfg,
 		HealthProbeAddr:         "127.0.0.1:0",
 		MetricsAddr:             "127.0.0.1:0",
 		SynthesizerPodNamespace: "default",
-	})
+	}
+	for _, o := range testOpts {
+		o.apply(options)
+	}
+	mgr, err := manager.NewTest(logr.FromContextOrDiscard(NewContext(t)), options)
 	require.NoError(t, err)
 	require.NoError(t, testv1.SchemeBuilder.AddToScheme(mgr.GetScheme())) // test-specific CRDs
 	newFakePodRuntime(t, mgr)
