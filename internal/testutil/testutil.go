@@ -324,8 +324,9 @@ func AtLeastVersion(t *testing.T, minor int) bool {
 }
 
 type ExecConn struct {
-	Hook  func(s *apiv1.Synthesizer) []client.Object
-	Calls atomic.Int64
+	Hook    func(s *apiv1.Synthesizer) []client.Object
+	PodHook func(p *corev1.Pod)
+	Calls   atomic.Int64
 }
 
 func (e *ExecConn) Synthesize(ctx context.Context, syn *apiv1.Synthesizer, pod *corev1.Pod, input []byte) (io.Reader, error) {
@@ -334,6 +335,10 @@ func (e *ExecConn) Synthesize(ctx context.Context, syn *apiv1.Synthesizer, pod *
 	objs := []client.Object{}
 	if e.Hook != nil {
 		objs = e.Hook(syn)
+	}
+
+	if e.PodHook != nil {
+		e.PodHook(pod)
 	}
 
 	outObjs := []*unstructured.Unstructured{}

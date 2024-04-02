@@ -3,6 +3,7 @@ package synthesis
 import (
 	"fmt"
 	"math/rand"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -80,6 +81,64 @@ func TestControllerHappyPath(t *testing.T) {
 	testutil.Eventually(t, func() bool {
 		return conn.Calls.Load() == 2
 	})
+
+	// The pod is deleted
+	testutil.Eventually(t, func() bool {
+		list := &corev1.PodList{}
+		require.NoError(t, cli.List(ctx, list))
+		return len(list.Items) == 0
+	})
+}
+
+// TestPodNamespaceOverride proves that synthesis Pods are scheduled on the
+// configured namespace.
+func TestPodNamespaceOverride(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	cli := mgr.GetClient()
+
+	expectedPodNamespace := "eno"
+	var actualPodNamespace atomic.Value
+	podHook := func(p *corev1.Pod) {
+		actualPodNamespace.Store(p.Namespace)
+	}
+
+	lifecycleConfig := *minimalTestConfig
+	lifecycleConfig.PodNamespace = expectedPodNamespace
+	require.NoError(t, NewPodLifecycleController(mgr.Manager, &lifecycleConfig))
+	require.NoError(t, NewStatusController(mgr.Manager))
+	require.NoError(t, NewRolloutController(mgr.Manager))
+	conn := &testutil.ExecConn{
+		PodHook: podHook,
+	}
+	require.NoError(t, NewExecController(mgr.Manager, &lifecycleConfig, conn))
+	mgr.Start(t)
+
+	ns := &corev1.Namespace{}
+	ns.Name = "eno"
+	require.NoError(t, cli.Create(ctx, ns))
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "test-syn-image"
+	require.NoError(t, cli.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	t.Run("initial creation", func(t *testing.T) {
+		// The pod eventually performs the synthesis
+		testutil.Eventually(t, func() bool {
+			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
+			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
+		})
+	})
+
+	require.Equal(t, expectedPodNamespace, actualPodNamespace.Load())
+	require.Equal(t, 1, conn.Calls.Load())
 
 	// The pod is deleted
 	testutil.Eventually(t, func() bool {

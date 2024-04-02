@@ -69,7 +69,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Delete any unnecessary pods
 	pods := &corev1.PodList{}
-	err = c.client.List(ctx, pods, client.InNamespace(comp.Namespace), client.MatchingFields{
+	err = c.client.List(ctx, pods, client.InNamespace(c.config.PodNamespace), client.MatchingFields{
 		manager.IdxPodsByComposition: comp.Name,
 	})
 	if err != nil {
