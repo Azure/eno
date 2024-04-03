@@ -13,6 +13,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
@@ -41,14 +42,13 @@ func NewPodLifecycleController(mgr ctrl.Manager, cfg *Config) error {
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
-		Owns(&corev1.Pod{}).
+		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(manager.PodToCompMapFunc)).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "podLifecycleController")).
 		Complete(c)
 }
 
 func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx)
-
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, req.NamespacedName, comp)
 	if err != nil {
@@ -69,7 +69,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Delete any unnecessary pods
 	pods := &corev1.PodList{}
-	err = c.client.List(ctx, pods, client.InNamespace(comp.Namespace), client.MatchingFields{
+	err = c.client.List(ctx, pods, client.InNamespace(c.config.PodNamespace), client.MatchingFields{
 		manager.IdxPodsByComposition: comp.Name,
 	})
 	if err != nil {
@@ -166,7 +166,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// If we made it this far it's safe to create a pod
-	pod := newPod(c.config, c.client.Scheme(), comp, syn)
+	pod := newPod(c.config, comp, syn)
 	err = c.client.Create(ctx, pod)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("creating pod: %w", err)

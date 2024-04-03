@@ -1,32 +1,28 @@
 package synthesis
 
 import (
-	"fmt"
 	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
 )
 
-func newPod(cfg *Config, scheme *runtime.Scheme, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev1.Pod {
+func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev1.Pod {
 	pod := &corev1.Pod{}
 	pod.GenerateName = "synthesis-"
 	pod.Namespace = cfg.PodNamespace
 	pod.Finalizers = []string{"eno.azure.io/cleanup"}
 	pod.Labels = map[string]string{
-		manager.ManagerLabelKey:       manager.ManagerLabelValue,
-		"eno.azure.io/synthesis-uuid": comp.Status.CurrentSynthesis.UUID,
+		manager.CompositionNameLabelKey:      comp.Name,
+		manager.CompositionNamespaceLabelKey: comp.Namespace,
+		manager.ManagerLabelKey:              manager.ManagerLabelValue,
+		"eno.azure.io/synthesis-uuid":        comp.Status.CurrentSynthesis.UUID,
 	}
 	pod.Annotations = map[string]string{
 		"eno.azure.io/composition-generation": strconv.FormatInt(comp.Generation, 10),
 		"eno.azure.io/synthesizer-generation": strconv.FormatInt(syn.Generation, 10),
-	}
-	if err := controllerutil.SetControllerReference(comp, pod, scheme); err != nil {
-		panic(fmt.Sprintf("unable to set owner reference: %s", err))
 	}
 
 	userID := int64(1000)
