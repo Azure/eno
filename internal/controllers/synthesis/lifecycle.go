@@ -44,7 +44,7 @@ func NewPodLifecycleController(mgr ctrl.Manager, cfg *Config) error {
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
-		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(handler.MapFunc(reconcileRequestsFromPod))).
+		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(handler.MapFunc(podToCompMapFunc))).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "podLifecycleController")).
 		Complete(c)
 }
@@ -331,7 +331,11 @@ func isReconciling(comp *apiv1.Composition) bool {
 	return comp.Status.CurrentSynthesis != nil && (comp.Status.CurrentSynthesis.Reconciled == nil) || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation
 }
 
-func reconcileRequestsFromPod(_ context.Context, obj client.Object) []reconcile.Request {
+func podToCompMapFunc(ctx context.Context, obj client.Object) []reconcile.Request {
+	if _, ok := obj.(*corev1.Pod); !ok {
+		logr.FromContextOrDiscard(ctx).V(0).Info("unexpected type given to podToCompMapFunc")
+		return nil
+	}
 	return []reconcile.Request{
 		{
 			NamespacedName: machineryTypes.NamespacedName{
