@@ -9,13 +9,11 @@ import (
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	machineryTypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/flowcontrol"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
@@ -44,7 +42,7 @@ func NewPodLifecycleController(mgr ctrl.Manager, cfg *Config) error {
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
-		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(handler.MapFunc(podToCompMapFunc))).
+		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(manager.PodToCompMapFunc)).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "podLifecycleController")).
 		Complete(c)
 }
@@ -329,19 +327,4 @@ func shouldUpdateDeletedCompositionStatus(comp *apiv1.Composition) bool {
 
 func isReconciling(comp *apiv1.Composition) bool {
 	return comp.Status.CurrentSynthesis != nil && (comp.Status.CurrentSynthesis.Reconciled == nil) || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation
-}
-
-func podToCompMapFunc(ctx context.Context, obj client.Object) []reconcile.Request {
-	if _, ok := obj.(*corev1.Pod); !ok {
-		logr.FromContextOrDiscard(ctx).V(0).Info("unexpected type given to podToCompMapFunc")
-		return nil
-	}
-	return []reconcile.Request{
-		{
-			NamespacedName: machineryTypes.NamespacedName{
-				Name:      obj.GetLabels()[manager.CompositionNameLabelKey],
-				Namespace: obj.GetLabels()[manager.CompositionNamespaceLabelKey],
-			},
-		},
-	}
 }

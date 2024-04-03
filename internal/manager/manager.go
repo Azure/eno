@@ -246,6 +246,31 @@ func NewCompositionToSynthesizerHandler(cli client.Client) handler.EventHandler 
 	}
 }
 
+func PodReferencesComposition(pod *corev1.Pod) bool {
+	labels := pod.GetLabels()
+	if labels == nil || labels[CompositionNameLabelKey] == "" || labels[CompositionNamespaceLabelKey] == "" {
+		return false
+	}
+	return true
+}
+
+func PodToCompMapFunc(ctx context.Context, obj client.Object) []reconcile.Request {
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
+		logr.FromContextOrDiscard(ctx).V(0).Info("unexpected type given to podToCompMapFunc")
+		return nil
+	}
+	if !PodReferencesComposition(pod) {
+		return nil
+	}
+	return []reconcile.Request{{
+		NamespacedName: types.NamespacedName{
+			Name:      pod.GetLabels()[CompositionNameLabelKey],
+			Namespace: pod.GetLabels()[CompositionNamespaceLabelKey],
+		},
+	}}
+}
+
 func indexController() client.IndexerFunc {
 	return func(o client.Object) []string {
 		owner := metav1.GetControllerOf(o)

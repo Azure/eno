@@ -39,7 +39,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("gettting pod: %w", err))
 	}
-	if pod.GetLabels()[manager.CompositionNameLabelKey] == "" || pod.GetLabels()[manager.CompositionNamespaceLabelKey] == "" {
+	if !manager.PodReferencesComposition(pod) {
 		// This shouldn't be common as the informer watch filters on Eno-managed pods using a selector
 		return ctrl.Result{}, nil
 	}
