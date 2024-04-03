@@ -138,7 +138,7 @@ func TestPodNamespaceOverride(t *testing.T) {
 	})
 
 	require.Equal(t, expectedPodNamespace, actualPodNamespace.Load())
-	require.Equal(t, 1, conn.Calls.Load())
+	require.Equal(t, int64(1), conn.Calls.Load())
 
 	// The pod is deleted
 	testutil.Eventually(t, func() bool {

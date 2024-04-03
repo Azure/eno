@@ -40,13 +40,16 @@ func init() {
 // - The resource slices cached by the informer do not have the configured manifests since they are held by the reconstitution cache anyway
 
 const (
-	IdxPodsByComposition           = ".metadata.ownerReferences.composition"
+	IdxPodsByComposition           = ".podsByComposition"
 	IdxCompositionsBySynthesizer   = ".spec.synthesizer"
 	IdxCompositionsBySymphony      = ".compositionsBySymphony"
 	IdxResourceSlicesByComposition = ".resourceSlicesByComposition"
 
 	ManagerLabelKey   = "app.kubernetes.io/managed-by"
 	ManagerLabelValue = "eno"
+
+	CompositionNameLabelKey      = "eno.azure.io/composition-name"
+	CompositionNamespaceLabelKey = "eno.azure.io/composition-namespace"
 )
 
 func init() {
@@ -144,7 +147,9 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 	}
 
 	if isController {
-		err = mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Pod{}, IdxPodsByComposition, indexController())
+		err = mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Pod{}, IdxPodsByComposition, func(o client.Object) []string {
+			return []string{o.GetLabels()[CompositionNameLabelKey]}
+		})
 		if err != nil {
 			return nil, err
 		}

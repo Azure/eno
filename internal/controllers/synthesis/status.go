@@ -39,7 +39,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("gettting pod: %w", err))
 	}
-	if len(pod.OwnerReferences) == 0 || pod.OwnerReferences[0].Kind != "Composition" {
+	if pod.GetLabels()[manager.CompositionNameLabelKey] == "" || pod.GetLabels()[manager.CompositionNamespaceLabelKey] == "" {
 		// This shouldn't be common as the informer watch filters on Eno-managed pods using a selector
 		return ctrl.Result{}, nil
 	}
@@ -49,8 +49,8 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	comp := &apiv1.Composition{}
-	comp.Name = pod.OwnerReferences[0].Name
-	comp.Namespace = pod.Namespace
+	comp.Name = pod.GetLabels()[manager.CompositionNameLabelKey]
+	comp.Namespace = pod.GetLabels()[manager.CompositionNamespaceLabelKey]
 	err = c.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 	if errors.IsNotFound(err) {
 		logger.V(0).Info("composition was deleted unexpectedly - releasing synthesizer pod")
