@@ -3,17 +3,20 @@ package reconciliation
 import (
 	"testing"
 
-	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/controllers/aggregation"
-	"github.com/Azure/eno/internal/controllers/replication"
-	"github.com/Azure/eno/internal/controllers/synthesis"
-	"github.com/Azure/eno/internal/testutil"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/controllers/aggregation"
+	"github.com/Azure/eno/internal/controllers/replication"
+	"github.com/Azure/eno/internal/controllers/synthesis"
+	"github.com/Azure/eno/internal/testutil"
 )
 
 // TestSymphonyIntegration proves that a basic symphony creation/deletion workflow works.
@@ -54,8 +57,13 @@ func TestSymphonyIntegration(t *testing.T) {
 
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
-	syn.Spec.Image = "create"
+	syn.Spec.Image = "anything"
 	require.NoError(t, upstream.Create(ctx, syn))
+
+	syn2 := &apiv1.Synthesizer{}
+	syn2.Name = "test-syn-2"
+	syn2.Spec.Image = "anything"
+	require.NoError(t, upstream.Create(ctx, syn2))
 
 	// Creation
 	symph := &apiv1.Symphony{}
@@ -69,9 +77,48 @@ func TestSymphonyIntegration(t *testing.T) {
 		return symph.Status.Reconciled != nil && symph.Status.ObservedGeneration == symph.Generation
 	})
 
+	// Add another variation
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph)
+		symph.Spec.Variations = append(symph.Spec.Variations, apiv1.Variation{
+			Synthesizer: apiv1.SynthesizerRef{Name: syn2.Name},
+		})
+		return upstream.Update(ctx, symph)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph)
+		return symph.Status.Reconciled != nil && symph.Status.ObservedGeneration == symph.Generation
+	})
+
+	// Remove a variation
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph)
+		symph.Spec.Variations = symph.Spec.Variations[:1]
+		return upstream.Update(ctx, symph)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		current := &apiv1.Symphony{} // invalidate cache
+		upstream.Get(ctx, client.ObjectKeyFromObject(symph), current)
+		return symph.Status.Reconciled != nil && current.Status.ObservedGeneration == symph.Generation && len(current.Status.Synthesizers) == 1
+	})
+
+	comps := &apiv1.CompositionList{}
+	err = upstream.List(ctx, comps)
+	require.NoError(t, err)
+	assert.Len(t, comps.Items, 1)
+
 	// Deletion
 	require.NoError(t, upstream.Delete(ctx, symph))
 	testutil.Eventually(t, func() bool {
 		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph))
 	})
+
+	comps = &apiv1.CompositionList{}
+	err = upstream.List(ctx, comps)
+	require.NoError(t, err)
+	assert.Len(t, comps.Items, 0)
 }

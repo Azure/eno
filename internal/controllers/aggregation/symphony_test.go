@@ -105,3 +105,38 @@ func TestBuildSymphonyStatusMissingSynthesis(t *testing.T) {
 	_, changed := c.buildStatus(symph, comps)
 	require.False(t, changed)
 }
+
+func TestBuildSymphonyStatusDeletingComposition(t *testing.T) {
+	now := metav1.Now()
+
+	symph := &apiv1.Symphony{}
+	symph.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: "synth1"}}, {Synthesizer: apiv1.SynthesizerRef{Name: "synth2"}}}
+
+	comp1 := apiv1.Composition{}
+	comp1.DeletionTimestamp = &now
+	comp1.Generation = 123
+	comp1.Name = "comp-1"
+	comp1.Spec.Synthesizer.Name = "synth1"
+	comp1.Status.CurrentSynthesis = &apiv1.Synthesis{
+		ObservedCompositionGeneration: comp1.Generation - 1, // !=
+		Synthesized:                   &now,
+		Reconciled:                    ptr.To(metav1.NewTime(now.Add(time.Minute + time.Second))),
+		Ready:                         ptr.To(metav1.NewTime(now.Add(time.Second))),
+	}
+
+	comp2 := apiv1.Composition{}
+	comp2.Name = "comp-2"
+	comp2.Spec.Synthesizer.Name = "synth2"
+	comp2.Status.CurrentSynthesis = &apiv1.Synthesis{
+		Synthesized: ptr.To(metav1.NewTime(now.Add(time.Minute))),
+		Reconciled:  ptr.To(metav1.NewTime(now.Add(time.Second))),
+		Ready:       ptr.To(metav1.NewTime(now.Add(time.Minute + (time.Second * 2)))),
+	}
+
+	comps := &apiv1.CompositionList{}
+	comps.Items = []apiv1.Composition{comp2, comp1}
+
+	c := &symphonyController{}
+	_, changed := c.buildStatus(symph, comps)
+	require.False(t, changed)
+}

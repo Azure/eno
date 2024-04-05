@@ -64,7 +64,7 @@ func (c *symphonyController) buildStatus(symph *apiv1.Symphony, comps *apiv1.Com
 	synthMap := map[string]struct{}{}
 	for _, comp := range comps.Items {
 		synthMap[comp.Spec.Synthesizer.Name] = struct{}{}
-		if comp.Status.CurrentSynthesis == nil {
+		if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation || comp.DeletionTimestamp != nil {
 			return newStatus, false
 		}
 
