@@ -59,7 +59,7 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 }
 
 func (c *symphonyController) buildStatus(symph *apiv1.Symphony, comps *apiv1.CompositionList) (apiv1.SymphonyStatus, bool) {
-	newStatus := apiv1.SymphonyStatus{Synthesizers: symph.Status.Synthesizers}
+	newStatus := apiv1.SymphonyStatus{ObservedGeneration: symph.Generation, Synthesizers: symph.Status.Synthesizers}
 
 	synthMap := map[string]struct{}{}
 	for _, comp := range comps.Items {

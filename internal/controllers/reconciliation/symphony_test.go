@@ -66,7 +66,7 @@ func TestSymphonyIntegration(t *testing.T) {
 
 	testutil.Eventually(t, func() bool {
 		upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph)
-		return symph.Status.Reconciled != nil
+		return symph.Status.Reconciled != nil && symph.Status.ObservedGeneration == symph.Generation
 	})
 
 	// Deletion

@@ -15,6 +15,7 @@ func TestBuildSymphonyStatusHappyPath(t *testing.T) {
 	now := metav1.Now()
 
 	symph := &apiv1.Symphony{}
+	symph.Generation = 123
 	symph.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: "synth1"}}, {Synthesizer: apiv1.SynthesizerRef{Name: "synth2"}}}
 
 	comp1 := apiv1.Composition{}
@@ -42,9 +43,10 @@ func TestBuildSymphonyStatusHappyPath(t *testing.T) {
 	status, changed := c.buildStatus(symph, comps)
 	require.True(t, changed)
 	assert.Equal(t, apiv1.SymphonyStatus{
-		Synthesized: ptr.To(metav1.NewTime(now.Add(time.Minute))),
-		Reconciled:  ptr.To(metav1.NewTime(now.Add(time.Minute + time.Second))),
-		Ready:       ptr.To(metav1.NewTime(now.Add(time.Minute + (time.Second * 2)))),
+		ObservedGeneration: 123,
+		Synthesized:        ptr.To(metav1.NewTime(now.Add(time.Minute))),
+		Reconciled:         ptr.To(metav1.NewTime(now.Add(time.Minute + time.Second))),
+		Ready:              ptr.To(metav1.NewTime(now.Add(time.Minute + (time.Second * 2)))),
 	}, status)
 
 	// It should not update the status when it already matches
