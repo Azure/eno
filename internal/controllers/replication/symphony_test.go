@@ -146,10 +146,12 @@ func TestSymphonyDuplicateCleanup(t *testing.T) {
 	now := metav1.Now()
 	comp.CreationTimestamp = metav1.NewTime(now.Add(time.Second))
 	comp.Name = "foo"
+	comp.Spec.Synthesizer.Name = "foo"
 
 	comp2 := apiv1.Composition{}
 	comp2.CreationTimestamp = now
 	comp2.Name = "bar"
+	comp2.Spec.Synthesizer.Name = "foo"
 
 	comps := &apiv1.CompositionList{Items: []apiv1.Composition{comp, comp2}}
 	_, _, err := s.reconcileReverse(ctx, sym, comps)

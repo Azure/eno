@@ -82,6 +82,9 @@ spec:
             type: object
           status:
             properties:
+              observedGeneration:
+                format: int64
+                type: integer
               ready:
                 format: date-time
                 type: string

@@ -114,8 +114,11 @@ func (c *symphonyController) reconcileReverse(ctx context.Context, symph *apiv1.
 		comp := comp
 		existingBySynthName[comp.Spec.Synthesizer.Name] = append(existingBySynthName[comp.Spec.Synthesizer.Name], &comp)
 
-		if _, ok := expectedSynths[comp.Spec.Synthesizer.Name]; (ok || comp.DeletionTimestamp == nil) && symph.DeletionTimestamp == nil {
-			continue // should still exist, or already deleting
+		if _, ok := expectedSynths[comp.Spec.Synthesizer.Name]; ok && symph.DeletionTimestamp == nil {
+			continue // should still exist
+		}
+		if comp.DeletionTimestamp != nil {
+			continue // already deleting
 		}
 
 		err := c.client.Delete(ctx, &comp)
