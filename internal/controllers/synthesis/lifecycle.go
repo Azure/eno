@@ -216,10 +216,6 @@ func (c *podLifecycleController) reconcileDeletedComposition(ctx context.Context
 		logger.V(1).Info("refusing to remove composition finalizer because it is still being reconciled")
 		return ctrl.Result{}, nil
 	}
-	if hasRunningPod(pods) {
-		logger.V(1).Info("refusing to remove composition finalizer because at least one synthesizer pod still exists")
-		return ctrl.Result{}, nil
-	}
 	if controllerutil.RemoveFinalizer(comp, "eno.azure.io/cleanup") {
 		err := c.client.Update(ctx, comp)
 		if err != nil {
@@ -241,11 +237,6 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 	var onePodDeleting bool
 	for _, pod := range pods.Items {
 		pod := pod
-		if comp.DeletionTimestamp != nil {
-			logger = logger.WithValues("reason", "CompositionDeleted")
-			return logger, &pod, true
-		}
-
 		// Allow a single extra pod to be created while the previous one is terminating
 		// in order to break potential deadlocks while avoiding a thundering herd of pods
 		if pod.DeletionTimestamp != nil {
@@ -254,6 +245,11 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 			}
 			onePodDeleting = true
 			continue
+		}
+
+		if comp.DeletionTimestamp != nil {
+			logger = logger.WithValues("reason", "CompositionDeleted")
+			return logger, &pod, true
 		}
 
 		isCurrent := podDerivedFrom(comp, &pod)
@@ -301,15 +297,6 @@ func swapStates(comp *apiv1.Composition, syn *apiv1.Synthesizer) {
 		ObservedCompositionGeneration: comp.Generation,
 		Attempts:                      attempts,
 	}
-}
-
-func hasRunningPod(list *corev1.PodList) bool {
-	for _, pod := range list.Items {
-		if pod.DeletionTimestamp == nil {
-			return true
-		}
-	}
-	return false
 }
 
 func shouldBackOffPodCreation(comp *apiv1.Composition) bool {

@@ -140,3 +140,56 @@ func TestBuildSymphonyStatusDeletingComposition(t *testing.T) {
 	_, changed := c.buildStatus(symph, comps)
 	require.False(t, changed)
 }
+
+func TestBuildSymphonyStatusOneStaleComposition(t *testing.T) {
+	now := metav1.Now()
+
+	symph := &apiv1.Symphony{}
+	symph.Generation = 123
+	symph.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: "synth1"}}, {Synthesizer: apiv1.SynthesizerRef{Name: "synth2"}}}
+
+	comp1 := apiv1.Composition{}
+	comp1.Name = "comp-1"
+	comp1.Spec.Synthesizer.Name = "synth1"
+	comp1.Status.CurrentSynthesis = &apiv1.Synthesis{
+		Synthesized: &now,
+		Reconciled:  ptr.To(metav1.NewTime(now.Add(time.Minute + time.Second))),
+		Ready:       ptr.To(metav1.NewTime(now.Add(time.Second))),
+	}
+
+	comp2 := apiv1.Composition{}
+	comp2.Name = "comp-2"
+	comp2.Spec.Synthesizer.Name = "synth2"
+	comp2.Status.CurrentSynthesis = &apiv1.Synthesis{
+		Synthesized: ptr.To(metav1.NewTime(now.Add(time.Minute))),
+		Reconciled:  ptr.To(metav1.NewTime(now.Add(time.Second))),
+		Ready:       ptr.To(metav1.NewTime(now.Add(time.Minute + (time.Second * 2)))),
+	}
+
+	comp3 := apiv1.Composition{}
+	comp3.Name = "comp-3"
+	comp3.Spec.Synthesizer.Name = "synth3"
+	comp3.Status.CurrentSynthesis = &apiv1.Synthesis{
+		Synthesized: nil,
+		Reconciled:  nil,
+		Ready:       nil,
+	}
+
+	comps := &apiv1.CompositionList{}
+	comps.Items = []apiv1.Composition{comp3, comp1, comp2} // stale composition is first on purpose
+
+	c := &symphonyController{}
+	status, changed := c.buildStatus(symph, comps)
+	require.True(t, changed)
+	assert.Equal(t, apiv1.SymphonyStatus{
+		ObservedGeneration: 123,
+		Synthesized:        nil,
+		Reconciled:         nil,
+		Ready:              nil,
+	}, status)
+
+	// It should not update the status when it already matches
+	symph.Status = status
+	_, changed = c.buildStatus(symph, comps)
+	require.False(t, changed)
+}

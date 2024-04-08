@@ -294,6 +294,31 @@ var shouldDeletePodTests = []struct {
 		PodShouldBeDeleted: true,
 	},
 	{
+		Name: "composition-and-pod-deleted",
+		Pods: []corev1.Pod{{
+			ObjectMeta: metav1.ObjectMeta{
+				CreationTimestamp: metav1.Now(),
+				DeletionTimestamp: ptr.To(metav1.Now()),
+				Annotations: map[string]string{
+					"eno.azure.io/composition-generation": "2",
+				},
+			},
+		}},
+		Composition: &apiv1.Composition{
+			ObjectMeta: metav1.ObjectMeta{
+				DeletionTimestamp: &metav1.Time{Time: time.Now()},
+				Generation:        2,
+			},
+		},
+		Synth: &apiv1.Synthesizer{
+			Spec: apiv1.SynthesizerSpec{
+				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
+			},
+		},
+		PodShouldExist:     false,
+		PodShouldBeDeleted: false,
+	},
+	{
 		Name: "one-pod-deleting",
 		Pods: []corev1.Pod{{
 			ObjectMeta: metav1.ObjectMeta{
