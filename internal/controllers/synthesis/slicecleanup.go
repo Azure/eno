@@ -51,7 +51,7 @@ func (c *sliceCleanupController) Reconcile(ctx context.Context, req ctrl.Request
 		err = c.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		if errors.IsNotFound(err) && time.Since(slice.CreationTimestamp.Time) < time.Minute {
 			logger.V(1).Info("didn't find a composition for this resource slice - ignoring because resource slice is new so informer may just be stale")
-			return ctrl.Result{}, nil
+			return ctrl.Result{RequeueAfter: time.Minute}, nil
 		}
 		if client.IgnoreNotFound(err) != nil {
 			return ctrl.Result{}, fmt.Errorf("getting composition: %w", err)

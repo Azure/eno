@@ -53,6 +53,9 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	comp.Namespace = pod.GetLabels()[manager.CompositionNamespaceLabelKey]
 	err = c.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 	if errors.IsNotFound(err) {
+		if pod.DeletionTimestamp != nil {
+			return ctrl.Result{}, nil // nothing to do
+		}
 		logger.V(0).Info("composition was deleted unexpectedly - releasing synthesizer pod")
 		return c.removeFinalizer(ctx, pod)
 	}
