@@ -62,12 +62,11 @@ func (c *symphonyController) buildStatus(symph *apiv1.Symphony, comps *apiv1.Com
 	newStatus := apiv1.SymphonyStatus{ObservedGeneration: symph.Generation, Synthesizers: symph.Status.Synthesizers}
 
 	synthMap := map[string]struct{}{}
+	// Find the max values
 	for _, comp := range comps.Items {
-		synthMap[comp.Spec.Synthesizer.Name] = struct{}{}
-		if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation || comp.DeletionTimestamp != nil {
-			return newStatus, false
+		if comp.Status.CurrentSynthesis == nil {
+			continue
 		}
-
 		if newStatus.Ready.Before(comp.Status.CurrentSynthesis.Ready) || newStatus.Ready == nil {
 			newStatus.Ready = comp.Status.CurrentSynthesis.Ready
 		}
@@ -77,6 +76,27 @@ func (c *symphonyController) buildStatus(symph *apiv1.Symphony, comps *apiv1.Com
 		if newStatus.Synthesized.Before(comp.Status.CurrentSynthesis.Synthesized) || newStatus.Synthesized == nil {
 			newStatus.Synthesized = comp.Status.CurrentSynthesis.Synthesized
 		}
+	}
+
+	// Filter any values where one or more composition hasn't reached the corresponding state
+	for _, comp := range comps.Items {
+		if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation || comp.DeletionTimestamp != nil {
+			newStatus.Ready = nil
+			newStatus.Reconciled = nil
+			newStatus.Synthesized = nil
+			return newStatus, false
+		}
+		if comp.Status.CurrentSynthesis.Ready == nil {
+			newStatus.Ready = nil
+		}
+		if comp.Status.CurrentSynthesis.Reconciled == nil {
+			newStatus.Reconciled = nil
+		}
+		if comp.Status.CurrentSynthesis.Synthesized == nil {
+			newStatus.Synthesized = nil
+		}
+
+		synthMap[comp.Spec.Synthesizer.Name] = struct{}{}
 	}
 
 	// It isn't safe to sync until we've seen a composition for every synthesizer in the symphony.
