@@ -18,7 +18,8 @@
 
 
 
-Bindings map a specific Kubernetes resource to an input reference.
+Bindings map a specific Kubernetes resource to a ref exposed by a synthesizer.
+Compositions use bindings to populate inputs supported by their synthesizer.
 
 
 
@@ -99,32 +100,20 @@ _Appears in:_
 
 
 
-#### InputResource
-
-
-
-
-
-
-
-_Appears in:_
-- [Input](#input)
-
-| Field | Description | Default | Validation |
-| --- | --- | --- | --- |
-| `name` _string_ |  |  |  |
-| `namespace` _string_ |  |  |  |
-| `kind` _string_ |  |  |  |
-| `group` _string_ |  |  |  |
-
-
 
 
 #### Ref
 
 
 
-Ref declares an input resource type that can be populated by a binding.
+Ref defines a synthesizer input.
+Inputs are typed using the Kubernetes API - they are just normal Kubernetes resources.
+The consumer (synthesizer) specifies the resource's kind/group,
+while the producer (composition) specifies a specific resource name/namespace.
+
+
+Compositions that use the synthesizer will be re-synthesized when the resource bound to this ref changes.
+Re-synthesis happens automatically while honoring the globally configured cooldown period.
 
 
 

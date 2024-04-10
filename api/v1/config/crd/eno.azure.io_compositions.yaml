@@ -57,8 +57,9 @@ spec:
                   Bindings allow compositions to specify which resource to use for a particular input "reference".
                   Declaring extra bindings not (yet) supported by the synthesizer is valid.
                 items:
-                  description: Bindings map a specific Kubernetes resource to an input
-                    reference.
+                  description: |-
+                    Bindings map a specific Kubernetes resource to a ref exposed by a synthesizer.
+                    Compositions use bindings to populate inputs supported by their synthesizer.
                   properties:
                     key:
                       description: Key determines which ref this binding binds to.

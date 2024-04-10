@@ -34,7 +34,8 @@ type InputResource struct {
 	Group string `json:"group"`
 }
 
-// Bindings map a specific Kubernetes resource to an input reference.
+// Bindings map a specific Kubernetes resource to a ref exposed by a synthesizer.
+// Compositions use bindings to populate inputs supported by their synthesizer.
 type Binding struct {
 	// Key determines which ref this binding binds to. Opaque.
 	//
@@ -52,7 +53,13 @@ type ResourceBinding struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-// Ref declares an input resource type that can be populated by a binding.
+// Ref defines a synthesizer input.
+// Inputs are typed using the Kubernetes API - they are just normal Kubernetes resources.
+// The consumer (synthesizer) specifies the resource's kind/group,
+// while the producer (composition) specifies a specific resource name/namespace.
+//
+// Compositions that use the synthesizer will be re-synthesized when the resource bound to this ref changes.
+// Re-synthesis happens automatically while honoring the globally configured cooldown period.
 type Ref struct {
 	// Key corresponds to bindings to this ref.
 	//

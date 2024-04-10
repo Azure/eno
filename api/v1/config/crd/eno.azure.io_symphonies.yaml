@@ -49,8 +49,9 @@ spec:
                 description: Bindings are inherited from all compositions managed
                   by this symphony.
                 items:
-                  description: Bindings map a specific Kubernetes resource to an input
-                    reference.
+                  description: |-
+                    Bindings map a specific Kubernetes resource to a ref exposed by a synthesizer.
+                    Compositions use bindings to populate inputs supported by their synthesizer.
                   properties:
                     key:
                       description: Key determines which ref this binding binds to.
