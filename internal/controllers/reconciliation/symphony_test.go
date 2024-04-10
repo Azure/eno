@@ -103,7 +103,7 @@ func TestSymphonyIntegration(t *testing.T) {
 	testutil.Eventually(t, func() bool {
 		current := &apiv1.Symphony{} // invalidate cache
 		upstream.Get(ctx, client.ObjectKeyFromObject(symph), current)
-		return symph.Status.Reconciled != nil && current.Status.ObservedGeneration == symph.Generation && len(current.Status.Synthesizers) == 1
+		return current.Status.Reconciled != nil && current.Status.ObservedGeneration == current.Generation && len(current.Status.Synthesizers) == 1
 	})
 
 	comps := &apiv1.CompositionList{}
