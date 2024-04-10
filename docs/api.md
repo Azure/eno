@@ -46,6 +46,11 @@ per distinct instance of Postgres, all referencing a single synthesizer resource
 Changing the spec of a composition will result in re-synthesis.
 
 
+Eno guarantees that a composition's resources will be deleted before the composition
+finishes deletion by holding a finalizer on it. To delete the composition while leaving
+the resources in place, set the annotation `eno.azure.io/reconcile-interval` to "orphan".
+
+
 
 
 
