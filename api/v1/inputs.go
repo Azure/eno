@@ -34,30 +34,41 @@ type InputResource struct {
 	Group string `json:"group"`
 }
 
+// Bindings map a specific Kubernetes resource to an input reference.
 type Binding struct {
+	// Key determines which ref this binding binds to. Opaque.
+	//
 	// +required
 	Key string `json:"key"`
+
 	// +required
 	Resource ResourceBinding `json:"resource"`
 }
 
+// A reference to a specific resource name and optionally namespace.
 type ResourceBinding struct {
 	// +required
 	Name      string `json:"name"`
 	Namespace string `json:"namespace,omitempty"`
 }
 
+// Ref declares an input resource type that can be populated by a binding.
 type Ref struct {
+	// Key corresponds to bindings to this ref.
+	//
 	// +required
 	Key string `json:"key"`
+
 	// +required
 	Resource ResourceRef `json:"resource"`
+
 	// Allows control over re-synthesis when inputs changed.
 	// A non-deferred input will trigger a synthesis immediately, whereas a
 	// deferred input will respect the cooldown period.
 	Defer bool `json:"defer,omitempty"`
 }
 
+// A reference to a resource kind/group.
 type ResourceRef struct {
 	// +required
 	Kind  string `json:"kind"`

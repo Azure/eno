@@ -1,0 +1,9 @@
+processor:
+  ignoreTypes:
+    - ".*List$"
+    - "ResourceSlice"
+  ignoreFields:
+    - "TypeMeta$"
+
+render:
+  kubernetesVersion: 1.22

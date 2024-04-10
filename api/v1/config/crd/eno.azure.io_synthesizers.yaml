@@ -17,6 +17,12 @@ spec:
   - name: v1
     schema:
       openAPIV3Schema:
+        description: |-
+          Synthesizers are any process that can run in a Kubernetes container that implements the [KRM Functions Specification](https://github.com/kubernetes-sigs/kustomize/blob/master/cmd/config/docs/api-conventions/functions-spec.md).
+
+
+          Synthesizer processes are given some metadata about the composition they are synthesizing, and are expected
+          to return a set of Kubernetes resources. Essentially they generate the desired state for a set of Kubernetes resources.
         properties:
           apiVersion:
             description: |-
@@ -40,6 +46,7 @@ spec:
               command:
                 default:
                 - synthesize
+                description: Copied opaquely into the container's command property.
                 items:
                   type: string
                 type: array
@@ -48,6 +55,7 @@ spec:
                 description: Timeout for each execution of the synthesizer command.
                 type: string
               image:
+                description: Copied opaquely into the container's image property.
                 type: string
               podTimeout:
                 default: 2m
@@ -65,6 +73,8 @@ spec:
                   Refs define the Synthesizer's input schema without binding it to specific
                   resources.
                 items:
+                  description: Ref declares an input resource type that can be populated
+                    by a binding.
                   properties:
                     defer:
                       description: |-
@@ -73,8 +83,10 @@ spec:
                         deferred input will respect the cooldown period.
                       type: boolean
                     key:
+                      description: Key corresponds to bindings to this ref.
                       type: string
                     resource:
+                      description: A reference to a resource kind/group.
                       properties:
                         group:
                           type: string

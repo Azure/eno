@@ -12,6 +12,10 @@ type SymphonyList struct {
 // Symphony is a set of variations on a composition.
 // Useful for creating several compositions that use a common set of bindings but different synthesizers.
 //
+// This pattern is highly opinionated for use-cases in which a single "unit of management"
+// includes multiple distinct components. For example: deploying many instances of an application that
+// is comprised of several components (Wordpress, etc.).
+//
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 type Symphony struct {
@@ -23,8 +27,13 @@ type Symphony struct {
 }
 
 type SymphonySpec struct {
+	// Each variation will result in the creation of a composition.
+	// Synthesizer refs must be unique across variations.
+	// Removing a variation will cause the composition to be deleted!
 	Variations []Variation `json:"variations,omitempty"`
-	Bindings   []Binding   `json:"bindings,omitempty"`
+
+	// Bindings are inherited from all compositions managed by this symphony.
+	Bindings []Binding `json:"bindings,omitempty"`
 }
 
 type SymphonyStatus struct {
@@ -36,6 +45,9 @@ type SymphonyStatus struct {
 }
 
 type Variation struct {
+	// Used to populate the composition's metadata.labels.
 	Labels      map[string]string `json:"labels,omitempty"`
+
+	// Used to populate the composition's spec.synthesizer.
 	Synthesizer SynthesizerRef    `json:"synthesizer,omitempty"`
 }

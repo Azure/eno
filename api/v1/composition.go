@@ -9,6 +9,13 @@ type CompositionList struct {
 	Items           []Composition `json:"items"`
 }
 
+// Compositions represent a collection of related, synthesized resources.
+//
+// For example: when managing Postgres with Eno, one would create a composition
+// per distinct instance of Postgres, all referencing a single synthesizer resource.
+//
+// Changing the spec of a composition will result in re-synthesis.
+//
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 type Composition struct {
@@ -20,10 +27,12 @@ type Composition struct {
 }
 
 type CompositionSpec struct {
-	// Compositions are synthesized by a Synthesizer.
+	// Compositions are synthesized by a Synthesizer, referenced by name.
 	Synthesizer SynthesizerRef `json:"synthesizer,omitempty"`
 
-	// Binds the schema defined in a Synthesizer spec to specific resources.
+	// Synthesizers can accept Kubernetes resources as inputs.
+	// Bindings allow compositions to specify which resource to use for a particular input "reference".
+	// Declaring extra bindings not (yet) supported by the synthesizer is valid.
 	Bindings []Binding `json:"bindings,omitempty"`
 }
 
@@ -32,17 +41,37 @@ type CompositionStatus struct {
 	PreviousSynthesis *Synthesis `json:"previousSynthesis,omitempty"`
 }
 
-// Synthesis represents a Synthesizer's specific synthesis of a given Composition.
+// A synthesis is the result of synthesizing a composition.
+// In other words: it's a collection of resources returned from a synthesizer.
 type Synthesis struct {
-	UUID                          string `json:"uuid,omitempty"`
-	ObservedCompositionGeneration int64  `json:"observedCompositionGeneration,omitempty"`
-	ObservedSynthesizerGeneration int64  `json:"observedSynthesizerGeneration,omitempty"`
+	// A random UUID scoped to this particular synthesis operation.
+	// Used internally for strict ordering semantics.
+	UUID string `json:"uuid,omitempty"`
 
+	// The value of the composition's metadata.generation at the time the synthesis began.
+	// This is a min i.e. a newer composition may have been used.
+	ObservedCompositionGeneration int64 `json:"observedCompositionGeneration,omitempty"`
+
+	// The value of the synthesizer's metadata.generation at the time the synthesis began.
+	// This is a min i.e. a newer composition may have been used.
+	ObservedSynthesizerGeneration int64 `json:"observedSynthesizerGeneration,omitempty"`
+
+	// Time at which the most recent synthesizer pod was created.
 	PodCreation *metav1.Time `json:"podCreation,omitempty"`
-	Synthesized *metav1.Time `json:"synthesized,omitempty"`
-	Reconciled  *metav1.Time `json:"reconciled,omitempty"`
-	Ready       *metav1.Time `json:"ready,omitempty"`
-	Attempts    int          `json:"attempts,omitempty"`
 
+	// Time at which the synthesis completed i.e. resourceSlices was written
+	Synthesized *metav1.Time `json:"synthesized,omitempty"`
+
+	// Time at which the synthesis's resources were reconciled into real Kubernetes resources.
+	Reconciled *metav1.Time `json:"reconciled,omitempty"`
+
+	// Time at which the synthesis's reconciled resources became ready.
+	Ready *metav1.Time `json:"ready,omitempty"`
+
+	// Counter used internally to calculate back off when retrying failed syntheses.
+	Attempts int `json:"attempts,omitempty"`
+
+	// References to every resource slice that contains the resources comprising this synthesis.
+	// Immutable.
 	ResourceSlices []*ResourceSliceRef `json:"resourceSlices,omitempty"`
 }

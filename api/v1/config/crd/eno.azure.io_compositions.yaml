@@ -17,6 +17,15 @@ spec:
   - name: v1
     schema:
       openAPIV3Schema:
+        description: |-
+          Compositions represent a collection of related, synthesized resources.
+
+
+          For example: when managing Postgres with Eno, one would create a composition
+          per distinct instance of Postgres, all referencing a single synthesizer resource.
+
+
+          Changing the spec of a composition will result in re-synthesis.
         properties:
           apiVersion:
             description: |-
@@ -38,13 +47,21 @@ spec:
           spec:
             properties:
               bindings:
-                description: Binds the schema defined in a Synthesizer spec to specific
-                  resources.
+                description: |-
+                  Synthesizers can accept Kubernetes resources as inputs.
+                  Bindings allow compositions to specify which resource to use for a particular input "reference".
+                  Declaring extra bindings not (yet) supported by the synthesizer is valid.
                 items:
+                  description: Bindings map a specific Kubernetes resource to an input
+                    reference.
                   properties:
                     key:
+                      description: Key determines which ref this binding binds to.
+                        Opaque.
                       type: string
                     resource:
+                      description: A reference to a specific resource name and optionally
+                        namespace.
                       properties:
                         name:
                           type: string
@@ -59,7 +76,8 @@ spec:
                   type: object
                 type: array
               synthesizer:
-                description: Compositions are synthesized by a Synthesizer.
+                description: Compositions are synthesized by a Synthesizer, referenced
+                  by name.
                 properties:
                   minGeneration:
                     description: |-
@@ -74,27 +92,45 @@ spec:
           status:
             properties:
               currentSynthesis:
-                description: Synthesis represents a Synthesizer's specific synthesis
-                  of a given Composition.
+                description: |-
+                  A synthesis is the result of synthesizing a composition.
+                  In other words: it's a collection of resources returned from a synthesizer.
                 properties:
                   attempts:
+                    description: Counter used internally to calculate back off when
+                      retrying failed syntheses.
                     type: integer
                   observedCompositionGeneration:
+                    description: |-
+                      The value of the composition's metadata.generation at the time the synthesis began.
+                      This is a min i.e. a newer composition may have been used.
                     format: int64
                     type: integer
                   observedSynthesizerGeneration:
+                    description: |-
+                      The value of the synthesizer's metadata.generation at the time the synthesis began.
+                      This is a min i.e. a newer composition may have been used.
                     format: int64
                     type: integer
                   podCreation:
+                    description: Time at which the most recent synthesizer pod was
+                      created.
                     format: date-time
                     type: string
                   ready:
+                    description: Time at which the synthesis's reconciled resources
+                      became ready.
                     format: date-time
                     type: string
                   reconciled:
+                    description: Time at which the synthesis's resources were reconciled
+                      into real Kubernetes resources.
                     format: date-time
                     type: string
                   resourceSlices:
+                    description: |-
+                      References to every resource slice that contains the resources comprising this synthesis.
+                      Immutable.
                     items:
                       properties:
                         name:
@@ -102,33 +138,56 @@ spec:
                       type: object
                     type: array
                   synthesized:
+                    description: Time at which the synthesis completed i.e. resourceSlices
+                      was written
                     format: date-time
                     type: string
                   uuid:
+                    description: |-
+                      A random UUID scoped to this particular synthesis operation.
+                      Used internally for strict ordering semantics.
                     type: string
                 type: object
               previousSynthesis:
-                description: Synthesis represents a Synthesizer's specific synthesis
-                  of a given Composition.
+                description: |-
+                  A synthesis is the result of synthesizing a composition.
+                  In other words: it's a collection of resources returned from a synthesizer.
                 properties:
                   attempts:
+                    description: Counter used internally to calculate back off when
+                      retrying failed syntheses.
                     type: integer
                   observedCompositionGeneration:
+                    description: |-
+                      The value of the composition's metadata.generation at the time the synthesis began.
+                      This is a min i.e. a newer composition may have been used.
                     format: int64
                     type: integer
                   observedSynthesizerGeneration:
+                    description: |-
+                      The value of the synthesizer's metadata.generation at the time the synthesis began.
+                      This is a min i.e. a newer composition may have been used.
                     format: int64
                     type: integer
                   podCreation:
+                    description: Time at which the most recent synthesizer pod was
+                      created.
                     format: date-time
                     type: string
                   ready:
+                    description: Time at which the synthesis's reconciled resources
+                      became ready.
                     format: date-time
                     type: string
                   reconciled:
+                    description: Time at which the synthesis's resources were reconciled
+                      into real Kubernetes resources.
                     format: date-time
                     type: string
                   resourceSlices:
+                    description: |-
+                      References to every resource slice that contains the resources comprising this synthesis.
+                      Immutable.
                     items:
                       properties:
                         name:
@@ -136,9 +195,14 @@ spec:
                       type: object
                     type: array
                   synthesized:
+                    description: Time at which the synthesis completed i.e. resourceSlices
+                      was written
                     format: date-time
                     type: string
                   uuid:
+                    description: |-
+                      A random UUID scoped to this particular synthesis operation.
+                      Used internally for strict ordering semantics.
                     type: string
                 type: object
             type: object
