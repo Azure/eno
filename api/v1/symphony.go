@@ -46,8 +46,8 @@ type SymphonyStatus struct {
 
 type Variation struct {
 	// Used to populate the composition's metadata.labels.
-	Labels      map[string]string `json:"labels,omitempty"`
+	Labels map[string]string `json:"labels,omitempty"`
 
 	// Used to populate the composition's spec.synthesizer.
-	Synthesizer SynthesizerRef    `json:"synthesizer,omitempty"`
+	Synthesizer SynthesizerRef `json:"synthesizer,omitempty"`
 }

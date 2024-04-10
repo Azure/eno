@@ -14,7 +14,11 @@ spec:
     singular: composition
   scope: Namespaced
   versions:
-  - name: v1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.synthesizer.name
+      name: Synthesizer
+      type: string
+    name: v1
     schema:
       openAPIV3Schema:
         description: |-

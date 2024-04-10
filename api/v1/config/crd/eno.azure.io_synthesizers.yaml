@@ -14,7 +14,11 @@ spec:
     singular: synthesizer
   scope: Cluster
   versions:
-  - name: v1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.image
+      name: Image
+      type: string
+    name: v1
     schema:
       openAPIV3Schema:
         description: |-
