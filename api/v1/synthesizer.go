@@ -11,9 +11,15 @@ type SynthesizerList struct {
 	Items           []Synthesizer `json:"items"`
 }
 
+// Synthesizers are any process that can run in a Kubernetes container that implements the [KRM Functions Specification](https://github.com/kubernetes-sigs/kustomize/blob/master/cmd/config/docs/api-conventions/functions-spec.md).
+//
+// Synthesizer processes are given some metadata about the composition they are synthesizing, and are expected
+// to return a set of Kubernetes resources. Essentially they generate the desired state for a set of Kubernetes resources.
+//
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
+// +kubebuilder:printcolumn:name="Image",type=string,JSONPath=`.spec.image`
 type Synthesizer struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -24,9 +30,13 @@ type Synthesizer struct {
 
 // +kubebuilder:validation:XValidation:rule="duration(self.execTimeout) <= duration(self.podTimeout)",message="podTimeout must be greater than execTimeout"
 type SynthesizerSpec struct {
+	// Copied opaquely into the container's image property.
+	//
 	// +required
 	Image string `json:"image,omitempty"`
 
+	// Copied opaquely into the container's command property.
+	//
 	// +kubebuilder:default={"synthesize"}
 	Command []string `json:"command,omitempty"`
 
