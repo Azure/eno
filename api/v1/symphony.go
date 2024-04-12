@@ -38,4 +38,5 @@ type SymphonyStatus struct {
 type Variation struct {
 	Labels      map[string]string `json:"labels,omitempty"`
 	Synthesizer SynthesizerRef    `json:"synthesizer,omitempty"`
+	Bindings    []Binding         `json:"bindings,omitempty"`
 }

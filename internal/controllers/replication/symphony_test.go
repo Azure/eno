@@ -157,3 +157,80 @@ func TestSymphonyDuplicateCleanup(t *testing.T) {
 	_, _, err := s.reconcileReverse(ctx, sym, comps)
 	require.EqualError(t, err, `deleting duplicate composition: compositions.eno.azure.io "bar" not found`)
 }
+
+func TestGetBindings(t *testing.T) {
+	tcs := []struct {
+		name             string
+		symph            apiv1.Symphony
+		variation        apiv1.Variation
+		expectedBindings []apiv1.Binding
+	}{
+		{
+			name: "just symphony bindings",
+			symph: apiv1.Symphony{
+				Spec: apiv1.SymphonySpec{
+					Bindings: []apiv1.Binding{
+						{Key: "bnd-1"},
+					},
+				},
+			},
+			expectedBindings: []apiv1.Binding{
+				{Key: "bnd-1"},
+			},
+		},
+		{
+			name: "just variation bindings",
+			variation: apiv1.Variation{
+				Bindings: []apiv1.Binding{
+					{Key: "bnd-1"},
+				},
+			},
+			expectedBindings: []apiv1.Binding{
+				{Key: "bnd-1"},
+			},
+		},
+		{
+			name: "symphony and variation bindings",
+			variation: apiv1.Variation{
+				Bindings: []apiv1.Binding{
+					{Key: "bnd-1"},
+				},
+			},
+			symph: apiv1.Symphony{
+				Spec: apiv1.SymphonySpec{
+					Bindings: []apiv1.Binding{
+						{Key: "bnd-2"},
+					},
+				},
+			},
+			expectedBindings: []apiv1.Binding{
+				{Key: "bnd-1"},
+				{Key: "bnd-2"},
+			},
+		},
+		{
+			name: "variation takes precedence over symphony",
+			variation: apiv1.Variation{
+				Bindings: []apiv1.Binding{
+					{Key: "bnd-1", Resource: apiv1.ResourceBinding{Name: "from-variation"}},
+				},
+			},
+			symph: apiv1.Symphony{
+				Spec: apiv1.SymphonySpec{
+					Bindings: []apiv1.Binding{
+						{Key: "bnd-1", Resource: apiv1.ResourceBinding{Name: "from-symphony"}},
+					},
+				},
+			},
+			expectedBindings: []apiv1.Binding{
+				{Key: "bnd-1", Resource: apiv1.ResourceBinding{Name: "from-variation"}},
+			},
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			actualBindings := getBindings(&tc.symph, &tc.variation)
+			require.ElementsMatch(t, tc.expectedBindings, actualBindings)
+		})
+	}
+}

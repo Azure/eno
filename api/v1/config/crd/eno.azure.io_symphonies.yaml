@@ -62,6 +62,25 @@ spec:
               variations:
                 items:
                   properties:
+                    bindings:
+                      items:
+                        properties:
+                          key:
+                            type: string
+                          resource:
+                            properties:
+                              name:
+                                type: string
+                              namespace:
+                                type: string
+                            required:
+                            - name
+                            type: object
+                        required:
+                        - key
+                        - resource
+                        type: object
+                      type: array
                     labels:
                       additionalProperties:
                         type: string
