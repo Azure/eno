@@ -3,6 +3,7 @@ package replication
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -158,7 +159,7 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		comp := &apiv1.Composition{}
 		comp.Namespace = symph.Namespace
 		comp.GenerateName = variation.Synthesizer.Name + "-"
-		comp.Spec.Bindings = symph.Spec.Bindings
+		comp.Spec.Bindings = getBindings(symph, &variation)
 		comp.Spec.Synthesizer = variation.Synthesizer
 		comp.Labels = variation.Labels
 		err := controllerutil.SetControllerReference(symph, comp, c.client.Scheme())
@@ -221,6 +222,23 @@ func (c *symphonyController) syncStatus(ctx context.Context, symph *apiv1.Sympho
 
 	logr.FromContextOrDiscard(ctx).V(1).Info("sync'd symphony status with composition index")
 	return true, nil
+}
+
+// getBindings generates the bindings for a variation given it's symphony.
+// Bindings specified by a variation take precedence over the symphony.
+func getBindings(symph *apiv1.Symphony, vrn *apiv1.Variation) []apiv1.Binding {
+	res := append([]apiv1.Binding(nil), symph.Spec.Bindings...)
+	// TODO: validate that variations don't specify a binding more than
+	// once. Probably in a webhook or with cel (check `all` and `exists_one` macros).
+	for _, bnd := range vrn.Bindings {
+		i := slices.IndexFunc(res, func(b apiv1.Binding) bool { return b.Key == bnd.Key })
+		if i >= 0 {
+			res[i] = bnd
+		} else {
+			res = append(res, bnd)
+		}
+	}
+	return res
 }
 
 func sortSynthesizerRefs(refs []apiv1.SynthesizerRef) {

@@ -50,4 +50,8 @@ type Variation struct {
 
 	// Used to populate the composition's spec.synthesizer.
 	Synthesizer SynthesizerRef `json:"synthesizer,omitempty"`
+
+	// Variation-specific bindings get merged with Symphony bindings and take
+	// precedence over them.
+	Bindings []Binding `json:"bindings,omitempty"`
 }
