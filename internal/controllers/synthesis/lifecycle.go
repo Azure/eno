@@ -200,6 +200,7 @@ func (c *podLifecycleController) reconcileDeletedComposition(ctx context.Context
 	if shouldUpdateDeletedCompositionStatus(comp) {
 		comp.Status.CurrentSynthesis.ObservedCompositionGeneration = comp.Generation
 		comp.Status.CurrentSynthesis.Ready = nil
+		comp.Status.CurrentSynthesis.UUID = uuid.NewString()
 		comp.Status.CurrentSynthesis.Reconciled = nil
 		now := metav1.Now()
 		comp.Status.CurrentSynthesis.Synthesized = &now

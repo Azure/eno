@@ -37,14 +37,13 @@ func (m *ManifestRef) FindStatus(slice *apiv1.ResourceSlice) *apiv1.ResourceStat
 
 // SynthesisRef refers to a specific synthesis of a composition.
 type SynthesisRef struct {
-	Name, Namespace string
-	Generation      int64
+	CompositionName, Namespace, UUID string
 }
 
 func NewSynthesisRef(comp *apiv1.Composition) *SynthesisRef {
-	c := &SynthesisRef{Name: comp.Name, Namespace: comp.Namespace}
+	c := &SynthesisRef{CompositionName: comp.Name, Namespace: comp.Namespace}
 	if comp.Status.CurrentSynthesis != nil {
-		c.Generation = comp.Status.CurrentSynthesis.ObservedCompositionGeneration
+		c.UUID = comp.Status.CurrentSynthesis.UUID
 	}
 	return c
 }

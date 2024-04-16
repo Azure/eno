@@ -106,7 +106,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	var prev *reconstitution.Resource
 	if comp.Status.PreviousSynthesis != nil {
-		synRef.Generation = comp.Status.PreviousSynthesis.ObservedCompositionGeneration
+		synRef.UUID = comp.Status.PreviousSynthesis.UUID
 		prev, _ = c.resourceClient.Get(ctx, synRef, &req.Resource)
 	}
 
