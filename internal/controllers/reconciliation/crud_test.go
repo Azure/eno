@@ -226,6 +226,7 @@ func TestCRUD(t *testing.T) {
 }
 
 func (c *crudTestCase) WaitForPhase(t *testing.T, downstream client.Client, phase string) {
+	t.Logf("waiting for phase %q", phase)
 	var lastRV string
 	testutil.Eventually(t, func() bool {
 		obj, err := c.Get(downstream)
@@ -591,8 +592,8 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	// Start re-synthesizing
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Spec.Synthesizer.MinGeneration = 10
-		return upstream.Update(ctx, comp)
+		comp.Status.MinSynthesizerGeneration = 10
+		return upstream.Status().Update(ctx, comp)
 	})
 	require.NoError(t, err)
 

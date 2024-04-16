@@ -107,13 +107,13 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Swap the state to prepare for resynthesis if needed
-	if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation {
+	if shouldSwapStates(comp) {
 		swapStates(comp, syn)
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
 		}
 		logger.V(0).Info("start to synthesize")
-		return ctrl.Result{}, nil
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// No need to create a pod if everything is in sync
@@ -295,9 +295,21 @@ func swapStates(comp *apiv1.Composition, syn *apiv1.Synthesizer) {
 	}
 
 	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		// TODO: Move here? UUID:                          uuid.NewString(),
 		ObservedCompositionGeneration: comp.Generation,
 		Attempts:                      attempts,
 	}
+}
+
+func shouldSwapStates(comp *apiv1.Composition) bool {
+	if comp.Status.CurrentSynthesis == nil {
+		return true
+	}
+
+	// Ignore synthesizer generation if it is 0 since that means we're waiting for pod creation, which is required to discover the generation
+	synthesizerHasChanged := (comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration != 0 && comp.Status.MinSynthesizerGeneration > comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration)
+	compositionHasChanged := comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation
+	return compositionHasChanged || synthesizerHasChanged
 }
 
 func shouldBackOffPodCreation(comp *apiv1.Composition) bool {

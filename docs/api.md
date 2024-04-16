@@ -26,6 +26,7 @@ Compositions use bindings to populate inputs supported by their synthesizer.
 _Appears in:_
 - [CompositionSpec](#compositionspec)
 - [SymphonySpec](#symphonyspec)
+- [Variation](#variation)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
@@ -94,6 +95,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
+| `minSynthesizerGeneration` _integer_ | Compositions will be resynthesized if their status.currentState.observedSynthesizerGeneration is < the referenced synthesizer's generation.<br />Used to slowly roll out synthesizer updates across compositions. |  |  |
 | `currentSynthesis` _[Synthesis](#synthesis)_ |  |  |  |
 | `previousSynthesis` _[Synthesis](#synthesis)_ |  |  |  |
 
@@ -288,7 +290,6 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `name` _string_ |  |  |  |
-| `minGeneration` _integer_ | Compositions will be resynthesized if their status.currentState.observedSynthesizerGeneration is < the referenced synthesizer's generation.<br />Used to slowly roll out synthesizer updates across compositions. |  |  |
 
 
 #### SynthesizerSpec
@@ -345,5 +346,6 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `labels` _object (keys:string, values:string)_ | Used to populate the composition's metadata.labels. |  |  |
 | `synthesizer` _[SynthesizerRef](#synthesizerref)_ | Used to populate the composition's spec.synthesizer. |  |  |
+| `bindings` _[Binding](#binding) array_ | Variation-specific bindings get merged with Symphony bindings and take<br />precedence over them. |  |  |
 
 
