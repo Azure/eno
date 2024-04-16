@@ -36,7 +36,7 @@ func TestControllerIntegration(t *testing.T) {
 		Synthesized:                   ptr.To(metav1.Now()),
 	}
 	require.NoError(t, client.Status().Update(ctx, comp))
-	compRef := NewCompositionRef(comp)
+	compRef := NewSynthesisRef(comp)
 
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = "test-slice"

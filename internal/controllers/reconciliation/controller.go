@@ -95,8 +95,8 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	ctx = logr.NewContext(ctx, logger)
 
 	// Find the current and (optionally) previous desired states in the cache
-	compRef := reconstitution.NewCompositionRef(comp)
-	resource, exists := c.resourceClient.Get(ctx, compRef, &req.Resource)
+	synRef := reconstitution.NewSynthesisRef(comp)
+	resource, exists := c.resourceClient.Get(ctx, synRef, &req.Resource)
 	if !exists {
 		// It's possible for the cache to be empty because a manifest for this resource no longer exists at the requested composition generation.
 		// Dropping the work item is safe since filling the new version will generate a new queue message.
@@ -106,8 +106,8 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	var prev *reconstitution.Resource
 	if comp.Status.PreviousSynthesis != nil {
-		compRef.Generation = comp.Status.PreviousSynthesis.ObservedCompositionGeneration
-		prev, _ = c.resourceClient.Get(ctx, compRef, &req.Resource)
+		synRef.Generation = comp.Status.PreviousSynthesis.ObservedCompositionGeneration
+		prev, _ = c.resourceClient.Get(ctx, synRef, &req.Resource)
 	}
 
 	// Keep track of the last reconciliation time and report on it relative to the resource's reconcile interval

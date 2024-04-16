@@ -24,7 +24,7 @@ func TestCacheBasics(t *testing.T) {
 	c := NewCache(client)
 
 	comp, synth, resources, expectedReqs := newCacheTestFixtures(2, 3)
-	compRef := NewCompositionRef(comp)
+	compRef := NewSynthesisRef(comp)
 	t.Run("fill", func(t *testing.T) {
 		reqs, err := c.fill(ctx, comp, synth, resources)
 		require.NoError(t, err)
@@ -86,7 +86,7 @@ func TestCacheCleanup(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, expectedReqs, reqs)
 	})
-	compRef := NewCompositionRef(comp)
+	compRef := NewSynthesisRef(comp)
 
 	t.Run("get", func(t *testing.T) {
 		resource, exists := c.Get(ctx, compRef, &expectedReqs[0].Resource)
@@ -153,7 +153,7 @@ func TestCachePartialPurge(t *testing.T) {
 	expectedReqs[0].Composition = types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
 	_, err = c.fill(ctx, comp, synth, resources)
 	require.NoError(t, err)
-	compRef := NewCompositionRef(comp)
+	compRef := NewSynthesisRef(comp)
 
 	// Fill another composition - this one shouldn't be purged
 	var toBePreserved *Request
@@ -179,7 +179,7 @@ func TestCachePartialPurge(t *testing.T) {
 	assert.False(t, exists)
 
 	// Resource of the other composition are unaffected
-	_, exists = c.Get(ctx, NewCompositionRef(comp), &toBePreserved.Resource)
+	_, exists = c.Get(ctx, NewSynthesisRef(comp), &toBePreserved.Resource)
 	assert.True(t, exists)
 
 	// The cache should only be internally tracking the remaining synthesis of our test composition

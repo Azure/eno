@@ -18,7 +18,7 @@ type Reconciler interface {
 
 // Client provides read/write access to a collection of reconstituted resources.
 type Client interface {
-	Get(ctx context.Context, comp *CompositionRef, res *resource.Ref) (*resource.Resource, bool)
+	Get(ctx context.Context, syn *SynthesisRef, res *resource.Ref) (*resource.Resource, bool)
 }
 
 // ManifestRef references a particular resource manifest within a resource slice.
@@ -35,14 +35,14 @@ func (m *ManifestRef) FindStatus(slice *apiv1.ResourceSlice) *apiv1.ResourceStat
 	return &state
 }
 
-// CompositionRef refers to a specific generation of a composition.
-type CompositionRef struct {
+// SynthesisRef refers to a specific synthesis of a composition.
+type SynthesisRef struct {
 	Name, Namespace string
 	Generation      int64
 }
 
-func NewCompositionRef(comp *apiv1.Composition) *CompositionRef {
-	c := &CompositionRef{Name: comp.Name, Namespace: comp.Namespace}
+func NewSynthesisRef(comp *apiv1.Composition) *SynthesisRef {
+	c := &SynthesisRef{Name: comp.Name, Namespace: comp.Namespace}
 	if comp.Status.CurrentSynthesis != nil {
 		c.Generation = comp.Status.CurrentSynthesis.ObservedCompositionGeneration
 	}

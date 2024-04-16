@@ -21,7 +21,7 @@ type Cache struct {
 	renv   *readiness.Env
 
 	mut                    sync.Mutex
-	resources              map[CompositionRef]map[resource.Ref]*Resource
+	resources              map[SynthesisRef]map[resource.Ref]*Resource
 	synthesesByComposition map[types.NamespacedName][]int64
 }
 
@@ -33,12 +33,12 @@ func NewCache(client client.Client) *Cache {
 	return &Cache{
 		client:                 client,
 		renv:                   renv,
-		resources:              make(map[CompositionRef]map[resource.Ref]*Resource),
+		resources:              make(map[SynthesisRef]map[resource.Ref]*Resource),
 		synthesesByComposition: make(map[types.NamespacedName][]int64),
 	}
 }
 
-func (c *Cache) Get(ctx context.Context, comp *CompositionRef, ref *resource.Ref) (*Resource, bool) {
+func (c *Cache) Get(ctx context.Context, comp *SynthesisRef, ref *resource.Ref) (*Resource, bool) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
@@ -58,7 +58,7 @@ func (c *Cache) Get(ctx context.Context, comp *CompositionRef, ref *resource.Ref
 // hasSynthesis returns true when the cache contains the resulting resources of the given synthesis.
 // This should be called before Fill to determine if filling is necessary.
 func (c *Cache) hasSynthesis(comp *apiv1.Composition, synthesis *apiv1.Synthesis) bool {
-	key := CompositionRef{
+	key := SynthesisRef{
 		Name:       comp.Name,
 		Namespace:  comp.Namespace,
 		Generation: synthesis.ObservedCompositionGeneration,
@@ -84,7 +84,7 @@ func (c *Cache) fill(ctx context.Context, comp *apiv1.Composition, synthesis *ap
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	synKey := CompositionRef{Name: comp.Name, Namespace: comp.Namespace, Generation: synthesis.ObservedCompositionGeneration}
+	synKey := SynthesisRef{Name: comp.Name, Namespace: comp.Namespace, Generation: synthesis.ObservedCompositionGeneration}
 	c.resources[synKey] = resources
 
 	compNSN := types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
@@ -145,7 +145,7 @@ func (c *Cache) purge(compNSN types.NamespacedName, comp *apiv1.Composition) {
 			remainingSyns = append(remainingSyns, syn)
 			continue // still referenced by the Generation
 		}
-		delete(c.resources, CompositionRef{
+		delete(c.resources, SynthesisRef{
 			Name:       compNSN.Name,
 			Namespace:  compNSN.Namespace,
 			Generation: syn,
