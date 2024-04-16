@@ -1,4 +1,4 @@
-package synthesis
+package rollout
 
 import (
 	"testing"
@@ -11,19 +11,25 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/testutil"
 )
 
-// TestControllerRollout proves that synthesizer changes are eventually rolled out across their compositions.
-func TestControllerRollout(t *testing.T) {
+var testSynthesisConfig = &synthesis.Config{
+	SliceCreationQPS: 15,
+	PodNamespace:     "default",
+}
+
+// TestSynthesizerRollout proves that synthesizer changes are eventually rolled out across their compositions.
+func TestSynthesizerRollout(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
-	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager))
-	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, &testutil.ExecConn{}))
+	require.NoError(t, NewSynthesizerController(mgr.Manager))
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
+	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
+	require.NoError(t, synthesis.NewExecController(mgr.Manager, testSynthesisConfig, &testutil.ExecConn{}))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -62,17 +68,17 @@ func TestControllerRollout(t *testing.T) {
 	})
 }
 
-// TestControllerSynthesizerRolloutCooldown proves that the synth rollout cooldown period is honored when
+// TestSynthesizerRolloutCooldown proves that the synth rollout cooldown period is honored when
 // rolling out changes across compositions.
-func TestControllerSynthesizerRolloutCooldown(t *testing.T) {
+func TestSynthesizerRolloutCooldown(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
-	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager)) // Rollout should not continue during this test
-	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, &testutil.ExecConn{}))
+	require.NoError(t, NewSynthesizerController(mgr.Manager))
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
+	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
+	require.NoError(t, synthesis.NewExecController(mgr.Manager, testSynthesisConfig, &testutil.ExecConn{}))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}

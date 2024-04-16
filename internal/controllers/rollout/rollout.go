@@ -1,4 +1,4 @@
-package synthesis
+package rollout
 
 import (
 	"context"
@@ -16,23 +16,23 @@ import (
 	"github.com/Azure/eno/internal/manager"
 )
 
-type rolloutController struct {
+type synthesizerController struct {
 	client client.Client
 }
 
-// NewRolloutController re-synthesizes compositions when their synthesizer has changed while honoring a cooldown period.
-func NewRolloutController(mgr ctrl.Manager) error {
-	c := &rolloutController{
+// NewSynthesizerController re-synthesizes compositions when their synthesizer has changed while honoring a cooldown period.
+func NewSynthesizerController(mgr ctrl.Manager) error {
+	c := &synthesizerController{
 		client: mgr.GetClient(),
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Synthesizer{}).
 		Watches(&apiv1.Composition{}, manager.NewCompositionToSynthesizerHandler(c.client)).
-		WithLogConstructor(manager.NewLogConstructor(mgr, "rolloutController")).
+		WithLogConstructor(manager.NewLogConstructor(mgr, "synthesizerRolloutController")).
 		Complete(c)
 }
 
-func (c *rolloutController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (c *synthesizerController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	syn := &apiv1.Synthesizer{}

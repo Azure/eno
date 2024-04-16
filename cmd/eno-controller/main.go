@@ -13,6 +13,7 @@ import (
 
 	"github.com/Azure/eno/internal/controllers/aggregation"
 	"github.com/Azure/eno/internal/controllers/replication"
+	"github.com/Azure/eno/internal/controllers/rollout"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/controllers/watchdog"
 	"github.com/Azure/eno/internal/manager"
@@ -74,7 +75,7 @@ func run() error {
 		return fmt.Errorf("constructing execution controller: %w", err)
 	}
 
-	err = synthesis.NewRolloutController(mgr)
+	err = rollout.NewSynthesizerController(mgr)
 	if err != nil {
 		return fmt.Errorf("constructing rollout controller: %w", err)
 	}

@@ -32,7 +32,6 @@ func TestControllerHappyPath(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager))
 	conn := &testutil.ExecConn{}
 	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, conn))
 	mgr.Start(t)
@@ -107,7 +106,6 @@ func TestPodNamespaceOverride(t *testing.T) {
 	lifecycleConfig.PodNamespace = expectedPodNamespace
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, &lifecycleConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager))
 	conn := &testutil.ExecConn{
 		PodHook: podHook,
 	}
@@ -157,7 +155,6 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager))
 	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
 		// simulate real pods taking some random amount of time to generation
 		time.Sleep(time.Millisecond * time.Duration(rand.Int63n(300)))
@@ -223,7 +220,6 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager))
 	mgr.Start(t)
 
 	syn1 := &apiv1.Synthesizer{}
