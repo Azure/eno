@@ -8,13 +8,16 @@ import (
 
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
 )
+
+// TODO: Move cooldown to global
+
+// TODO: Publish events when initiating synthesis
 
 type synthesizerController struct {
 	client client.Client
@@ -42,22 +45,35 @@ func (c *synthesizerController) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 	logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerNamespace", syn.Namespace, "synthesizerGeneration", syn.Generation)
 
-	if syn.Status.LastRolloutTime != nil && syn.Status.CurrentGeneration != syn.Generation {
-		if syn.Spec.RolloutCooldown == nil {
-			return ctrl.Result{}, nil // not configured
-		}
-		remainingCooldown := syn.Spec.RolloutCooldown.Duration - time.Since(syn.Status.LastRolloutTime.Time)
-		if remainingCooldown > 0 {
-			return ctrl.Result{RequeueAfter: remainingCooldown}, nil // not ready to continue rollout yet
-		}
-	}
-
 	compList := &apiv1.CompositionList{}
 	err = c.client.List(ctx, compList, client.MatchingFields{
 		manager.IdxCompositionsBySynthesizer: syn.Name,
 	})
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
+	}
+
+	var lastRolloutTime *metav1.Time
+	for _, comp := range compList.Items {
+		comp := comp
+
+		// Skip compositions that:
+		// - Are brand new (no current synthesis)
+		// - Have never received a rolling update (no previous synthesis)
+		// - Are currently being synthesized
+		if comp.Status.CurrentSynthesis == nil || comp.Status.PreviousSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil {
+			continue
+		}
+		if ts := comp.Status.CurrentSynthesis.Synthesized; lastRolloutTime.Before(ts) {
+			lastRolloutTime = ts
+		}
+	}
+
+	if lastRolloutTime != nil && syn.Spec.RolloutCooldown != nil {
+		remainingCooldown := syn.Spec.RolloutCooldown.Duration - time.Since(lastRolloutTime.Time)
+		if remainingCooldown > 0 {
+			return ctrl.Result{RequeueAfter: remainingCooldown}, nil // not ready to continue rollout yet
+		}
 	}
 
 	// randomize list to avoid always rolling out changes in the same order
@@ -69,52 +85,21 @@ func (c *synthesizerController) Reconcile(ctx context.Context, req ctrl.Request)
 
 		// Compositions aren't eligible to receive an updated synthesizer when:
 		// - They are newer than the cooldown period
-		// - They already use this or a newer synthesizer version
-		// - They haven't ever been synthesized (they'll use the new synthesizer version anyway)
+		// - They haven't ever been synthesized (they'll use the latest inputs anyway)
 		// - They are currently being synthesized
-		// - They've been synthesized by this or a newer version
-		if time.Since(comp.CreationTimestamp.Time) < syn.Spec.RolloutCooldown.Duration || comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration >= syn.Generation {
+		// - They are already in sync with the latest inputs
+		if time.Since(comp.CreationTimestamp.Time) < syn.Spec.RolloutCooldown.Duration || comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || isInSync(&comp, syn) {
 			continue
 		}
 
-		now := metav1.Now()
-		syn.Status.LastRolloutTime = &now
-		if err := c.client.Status().Update(ctx, syn); err != nil {
-			return ctrl.Result{}, fmt.Errorf("advancing last rollout time: %w", err)
-		}
-
-		err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-			if err := c.client.Get(ctx, client.ObjectKeyFromObject(&comp), &comp); err != nil {
-				return err
-			}
-			swapStates(&comp)
-			return c.client.Status().Update(ctx, &comp)
-		})
+		swapStates(&comp)
+		err = c.client.Status().Update(ctx, &comp)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
 		}
 
-		logger.V(0).Info("advancing synthesizer rollout process")
+		logger.V(1).Info("advancing rollout process")
 		return ctrl.Result{RequeueAfter: syn.Spec.RolloutCooldown.Duration}, nil
-	}
-
-	// Update the status to reflect the completed rollout
-	if syn.Status.CurrentGeneration != syn.Generation {
-		previousTime := syn.Status.LastRolloutTime
-		now := metav1.Now()
-		syn.Status.LastRolloutTime = &now
-		syn.Status.CurrentGeneration = syn.Generation
-		if err := c.client.Status().Update(ctx, syn); err != nil {
-			return ctrl.Result{}, fmt.Errorf("updating synthesizer's current generation: %w", err)
-		}
-
-		if previousTime != nil {
-			logger = logger.WithValues("latency", now.Sub(previousTime.Time).Milliseconds())
-		}
-		if len(compList.Items) > 0 { // log doesn't make sense if the synthesizer wasn't actually rolled out
-			logger.V(0).Info("finished rolling out latest synthesizer version")
-		}
-		return ctrl.Result{}, nil
 	}
 
 	return ctrl.Result{}, nil
@@ -129,4 +114,8 @@ func swapStates(comp *apiv1.Composition) {
 	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
 		ObservedCompositionGeneration: comp.Generation,
 	}
+}
+
+func isInSync(comp *apiv1.Composition, syn *apiv1.Synthesizer) bool {
+	return comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration >= syn.Generation
 }

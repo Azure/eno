@@ -324,10 +324,6 @@ _Appears in:_
 _Appears in:_
 - [Synthesizer](#synthesizer)
 
-| Field | Description | Default | Validation |
-| --- | --- | --- | --- |
-| `currentGeneration` _integer_ | The metadata.generation of this resource at the oldest version currently used by any Generations.<br />This will equal the current generation when slow rollout of an update to the Generations is complete. |  |  |
-| `lastRolloutTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ | LastRolloutTime is the timestamp of the last pod creation caused by a change to this resource.<br />Should not be updated due to Composotion changes.<br />Used to calculate rollout cooldown period. |  |  |
 
 
 #### Variation

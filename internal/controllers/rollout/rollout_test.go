@@ -115,12 +115,6 @@ func TestSynthesizerRolloutCooldown(t *testing.T) {
 		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
 	})
 
-	// Wait for the informer cache to know about the last update
-	testutil.Eventually(t, func() bool {
-		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(syn), syn)))
-		return syn.Status.LastRolloutTime != nil
-	})
-
 	// Second synthesizer update
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		if err := cli.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
