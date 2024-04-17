@@ -302,14 +302,7 @@ func swapStates(comp *apiv1.Composition, syn *apiv1.Synthesizer) {
 }
 
 func shouldSwapStates(comp *apiv1.Composition) bool {
-	if comp.Status.CurrentSynthesis == nil {
-		return true
-	}
-
-	// Ignore synthesizer generation if it is 0 since that means we're waiting for pod creation, which is required to discover the generation
-	synthesizerHasChanged := (comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration != 0 && comp.Status.MinSynthesizerGeneration > comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration)
-	compositionHasChanged := comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation
-	return compositionHasChanged || synthesizerHasChanged
+	return comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation
 }
 
 func shouldBackOffPodCreation(comp *apiv1.Composition) bool {

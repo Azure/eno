@@ -73,7 +73,7 @@ func (c *synthesizerController) Reconcile(ctx context.Context, req ctrl.Request)
 		// - They haven't ever been synthesized (they'll use the new synthesizer version anyway)
 		// - They are currently being synthesized
 		// - They've been synthesized by this or a newer version
-		if time.Since(comp.CreationTimestamp.Time) < syn.Spec.RolloutCooldown.Duration || comp.Status.MinSynthesizerGeneration >= syn.Generation || comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration >= syn.Generation {
+		if time.Since(comp.CreationTimestamp.Time) < syn.Spec.RolloutCooldown.Duration || comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration >= syn.Generation {
 			continue
 		}
 
@@ -87,12 +87,13 @@ func (c *synthesizerController) Reconcile(ctx context.Context, req ctrl.Request)
 			if err := c.client.Get(ctx, client.ObjectKeyFromObject(&comp), &comp); err != nil {
 				return err
 			}
-			comp.Status.MinSynthesizerGeneration = syn.Generation
+			swapStates(&comp)
 			return c.client.Status().Update(ctx, &comp)
 		})
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
 		}
+
 		logger.V(0).Info("advancing synthesizer rollout process")
 		return ctrl.Result{RequeueAfter: syn.Spec.RolloutCooldown.Duration}, nil
 	}
@@ -117,4 +118,15 @@ func (c *synthesizerController) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func swapStates(comp *apiv1.Composition) {
+	// If the previous state has been synthesized but not the current, keep the previous to avoid orphaning deleted resources
+	if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil {
+		comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
+	}
+
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		ObservedCompositionGeneration: comp.Generation,
+	}
 }

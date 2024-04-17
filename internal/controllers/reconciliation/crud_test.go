@@ -593,8 +593,8 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	// Start re-synthesizing
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Status.MinSynthesizerGeneration = 10
-		return upstream.Status().Update(ctx, comp)
+		comp.Spec.Bindings = []apiv1.Binding{{Key: "anything", Resource: apiv1.ResourceBinding{Name: "also-anything"}}}
+		return upstream.Update(ctx, comp)
 	})
 	require.NoError(t, err)
 

@@ -42,10 +42,6 @@ type CompositionSpec struct {
 }
 
 type CompositionStatus struct {
-	// Compositions will be resynthesized if their status.currentState.observedSynthesizerGeneration is < the referenced synthesizer's generation.
-	// Used to slowly roll out synthesizer updates across compositions.
-	MinSynthesizerGeneration int64 `json:"minSynthesizerGeneration,omitempty"`
-
 	CurrentSynthesis  *Synthesis `json:"currentSynthesis,omitempty"`
 	PreviousSynthesis *Synthesis `json:"previousSynthesis,omitempty"`
 }

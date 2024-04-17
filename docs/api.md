@@ -95,7 +95,6 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `minSynthesizerGeneration` _integer_ | Compositions will be resynthesized if their status.currentState.observedSynthesizerGeneration is < the referenced synthesizer's generation.<br />Used to slowly roll out synthesizer updates across compositions. |  |  |
 | `currentSynthesis` _[Synthesis](#synthesis)_ |  |  |  |
 | `previousSynthesis` _[Synthesis](#synthesis)_ |  |  |  |
 
