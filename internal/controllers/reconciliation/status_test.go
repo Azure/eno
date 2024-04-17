@@ -33,7 +33,7 @@ func TestResourceReadiness(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
+	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager, time.Millisecond))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
@@ -63,7 +63,6 @@ func TestResourceReadiness(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "bar"
-	syn.Spec.RolloutCooldown = &metav1.Duration{Duration: time.Millisecond}
 	require.NoError(t, upstream.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}

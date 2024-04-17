@@ -308,7 +308,6 @@ _Appears in:_
 | `command` _string array_ | Copied opaquely into the container's command property. | [synthesize] |  |
 | `execTimeout` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#duration-v1-meta)_ | Timeout for each execution of the synthesizer command. | 10s |  |
 | `podTimeout` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#duration-v1-meta)_ | Pods are recreated after they've existed for at least the pod timeout interval.<br />This helps close the loop in failure modes where a pod may be considered ready but not actually able to run. | 2m |  |
-| `rolloutCooldown` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#duration-v1-meta)_ | Any changes to the synthesizer will be propagated to compositions that reference it.<br />This property controls how long Eno will wait between each composition update. | 30s |  |
 | `reconcileInterval` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#duration-v1-meta)_ | Synthesized resources can optionally be reconciled at a given interval.<br />Per-resource jitter will be applied to avoid spikes in request rate. |  |  |
 | `refs` _[Ref](#ref) array_ | Refs define the Synthesizer's input schema without binding it to specific<br />resources. |  |  |
 

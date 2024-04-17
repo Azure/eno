@@ -6,7 +6,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -26,7 +25,7 @@ func TestSynthesizerRollout(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, NewSynthesizerController(mgr.Manager))
+	require.NoError(t, NewSynthesizerController(mgr.Manager, time.Millisecond*10))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewExecController(mgr.Manager, testSynthesisConfig, &testutil.ExecConn{}))
@@ -35,7 +34,6 @@ func TestSynthesizerRollout(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "test-syn-image"
-	syn.Spec.RolloutCooldown = &metav1.Duration{Duration: time.Millisecond * 10}
 	require.NoError(t, cli.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}
@@ -75,7 +73,7 @@ func TestSynthesizerRolloutCooldown(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, NewSynthesizerController(mgr.Manager))
+	require.NoError(t, NewSynthesizerController(mgr.Manager, time.Millisecond*10))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewExecController(mgr.Manager, testSynthesisConfig, &testutil.ExecConn{}))
@@ -84,7 +82,6 @@ func TestSynthesizerRolloutCooldown(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "test-syn-image"
-	syn.Spec.RolloutCooldown = &metav1.Duration{Duration: time.Millisecond * 10}
 	require.NoError(t, cli.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}

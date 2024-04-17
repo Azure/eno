@@ -156,7 +156,7 @@ func TestCRUD(t *testing.T) {
 			downstream := mgr.DownstreamClient
 
 			// Register supporting controllers
-			require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
+			require.NoError(t, rollout.NewSynthesizerController(mgr.Manager, time.Millisecond))
 			require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 			require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 			require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: newSliceBuilder(t, scheme, &test)}))
@@ -170,7 +170,6 @@ func TestCRUD(t *testing.T) {
 			syn := &apiv1.Synthesizer{}
 			syn.Name = "test-syn"
 			syn.Spec.Image = "create"
-			syn.Spec.RolloutCooldown = &metav1.Duration{Duration: time.Millisecond}
 			require.NoError(t, upstream.Create(ctx, syn))
 
 			comp := &apiv1.Composition{}
@@ -317,7 +316,7 @@ func TestReconcileInterval(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
+	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager, time.Millisecond))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
@@ -387,7 +386,7 @@ func TestReconcileCacheRace(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
+	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager, time.Millisecond))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	renderN := 0
@@ -460,7 +459,7 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
+	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager, time.Millisecond))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))

@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -225,13 +224,11 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 	syn1 := &apiv1.Synthesizer{}
 	syn1.Name = "test-syn-1"
 	syn1.Spec.Image = "initial-image"
-	syn1.Spec.RolloutCooldown = &metav1.Duration{Duration: time.Millisecond * 10}
 	require.NoError(t, cli.Create(ctx, syn1))
 
 	syn2 := &apiv1.Synthesizer{}
 	syn2.Name = "test-syn-2"
 	syn2.Spec.Image = "updated-image"
-	syn1.Spec.RolloutCooldown = &metav1.Duration{Duration: time.Millisecond * 10}
 	require.NoError(t, cli.Create(ctx, syn2))
 
 	comp := &apiv1.Composition{}

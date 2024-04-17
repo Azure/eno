@@ -617,11 +617,6 @@ func (in *SynthesizerSpec) DeepCopyInto(out *SynthesizerSpec) {
 		*out = new(metav1.Duration)
 		**out = **in
 	}
-	if in.RolloutCooldown != nil {
-		in, out := &in.RolloutCooldown, &out.RolloutCooldown
-		*out = new(metav1.Duration)
-		**out = **in
-	}
 	if in.ReconcileInterval != nil {
 		in, out := &in.ReconcileInterval, &out.ReconcileInterval
 		*out = new(metav1.Duration)

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -15,22 +14,23 @@ import (
 	"github.com/Azure/eno/internal/manager"
 )
 
-// TODO: Move cooldown to global
-
 // TODO: Publish events when initiating synthesis
 
 type synthesizerController struct {
-	client client.Client
+	client   client.Client
+	cooldown time.Duration
 }
 
 // NewSynthesizerController re-synthesizes compositions when their synthesizer has changed while honoring a cooldown period.
-func NewSynthesizerController(mgr ctrl.Manager) error {
+func NewSynthesizerController(mgr ctrl.Manager, cooldown time.Duration) error {
 	c := &synthesizerController{
-		client: mgr.GetClient(),
+		client:   mgr.GetClient(),
+		cooldown: cooldown,
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Synthesizer{}).
 		Watches(&apiv1.Composition{}, manager.NewCompositionToSynthesizerHandler(c.client)).
+		// TODO: Filter some events?
 		WithLogConstructor(manager.NewLogConstructor(mgr, "synthesizerRolloutController")).
 		Complete(c)
 }
@@ -53,27 +53,21 @@ func (c *synthesizerController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 	}
 
-	var lastRolloutTime *metav1.Time
+	var latestRollout time.Time
 	for _, comp := range compList.Items {
-		comp := comp
-
-		// Skip compositions that:
-		// - Are brand new (no current synthesis)
-		// - Have never received a rolling update (no previous synthesis)
-		// - Are currently being synthesized
-		if comp.Status.CurrentSynthesis == nil || comp.Status.PreviousSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil {
-			continue
+		// For every synthesizer, only one composition can be the target of a rolling change at any point in time.
+		// To avoid blocked rollouts caused by compositions that cannot be synthesized, also time out and move on eventually.
+		if isRolling(&comp) {
+			return ctrl.Result{}, nil
 		}
-		if ts := comp.Status.CurrentSynthesis.Synthesized; lastRolloutTime.Before(ts) {
-			lastRolloutTime = ts
+
+		if comp.Status.CurrentSynthesis != nil && comp.Status.PreviousSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil && comp.Status.CurrentSynthesis.Synthesized.Time.After(latestRollout) {
+			latestRollout = comp.Status.CurrentSynthesis.Synthesized.Time
 		}
 	}
-
-	if lastRolloutTime != nil && syn.Spec.RolloutCooldown != nil {
-		remainingCooldown := syn.Spec.RolloutCooldown.Duration - time.Since(lastRolloutTime.Time)
-		if remainingCooldown > 0 {
-			return ctrl.Result{RequeueAfter: remainingCooldown}, nil // not ready to continue rollout yet
-		}
+	if delta := time.Since(latestRollout); delta < c.cooldown {
+		// TODO: Expand test coverage
+		return ctrl.Result{RequeueAfter: c.cooldown - delta}, nil
 	}
 
 	// randomize list to avoid always rolling out changes in the same order
@@ -88,7 +82,7 @@ func (c *synthesizerController) Reconcile(ctx context.Context, req ctrl.Request)
 		// - They haven't ever been synthesized (they'll use the latest inputs anyway)
 		// - They are currently being synthesized
 		// - They are already in sync with the latest inputs
-		if time.Since(comp.CreationTimestamp.Time) < syn.Spec.RolloutCooldown.Duration || comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || isInSync(&comp, syn) {
+		if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || isInSync(&comp, syn) || time.Since(comp.CreationTimestamp.Time) < c.cooldown {
 			continue
 		}
 
@@ -99,7 +93,7 @@ func (c *synthesizerController) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 
 		logger.V(1).Info("advancing rollout process")
-		return ctrl.Result{RequeueAfter: syn.Spec.RolloutCooldown.Duration}, nil
+		return ctrl.Result{}, nil
 	}
 
 	return ctrl.Result{}, nil
@@ -118,4 +112,8 @@ func swapStates(comp *apiv1.Composition) {
 
 func isInSync(comp *apiv1.Composition, syn *apiv1.Synthesizer) bool {
 	return comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration >= syn.Generation
+}
+
+func isRolling(comp *apiv1.Composition) bool {
+	return comp.Status.CurrentSynthesis != nil && comp.Status.PreviousSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized == nil
 }
