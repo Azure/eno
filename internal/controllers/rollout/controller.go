@@ -14,16 +14,14 @@ import (
 	"github.com/Azure/eno/internal/manager"
 )
 
-// TODO: Publish events when initiating synthesis
-
-type synthesizerController struct {
+type controller struct {
 	client   client.Client
 	cooldown time.Duration
 }
 
-// NewSynthesizerController re-synthesizes compositions when their synthesizer has changed while honoring a cooldown period.
-func NewSynthesizerController(mgr ctrl.Manager, cooldown time.Duration) error {
-	c := &synthesizerController{
+// NewController re-synthesizes compositions when their synthesizer has changed while honoring a cooldown period.
+func NewController(mgr ctrl.Manager, cooldown time.Duration) error {
+	c := &controller{
 		client:   mgr.GetClient(),
 		cooldown: cooldown,
 	}
@@ -35,7 +33,7 @@ func NewSynthesizerController(mgr ctrl.Manager, cooldown time.Duration) error {
 		Complete(c)
 }
 
-func (c *synthesizerController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	syn := &apiv1.Synthesizer{}

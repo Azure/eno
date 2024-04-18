@@ -33,7 +33,7 @@ func TestResourceReadiness(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager, time.Millisecond))
+	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, aggregation.NewSliceController(mgr.Manager))

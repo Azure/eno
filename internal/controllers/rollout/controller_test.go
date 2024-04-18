@@ -25,7 +25,7 @@ func TestSynthesizerRollout(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, NewSynthesizerController(mgr.Manager, time.Millisecond*10))
+	require.NoError(t, NewController(mgr.Manager, time.Millisecond*10))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewExecController(mgr.Manager, testSynthesisConfig, &testutil.ExecConn{}))
@@ -73,7 +73,7 @@ func TestSynthesizerRolloutCooldown(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, NewSynthesizerController(mgr.Manager, time.Hour))
+	require.NoError(t, NewController(mgr.Manager, time.Hour))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewExecController(mgr.Manager, testSynthesisConfig, &testutil.ExecConn{}))

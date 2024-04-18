@@ -77,7 +77,7 @@ func run() error {
 		return fmt.Errorf("constructing execution controller: %w", err)
 	}
 
-	err = rollout.NewSynthesizerController(mgr, rolloutCooldown)
+	err = rollout.NewController(mgr, rolloutCooldown)
 	if err != nil {
 		return fmt.Errorf("constructing rollout controller: %w", err)
 	}
