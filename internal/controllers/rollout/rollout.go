@@ -66,7 +66,6 @@ func (c *synthesizerController) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 	if delta := time.Since(latestRollout); delta < c.cooldown {
-		// TODO: Expand test coverage
 		return ctrl.Result{RequeueAfter: c.cooldown - delta}, nil
 	}
 
@@ -78,11 +77,10 @@ func (c *synthesizerController) Reconcile(ctx context.Context, req ctrl.Request)
 		logger := logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
 
 		// Compositions aren't eligible to receive an updated synthesizer when:
-		// - They are newer than the cooldown period
 		// - They haven't ever been synthesized (they'll use the latest inputs anyway)
 		// - They are currently being synthesized
 		// - They are already in sync with the latest inputs
-		if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || isInSync(&comp, syn) || time.Since(comp.CreationTimestamp.Time) < c.cooldown {
+		if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || isInSync(&comp, syn) {
 			continue
 		}
 

@@ -73,7 +73,7 @@ func TestSynthesizerRolloutCooldown(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, NewSynthesizerController(mgr.Manager, time.Millisecond*10))
+	require.NoError(t, NewSynthesizerController(mgr.Manager, time.Hour))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewExecController(mgr.Manager, testSynthesisConfig, &testutil.ExecConn{}))
@@ -117,7 +117,7 @@ func TestSynthesizerRolloutCooldown(t *testing.T) {
 		if err := cli.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
 			return err
 		}
-		syn.Spec.Image = "updated-image"
+		syn.Spec.Image = "another-updated-image"
 		return cli.Update(ctx, syn)
 	})
 	require.NoError(t, err)
@@ -126,5 +126,5 @@ func TestSynthesizerRolloutCooldown(t *testing.T) {
 	time.Sleep(time.Millisecond * 250)
 	original := comp.DeepCopy()
 	require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-	assert.Equal(t, original.Generation, comp.Generation, "spec hasn't been updated")
+	assert.Equal(t, original.Status.CurrentSynthesis.ObservedSynthesizerGeneration, comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration, "composition has not been resynthesized")
 }
