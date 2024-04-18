@@ -7,8 +7,13 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
@@ -27,7 +32,7 @@ func NewController(mgr ctrl.Manager, cooldown time.Duration) error {
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Synthesizer{}).
-		Watches(&apiv1.Composition{}, manager.NewCompositionToSynthesizerHandler(c.client)).
+		Watches(&apiv1.Composition{}, newCompositionHandler()).
 		// TODO: Filter some events?
 		WithLogConstructor(manager.NewLogConstructor(mgr, "synthesizerRolloutController")).
 		Complete(c)
@@ -112,4 +117,42 @@ func isInSync(comp *apiv1.Composition, syn *apiv1.Synthesizer) bool {
 
 func isRolling(comp *apiv1.Composition) bool {
 	return comp.Status.CurrentSynthesis != nil && comp.Status.PreviousSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized == nil
+}
+
+func newCompositionHandler() handler.EventHandler {
+	return &handler.Funcs{
+		CreateFunc: func(ctx context.Context, ce event.CreateEvent, rli workqueue.RateLimitingInterface) {
+			// No need to handle creation events since the status will always be nil.
+		},
+		DeleteFunc: func(ctx context.Context, de event.DeleteEvent, rli workqueue.RateLimitingInterface) {
+			// We don't handle deletes on purpose, since a composition being deleted can only ever
+			// result in the cooldown period being shortened i.e. we lose track of a more recent
+			// rollout event.
+			//
+			// It's okay that this state can be lost, since it falls within the promised semantics
+			// of this controller. But ideally we can avoid it when possible.
+		},
+		UpdateFunc: func(ctx context.Context, ue event.UpdateEvent, rli workqueue.RateLimitingInterface) {
+			newComp, ok := ue.ObjectNew.(*apiv1.Composition)
+			if !ok {
+				logr.FromContextOrDiscard(ctx).V(0).Info("unexpected type given to newCompositionToSynthesizerHandler")
+				return
+			}
+
+			oldComp, ok := ue.ObjectOld.(*apiv1.Composition)
+			if !ok {
+				rli.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: newComp.Spec.Synthesizer.Name}})
+				return
+			}
+
+			// Nothing we care about has changed
+			if oldComp.Spec.Synthesizer.Name == newComp.Spec.Synthesizer.Name &&
+				oldComp.Status.CurrentSynthesis != nil && newComp.Status.CurrentSynthesis != nil &&
+				oldComp.Status.CurrentSynthesis.UUID == newComp.Status.CurrentSynthesis.UUID {
+				return
+			}
+
+			rli.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: newComp.Spec.Synthesizer.Name}})
+		},
+	}
 }
