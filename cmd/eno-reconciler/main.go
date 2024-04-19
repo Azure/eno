@@ -51,7 +51,7 @@ func run() error {
 	flag.DurationVar(&writeBatchInterval, "write-batch-interval", time.Second*5, "The max throughput of composition status updates")
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.StringVar(&remoteKubeconfigFile, "remote-kubeconfig", "", "Path to the kubeconfig of the apiserver where the resources will be reconciled. The config from the environment is used if this is not provided")
-	flag.Float64Var(&remoteQPS, "remote-qps", 0, "Max requests per second to the remote apiserver")
+	flag.Float64Var(&remoteQPS, "remote-qps", 50, "Max requests per second to the remote apiserver")
 	flag.DurationVar(&recOpts.Timeout, "timeout", time.Minute, "Per-resource reconciliation timeout. Avoids cases where client retries/timeouts are configured poorly and the loop gets blocked")
 	flag.DurationVar(&recOpts.ReadinessPollInterval, "readiness-poll-interval", time.Second*5, "Interval at which non-ready resources will be checked for readiness")
 	flag.StringVar(&compositionSelector, "composition-label-selector", labels.Everything().String(), "Optional label selector for compositions to be reconciled")

@@ -100,7 +100,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	if !exists {
 		// It's possible for the cache to be empty because a manifest for this resource no longer exists at the requested composition generation.
 		// Dropping the work item is safe since filling the new version will generate a new queue message.
-		logger.V(1).Info("dropping work item because the corresponding manifest generation no longer exists in the cache")
+		logger.V(1).Info("dropping work item because the corresponding synthesis no longer exists in the cache")
 		return ctrl.Result{}, nil
 	}
 
