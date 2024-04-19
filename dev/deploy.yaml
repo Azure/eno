@@ -6,8 +6,8 @@ metadata:
     app: eno-controller
 spec:
   strategy:
-    type: Recreate
-  replicas: 1
+    type: RollingUpdate
+  replicas: 2
   selector:
     matchLabels:
       app: eno-controller
@@ -23,13 +23,37 @@ spec:
       containers:
       - name: eno-controller
         image: $REGISTRY/eno-controller:$TAG
+        args:
+        - --leader-election
+        - --leader-election-id=controller
+        resources:
+          requests:
+            cpu: 50m
+            memory: 42Mi
+          limits:
+            cpu: 250m
+            memory: 42Mi
         env:
-          - name: PPROF_ADDR
-            value: ":8888"
           - name: POD_NAMESPACE
             valueFrom:
               fieldRef:
                 fieldPath: metadata.namespace
+          - name: GOMAXPROCS 
+            value: "1"
+          - name: GOMEMLIMIT
+            valueFrom:
+              resourceFieldRef:
+                resource: limits.memory
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+            scheme: HTTP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+            scheme: HTTP
 
 ---
 
@@ -41,8 +65,8 @@ metadata:
     app: eno-reconciler
 spec:
   strategy:
-    type: Recreate
-  replicas: 1
+    type: RollingUpdate
+  replicas: 2
   selector:
     matchLabels:
       app: eno-reconciler
@@ -59,13 +83,26 @@ spec:
       - name: eno-reconciler
         image: $REGISTRY/eno-reconciler:$TAG
         args:
-        - --qps=1000
-        - --remote-qps=1000
+        - --leader-election
+        - --leader-election-id=reconciler
         env:
-          - name: PPROF_ADDR
-            value: ":8888"
-          - name: INSECURE_LOG_PATCH
-            value: "true"
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: GOMAXPROCS 
+            value: "1"
+          - name: GOMEMLIMIT
+            valueFrom:
+              resourceFieldRef:
+                resource: limits.memory
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 1
+            memory: 256Mi
         readinessProbe:
           httpGet:
             path: /readyz
