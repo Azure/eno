@@ -111,31 +111,11 @@ spec:
                   - resource
                   type: object
                 type: array
-              rolloutCooldown:
-                default: 30s
-                description: |-
-                  Any changes to the synthesizer will be propagated to compositions that reference it.
-                  This property controls how long Eno will wait between each composition update.
-                type: string
             type: object
             x-kubernetes-validations:
             - message: podTimeout must be greater than execTimeout
               rule: duration(self.execTimeout) <= duration(self.podTimeout)
           status:
-            properties:
-              currentGeneration:
-                description: |-
-                  The metadata.generation of this resource at the oldest version currently used by any Generations.
-                  This will equal the current generation when slow rollout of an update to the Generations is complete.
-                format: int64
-                type: integer
-              lastRolloutTime:
-                description: |-
-                  LastRolloutTime is the timestamp of the last pod creation caused by a change to this resource.
-                  Should not be updated due to Composotion changes.
-                  Used to calculate rollout cooldown period.
-                format: date-time
-                type: string
             type: object
         type: object
     served: true

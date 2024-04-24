@@ -1,4 +1,4 @@
-package synthesis
+package rollout
 
 import (
 	"testing"
@@ -6,30 +6,34 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/testutil"
 )
 
-// TestControllerRollout proves that synthesizer changes are eventually rolled out across their compositions.
-func TestControllerRollout(t *testing.T) {
+var testSynthesisConfig = &synthesis.Config{
+	SliceCreationQPS: 15,
+	PodNamespace:     "default",
+}
+
+// TestSynthesizerRollout proves that synthesizer changes are eventually rolled out across their compositions.
+func TestSynthesizerRollout(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
-	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager))
-	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, &testutil.ExecConn{}))
+	require.NoError(t, NewController(mgr.Manager, time.Millisecond*10))
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
+	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
+	require.NoError(t, synthesis.NewExecController(mgr.Manager, testSynthesisConfig, &testutil.ExecConn{}))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "test-syn-image"
-	syn.Spec.RolloutCooldown = &metav1.Duration{Duration: time.Millisecond * 10}
 	require.NoError(t, cli.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}
@@ -62,23 +66,22 @@ func TestControllerRollout(t *testing.T) {
 	})
 }
 
-// TestControllerSynthesizerRolloutCooldown proves that the synth rollout cooldown period is honored when
+// TestSynthesizerRolloutCooldown proves that the synth rollout cooldown period is honored when
 // rolling out changes across compositions.
-func TestControllerSynthesizerRolloutCooldown(t *testing.T) {
+func TestSynthesizerRolloutCooldown(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
-	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager)) // Rollout should not continue during this test
-	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, &testutil.ExecConn{}))
+	require.NoError(t, NewController(mgr.Manager, time.Hour))
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
+	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
+	require.NoError(t, synthesis.NewExecController(mgr.Manager, testSynthesisConfig, &testutil.ExecConn{}))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "test-syn-image"
-	syn.Spec.RolloutCooldown = &metav1.Duration{Duration: time.Millisecond * 10}
 	require.NoError(t, cli.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}
@@ -109,18 +112,12 @@ func TestControllerSynthesizerRolloutCooldown(t *testing.T) {
 		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
 	})
 
-	// Wait for the informer cache to know about the last update
-	testutil.Eventually(t, func() bool {
-		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(syn), syn)))
-		return syn.Status.LastRolloutTime != nil
-	})
-
 	// Second synthesizer update
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		if err := cli.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
 			return err
 		}
-		syn.Spec.Image = "updated-image"
+		syn.Spec.Image = "another-updated-image"
 		return cli.Update(ctx, syn)
 	})
 	require.NoError(t, err)
@@ -129,5 +126,5 @@ func TestControllerSynthesizerRolloutCooldown(t *testing.T) {
 	time.Sleep(time.Millisecond * 250)
 	original := comp.DeepCopy()
 	require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-	assert.Equal(t, original.Generation, comp.Generation, "spec hasn't been updated")
+	assert.Equal(t, original.Status.CurrentSynthesis.ObservedSynthesizerGeneration, comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration, "composition has not been resynthesized")
 }

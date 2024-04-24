@@ -21,6 +21,7 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/controllers/aggregation"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
+	"github.com/Azure/eno/internal/controllers/rollout"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/testutil"
 )
@@ -155,7 +156,7 @@ func TestCRUD(t *testing.T) {
 			downstream := mgr.DownstreamClient
 
 			// Register supporting controllers
-			require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
+			require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
 			require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 			require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 			require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: newSliceBuilder(t, scheme, &test)}))
@@ -169,7 +170,6 @@ func TestCRUD(t *testing.T) {
 			syn := &apiv1.Synthesizer{}
 			syn.Name = "test-syn"
 			syn.Spec.Image = "create"
-			syn.Spec.RolloutCooldown = &metav1.Duration{Duration: time.Millisecond}
 			require.NoError(t, upstream.Create(ctx, syn))
 
 			comp := &apiv1.Composition{}
@@ -226,6 +226,7 @@ func TestCRUD(t *testing.T) {
 }
 
 func (c *crudTestCase) WaitForPhase(t *testing.T, downstream client.Client, phase string) {
+	t.Logf("waiting for phase %q", phase)
 	var lastRV string
 	testutil.Eventually(t, func() bool {
 		obj, err := c.Get(downstream)
@@ -315,7 +316,7 @@ func TestReconcileInterval(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
+	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
@@ -385,7 +386,7 @@ func TestReconcileCacheRace(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
+	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	renderN := 0
@@ -458,7 +459,7 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
+	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
@@ -591,7 +592,7 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	// Start re-synthesizing
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Spec.Synthesizer.MinGeneration = 10
+		comp.Spec.Bindings = []apiv1.Binding{{Key: "anything", Resource: apiv1.ResourceBinding{Name: "also-anything"}}}
 		return upstream.Update(ctx, comp)
 	})
 	require.NoError(t, err)

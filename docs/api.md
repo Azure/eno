@@ -26,6 +26,7 @@ Compositions use bindings to populate inputs supported by their synthesizer.
 _Appears in:_
 - [CompositionSpec](#compositionspec)
 - [SymphonySpec](#symphonyspec)
+- [Variation](#variation)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
@@ -288,7 +289,6 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `name` _string_ |  |  |  |
-| `minGeneration` _integer_ | Compositions will be resynthesized if their status.currentState.observedSynthesizerGeneration is < the referenced synthesizer's generation.<br />Used to slowly roll out synthesizer updates across compositions. |  |  |
 
 
 #### SynthesizerSpec
@@ -308,7 +308,6 @@ _Appears in:_
 | `command` _string array_ | Copied opaquely into the container's command property. | [synthesize] |  |
 | `execTimeout` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#duration-v1-meta)_ | Timeout for each execution of the synthesizer command. | 10s |  |
 | `podTimeout` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#duration-v1-meta)_ | Pods are recreated after they've existed for at least the pod timeout interval.<br />This helps close the loop in failure modes where a pod may be considered ready but not actually able to run. | 2m |  |
-| `rolloutCooldown` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#duration-v1-meta)_ | Any changes to the synthesizer will be propagated to compositions that reference it.<br />This property controls how long Eno will wait between each composition update. | 30s |  |
 | `reconcileInterval` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#duration-v1-meta)_ | Synthesized resources can optionally be reconciled at a given interval.<br />Per-resource jitter will be applied to avoid spikes in request rate. |  |  |
 | `refs` _[Ref](#ref) array_ | Refs define the Synthesizer's input schema without binding it to specific<br />resources. |  |  |
 
@@ -324,10 +323,6 @@ _Appears in:_
 _Appears in:_
 - [Synthesizer](#synthesizer)
 
-| Field | Description | Default | Validation |
-| --- | --- | --- | --- |
-| `currentGeneration` _integer_ | The metadata.generation of this resource at the oldest version currently used by any Generations.<br />This will equal the current generation when slow rollout of an update to the Generations is complete. |  |  |
-| `lastRolloutTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ | LastRolloutTime is the timestamp of the last pod creation caused by a change to this resource.<br />Should not be updated due to Composotion changes.<br />Used to calculate rollout cooldown period. |  |  |
 
 
 #### Variation
@@ -345,5 +340,6 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `labels` _object (keys:string, values:string)_ | Used to populate the composition's metadata.labels. |  |  |
 | `synthesizer` _[SynthesizerRef](#synthesizerref)_ | Used to populate the composition's spec.synthesizer. |  |  |
+| `bindings` _[Binding](#binding) array_ | Variation-specific bindings get merged with Symphony bindings and take<br />precedence over them. |  |  |
 
 

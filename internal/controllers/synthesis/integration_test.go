@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -32,7 +31,6 @@ func TestControllerHappyPath(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager))
 	conn := &testutil.ExecConn{}
 	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, conn))
 	mgr.Start(t)
@@ -107,7 +105,6 @@ func TestPodNamespaceOverride(t *testing.T) {
 	lifecycleConfig.PodNamespace = expectedPodNamespace
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, &lifecycleConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager))
 	conn := &testutil.ExecConn{
 		PodHook: podHook,
 	}
@@ -157,7 +154,6 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager))
 	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
 		// simulate real pods taking some random amount of time to generation
 		time.Sleep(time.Millisecond * time.Duration(rand.Int63n(300)))
@@ -223,19 +219,16 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager))
 	mgr.Start(t)
 
 	syn1 := &apiv1.Synthesizer{}
 	syn1.Name = "test-syn-1"
 	syn1.Spec.Image = "initial-image"
-	syn1.Spec.RolloutCooldown = &metav1.Duration{Duration: time.Millisecond * 10}
 	require.NoError(t, cli.Create(ctx, syn1))
 
 	syn2 := &apiv1.Synthesizer{}
 	syn2.Name = "test-syn-2"
 	syn2.Spec.Image = "updated-image"
-	syn1.Spec.RolloutCooldown = &metav1.Duration{Duration: time.Millisecond * 10}
 	require.NoError(t, cli.Create(ctx, syn2))
 
 	comp := &apiv1.Composition{}

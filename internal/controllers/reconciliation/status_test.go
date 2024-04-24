@@ -7,6 +7,7 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/controllers/aggregation"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
+	"github.com/Azure/eno/internal/controllers/rollout"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/google/uuid"
@@ -32,7 +33,7 @@ func TestResourceReadiness(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	require.NoError(t, synthesis.NewRolloutController(mgr.Manager))
+	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
 	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
@@ -62,7 +63,6 @@ func TestResourceReadiness(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "bar"
-	syn.Spec.RolloutCooldown = &metav1.Duration{Duration: time.Millisecond}
 	require.NoError(t, upstream.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}

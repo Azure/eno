@@ -217,35 +217,6 @@ func NewCompositionToResourceSliceHandler(cli client.Client) handler.EventHandle
 	}
 }
 
-func NewCompositionToSynthesizerHandler(cli client.Client) handler.EventHandler {
-	return &handler.Funcs{
-		CreateFunc: func(ctx context.Context, ce event.CreateEvent, rli workqueue.RateLimitingInterface) {
-			comp, ok := ce.Object.(*apiv1.Composition)
-			if !ok {
-				logr.FromContextOrDiscard(ctx).V(0).Info("unexpected type given to NewCompositionToSynthesizerHandler")
-				return
-			}
-			rli.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: comp.Spec.Synthesizer.Name}})
-		},
-		UpdateFunc: func(ctx context.Context, ue event.UpdateEvent, rli workqueue.RateLimitingInterface) {
-			comp, ok := ue.ObjectNew.(*apiv1.Composition)
-			if !ok {
-				logr.FromContextOrDiscard(ctx).V(0).Info("unexpected type given to NewCompositionToSynthesizerHandler")
-				return
-			}
-			rli.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: comp.Spec.Synthesizer.Name}})
-		},
-		DeleteFunc: func(ctx context.Context, de event.DeleteEvent, rli workqueue.RateLimitingInterface) {
-			comp, ok := de.Object.(*apiv1.Composition)
-			if !ok {
-				logr.FromContextOrDiscard(ctx).V(0).Info("unexpected type given to NewCompositionToSynthesizerHandler")
-				return
-			}
-			rli.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: comp.Spec.Synthesizer.Name}})
-		},
-	}
-}
-
 func PodReferencesComposition(pod *corev1.Pod) bool {
 	labels := pod.GetLabels()
 	if labels == nil || labels[CompositionNameLabelKey] == "" || labels[CompositionNamespaceLabelKey] == "" {

@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -34,12 +35,12 @@ func TestManagerBasics(t *testing.T) {
 	require.NoError(t, client.Create(ctx, comp))
 
 	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
-		ObservedCompositionGeneration: comp.Generation,
-		ResourceSlices:                []*apiv1.ResourceSliceRef{{Name: "test-slice"}},
-		Synthesized:                   ptr.To(metav1.Now()),
+		UUID:           uuid.NewString(),
+		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: "test-slice"}},
+		Synthesized:    ptr.To(metav1.Now()),
 	}
 	require.NoError(t, client.Status().Update(ctx, comp))
-	tr.comp = NewCompositionRef(comp)
+	tr.comp = NewSynthesisRef(comp)
 
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = "test-slice"
@@ -59,7 +60,7 @@ func TestManagerBasics(t *testing.T) {
 
 type testReconciler struct {
 	cache        *Cache
-	comp         *CompositionRef
+	comp         *SynthesisRef
 	lastResource atomic.Pointer[Resource]
 }
 

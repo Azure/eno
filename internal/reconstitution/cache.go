@@ -15,14 +15,16 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// TODO: Log synthesis UUID everywhere
+
 // Cache maintains a fast index of (ResourceRef + Composition + Synthesis) -> Resource.
 type Cache struct {
 	client client.Client
 	renv   *readiness.Env
 
-	mut                    sync.Mutex
-	resources              map[CompositionRef]map[resource.Ref]*Resource
-	synthesesByComposition map[types.NamespacedName][]int64
+	mut                         sync.Mutex
+	resources                   map[SynthesisRef]map[resource.Ref]*Resource
+	synthesisUUIDsByComposition map[types.NamespacedName][]string
 }
 
 func NewCache(client client.Client) *Cache {
@@ -31,14 +33,14 @@ func NewCache(client client.Client) *Cache {
 		panic(fmt.Sprintf("error setting up readiness expression env: %s", err))
 	}
 	return &Cache{
-		client:                 client,
-		renv:                   renv,
-		resources:              make(map[CompositionRef]map[resource.Ref]*Resource),
-		synthesesByComposition: make(map[types.NamespacedName][]int64),
+		client:                      client,
+		renv:                        renv,
+		resources:                   make(map[SynthesisRef]map[resource.Ref]*Resource),
+		synthesisUUIDsByComposition: make(map[types.NamespacedName][]string),
 	}
 }
 
-func (c *Cache) Get(ctx context.Context, comp *CompositionRef, ref *resource.Ref) (*Resource, bool) {
+func (c *Cache) Get(ctx context.Context, comp *SynthesisRef, ref *resource.Ref) (*Resource, bool) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
@@ -58,10 +60,10 @@ func (c *Cache) Get(ctx context.Context, comp *CompositionRef, ref *resource.Ref
 // hasSynthesis returns true when the cache contains the resulting resources of the given synthesis.
 // This should be called before Fill to determine if filling is necessary.
 func (c *Cache) hasSynthesis(comp *apiv1.Composition, synthesis *apiv1.Synthesis) bool {
-	key := CompositionRef{
-		Name:       comp.Name,
-		Namespace:  comp.Namespace,
-		Generation: synthesis.ObservedCompositionGeneration,
+	key := SynthesisRef{
+		CompositionName: comp.Name,
+		Namespace:       comp.Namespace,
+		UUID:            synthesis.UUID,
 	}
 
 	c.mut.Lock()
@@ -84,11 +86,11 @@ func (c *Cache) fill(ctx context.Context, comp *apiv1.Composition, synthesis *ap
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	synKey := CompositionRef{Name: comp.Name, Namespace: comp.Namespace, Generation: synthesis.ObservedCompositionGeneration}
+	synKey := SynthesisRef{CompositionName: comp.Name, Namespace: comp.Namespace, UUID: synthesis.UUID}
 	c.resources[synKey] = resources
 
 	compNSN := types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
-	c.synthesesByComposition[compNSN] = append(c.synthesesByComposition[compNSN], synKey.Generation)
+	c.synthesisUUIDsByComposition[compNSN] = append(c.synthesisUUIDsByComposition[compNSN], synKey.UUID)
 
 	logger.V(0).Info("cache filled")
 	return requests, nil
@@ -138,18 +140,18 @@ func (c *Cache) purge(compNSN types.NamespacedName, comp *apiv1.Composition) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	remainingSyns := []int64{}
-	for _, syn := range c.synthesesByComposition[compNSN] {
+	remainingSyns := []string{}
+	for _, uuid := range c.synthesisUUIDsByComposition[compNSN] {
 		// Don't touch any syntheses still referenced by the composition
-		if comp != nil && ((comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == syn) || (comp.Status.PreviousSynthesis != nil && comp.Status.PreviousSynthesis.ObservedCompositionGeneration == syn)) {
-			remainingSyns = append(remainingSyns, syn)
-			continue // still referenced by the Generation
+		if comp != nil && ((comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.UUID == uuid) || (comp.Status.PreviousSynthesis != nil && comp.Status.PreviousSynthesis.UUID == uuid)) {
+			remainingSyns = append(remainingSyns, uuid)
+			continue // still referenced
 		}
-		delete(c.resources, CompositionRef{
-			Name:       compNSN.Name,
-			Namespace:  compNSN.Namespace,
-			Generation: syn,
+		delete(c.resources, SynthesisRef{
+			CompositionName: compNSN.Name,
+			Namespace:       compNSN.Namespace,
+			UUID:            uuid,
 		})
 	}
-	c.synthesesByComposition[compNSN] = remainingSyns
+	c.synthesisUUIDsByComposition[compNSN] = remainingSyns
 }

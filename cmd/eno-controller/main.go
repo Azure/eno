@@ -13,6 +13,7 @@ import (
 
 	"github.com/Azure/eno/internal/controllers/aggregation"
 	"github.com/Azure/eno/internal/controllers/replication"
+	"github.com/Azure/eno/internal/controllers/rollout"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/controllers/watchdog"
 	"github.com/Azure/eno/internal/manager"
@@ -28,9 +29,10 @@ func main() {
 func run() error {
 	ctx := ctrl.SetupSignalHandler()
 	var (
-		debugLogging  bool
-		watchdogThres time.Duration
-		synconf       = &synthesis.Config{}
+		debugLogging    bool
+		watchdogThres   time.Duration
+		rolloutCooldown time.Duration
+		synconf         = &synthesis.Config{}
 
 		mgrOpts = &manager.Options{
 			Rest: ctrl.GetConfigOrDie(),
@@ -41,6 +43,7 @@ func run() error {
 	flag.StringVar(&synconf.PodServiceAccount, "synthesizer-pod-service-account", "", "Service account name to be assigned to synthesizer Pods.")
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.DurationVar(&watchdogThres, "watchdog-threshold", time.Minute*5, "How long before the watchdog considers a mid-transition resource to be stuck")
+	flag.DurationVar(&rolloutCooldown, "rollout-cooldown", time.Second*2, "How long before an update to related resource (synthesizer, bindings, etc.) will trigger a composition's re-synthesis")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 
@@ -74,7 +77,7 @@ func run() error {
 		return fmt.Errorf("constructing execution controller: %w", err)
 	}
 
-	err = synthesis.NewRolloutController(mgr)
+	err = rollout.NewController(mgr, rolloutCooldown)
 	if err != nil {
 		return fmt.Errorf("constructing rollout controller: %w", err)
 	}

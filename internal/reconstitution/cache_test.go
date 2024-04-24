@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/uuid"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/resource"
@@ -24,7 +24,7 @@ func TestCacheBasics(t *testing.T) {
 	c := NewCache(client)
 
 	comp, synth, resources, expectedReqs := newCacheTestFixtures(2, 3)
-	compRef := NewCompositionRef(comp)
+	compRef := NewSynthesisRef(comp)
 	t.Run("fill", func(t *testing.T) {
 		reqs, err := c.fill(ctx, comp, synth, resources)
 		require.NoError(t, err)
@@ -36,7 +36,7 @@ func TestCacheBasics(t *testing.T) {
 		assert.True(t, c.hasSynthesis(comp, synth))
 
 		// negative
-		assert.False(t, c.hasSynthesis(comp, &apiv1.Synthesis{ObservedCompositionGeneration: 123}))
+		assert.False(t, c.hasSynthesis(comp, &apiv1.Synthesis{UUID: uuid.NewString()}))
 	})
 
 	t.Run("get", func(t *testing.T) {
@@ -53,7 +53,7 @@ func TestCacheBasics(t *testing.T) {
 
 		// negative
 		copy := *compRef
-		copy.Generation = 123
+		copy.UUID = uuid.NewString()
 		_, exists = c.Get(ctx, &copy, &expectedReqs[0].Resource)
 		assert.False(t, exists)
 	})
@@ -86,7 +86,7 @@ func TestCacheCleanup(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, expectedReqs, reqs)
 	})
-	compRef := NewCompositionRef(comp)
+	compRef := NewSynthesisRef(comp)
 
 	t.Run("get", func(t *testing.T) {
 		resource, exists := c.Get(ctx, compRef, &expectedReqs[0].Resource)
@@ -144,16 +144,16 @@ func TestCachePartialPurge(t *testing.T) {
 	comp, synth, resources, _ := newCacheTestFixtures(3, 4)
 	_, err := c.fill(ctx, comp, synth, resources)
 	require.NoError(t, err)
-	originalGen := synth.ObservedCompositionGeneration
+	originalUUID := synth.UUID
 	compNSN := types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
 
-	// Add another resource to the composition but synthesized from a newer generation
+	// Add another resource to the composition but from a newer synthesis
 	_, _, resources, expectedReqs := newCacheTestFixtures(1, 1)
-	synth.ObservedCompositionGeneration++
+	synth.UUID = uuid.NewString()
 	expectedReqs[0].Composition = types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
 	_, err = c.fill(ctx, comp, synth, resources)
 	require.NoError(t, err)
-	compRef := NewCompositionRef(comp)
+	compRef := NewSynthesisRef(comp)
 
 	// Fill another composition - this one shouldn't be purged
 	var toBePreserved *Request
@@ -166,7 +166,7 @@ func TestCachePartialPurge(t *testing.T) {
 
 	comp.Status.CurrentSynthesis = synth // only reference the most recent synthesis
 
-	// Purge only a single synthesis of a generation
+	// Purge only a single synthesis
 	c.purge(compNSN, comp)
 
 	// The newer resource should still exist
@@ -174,30 +174,30 @@ func TestCachePartialPurge(t *testing.T) {
 	assert.True(t, exists)
 
 	// The older resource is not referenced by the composition and should have been removed
-	compRef.Generation = originalGen
+	compRef.UUID = originalUUID
 	_, exists = c.Get(ctx, compRef, &expectedReqs[0].Resource)
 	assert.False(t, exists)
 
 	// Resource of the other composition are unaffected
-	_, exists = c.Get(ctx, NewCompositionRef(comp), &toBePreserved.Resource)
+	_, exists = c.Get(ctx, NewSynthesisRef(comp), &toBePreserved.Resource)
 	assert.True(t, exists)
 
 	// The cache should only be internally tracking the remaining synthesis of our test composition
-	assert.Len(t, c.synthesesByComposition[compNSN], 1)
+	assert.Len(t, c.synthesisUUIDsByComposition[compNSN], 1)
 }
 
 func newCacheTestFixtures(sliceCount, resPerSliceCount int) (*apiv1.Composition, *apiv1.Synthesis, []apiv1.ResourceSlice, []*Request) {
 	comp := &apiv1.Composition{}
-	comp.Namespace = string(uuid.NewUUID())
-	comp.Name = string(uuid.NewUUID())
-	synth := &apiv1.Synthesis{ObservedCompositionGeneration: 3} // just not 0
+	comp.Namespace = string(uuid.NewString())
+	comp.Name = string(uuid.NewString())
+	synth := &apiv1.Synthesis{UUID: uuid.NewString()} // just not 0
 	comp.Status.CurrentSynthesis = synth
 
 	resources := make([]apiv1.ResourceSlice, sliceCount)
 	requests := []*Request{}
 	for i := 0; i < sliceCount; i++ {
 		slice := apiv1.ResourceSlice{}
-		slice.Name = string(uuid.NewUUID())
+		slice.Name = string(uuid.NewString())
 		slice.Namespace = "slice-ns"
 		slice.Spec.Resources = make([]apiv1.Manifest, resPerSliceCount)
 

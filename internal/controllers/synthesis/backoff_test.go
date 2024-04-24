@@ -20,7 +20,6 @@ func TestControllerBackoff(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -55,7 +54,6 @@ func TestControllerBackoffReset(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewRolloutController(mgr.Manager))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
