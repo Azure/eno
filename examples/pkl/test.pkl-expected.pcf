@@ -1,0 +1,230 @@
+examples {
+  ["SNAPSHOT TESTS!!!!!"] {
+    new {
+      file {
+        uri = "file:vars.yaml"
+        text = """
+          # this file just proves that we can import yaml from main.pkl
+          imageTag: test-image-tag
+          """
+        base64 = "IyB0aGlzIGZpbGUganVzdCBwcm92ZXMgdGhhdCB3ZSBjYW4gaW1wb3J0IHlhbWwgZnJvbSBtYWluLnBrbAppbWFnZVRhZzogdGVzdC1pbWFnZS10YWc="
+      }
+      parsed {
+        imageTag = "test-image-tag"
+      }
+      resources {
+        new {
+          apiVersion = "v1"
+          kind = "Service"
+          metadata {
+            generation = null
+            finalizers = null
+            resourceVersion = null
+            annotations = null
+            generateName = null
+            deletionTimestamp = null
+            labels {
+              ["app"] = "guestbook"
+              ["tier"] = "frontend"
+            }
+            ownerReferences = null
+            selfLink = null
+            deletionGracePeriodSeconds = null
+            uid = null
+            managedFields = null
+            creationTimestamp = null
+            name = "frontend"
+            namespace = null
+            clusterName = null
+          }
+          spec {
+            clusterIPs = null
+            healthCheckNodePort = null
+            ipFamilyPolicy = null
+            externalIPs = null
+            sessionAffinity = null
+            allocateLoadBalancerNodePorts = null
+            ports {
+              new {
+                protocol = null
+                port = 80
+                appProtocol = null
+                name = null
+                nodePort = null
+                targetPort = null
+              }
+            }
+            type = "NodePort"
+            loadBalancerClass = null
+            sessionAffinityConfig = null
+            ipFamilies = null
+            loadBalancerIP = null
+            externalName = null
+            loadBalancerSourceRanges = null
+            externalTrafficPolicy = null
+            selector {
+              ["app"] = "guestbook"
+              ["tier"] = "frontend"
+            }
+            publishNotReadyAddresses = null
+            internalTrafficPolicy = null
+            clusterIP = null
+            topologyKeys = null
+            ipFamily = null
+          }
+          status = null
+        }
+        new {
+          apiVersion = "apps/v1"
+          kind = "Deployment"
+          metadata {
+            generation = null
+            finalizers = null
+            resourceVersion = null
+            annotations = null
+            generateName = null
+            deletionTimestamp = null
+            labels = null
+            ownerReferences = null
+            selfLink = null
+            deletionGracePeriodSeconds = null
+            uid = null
+            managedFields = null
+            creationTimestamp = null
+            name = "frontend"
+            namespace = null
+            clusterName = null
+          }
+          spec {
+            template {
+              metadata {
+                generation = null
+                finalizers = null
+                resourceVersion = null
+                annotations = null
+                generateName = null
+                deletionTimestamp = null
+                labels {
+                  ["app"] = "guestbook"
+                  ["tier"] = "frontend"
+                }
+                ownerReferences = null
+                selfLink = null
+                deletionGracePeriodSeconds = null
+                uid = null
+                managedFields = null
+                creationTimestamp = null
+                name = null
+                namespace = null
+                clusterName = null
+              }
+              spec {
+                dnsPolicy = null
+                nodeName = null
+                terminationGracePeriodSeconds = null
+                dnsConfig = null
+                hostNetwork = null
+                readinessGates = null
+                serviceAccountName = null
+                imagePullSecrets = null
+                priorityClassName = null
+                hostAliases = null
+                securityContext = null
+                preemptionPolicy = null
+                nodeSelector = null
+                hostname = null
+                runtimeClassName = null
+                tolerations = null
+                automountServiceAccountToken = null
+                schedulingGates = null
+                schedulerName = null
+                activeDeadlineSeconds = null
+                os = null
+                setHostnameAsFQDN = null
+                enableServiceLinks = null
+                overhead = null
+                hostIPC = null
+                topologySpreadConstraints = null
+                volumes = null
+                ephemeralContainers = null
+                serviceAccount = null
+                priority = null
+                restartPolicy = null
+                shareProcessNamespace = null
+                hostUsers = null
+                resourceClaims = null
+                subdomain = null
+                containers {
+                  new {
+                    volumeDevices = null
+                    image = "test-image-tag"
+                    imagePullPolicy = null
+                    livenessProbe = null
+                    stdin = null
+                    terminationMessagePolicy = null
+                    terminationMessagePath = null
+                    workingDir = null
+                    resources {
+                      claims = null
+                      requests {
+                        ["cpu"] = "100m"
+                        ["memory"] = "100Mi"
+                      }
+                      limits = null
+                    }
+                    securityContext = null
+                    startupProbe = null
+                    env {
+                      new {
+                        name = "GET_HOSTS_FROM"
+                        value = "dns"
+                        valueFrom = null
+                      }
+                    }
+                    ports {
+                      new {
+                        protocol = null
+                        hostIP = null
+                        name = null
+                        containerPort = 80
+                        hostPort = null
+                      }
+                    }
+                    restartPolicy = null
+                    command = null
+                    volumeMounts = null
+                    args = null
+                    lifecycle = null
+                    name = "php-redis"
+                    tty = null
+                    readinessProbe = null
+                    resizePolicy = null
+                    stdinOnce = null
+                    envFrom = null
+                  }
+                }
+                initContainers = null
+                affinity = null
+                hostPID = null
+              }
+            }
+            paused = null
+            replicas = 3
+            revisionHistoryLimit = null
+            selector {
+              matchExpressions = null
+              matchLabels {
+                ["app"] = "guestbook"
+                ["tier"] = "frontend"
+              }
+            }
+            minReadySeconds = null
+            strategy = null
+            progressDeadlineSeconds = null
+          }
+          status = null
+        }
+      }
+    }
+  }
+}

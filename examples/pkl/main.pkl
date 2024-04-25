@@ -1,0 +1,87 @@
+import "@k8s/K8sResource.pkl"
+import "@k8s/api/apps/v1/Deployment.pkl"
+import "@k8s/api/core/v1/Service.pkl"
+import "pkl:yaml"
+
+file = read("file:vars.yaml")
+parsed = new yaml.Parser {}.parse(file)
+
+
+resources: Listing<K8sResource> = new {
+  new Service {
+    metadata {
+      name = "frontend"
+      labels {
+        ["app"] = "guestbook"
+        ["tier"] = "frontend"
+      }
+    }
+    spec {
+      type = "NodePort"
+      ports {
+        new {
+          port = 80
+        }
+      }
+      selector {
+        ["app"] = "guestbook"
+        ["tier"] = "frontend"
+      }
+    }
+  }
+
+  new Deployment {
+    metadata {
+      name = "frontend"
+    }
+    spec {
+      selector {
+        matchLabels {
+          ["app"] = "guestbook"
+          ["tier"] = "frontend"
+        }
+      }
+      replicas = 3
+      template {
+        metadata {
+          labels {
+            ["app"] = "guestbook"
+            ["tier"] = "frontend"
+          }
+        }
+        spec {
+          containers {
+            new {
+              name = "php-redis"
+              image = parsed.imageTag
+              resources {
+                requests {
+                  ["cpu"] = "100m"
+                  ["memory"] = "100Mi"
+                }
+              }
+              env {
+                new {
+                  name = "GET_HOSTS_FROM"
+                  value = "dns"
+                }
+              }
+              ports {
+                new {
+                  containerPort = 80
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+output {
+  value = resources
+  renderer = (K8sResource.output.renderer as YamlRenderer) {
+    isStream = true
+  }
+}

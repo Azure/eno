@@ -1,0 +1,15 @@
+amends "pkl:test"
+
+facts {
+  ["compare numbers in case math is broken"] {
+    5 == 5
+    3 == 5
+  }
+}
+
+
+examples {
+  ["SNAPSHOT TESTS!!!!!"] {
+    import("main.pkl") // this automatically generates test.pkl-expected.pcf if it doesn't exist!
+  }
+}
