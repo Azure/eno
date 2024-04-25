@@ -23,6 +23,7 @@ type Config struct {
 	SliceCreationQPS  float64
 	PodNamespace      string
 	PodServiceAccount string
+	PodLabels         map[string]string
 }
 
 type podLifecycleController struct {

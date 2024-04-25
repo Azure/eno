@@ -14,12 +14,14 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 	pod.GenerateName = "synthesis-"
 	pod.Namespace = cfg.PodNamespace
 	pod.Finalizers = []string{"eno.azure.io/cleanup"}
-	pod.Labels = map[string]string{
-		manager.CompositionNameLabelKey:      comp.Name,
-		manager.CompositionNamespaceLabelKey: comp.Namespace,
-		manager.ManagerLabelKey:              manager.ManagerLabelValue,
-		"eno.azure.io/synthesis-uuid":        comp.Status.CurrentSynthesis.UUID,
+	pod.Labels = map[string]string{}
+	if cfg.PodLabels != nil {
+		pod.Labels = cfg.PodLabels
 	}
+	pod.Labels[manager.CompositionNameLabelKey] = comp.Name
+	pod.Labels[manager.CompositionNamespaceLabelKey] = comp.Namespace
+	pod.Labels[manager.ManagerLabelKey] = manager.ManagerLabelValue
+	pod.Labels["eno.azure.io/synthesis-uuid"] = comp.Status.CurrentSynthesis.UUID
 	pod.Annotations = map[string]string{
 		"eno.azure.io/composition-generation": strconv.FormatInt(comp.Generation, 10),
 		"eno.azure.io/synthesizer-generation": strconv.FormatInt(syn.Generation, 10),
@@ -39,24 +41,6 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 				},
 				RunAsUser:    &userID,
 				RunAsNonRoot: &yes,
-			},
-			Env: []corev1.EnvVar{
-				{
-					Name:  "COMPOSITION_NAME",
-					Value: comp.Name,
-				},
-				{
-					Name:  "COMPOSITION_NAMESPACE",
-					Value: comp.Namespace,
-				},
-				{
-					Name:  "COMPOSITION_GENERATION",
-					Value: strconv.FormatInt(comp.Generation, 10),
-				},
-				{
-					Name:  "SYNTHESIZER_GENERATION",
-					Value: strconv.FormatInt(syn.Generation, 10),
-				},
 			},
 		}},
 	}

@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-logr/zapr"
@@ -31,6 +32,7 @@ func run() error {
 		debugLogging  bool
 		watchdogThres time.Duration
 		synconf       = &synthesis.Config{}
+		podLabelStr   string
 
 		mgrOpts = &manager.Options{
 			Rest: ctrl.GetConfigOrDie(),
@@ -39,10 +41,13 @@ func run() error {
 	flag.Float64Var(&synconf.SliceCreationQPS, "slice-creation-qps", 5, "Max QPS for writing synthesized resources into resource slices")
 	flag.StringVar(&synconf.PodNamespace, "synthesizer-pod-namespace", os.Getenv("POD_NAMESPACE"), "Namespace to create synthesizer pods in. Defaults to POD_NAMESPACE.")
 	flag.StringVar(&synconf.PodServiceAccount, "synthesizer-pod-service-account", "", "Service account name to be assigned to synthesizer Pods.")
+	flag.StringVar(&podLabelStr, "synthesizer-pod-labels", "", "Comma-delimited labels to be set on synthesis pods like labelkey=labelval")
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.DurationVar(&watchdogThres, "watchdog-threshold", time.Minute*5, "How long before the watchdog considers a mid-transition resource to be stuck")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
+
+	synconf.PodLabels = parseMapString(podLabelStr)
 
 	if synconf.PodNamespace == "" {
 		return fmt.Errorf("a value is required in --synthesizer-pod-namespace or POD_NAMESPACE")
@@ -105,4 +110,16 @@ func run() error {
 	}
 
 	return mgr.Start(ctx)
+}
+
+func parseMapString(str string) map[string]string {
+	m := map[string]string{}
+	for _, cur := range strings.Split(str, ",") {
+		chunks := strings.SplitN(cur, "=", 2)
+		if len(chunks) != 2 {
+			continue
+		}
+		m[chunks[0]] = chunks[1]
+	}
+	return m
 }

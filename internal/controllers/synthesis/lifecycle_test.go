@@ -151,6 +151,44 @@ func TestPodConcurrencyLimit(t *testing.T) {
 	assert.Len(t, pods.Items, 2)
 }
 
+func TestPodLabels(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	cli := mgr.GetClient()
+
+	conf := &Config{
+		SliceCreationQPS: 15,
+		PodNamespace:     "default",
+		PodLabels:        map[string]string{"foo": "bar"},
+	}
+	require.NoError(t, NewPodLifecycleController(mgr.Manager, conf))
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn-1"
+	syn.Spec.Image = "initial-image"
+	require.NoError(t, cli.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	var pod *corev1.Pod
+	testutil.Eventually(t, func() bool {
+		pods := &corev1.PodList{}
+		cli.List(ctx, pods)
+		if len(pods.Items) == 0 {
+			return false
+		}
+		pod = &pods.Items[0]
+		return true
+	})
+
+	assert.Equal(t, "bar", pod.Labels["foo"])
+}
+
 var shouldDeletePodTests = []struct {
 	Name               string
 	Pods               []corev1.Pod
