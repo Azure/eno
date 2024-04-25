@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"testing"
+	"time"
 
 	"github.com/Azure/eno/internal/testutil"
 	openapi_v2 "github.com/google/gnostic-models/openapiv2"
@@ -75,6 +76,30 @@ func TestDiscoveryCacheRefillVersionMissing(t *testing.T) {
 	assert.Nil(t, s)
 
 	assert.Equal(t, 4, client.Calls)
+}
+
+func TestDiscoveryCacheTimeout(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	client := &fakeDiscovery{Info: &openapi_v2.Info{Version: "v1.14.123"}}
+	d := &Cache{client: client}
+
+	gvk := schema.GroupVersionKind{
+		Group:   "test-group",
+		Version: "test-version",
+		Kind:    "TestKind1",
+	}
+
+	s, err := d.Get(ctx, gvk)
+	require.NoError(t, err)
+	assert.Nil(t, s)
+
+	d.lastFill = d.lastFill.Add(-time.Hour * 25)
+
+	s, err = d.Get(ctx, gvk)
+	require.NoError(t, err)
+	assert.Nil(t, s)
+
+	assert.Equal(t, 2, client.Calls)
 }
 
 func TestWithRealApiserver(t *testing.T) {
