@@ -36,8 +36,7 @@ type Options struct {
 	WriteBuffer *flowcontrol.ResourceSliceWriteBuffer
 	Downstream  *rest.Config
 
-	DiscoveryRPS           float32
-	RediscoverWhenNotFound bool
+	DiscoveryRPS float32
 
 	Timeout               time.Duration
 	ReadinessPollInterval time.Duration
@@ -61,7 +60,7 @@ func New(opts Options) (*Controller, error) {
 		return nil, err
 	}
 
-	disc, err := discovery.NewCache(opts.Downstream, opts.DiscoveryRPS, opts.RediscoverWhenNotFound)
+	disc, err := discovery.NewCache(opts.Downstream, opts.DiscoveryRPS)
 	if err != nil {
 		return nil, err
 	}

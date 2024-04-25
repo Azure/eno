@@ -328,16 +328,6 @@ func newFakePodRuntime(t testing.TB, mgr ctrl.Manager) {
 	require.NoError(t, err)
 }
 
-func AtLeastVersion(t *testing.T, minor int) bool {
-	versionStr := os.Getenv("DOWNSTREAM_VERSION_MINOR")
-	if versionStr == "" {
-		return true // fail open for local dev
-	}
-
-	version, _ := strconv.Atoi(versionStr)
-	return version >= minor
-}
-
 type ExecConn struct {
 	Hook    func(s *apiv1.Synthesizer) []client.Object
 	PodHook func(p *corev1.Pod)
