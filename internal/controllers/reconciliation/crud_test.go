@@ -175,7 +175,6 @@ var crudTests = []crudTestCase{
 					"namespace": "default",
 				},
 				"patch": map[string]any{
-					// TODO: Move to "resource" struct?
 					"apiVersion": "v1",
 					"kind":       "Service",
 					"ops": []map[string]any{

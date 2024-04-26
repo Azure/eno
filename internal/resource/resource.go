@@ -18,6 +18,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
+var patchGVK = schema.GroupVersionKind{
+	Group:   "eno.azure.io",
+	Version: "v1",
+	Kind:    "Patch",
+}
+
 // Ref refers to a specific synthesized resource.
 type Ref struct {
 	Name, Namespace, Kind string
@@ -108,11 +114,7 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 		return nil, fmt.Errorf("missing name, kind, or apiVersion")
 	}
 
-	if (res.GVK == schema.GroupVersionKind{
-		Group:   "eno.azure.io",
-		Version: "v1",
-		Kind:    "Patch",
-	}) {
+	if res.GVK == patchGVK {
 		obj := struct {
 			Patch patchMeta `json:"patch"`
 		}{}

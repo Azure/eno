@@ -42,12 +42,7 @@ func Slice(comp *apiv1.Composition, previous []*apiv1.ResourceSlice, outputs []*
 				return nil, reconcile.TerminalError(fmt.Errorf("decoding resource %d of slice %s: %w", i, slice.Name, err))
 			}
 
-			// TODO: Refactor
-			if (obj.GetObjectKind().GroupVersionKind() == schema.GroupVersionKind{
-				Group:   "eno.azure.io",
-				Version: "v1",
-				Kind:    "Patch",
-			}) {
+			if obj.GetObjectKind().GroupVersionKind() == patchGVK {
 				// Patches can be removed without deleting the resource
 				continue
 			}
@@ -99,12 +94,7 @@ type resourceRef struct {
 }
 
 func newResourceRef(obj *unstructured.Unstructured) resourceRef {
-	// TODO: Refactor
-	if (obj.GetObjectKind().GroupVersionKind() == schema.GroupVersionKind{
-		Group:   "eno.azure.io",
-		Version: "v1",
-		Kind:    "Patch",
-	}) {
+	if obj.GetObjectKind().GroupVersionKind() == patchGVK {
 		apiVersion, _, _ := unstructured.NestedString(obj.Object, "patch", "apiVersion")
 		kind, _, _ := unstructured.NestedString(obj.Object, "patch", "kind")
 		gv, _ := schema.ParseGroupVersion(apiVersion)
