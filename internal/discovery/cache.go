@@ -2,7 +2,9 @@ package discovery
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"time"
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -18,10 +20,11 @@ type Cache struct {
 	mut              sync.Mutex
 	client           discovery.DiscoveryInterface
 	fillWhenNotFound bool
+	lastFill         time.Time
 	current          map[schema.GroupVersionKind]proto.Schema
 }
 
-func NewCache(rc *rest.Config, qps float32, fillWhenNotFound bool) (*Cache, error) {
+func NewCache(rc *rest.Config, qps float32) (*Cache, error) {
 	conf := rest.CopyConfig(rc)
 	conf.RateLimiter = flowcontrol.NewTokenBucketRateLimiter(qps, 1) // parsing the spec is expensive, rate limit to be careful
 
@@ -31,7 +34,7 @@ func NewCache(rc *rest.Config, qps float32, fillWhenNotFound bool) (*Cache, erro
 	}
 	disc.UseLegacyDiscovery = true // don't bother with aggregated APIs since they may be unavailable
 
-	d := &Cache{client: disc, fillWhenNotFound: fillWhenNotFound}
+	d := &Cache{client: disc}
 	return d, nil
 }
 
@@ -40,12 +43,10 @@ func (c *Cache) Get(ctx context.Context, gvk schema.GroupVersionKind) (proto.Sch
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	// Older versions of Kubernetes don't include CRDs in the openapi spec, so on those versions we cannot invalidate the cache if a resource is not found.
-	// However, on newer versions we expect every resource to exist in the spec so retries are safe and often necessary.
 	for i := 0; i < 2; i++ {
-		if c.current == nil {
+		if c.current == nil || time.Since(c.lastFill) > time.Hour*24 {
 			logger.V(0).Info("filling discovery cache")
-			if err := c.fillUnlocked(); err != nil {
+			if err := c.fillUnlocked(ctx); err != nil {
 				return nil, err
 			}
 		}
@@ -66,14 +67,34 @@ func (c *Cache) Get(ctx context.Context, gvk schema.GroupVersionKind) (proto.Sch
 	return nil, nil
 }
 
-func (c *Cache) fillUnlocked() error {
+func (c *Cache) fillUnlocked(ctx context.Context) error {
 	doc, err := c.client.OpenAPISchema()
 	if err != nil {
 		return err
 	}
-	c.current, err = buildCurrentSchemaMap(doc)
-	if err != nil {
-		return err
+	if doc.Info == nil {
+		c.fillWhenNotFound = true // fail open
+	} else {
+		c.fillWhenNotFound = c.evalVersion(ctx, doc.Info.Version)
 	}
-	return nil
+	c.current, err = buildCurrentSchemaMap(doc)
+	c.lastFill = time.Now()
+	return err
+}
+
+// evalVersion returns true if it's safe to rediscover when a type isn't found on the given version of Kubernetes e.g. "v1.20.0".
+// This is necessary because older versions of apiserver do not expose CRDs in the openapi spec.
+// So we would end up rediscovering the entire schema before each attempt to sync any CRs.
+func (*Cache) evalVersion(ctx context.Context, v string) bool {
+	logger := logr.FromContextOrDiscard(ctx)
+
+	var major, minor, patch int
+	_, err := fmt.Sscanf(v, "v%d.%d.%d", &major, &minor, &patch)
+	if err != nil {
+		logger.Error(err, "error while parsing the kubernetes version - defaulting to automatically discover new types")
+		return true
+	}
+	logger.V(1).Info(fmt.Sprintf("discovered apiserver's major/minor version: %d.%d", major, minor))
+
+	return major == 1 && minor >= 15
 }
