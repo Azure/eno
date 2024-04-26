@@ -85,13 +85,14 @@ func (r *Resource) PatchDeletes() bool {
 		return false
 	}
 
-	patched := &unstructured.Unstructured{}
-	err = patched.UnmarshalJSON(patchedjson)
+	patched := map[string]any{}
+	err = json.Unmarshal(patchedjson, &patched)
 	if err != nil {
 		return false
 	}
 
-	return patched.GetDeletionTimestamp() != nil
+	dt, _, _ := unstructured.NestedString(patched, "metadata", "deletionTimestamp")
+	return dt != ""
 }
 
 func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.ResourceSlice, resource *apiv1.Manifest) (*Resource, error) {

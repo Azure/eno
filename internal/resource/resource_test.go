@@ -86,7 +86,7 @@ var newResourceTests = []struct {
 				"apiVersion": "v1",
 				"kind": "ConfigMap",
 				"ops": [
-					{"op": "add", "path": "/metadata/deletionTimestamp", "value": "2024-01-22T19:13:15Z"}
+					{"op": "add", "path": "/metadata/deletionTimestamp", "value": "anything"}
 				]
 			}
 		}`,
