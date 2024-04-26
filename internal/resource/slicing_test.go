@@ -2,7 +2,6 @@ package resource
 
 import (
 	"testing"
-	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/stretchr/testify/assert"
@@ -102,31 +101,6 @@ func TestSliceTombstonesPatch(t *testing.T) {
 	slices, err = Slice(&apiv1.Composition{}, slices, []*unstructured.Unstructured{}, 100000)
 	require.NoError(t, err)
 	require.Len(t, slices, 0)
-}
-
-func TestSliceReconcileInterval(t *testing.T) {
-	outputs := []*unstructured.Unstructured{{
-		Object: map[string]interface{}{
-			"kind":       "Test",
-			"apiVersion": "mygroup/v1",
-			"metadata": map[string]interface{}{
-				"name":      "test-resource",
-				"namespace": "test-ns",
-				"annotations": map[string]interface{}{
-					"eno.azure.io/reconcile-interval": "10s",
-				},
-			},
-		},
-	}}
-
-	// The reconcile interval is passed from the resource itself to its manifest representation
-	slices, err := Slice(&apiv1.Composition{}, []*apiv1.ResourceSlice{}, outputs, 100000)
-	require.NoError(t, err)
-	require.Len(t, slices, 1)
-	require.Len(t, slices[0].Spec.Resources, 1)
-	require.NotNil(t, slices[0].Spec.Resources[0].ReconcileInterval)
-	assert.Equal(t, time.Second*10, slices[0].Spec.Resources[0].ReconcileInterval.Duration)                                                                                          // it's in the manifest
-	assert.Equal(t, "{\"apiVersion\":\"mygroup/v1\",\"kind\":\"Test\",\"metadata\":{\"name\":\"test-resource\",\"namespace\":\"test-ns\"}}\n", slices[0].Spec.Resources[0].Manifest) // it's not in the resource itself
 }
 
 func TestSliceTombstonesVersionSemantics(t *testing.T) {

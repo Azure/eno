@@ -2,13 +2,11 @@ package resource
 
 import (
 	"fmt"
-	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -19,14 +17,12 @@ func Slice(comp *apiv1.Composition, previous []*apiv1.ResourceSlice, outputs []*
 	refs := map[resourceRef]struct{}{}
 	manifests := []apiv1.Manifest{}
 	for i, output := range outputs {
-		reconcileInterval := consumeReconcileIntervalAnnotation(output)
 		js, err := output.MarshalJSON()
 		if err != nil {
 			return nil, reconcile.TerminalError(fmt.Errorf("encoding output %d: %w", i, err))
 		}
 		manifests = append(manifests, apiv1.Manifest{
-			Manifest:          string(js),
-			ReconcileInterval: reconcileInterval,
+			Manifest: string(js),
 		})
 		refs[newResourceRef(output)] = struct{}{}
 	}
@@ -112,28 +108,4 @@ func newResourceRef(obj *unstructured.Unstructured) resourceRef {
 		Kind:      obj.GetKind(),
 		Group:     obj.GroupVersionKind().Group,
 	}
-}
-
-func consumeReconcileIntervalAnnotation(obj client.Object) *metav1.Duration {
-	const key = "eno.azure.io/reconcile-interval"
-	anno := obj.GetAnnotations()
-	if anno == nil {
-		return nil
-	}
-	str := anno[key]
-	if str == "" {
-		return nil
-	}
-	delete(anno, key)
-
-	if len(anno) == 0 {
-		anno = nil // apiserver treats an empty annotation map as nil, we must as well to avoid constant patches
-	}
-	obj.SetAnnotations(anno)
-
-	dur, err := time.ParseDuration(str)
-	if err != nil {
-		return nil
-	}
-	return &metav1.Duration{Duration: dur}
 }

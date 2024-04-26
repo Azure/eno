@@ -14,6 +14,7 @@ import (
 	jsonpatch "github.com/evanphx/json-patch/v5"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/equality"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
@@ -34,12 +35,13 @@ type Resource struct {
 	lastSeenMeta
 	lastReconciledMeta
 
-	Ref             Ref
-	Manifest        *apiv1.Manifest
-	GVK             schema.GroupVersionKind
-	SliceDeleted    bool
-	ReadinessChecks readiness.Checks
-	Patch           jsonpatch.Patch
+	Ref               Ref
+	Manifest          *apiv1.Manifest
+	ReconcileInterval *metav1.Duration
+	GVK               schema.GroupVersionKind
+	SliceDeleted      bool
+	ReadinessChecks   readiness.Checks
+	Patch             jsonpatch.Patch
 }
 
 func (r *Resource) Deleted() bool { return r.SliceDeleted || r.Manifest.Deleted }
@@ -133,6 +135,15 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 	}
 
 	anno := parsed.GetAnnotations()
+	if anno == nil {
+		return res, nil
+	}
+
+	const reconcileIntervalKey = "eno.azure.io/reconcile-interval"
+	reconcileInterval, _ := time.ParseDuration(anno[reconcileIntervalKey])
+	res.ReconcileInterval = &metav1.Duration{Duration: reconcileInterval}
+	delete(anno, reconcileIntervalKey)
+
 	for key, value := range parsed.GetAnnotations() {
 		if !strings.HasPrefix(key, "eno.azure.io/readiness") {
 			continue

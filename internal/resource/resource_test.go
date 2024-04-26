@@ -2,6 +2,7 @@ package resource
 
 import (
 	"testing"
+	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/readiness"
@@ -26,6 +27,7 @@ var newResourceTests = []struct {
 				"name": "foo",
 				"annotations": {
 					"foo": "bar",
+					"eno.azure.io/reconcile-interval": "10s",
 					"eno.azure.io/readiness": "true",
 					"eno.azure.io/readiness-test": "false"
 				}
@@ -34,6 +36,7 @@ var newResourceTests = []struct {
 		Assert: func(t *testing.T, r *Resource) {
 			assert.Equal(t, schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, r.GVK)
 			assert.Len(t, r.ReadinessChecks, 2)
+			assert.Equal(t, time.Second*10, r.ReconcileInterval.Duration)
 		},
 	},
 	{

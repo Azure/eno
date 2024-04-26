@@ -111,10 +111,10 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	// Keep track of the last reconciliation time and report on it relative to the resource's reconcile interval
 	// This is useful for identifying cases where the loop can't keep up
-	if resource.Manifest.ReconcileInterval != nil {
+	if resource.ReconcileInterval != nil {
 		observation := resource.ObserveReconciliation()
 		if observation > 0 {
-			delta := observation - resource.Manifest.ReconcileInterval.Duration
+			delta := observation - resource.ReconcileInterval.Duration
 			reconciliationScheduleDelta.Observe(delta.Seconds())
 		}
 	}
@@ -162,8 +162,8 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	if ready == nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}
-	if resource != nil && !resource.Deleted() && resource.Manifest.ReconcileInterval != nil {
-		return ctrl.Result{RequeueAfter: wait.Jitter(resource.Manifest.ReconcileInterval.Duration, 0.1)}, nil
+	if resource != nil && !resource.Deleted() && resource.ReconcileInterval != nil {
+		return ctrl.Result{RequeueAfter: wait.Jitter(resource.ReconcileInterval.Duration, 0.1)}, nil
 	}
 	return ctrl.Result{}, nil
 }
