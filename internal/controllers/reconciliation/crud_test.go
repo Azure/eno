@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/util/retry"
@@ -38,6 +39,7 @@ var defaultConf = &synthesis.Config{
 
 type crudTestCase struct {
 	Name                         string
+	ShouldSkipDelete             bool
 	Empty, Initial, Updated      client.Object
 	AssertCreated, AssertUpdated func(t *testing.T, obj client.Object)
 	ApplyExternalUpdate          func(t *testing.T, obj client.Object) client.Object
@@ -138,6 +140,62 @@ var crudTests = []crudTestCase{
 			assert.Equal(t, []*testv1.TestValue{{Int: 2}}, tr.Spec.Values)
 		},
 	},
+	{
+		Name:             "patch",
+		ShouldSkipDelete: true,
+		Empty:            &corev1.Service{},
+		Initial: &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-obj",
+				Namespace: "default",
+			},
+			Spec: corev1.ServiceSpec{
+				Ports: []corev1.ServicePort{{
+					Name:     "first",
+					Port:     1234,
+					Protocol: corev1.ProtocolTCP,
+				}},
+			},
+		},
+		AssertCreated: func(t *testing.T, obj client.Object) {
+			svc := obj.(*corev1.Service).Spec
+			assert.Equal(t, []corev1.ServicePort{{
+				Name:       "first",
+				Port:       1234,
+				Protocol:   corev1.ProtocolTCP,
+				TargetPort: intstr.FromInt(1234),
+			}}, svc.Ports)
+		},
+		Updated: &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "eno.azure.io/v1",
+				"kind":       "Patch",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+				"patch": map[string]any{
+					// TODO: Move to "resource" struct?
+					"apiVersion": "v1",
+					"kind":       "Service",
+					"ops": []map[string]any{
+						{"op": "replace", "path": "/spec/ports/0/port", "value": 2345},
+						{"op": "add", "path": "/metadata/annotations/test-phase", "value": "update"},
+					},
+				},
+			},
+		},
+		AssertUpdated: func(t *testing.T, obj client.Object) {
+			svc := obj.(*corev1.Service).Spec
+			require.Len(t, svc.Ports, 1)
+			assert.Contains(t, svc.Ports, corev1.ServicePort{
+				Name:       "first",
+				Port:       2345,
+				Protocol:   corev1.ProtocolTCP,
+				TargetPort: intstr.FromInt(1234),
+			})
+		},
+	},
 }
 
 // TestCRUD covers the entire synthesis and reconciliation flow for a set of resources,
@@ -195,7 +253,7 @@ func TestCRUD(t *testing.T) {
 					require.NoError(t, err)
 
 					updatedObj := test.ApplyExternalUpdate(t, obj.DeepCopyObject().(client.Object))
-					updatedObj = setPhase(updatedObj, "external-update")
+					setPhase(updatedObj, "external-update")
 					if err := downstream.Update(ctx, updatedObj); err != nil {
 						return err
 					}
@@ -216,6 +274,10 @@ func TestCRUD(t *testing.T) {
 
 			t.Logf("starting deletion")
 			setImage(t, upstream, syn, "delete")
+
+			if test.ShouldSkipDelete {
+				return
+			}
 
 			testutil.Eventually(t, func() bool {
 				_, err := test.Get(downstream)
@@ -265,11 +327,11 @@ func newSliceBuilder(t *testing.T, scheme *runtime.Scheme, test *crudTestCase) f
 		var obj client.Object
 		switch s.Spec.Image {
 		case "create":
-			obj = test.Initial.DeepCopyObject().(client.Object)
-			obj = setPhase(obj, "create")
+			obj = test.Initial
+			setPhase(obj, "create")
 		case "update":
-			obj = test.Updated.DeepCopyObject().(client.Object)
-			obj = setPhase(obj, "update")
+			obj = test.Updated
+			setPhase(obj, "update")
 		case "delete":
 			return []client.Object{}
 		default:
@@ -284,15 +346,13 @@ func newSliceBuilder(t *testing.T, scheme *runtime.Scheme, test *crudTestCase) f
 	}
 }
 
-func setPhase(obj client.Object, phase string) client.Object {
-	copy := obj.DeepCopyObject().(client.Object)
-	anno := copy.GetAnnotations()
+func setPhase(obj client.Object, phase string) {
+	anno := obj.GetAnnotations()
 	if anno == nil {
 		anno = map[string]string{}
 	}
 	anno["test-phase"] = phase
-	copy.SetAnnotations(anno)
-	return copy
+	obj.SetAnnotations(anno)
 }
 
 func getPhase(obj client.Object) string {
@@ -614,4 +674,134 @@ func TestMidSynthesisDeletion(t *testing.T) {
 		t.Logf("resourceGone=%t compGone=%t", resourceGone, compGone)
 		return resourceGone && compGone
 	})
+}
+
+// TestPatchCreation proves that a patch resource will not be created if it doesn't exist.
+func TestPatchCreation(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	// Register supporting controllers
+	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
+	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
+	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
+	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
+		obj := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "eno.azure.io/v1",
+				"kind":       "Patch",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+				"patch": map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"ops": []map[string]any{
+						{"op": "add", "path": "/data", "value": "foo"},
+					},
+				},
+			},
+		}
+		return []client.Object{obj}
+	}}))
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "create"
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
+	})
+
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+	require.True(t, errors.IsNotFound(err))
+}
+
+// TestPatchDeletion proves that a patch resource can delete the resource it references.
+func TestPatchDeletion(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	// Register supporting controllers
+	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
+	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
+	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
+	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
+		obj := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "eno.azure.io/v1",
+				"kind":       "Patch",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+				"patch": map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"ops": []map[string]any{
+						{"op": "add", "path": "/metadata/deletionTimestamp", "value": "2024-01-22T19:13:15Z"},
+					},
+				},
+			},
+		}
+		return []client.Object{obj}
+	}}))
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	require.NoError(t, downstream.Create(ctx, cm))
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "create"
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
+	})
+
+	err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+	require.True(t, errors.IsNotFound(err))
 }

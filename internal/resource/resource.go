@@ -2,6 +2,7 @@ package resource
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -10,7 +11,9 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/readiness"
+	jsonpatch "github.com/evanphx/json-patch/v5"
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
@@ -30,6 +33,7 @@ type Resource struct {
 	GVK             schema.GroupVersionKind
 	SliceDeleted    bool
 	ReadinessChecks readiness.Checks
+	Patch           jsonpatch.Patch
 }
 
 func (r *Resource) Deleted() bool { return r.SliceDeleted || r.Manifest.Deleted }
@@ -37,6 +41,49 @@ func (r *Resource) Deleted() bool { return r.SliceDeleted || r.Manifest.Deleted 
 func (r *Resource) Parse() (*unstructured.Unstructured, error) {
 	u := &unstructured.Unstructured{}
 	return u, u.UnmarshalJSON([]byte(r.Manifest.Manifest))
+}
+
+func (r *Resource) NeedsToBePatched(current *unstructured.Unstructured) bool {
+	if r.Patch == nil || current == nil {
+		return false
+	}
+
+	curjson, err := current.MarshalJSON()
+	if err != nil {
+		return false
+	}
+
+	patchedjson, err := r.Patch.Apply(curjson)
+	if err != nil {
+		return false
+	}
+
+	patched := &unstructured.Unstructured{}
+	err = patched.UnmarshalJSON(patchedjson)
+	if err != nil {
+		return false
+	}
+
+	return !equality.Semantic.DeepEqual(current, patched)
+}
+
+func (r *Resource) PatchDeletes() bool {
+	if r.Patch == nil {
+		return false
+	}
+
+	patchedjson, err := r.Patch.Apply([]byte(`{"apiVersion": "anything/v1", "kind":"Anything", "metadata":{}}`))
+	if err != nil {
+		return false
+	}
+
+	patched := &unstructured.Unstructured{}
+	err = patched.UnmarshalJSON(patchedjson)
+	if err != nil {
+		return false
+	}
+
+	return patched.GetDeletionTimestamp() != nil
 }
 
 func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.ResourceSlice, resource *apiv1.Manifest) (*Resource, error) {
@@ -59,6 +106,28 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 
 	if res.Ref.Name == "" || res.Ref.Kind == "" || parsed.GetAPIVersion() == "" {
 		return nil, fmt.Errorf("missing name, kind, or apiVersion")
+	}
+
+	if (res.GVK == schema.GroupVersionKind{
+		Group:   "eno.azure.io",
+		Version: "v1",
+		Kind:    "Patch",
+	}) {
+		obj := struct {
+			Patch patchMeta `json:"patch"`
+		}{}
+		err = json.Unmarshal([]byte(resource.Manifest), &obj)
+		if err != nil {
+			return nil, fmt.Errorf("parsing patch json: %w", err)
+		}
+		gv, err := schema.ParseGroupVersion(obj.Patch.APIVersion)
+		if err != nil {
+			return nil, fmt.Errorf("parsing patch apiVersion: %w", err)
+		}
+		res.GVK.Group = gv.Group
+		res.GVK.Version = gv.Version
+		res.GVK.Kind = obj.Patch.Kind
+		res.Patch = obj.Patch.Ops
 	}
 
 	anno := parsed.GetAnnotations()
@@ -85,6 +154,12 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 	sort.Slice(res.ReadinessChecks, func(i, j int) bool { return res.ReadinessChecks[i].Name < res.ReadinessChecks[j].Name })
 
 	return res, nil
+}
+
+type patchMeta struct {
+	APIVersion string          `json:"apiVersion"`
+	Kind       string          `json:"kind"`
+	Ops        jsonpatch.Patch `json:"ops"`
 }
 
 type lastSeenMeta struct {

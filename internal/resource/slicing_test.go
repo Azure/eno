@@ -60,6 +60,50 @@ func TestSliceTombstonesBasics(t *testing.T) {
 	require.Len(t, slices, 0)
 }
 
+func TestSliceTombstonesPatch(t *testing.T) {
+	firstOutputs := []*unstructured.Unstructured{{
+		Object: map[string]interface{}{
+			"kind":       "Test",
+			"apiVersion": "mygroup/v1",
+			"metadata": map[string]interface{}{
+				"name":      "test-resource",
+				"namespace": "test-ns",
+			},
+		},
+	}}
+
+	secondOutputs := []*unstructured.Unstructured{{
+		Object: map[string]interface{}{
+			"kind":       "Patch",
+			"apiVersion": "eno.azure.io/v1",
+			"metadata": map[string]interface{}{
+				"name":      "test-resource",
+				"namespace": "test-ns",
+			},
+			"patch": map[string]interface{}{
+				"kind":       "Test",
+				"apiVersion": "mygroup/v1",
+			},
+		},
+	}}
+
+	slices, err := Slice(&apiv1.Composition{}, []*apiv1.ResourceSlice{}, firstOutputs, 100000)
+	require.NoError(t, err)
+	require.Len(t, slices, 1)
+	require.Len(t, slices[0].Spec.Resources, 1)
+	assert.False(t, slices[0].Spec.Resources[0].Deleted)
+
+	slices, err = Slice(&apiv1.Composition{}, slices, secondOutputs, 100000)
+	require.NoError(t, err)
+	require.Len(t, slices, 1)
+	require.Len(t, slices[0].Spec.Resources, 1)
+	assert.False(t, slices[0].Spec.Resources[0].Deleted)
+
+	slices, err = Slice(&apiv1.Composition{}, slices, []*unstructured.Unstructured{}, 100000)
+	require.NoError(t, err)
+	require.Len(t, slices, 0)
+}
+
 func TestSliceReconcileInterval(t *testing.T) {
 	outputs := []*unstructured.Unstructured{{
 		Object: map[string]interface{}{

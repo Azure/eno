@@ -120,8 +120,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 
 	// Fetch the current resource
-	apiVersion, _ := resource.GVK.ToAPIVersionAndKind()
-	current, hasChanged, err := c.getCurrent(ctx, resource, apiVersion)
+	current, hasChanged, err := c.getCurrent(ctx, resource)
 	if client.IgnoreNotFound(err) != nil {
 		return ctrl.Result{}, fmt.Errorf("getting current state: %w", err)
 	}
@@ -176,7 +175,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		reconciliationLatency.Observe(time.Since(start).Seconds())
 	}()
 
-	if resource.Deleted() {
+	if resource.Deleted() || (resource.Patch != nil && resource.PatchDeletes()) {
 		if current == nil || current.GetDeletionTimestamp() != nil {
 			return false, nil // already deleted - nothing to do
 		}
@@ -185,11 +184,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		}
 
 		reconciliationActions.WithLabelValues("delete").Inc()
-		obj, err := resource.Parse()
-		if err != nil {
-			return false, fmt.Errorf("invalid resource: %w", err)
-		}
-		err = c.upstreamClient.Delete(ctx, obj)
+		err := c.upstreamClient.Delete(ctx, current)
 		if err != nil {
 			return false, client.IgnoreNotFound(fmt.Errorf("deleting resource: %w", err))
 		}
@@ -197,7 +192,12 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		return true, nil
 	}
 
-	// Always create the resource when it doesn't exist
+	if resource.Patch != nil && current == nil {
+		logger.V(1).Info("resource doesn't exist - skipping patch")
+		return false, nil
+	}
+
+	// Create the resource when it doesn't exist
 	if current == nil {
 		reconciliationActions.WithLabelValues("create").Inc()
 		obj, err := resource.Parse()
@@ -218,9 +218,11 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	if err != nil {
 		return false, fmt.Errorf("building patch: %w", err)
 	}
-	patch, err = mungePatch(patch, current.GetResourceVersion())
-	if err != nil {
-		return false, fmt.Errorf("adding resource version: %w", err)
+	if patchType != types.JSONPatchType {
+		patch, err = mungePatch(patch, current.GetResourceVersion())
+		if err != nil {
+			return false, fmt.Errorf("adding resource version: %w", err)
+		}
 	}
 	if len(patch) == 0 {
 		logger.V(1).Info("skipping empty patch")
@@ -240,6 +242,14 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 }
 
 func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) ([]byte, types.PatchType, error) {
+	if resource.Patch != nil {
+		if !resource.NeedsToBePatched(current) {
+			return []byte{}, types.JSONPatchType, nil
+		}
+		patch, err := json.Marshal(&resource.Patch)
+		return patch, types.JSONPatchType, err
+	}
+
 	var prevManifest []byte
 	if prev != nil {
 		prevManifest = []byte(prev.Manifest.Manifest)
@@ -270,13 +280,13 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 	return patch, types.StrategicMergePatchType, err
 }
 
-func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Resource, apiVersion string) (*unstructured.Unstructured, bool, error) {
+func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Resource) (*unstructured.Unstructured, bool, error) {
 	if resource.HasBeenSeen() && !resource.Deleted() {
 		meta := &metav1.PartialObjectMetadata{}
 		meta.Name = resource.Ref.Name
 		meta.Namespace = resource.Ref.Namespace
-		meta.Kind = resource.Ref.Kind
-		meta.APIVersion = apiVersion
+		meta.Kind = resource.GVK.Kind
+		meta.APIVersion = resource.GVK.GroupVersion().String()
 		err := c.upstreamClient.Get(ctx, client.ObjectKeyFromObject(meta), meta)
 		if err != nil {
 			return nil, false, err
@@ -291,7 +301,8 @@ func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Re
 	current.SetName(resource.Ref.Name)
 	current.SetNamespace(resource.Ref.Namespace)
 	current.SetKind(resource.Ref.Kind)
-	current.SetAPIVersion(apiVersion)
+	current.SetKind(resource.GVK.Kind)
+	current.SetAPIVersion(resource.GVK.GroupVersion().String())
 	err := c.upstreamClient.Get(ctx, client.ObjectKeyFromObject(current), current)
 	if err != nil {
 		return nil, true, err

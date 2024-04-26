@@ -7,6 +7,7 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
@@ -39,6 +40,16 @@ func Slice(comp *apiv1.Composition, previous []*apiv1.ResourceSlice, outputs []*
 			err := obj.UnmarshalJSON([]byte(res.Manifest))
 			if err != nil {
 				return nil, reconcile.TerminalError(fmt.Errorf("decoding resource %d of slice %s: %w", i, slice.Name, err))
+			}
+
+			// TODO: Refactor
+			if (obj.GetObjectKind().GroupVersionKind() == schema.GroupVersionKind{
+				Group:   "eno.azure.io",
+				Version: "v1",
+				Kind:    "Patch",
+			}) {
+				// Patches can be removed without deleting the resource
+				continue
 			}
 
 			// We don't need a tombstone once the deleted resource has been reconciled
@@ -88,6 +99,23 @@ type resourceRef struct {
 }
 
 func newResourceRef(obj *unstructured.Unstructured) resourceRef {
+	// TODO: Refactor
+	if (obj.GetObjectKind().GroupVersionKind() == schema.GroupVersionKind{
+		Group:   "eno.azure.io",
+		Version: "v1",
+		Kind:    "Patch",
+	}) {
+		apiVersion, _, _ := unstructured.NestedString(obj.Object, "patch", "apiVersion")
+		kind, _, _ := unstructured.NestedString(obj.Object, "patch", "kind")
+		gv, _ := schema.ParseGroupVersion(apiVersion)
+		return resourceRef{
+			Name:      obj.GetName(),
+			Namespace: obj.GetNamespace(),
+			Kind:      kind,
+			Group:     gv.Group,
+		}
+	}
+
 	return resourceRef{
 		Name:      obj.GetName(),
 		Namespace: obj.GetNamespace(),
