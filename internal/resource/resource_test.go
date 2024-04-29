@@ -37,6 +37,34 @@ var newResourceTests = []struct {
 			assert.Equal(t, schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, r.GVK)
 			assert.Len(t, r.ReadinessChecks, 2)
 			assert.Equal(t, time.Second*10, r.ReconcileInterval.Duration)
+			assert.Equal(t, Ref{
+				Name:      "foo",
+				Namespace: "",
+				Group:     "",
+				Kind:      "ConfigMap",
+			}, r.Ref)
+		},
+	},
+	{
+		Name: "deployment",
+		Manifest: `{
+			"apiVersion": "apps/v1",
+			"kind": "Deployment",
+			"metadata": {
+				"name": "foo",
+				"namespace": "bar"
+			}
+		}`,
+		Assert: func(t *testing.T, r *Resource) {
+			assert.Equal(t, schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}, r.GVK)
+			assert.Len(t, r.ReadinessChecks, 0)
+			assert.Nil(t, r.ReconcileInterval)
+			assert.Equal(t, Ref{
+				Name:      "foo",
+				Namespace: "bar",
+				Group:     "apps",
+				Kind:      "Deployment",
+			}, r.Ref)
 		},
 	},
 	{
