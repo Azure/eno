@@ -2,7 +2,6 @@ package resource
 
 import (
 	"testing"
-	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/stretchr/testify/assert"
@@ -60,29 +59,48 @@ func TestSliceTombstonesBasics(t *testing.T) {
 	require.Len(t, slices, 0)
 }
 
-func TestSliceReconcileInterval(t *testing.T) {
-	outputs := []*unstructured.Unstructured{{
+func TestSliceTombstonesPatch(t *testing.T) {
+	firstOutputs := []*unstructured.Unstructured{{
 		Object: map[string]interface{}{
 			"kind":       "Test",
 			"apiVersion": "mygroup/v1",
 			"metadata": map[string]interface{}{
 				"name":      "test-resource",
 				"namespace": "test-ns",
-				"annotations": map[string]interface{}{
-					"eno.azure.io/reconcile-interval": "10s",
-				},
 			},
 		},
 	}}
 
-	// The reconcile interval is passed from the resource itself to its manifest representation
-	slices, err := Slice(&apiv1.Composition{}, []*apiv1.ResourceSlice{}, outputs, 100000)
+	secondOutputs := []*unstructured.Unstructured{{
+		Object: map[string]interface{}{
+			"kind":       "Patch",
+			"apiVersion": "eno.azure.io/v1",
+			"metadata": map[string]interface{}{
+				"name":      "test-resource",
+				"namespace": "test-ns",
+			},
+			"patch": map[string]interface{}{
+				"kind":       "Test",
+				"apiVersion": "mygroup/v1",
+			},
+		},
+	}}
+
+	slices, err := Slice(&apiv1.Composition{}, []*apiv1.ResourceSlice{}, firstOutputs, 100000)
 	require.NoError(t, err)
 	require.Len(t, slices, 1)
 	require.Len(t, slices[0].Spec.Resources, 1)
-	require.NotNil(t, slices[0].Spec.Resources[0].ReconcileInterval)
-	assert.Equal(t, time.Second*10, slices[0].Spec.Resources[0].ReconcileInterval.Duration)                                                                                          // it's in the manifest
-	assert.Equal(t, "{\"apiVersion\":\"mygroup/v1\",\"kind\":\"Test\",\"metadata\":{\"name\":\"test-resource\",\"namespace\":\"test-ns\"}}\n", slices[0].Spec.Resources[0].Manifest) // it's not in the resource itself
+	assert.False(t, slices[0].Spec.Resources[0].Deleted)
+
+	slices, err = Slice(&apiv1.Composition{}, slices, secondOutputs, 100000)
+	require.NoError(t, err)
+	require.Len(t, slices, 1)
+	require.Len(t, slices[0].Spec.Resources, 1)
+	assert.False(t, slices[0].Spec.Resources[0].Deleted)
+
+	slices, err = Slice(&apiv1.Composition{}, slices, []*unstructured.Unstructured{}, 100000)
+	require.NoError(t, err)
+	require.Len(t, slices, 0)
 }
 
 func TestSliceTombstonesVersionSemantics(t *testing.T) {

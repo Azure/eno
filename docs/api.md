@@ -261,6 +261,32 @@ Synthesizer processes are given some metadata about the composition they are syn
 to return a set of Kubernetes resources. Essentially they generate the desired state for a set of Kubernetes resources.
 
 
+A special resource can be returned from synthesizers: `eno.azure.io/v1.Patch`.
+Example:
+
+
+```yaml
+
+
+	 # - Nothing will happen if the resource doesn't exist
+	 # - Patches are only applied when they would result in a change
+	 # - Deleting the Patch will not delete the referenced resource
+		apiVersion: eno.azure.io/v1
+		kind: Patch
+		metadata:
+			name: resource-to-be-patched
+			namespace: default
+		patch:
+			apiVersion: v1
+			kind: ConfigMap
+			ops: # standard jsonpatch operations
+			  - { "op": "add", "path": "/data/hello", "value": "world" }
+			  - { "op": "add", "path": "/metadata/deletionTimestamp", "value": "anything" } # setting any deletion timestamp will delete the resource
+
+
+```
+
+
 
 
 

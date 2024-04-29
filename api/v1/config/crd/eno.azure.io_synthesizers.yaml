@@ -21,12 +21,21 @@ spec:
     name: v1
     schema:
       openAPIV3Schema:
-        description: |-
-          Synthesizers are any process that can run in a Kubernetes container that implements the [KRM Functions Specification](https://github.com/kubernetes-sigs/kustomize/blob/master/cmd/config/docs/api-conventions/functions-spec.md).
-
-
-          Synthesizer processes are given some metadata about the composition they are synthesizing, and are expected
-          to return a set of Kubernetes resources. Essentially they generate the desired state for a set of Kubernetes resources.
+        description: "Synthesizers are any process that can run in a Kubernetes container
+          that implements the [KRM Functions Specification](https://github.com/kubernetes-sigs/kustomize/blob/master/cmd/config/docs/api-conventions/functions-spec.md).\n\n\nSynthesizer
+          processes are given some metadata about the composition they are synthesizing,
+          and are expected\nto return a set of Kubernetes resources. Essentially they
+          generate the desired state for a set of Kubernetes resources.\n\n\nA special
+          resource can be returned from synthesizers: `eno.azure.io/v1.Patch`.\nExample:\n\n\n```yaml\n\n\n\t
+          # - Nothing will happen if the resource doesn't exist\n\t # - Patches are
+          only applied when they would result in a change\n\t # - Deleting the Patch
+          will not delete the referenced resource\n\t\tapiVersion: eno.azure.io/v1\n\t\tkind:
+          Patch\n\t\tmetadata:\n\t\t\tname: resource-to-be-patched\n\t\t\tnamespace:
+          default\n\t\tpatch:\n\t\t\tapiVersion: v1\n\t\t\tkind: ConfigMap\n\t\t\tops:
+          # standard jsonpatch operations\n\t\t\t  - { \"op\": \"add\", \"path\":
+          \"/data/hello\", \"value\": \"world\" }\n\t\t\t  - { \"op\": \"add\", \"path\":
+          \"/metadata/deletionTimestamp\", \"value\": \"anything\" } # setting any
+          deletion timestamp will delete the resource\n\n\n```"
         properties:
           apiVersion:
             description: |-
