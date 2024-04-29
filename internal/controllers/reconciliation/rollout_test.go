@@ -89,20 +89,16 @@ func TestBulkRollout(t *testing.T) {
 	require.NoError(t, err)
 
 	testutil.Eventually(t, func() bool {
-		outOfSync := []string{}
 		for i := 0; i < n; i++ {
 			comp := &apiv1.Composition{}
 			comp.Name = fmt.Sprintf("test-comp-%d", i)
 			comp.Namespace = "default"
 			err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 			inSync := err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
-			if comp.Status.CurrentSynthesis != nil {
-				if !inSync {
-					outOfSync = append(outOfSync, fmt.Sprintf("composition %s with synthesized=%t reconciled=%t syngen=%d", comp.Name, comp.Status.CurrentSynthesis.Synthesized != nil, comp.Status.CurrentSynthesis.Reconciled != nil, comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration))
-				}
+			if !inSync {
+				return false
 			}
 		}
-		// t.Logf("out of sync compositions: %+s", outOfSync)
-		return len(outOfSync) == 0
+		return true
 	})
 }
