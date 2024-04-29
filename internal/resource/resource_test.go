@@ -65,7 +65,7 @@ var newResourceTests = []struct {
 				"kind":       "ConfigMap",
 				"data":       map[string]any{},
 			}}
-			assert.False(t, r.PatchDeletes())
+			assert.False(t, r.PatchSetsDeletionTimestamp())
 			assert.True(t, r.NeedsToBePatched(cm))
 			assert.True(t, r.NeedsToBePatched(cm))
 
@@ -93,7 +93,7 @@ var newResourceTests = []struct {
 		Assert: func(t *testing.T, r *Resource) {
 			assert.Equal(t, schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, r.GVK)
 			assert.Len(t, r.Patch, 1)
-			assert.True(t, r.PatchDeletes())
+			assert.True(t, r.PatchSetsDeletionTimestamp())
 		},
 	},
 }

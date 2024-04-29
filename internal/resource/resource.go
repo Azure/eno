@@ -75,12 +75,14 @@ func (r *Resource) NeedsToBePatched(current *unstructured.Unstructured) bool {
 	return !equality.Semantic.DeepEqual(current, patched)
 }
 
-func (r *Resource) PatchDeletes() bool {
+func (r *Resource) PatchSetsDeletionTimestamp() bool {
 	if r.Patch == nil {
 		return false
 	}
 
-	patchedjson, err := r.Patch.Apply([]byte(`{"apiVersion": "anything/v1", "kind":"Anything", "metadata":{}}`))
+	// Apply the patch to a minimally-viable unstructured resource.
+	// This is needed to satisfy the validation logic of the unstructured json parser, which requires a kind/apiVersion.
+	patchedjson, err := r.Patch.Apply([]byte(`{"apiVersion": "eno.azure.io/v1", "kind":"PatchPlaceholder", "metadata":{}}`))
 	if err != nil {
 		return false
 	}
