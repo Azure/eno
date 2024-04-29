@@ -44,7 +44,9 @@ type Resource struct {
 	Patch             jsonpatch.Patch
 }
 
-func (r *Resource) Deleted() bool { return r.SliceDeleted || r.Manifest.Deleted }
+func (r *Resource) Deleted() bool {
+	return r.SliceDeleted || r.Manifest.Deleted || (r.Patch != nil && r.PatchSetsDeletionTimestamp())
+}
 
 func (r *Resource) Parse() (*unstructured.Unstructured, error) {
 	u := &unstructured.Unstructured{}

@@ -175,7 +175,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		reconciliationLatency.Observe(time.Since(start).Seconds())
 	}()
 
-	if resource.Deleted() || (resource.Patch != nil && resource.PatchSetsDeletionTimestamp()) {
+	if resource.Deleted() {
 		if current == nil || current.GetDeletionTimestamp() != nil {
 			return false, nil // already deleted - nothing to do
 		}
