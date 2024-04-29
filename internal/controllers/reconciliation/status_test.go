@@ -11,6 +11,7 @@ import (
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -176,3 +177,67 @@ func TestReconcileStatus(t *testing.T) {
 }
 
 func isNotReady(state apiv1.ResourceState) bool { return state.Ready == nil }
+
+// TestStatusNegative covers a weird corner case where a resource fails a patch but is still marked as reconciled.
+func TestStatusNegative(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	obj := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-obj",
+			Namespace: "default",
+			Annotations: map[string]string{
+				"eno.azure.io/reconcile-interval": "1ms",
+			},
+		},
+		Data: map[string]string{"foo": "bar"},
+	}
+
+	// Register supporting controllers
+	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
+	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
+	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
+	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
+		obj := obj.DeepCopy()
+		obj.Data = map[string]string{"foo": "baz"} // update: bar->baz
+		gvks, _, err := scheme.ObjectKinds(obj)
+		require.NoError(t, err)
+		obj.GetObjectKind().SetGroupVersionKind(gvks[0])
+		return []client.Object{obj}
+	}}))
+
+	// Test subject
+	c := setupTestSubject(t, mgr)
+	c.upstreamClient = testutil.NewReadOnlyClient(t, obj)
+	mgr.Start(t)
+
+	// Any syn/comp will do since we faked out the synthesizer pod
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "create"
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	// Prove the resource was not marked as reconciled
+	// This would be better as a unit test where we can block on reconciliation,
+	// consider refactoring later (it will be non-trivial)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
+	})
+	time.Sleep(time.Second)
+	require.NoError(t, upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	assert.Nil(t, comp.Status.CurrentSynthesis.Reconciled)
+}

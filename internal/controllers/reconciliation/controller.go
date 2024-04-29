@@ -129,6 +129,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	// Skip without logging since this is a very hot path
 	var modified bool
 	if hasChanged {
+		resource.ObserveVersion("") // in case reconciliation fails, invalidate the cache first to avoid skipping the next attempt
 		modified, err = c.reconcileResource(ctx, comp, prev, resource, current)
 		if err != nil {
 			return ctrl.Result{}, err
