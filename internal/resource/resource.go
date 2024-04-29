@@ -45,7 +45,7 @@ type Resource struct {
 }
 
 func (r *Resource) Deleted() bool {
-	return r.SliceDeleted || r.Manifest.Deleted || (r.Patch != nil && r.PatchSetsDeletionTimestamp())
+	return r.SliceDeleted || r.Manifest.Deleted || (r.Patch != nil && r.patchSetsDeletionTimestamp())
 }
 
 func (r *Resource) Parse() (*unstructured.Unstructured, error) {
@@ -77,7 +77,7 @@ func (r *Resource) NeedsToBePatched(current *unstructured.Unstructured) bool {
 	return !equality.Semantic.DeepEqual(current, patched)
 }
 
-func (r *Resource) PatchSetsDeletionTimestamp() bool {
+func (r *Resource) patchSetsDeletionTimestamp() bool {
 	if r.Patch == nil {
 		return false
 	}
