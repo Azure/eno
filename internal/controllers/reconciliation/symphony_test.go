@@ -27,8 +27,11 @@ func TestSymphonyIntegration(t *testing.T) {
 	corev1.SchemeBuilder.AddToScheme(scheme)
 
 	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t)
+	mgr := testutil.NewManager(t, testutil.WithCompositionNamespace(metav1.NamespaceAll))
 	upstream := mgr.GetClient()
+
+	// Create test namespace.
+	require.NoError(t, upstream.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test"}}))
 
 	// Register supporting controllers
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
@@ -74,8 +77,19 @@ func TestSymphonyIntegration(t *testing.T) {
 	symph.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: syn.Name}}}
 	require.NoError(t, upstream.Create(ctx, symph))
 
+	symph2 := &apiv1.Symphony{}
+	symph2.Name = "test-comp-2"
+	symph2.Namespace = "test"
+	symph2.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: syn.Name}}}
+	require.NoError(t, upstream.Create(ctx, symph2))
+
 	testutil.Eventually(t, func() bool {
 		upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph)
+		return symph.Status.Reconciled != nil && symph.Status.ObservedGeneration == symph.Generation
+	})
+
+	testutil.Eventually(t, func() bool {
+		upstream.Get(ctx, client.ObjectKeyFromObject(symph2), symph2)
 		return symph.Status.Reconciled != nil && symph.Status.ObservedGeneration == symph.Generation
 	})
 

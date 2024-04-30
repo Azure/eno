@@ -77,6 +77,12 @@ func WithPodNamespace(ns string) TestManagerOption {
 	})
 }
 
+func WithCompositionNamespace(ns string) TestManagerOption {
+	return TestManagerOption(func(o *manager.Options) {
+		o.CompositionNamespace = ns
+	})
+}
+
 // NewManager starts one or two envtest environments depending on the env.
 // This should work seamlessly when run locally assuming binaries have been fetched with setup-envtest.
 // In CI the second environment is used to compatibility test against a matrix of k8s versions.
