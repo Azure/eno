@@ -157,6 +157,12 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	if current != nil {
+		if rv := current.GetResourceVersion(); rv != "" {
+			resource.ObserveVersion(rv)
+		}
+	}
+
 	// Store the results
 	deleted := current == nil || current.GetDeletionTimestamp() != nil
 	c.writeBuffer.PatchStatusAsync(ctx, &req.Manifest, patchResourceState(deleted, ready))
@@ -311,9 +317,6 @@ func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Re
 	err := c.upstreamClient.Get(ctx, client.ObjectKeyFromObject(current), current)
 	if err != nil {
 		return nil, true, err
-	}
-	if rv := current.GetResourceVersion(); rv != "" {
-		resource.ObserveVersion(rv)
 	}
 	return current, true, nil
 }
