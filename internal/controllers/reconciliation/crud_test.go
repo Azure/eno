@@ -804,3 +804,73 @@ func TestPatchDeletion(t *testing.T) {
 	err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm)
 	require.True(t, errors.IsNotFound(err))
 }
+
+// TestDisableUpdates proves that resources which set the disable-updates annotation are not updated.
+func TestDisableUpdates(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	// Register supporting controllers
+	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
+	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
+	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
+		obj := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-obj",
+				Namespace: "default",
+				Annotations: map[string]string{
+					"eno.azure.io/reconcile-interval": "10ms",
+					"eno.azure.io/disable-updates":    "true",
+				},
+			},
+			Data: map[string]string{"foo": "bar"},
+		}
+
+		gvks, _, err := scheme.ObjectKinds(obj)
+		require.NoError(t, err)
+		obj.GetObjectKind().SetGroupVersionKind(gvks[0])
+		return []client.Object{obj}
+	}}))
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	// Any syn/comp will do since we faked out the synthesizer pod
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "create"
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	// Wait for resource to be created
+	obj := &corev1.ConfigMap{}
+	testutil.Eventually(t, func() bool {
+		obj.SetName("test-obj")
+		obj.SetNamespace("default")
+		err := downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+		return err == nil
+	})
+
+	// Update the service from outside of Eno
+	obj.Data["foo"] = "baz"
+	require.NoError(t, downstream.Update(ctx, obj))
+
+	// The service should not be updated
+	time.Sleep(time.Millisecond * 100)
+	err := downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+	require.NoError(t, err)
+	assert.Equal(t, "baz", obj.Data["foo"])
+}

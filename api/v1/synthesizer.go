@@ -16,6 +16,30 @@ type SynthesizerList struct {
 // Synthesizer processes are given some metadata about the composition they are synthesizing, and are expected
 // to return a set of Kubernetes resources. Essentially they generate the desired state for a set of Kubernetes resources.
 //
+// Eno honors a handful of annotations on resources emitted from synthesizers. They are consumed by Eno i.e. are not passed to the "real", reconciled resource.
+// - eno.azure.io/reconcile-interval: How often to correct for any configuration drift. Accepts durations parsable by time.ParseDuration.
+// - eno.azure.io/disable-updates: Ensure that the resource exists but never update it. Useful for populating resources you expect another user/process to mutate.
+// - eno.azure.io/readiness: CEL expression used to assert that the resource is ready. More details below.
+// - eno.azure.io/readiness-*: Same as above, allows for multiple readiness checks. All checks must pass for the resource to be considered ready.
+//
+// Readiness expressions can return either bool or a Kubernetes condition struct.
+// If a condition is returned it will be used as the resource's readiness time, otherwise the controller will use wallclock time at the first moment it noticed the truthy value.
+// When possible, match on a timestamp to preserve accuracy.
+//
+// Example matching on a condition:
+// ```cel
+//
+//	self.status.conditions.filter(item, item.type == 'Test' && item.status == 'False')
+//
+// ```
+//
+// Example matching on a boolean:
+// ```cel
+//
+//	self.status.foo == 'bar'
+//
+// ```
+//
 // A special resource can be returned from synthesizers: `eno.azure.io/v1.Patch`.
 // Example:
 //

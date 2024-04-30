@@ -42,6 +42,7 @@ type Resource struct {
 	SliceDeleted      bool
 	ReadinessChecks   readiness.Checks
 	Patch             jsonpatch.Patch
+	DisableUpdates    bool
 }
 
 func (r *Resource) Deleted() bool {
@@ -149,6 +150,10 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 	reconcileInterval, _ := time.ParseDuration(anno[reconcileIntervalKey])
 	res.ReconcileInterval = &metav1.Duration{Duration: reconcileInterval}
 	delete(anno, reconcileIntervalKey)
+
+	const disableUpdatesKey = "eno.azure.io/disable-updates"
+	res.DisableUpdates = anno[disableUpdatesKey] == "true"
+	delete(anno, disableUpdatesKey)
 
 	for key, value := range parsed.GetAnnotations() {
 		if !strings.HasPrefix(key, "eno.azure.io/readiness") {
