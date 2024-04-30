@@ -27,7 +27,7 @@ var patchGVK = schema.GroupVersionKind{
 
 // Ref refers to a specific synthesized resource.
 type Ref struct {
-	Name, Namespace, Kind string
+	Name, Namespace, Group, Kind string
 }
 
 // Resource is the controller's internal representation of a single resource out of a ResourceSlice.
@@ -114,6 +114,7 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 	res.GVK = gvk
 	res.Ref.Name = parsed.GetName()
 	res.Ref.Namespace = parsed.GetNamespace()
+	res.Ref.Group = parsed.GroupVersionKind().Group
 	res.Ref.Kind = parsed.GetKind()
 	logger = logger.WithValues("resourceKind", parsed.GetKind(), "resourceName", parsed.GetName(), "resourceNamespace", parsed.GetNamespace())
 

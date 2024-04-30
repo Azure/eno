@@ -58,12 +58,6 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	var latestRollout time.Time
 	for _, comp := range compList.Items {
-		// For every synthesizer, only one composition can be the target of a rolling change at any point in time.
-		// To avoid blocked rollouts caused by compositions that cannot be synthesized, also time out and move on eventually.
-		if isRolling(&comp) {
-			return ctrl.Result{}, nil
-		}
-
 		if comp.Status.CurrentSynthesis != nil && comp.Status.PreviousSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil && comp.Status.CurrentSynthesis.Synthesized.Time.After(latestRollout) {
 			latestRollout = comp.Status.CurrentSynthesis.Synthesized.Time
 		}
@@ -94,7 +88,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 
 		logger.V(1).Info("advancing rollout process")
-		return ctrl.Result{}, nil
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	return ctrl.Result{}, nil
@@ -113,10 +107,6 @@ func swapStates(comp *apiv1.Composition) {
 
 func isInSync(comp *apiv1.Composition, syn *apiv1.Synthesizer) bool {
 	return comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration >= syn.Generation
-}
-
-func isRolling(comp *apiv1.Composition) bool {
-	return comp.Status.CurrentSynthesis != nil && comp.Status.PreviousSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized == nil
 }
 
 func newCompositionHandler() handler.EventHandler {

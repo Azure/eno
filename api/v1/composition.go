@@ -18,7 +18,7 @@ type CompositionList struct {
 //
 // Eno guarantees that a composition's resources will be deleted before the composition
 // finishes deletion by holding a finalizer on it. To delete the composition while leaving
-// the resources in place, set the annotation `eno.azure.io/reconcile-interval` to "orphan".
+// the resources in place, set the annotation `eno.azure.io/deletion-strategy` to "orphan".
 //
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status

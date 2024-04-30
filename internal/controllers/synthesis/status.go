@@ -69,7 +69,7 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		compGen, _ = strconv.ParseInt(pod.Annotations["eno.azure.io/composition-generation"], 10, 0)
 		synGen, _  = strconv.ParseInt(pod.Annotations["eno.azure.io/synthesizer-generation"], 10, 0)
 	)
-	logger.WithValues("synthesizerGeneration", synGen, "compositionGeneration", compGen)
+	logger = logger.WithValues("synthesizerGeneration", synGen, "compositionGeneration", compGen)
 	if shouldWriteStatus(comp, compGen, pod.CreationTimestamp) {
 		if comp.Status.CurrentSynthesis == nil {
 			comp.Status.CurrentSynthesis = &apiv1.Synthesis{}

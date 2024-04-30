@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -53,6 +54,34 @@ func NewClientWithInterceptors(t testing.TB, ict *interceptor.Funcs) client.Clie
 	if ict != nil {
 		builder.WithInterceptorFuncs(*ict)
 	}
+
+	return builder.Build()
+}
+
+func NewReadOnlyClient(t testing.TB, objs ...runtime.Object) client.Client {
+	scheme := runtime.NewScheme()
+	require.NoError(t, apiv1.SchemeBuilder.AddToScheme(scheme))
+	require.NoError(t, corev1.SchemeBuilder.AddToScheme(scheme))
+
+	builder := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(objs...).
+		WithStatusSubresource(&apiv1.ResourceSlice{}, &apiv1.Composition{})
+
+	builder.WithInterceptorFuncs(interceptor.Funcs{
+		Create: func(ctx context.Context, client client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			return errors.New("no writes allowed")
+		},
+		Update: func(ctx context.Context, client client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+			return errors.New("no writes allowed")
+		},
+		Patch: func(ctx context.Context, client client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+			return errors.New("no writes allowed")
+		},
+		Delete: func(ctx context.Context, client client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+			return errors.New("no writes allowed")
+		},
+	})
 
 	return builder.Build()
 }
