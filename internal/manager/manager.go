@@ -108,12 +108,18 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 	}
 
 	if isReconciler {
-		mgrOpts.Cache.ByObject[&apiv1.Composition{}] = cache.ByObject{
-			Namespaces: map[string]cache.Config{
-				opts.CompositionNamespace: {
-					LabelSelector: opts.CompositionSelector,
+		if opts.CompositionNamespace != cache.AllNamespaces {
+			mgrOpts.Cache.ByObject[&apiv1.Composition{}] = cache.ByObject{
+				Namespaces: map[string]cache.Config{
+					opts.CompositionNamespace: {
+						LabelSelector: opts.CompositionSelector,
+					},
 				},
-			},
+			}
+		} else {
+			mgrOpts.Cache.ByObject[&apiv1.Composition{}] = cache.ByObject{
+				Label: opts.CompositionSelector,
+			}
 		}
 
 		yespls := true

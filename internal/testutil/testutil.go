@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/util/yaml"
@@ -128,6 +129,7 @@ func NewManager(t *testing.T, testOpts ...TestManagerOption) *Manager {
 		MetricsAddr:             "127.0.0.1:0",
 		SynthesizerPodNamespace: "default",
 		CompositionNamespace:    "default",
+		CompositionSelector:     labels.Everything(),
 	}
 	for _, o := range testOpts {
 		o.apply(options)
