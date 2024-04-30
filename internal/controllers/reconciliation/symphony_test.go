@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/retry"
+	ctrlcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -27,7 +28,7 @@ func TestSymphonyIntegration(t *testing.T) {
 	corev1.SchemeBuilder.AddToScheme(scheme)
 
 	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t, testutil.WithCompositionNamespace(metav1.NamespaceAll))
+	mgr := testutil.NewManager(t, testutil.WithCompositionNamespace(ctrlcache.AllNamespaces))
 	upstream := mgr.GetClient()
 
 	// Create test namespace.
