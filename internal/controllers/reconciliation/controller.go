@@ -231,6 +231,9 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	}
 	if len(patch) == 0 {
 		logger.V(1).Info("skipping empty patch")
+		if rv := current.GetResourceVersion(); rv != "" {
+			resource.ObserveVersion(rv)
+		}
 		return false, nil
 	}
 	reconciliationActions.WithLabelValues("patch").Inc()
@@ -240,6 +243,9 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	err = c.upstreamClient.Patch(ctx, current, client.RawPatch(patchType, patch))
 	if err != nil {
 		return false, fmt.Errorf("applying patch: %w", err)
+	}
+	if rv := current.GetResourceVersion(); rv != "" {
+		resource.ObserveVersion(rv)
 	}
 	logger.V(0).Info("patched resource", "patchType", string(patchType), "resourceVersion", current.GetResourceVersion(), "previousResourceVersion", prevRV)
 
@@ -311,9 +317,6 @@ func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Re
 	err := c.upstreamClient.Get(ctx, client.ObjectKeyFromObject(current), current)
 	if err != nil {
 		return nil, true, err
-	}
-	if rv := current.GetResourceVersion(); rv != "" {
-		resource.ObserveVersion(rv)
 	}
 	return current, true, nil
 }
