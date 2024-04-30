@@ -29,7 +29,8 @@ var newResourceTests = []struct {
 					"foo": "bar",
 					"eno.azure.io/reconcile-interval": "10s",
 					"eno.azure.io/readiness": "true",
-					"eno.azure.io/readiness-test": "false"
+					"eno.azure.io/readiness-test": "false",
+					"eno.azure.io/disable-updates": "true"
 				}
 			}
 		}`,
@@ -43,6 +44,7 @@ var newResourceTests = []struct {
 				Group:     "",
 				Kind:      "ConfigMap",
 			}, r.Ref)
+			assert.True(t, r.DisableUpdates)
 		},
 	},
 	{

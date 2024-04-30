@@ -213,6 +213,10 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		return true, nil
 	}
 
+	if resource.DisableUpdates {
+		return false, nil
+	}
+
 	// Compute a merge patch
 	prevRV := current.GetResourceVersion()
 	patch, patchType, err := c.buildPatch(ctx, prev, resource, current)
