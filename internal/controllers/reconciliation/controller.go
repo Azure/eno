@@ -129,6 +129,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	// Skip without logging since this is a very hot path
 	var modified bool
 	if hasChanged {
+		resource.ObserveVersion("") // in case reconciliation fails, invalidate the cache first to avoid skipping the next attempt
 		modified, err = c.reconcileResource(ctx, comp, prev, resource, current)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -142,7 +143,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	slice := &apiv1.ResourceSlice{}
 	err = c.client.Get(ctx, req.Manifest.Slice, slice)
 	if err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting resource slice: %w", err))
+		return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
 	}
 	var ready *metav1.Time
 	if status := req.Manifest.FindStatus(slice); status == nil || status.Ready == nil {

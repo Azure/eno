@@ -103,7 +103,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 
 	if comp.DeletionTimestamp != nil {
 		ctx = logr.NewContext(ctx, logger)
-		return c.reconcileDeletedComposition(ctx, comp, pods)
+		return c.reconcileDeletedComposition(ctx, comp)
 	}
 
 	// Swap the state to prepare for resynthesis if needed
@@ -177,7 +177,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	return ctrl.Result{}, nil
 }
 
-func (c *podLifecycleController) reconcileDeletedComposition(ctx context.Context, comp *apiv1.Composition, pods *corev1.PodList) (ctrl.Result, error) {
+func (c *podLifecycleController) reconcileDeletedComposition(ctx context.Context, comp *apiv1.Composition) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	// If the composition was being synthesized at the time of deletion we need to swap the previous
@@ -319,5 +319,5 @@ func shouldUpdateDeletedCompositionStatus(comp *apiv1.Composition) bool {
 }
 
 func isReconciling(comp *apiv1.Composition) bool {
-	return comp.Status.CurrentSynthesis != nil && (comp.Status.CurrentSynthesis.Reconciled == nil) || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation
+	return comp.Status.CurrentSynthesis != nil && (comp.Status.CurrentSynthesis.Reconciled == nil || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation)
 }
