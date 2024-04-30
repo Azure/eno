@@ -84,6 +84,9 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	if compGen < comp.Generation || (comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil) || comp.DeletionTimestamp != nil {
 		return ctrl.Result{}, nil // old pod - don't bother synthesizing. The lifecycle controller will delete it
 	}
+	if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == 0 {
+		return ctrl.Result{}, nil // wait for the status controller to learn the synth generation first
+	}
 
 	wait, ok, err := c.shouldDebounce(ctx, pod)
 	if err != nil {
