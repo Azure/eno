@@ -78,6 +78,10 @@ func TestSymphonyIntegration(t *testing.T) {
 	symph.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: syn.Name}}}
 	require.NoError(t, upstream.Create(ctx, symph))
 
+	// TODO: Extract the boilerplate for this test and create a dedicated
+	// scenario for ns isolation.
+	// Creating a second symphony with the same name in a separate namespace
+	// to ensure we handle namespace isolation correctly.
 	symph2 := &apiv1.Symphony{}
 	symph2.Name = "test-comp"
 	symph2.Namespace = "test"
