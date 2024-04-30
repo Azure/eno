@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/retry"
+	ctrlcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -27,8 +28,11 @@ func TestSymphonyIntegration(t *testing.T) {
 	corev1.SchemeBuilder.AddToScheme(scheme)
 
 	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t)
+	mgr := testutil.NewManager(t, testutil.WithCompositionNamespace(ctrlcache.AllNamespaces))
 	upstream := mgr.GetClient()
+
+	// Create test namespace.
+	require.NoError(t, upstream.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test"}}))
 
 	// Register supporting controllers
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
@@ -74,9 +78,44 @@ func TestSymphonyIntegration(t *testing.T) {
 	symph.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: syn.Name}}}
 	require.NoError(t, upstream.Create(ctx, symph))
 
+	// TODO: Extract the boilerplate for this test and create a dedicated
+	// scenario for ns isolation.
+	// Creating a second symphony with the same name in a separate namespace
+	// to ensure we handle namespace isolation correctly.
+	symph2 := &apiv1.Symphony{}
+	symph2.Name = "test-comp"
+	symph2.Namespace = "test"
+	symph2.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: syn.Name}}}
+	require.NoError(t, upstream.Create(ctx, symph2))
+
 	testutil.Eventually(t, func() bool {
 		upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph)
-		return symph.Status.Reconciled != nil && symph.Status.ObservedGeneration == symph.Generation
+		if symph.Status.Reconciled == nil || symph.Status.ObservedGeneration != symph.Generation {
+			return false
+		}
+
+		comps := &apiv1.CompositionList{}
+		upstream.List(ctx, comps, client.InNamespace(symph.Namespace))
+		return len(comps.Items) == 1
+	})
+
+	testutil.Eventually(t, func() bool {
+		upstream.Get(ctx, client.ObjectKeyFromObject(symph2), symph2)
+		if symph.Status.Reconciled == nil || symph.Status.ObservedGeneration != symph.Generation {
+			return false
+		}
+
+		comps := &apiv1.CompositionList{}
+		upstream.List(ctx, comps, client.InNamespace(symph2.Namespace))
+		return len(comps.Items) == 1
+	})
+
+	// Delet one of the symphonies
+	require.NoError(t, upstream.Delete(ctx, symph2))
+	testutil.Eventually(t, func() bool {
+		comps := &apiv1.CompositionList{}
+		upstream.List(ctx, comps)
+		return len(comps.Items) == 1
 	})
 
 	// Add another variation

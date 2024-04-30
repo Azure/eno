@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/util/yaml"
@@ -106,6 +107,12 @@ func WithPodNamespace(ns string) TestManagerOption {
 	})
 }
 
+func WithCompositionNamespace(ns string) TestManagerOption {
+	return TestManagerOption(func(o *manager.Options) {
+		o.CompositionNamespace = ns
+	})
+}
+
 // NewManager starts one or two envtest environments depending on the env.
 // This should work seamlessly when run locally assuming binaries have been fetched with setup-envtest.
 // In CI the second environment is used to compatibility test against a matrix of k8s versions.
@@ -150,6 +157,8 @@ func NewManager(t *testing.T, testOpts ...TestManagerOption) *Manager {
 		HealthProbeAddr:         "127.0.0.1:0",
 		MetricsAddr:             "127.0.0.1:0",
 		SynthesizerPodNamespace: "default",
+		CompositionNamespace:    "default",
+		CompositionSelector:     labels.Everything(),
 	}
 	for _, o := range testOpts {
 		o.apply(options)
