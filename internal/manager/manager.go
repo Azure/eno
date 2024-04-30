@@ -108,6 +108,7 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 	}
 
 	if isReconciler {
+		// TODO: Dedicated test for composition namespace isolation.
 		if opts.CompositionNamespace != cache.AllNamespaces {
 			mgrOpts.Cache.ByObject[&apiv1.Composition{}] = cache.ByObject{
 				Namespaces: map[string]cache.Config{
