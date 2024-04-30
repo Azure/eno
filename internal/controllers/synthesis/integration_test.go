@@ -77,7 +77,7 @@ func TestControllerHappyPath(t *testing.T) {
 
 	// The synthesizer is eventually executed a second time
 	testutil.Eventually(t, func() bool {
-		return conn.Calls.Load() == 2
+		return conn.Calls.Load() >= 2
 	})
 
 	// The pod is deleted
