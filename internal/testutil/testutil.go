@@ -121,6 +121,7 @@ func NewManager(t *testing.T, testOpts ...TestManagerOption) *Manager {
 		HealthProbeAddr:         "127.0.0.1:0",
 		MetricsAddr:             "127.0.0.1:0",
 		SynthesizerPodNamespace: "default",
+		CompositionNamespace:    "default",
 	}
 	for _, o := range testOpts {
 		o.apply(options)
