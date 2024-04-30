@@ -37,7 +37,7 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 	logger = logger.WithValues("symphonyName", symph.Name, "symphonyNamespace", symph.Namespace)
 
 	existing := &apiv1.CompositionList{}
-	err = c.client.List(ctx, existing, client.MatchingFields{
+	err = c.client.List(ctx, existing, client.InNamespace(symph.Namespace), client.MatchingFields{
 		manager.IdxCompositionsBySymphony: symph.Name,
 	})
 	if err != nil {

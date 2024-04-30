@@ -10,7 +10,6 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -40,16 +39,8 @@ func init() {
 // - The resource slices cached by the informer do not have the configured manifests since they are held by the reconstitution cache anyway
 
 const (
-	IdxPodsByComposition           = ".podsByComposition"
-	IdxCompositionsBySynthesizer   = ".spec.synthesizer"
-	IdxCompositionsBySymphony      = ".compositionsBySymphony"
-	IdxResourceSlicesByComposition = ".resourceSlicesByComposition"
-
 	ManagerLabelKey   = "app.kubernetes.io/managed-by"
 	ManagerLabelValue = "eno"
-
-	CompositionNameLabelKey      = "eno.azure.io/composition-name"
-	CompositionNamespaceLabelKey = "eno.azure.io/composition-namespace"
 )
 
 func init() {
@@ -148,7 +139,7 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 
 	if isController {
 		err = mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Pod{}, IdxPodsByComposition, func(o client.Object) []string {
-			return []string{o.GetLabels()[CompositionNameLabelKey]}
+			return []string{PodByCompIdxValueFromPod(o)}
 		})
 		if err != nil {
 			return nil, err
@@ -193,7 +184,7 @@ func NewLogConstructor(mgr ctrl.Manager, controllerName string) func(*reconcile.
 func NewCompositionToResourceSliceHandler(cli client.Client) handler.EventHandler {
 	apply := func(ctx context.Context, rli workqueue.RateLimitingInterface, obj client.Object) {
 		list := &apiv1.ResourceSliceList{}
-		err := cli.List(ctx, list, client.MatchingFields{
+		err := cli.List(ctx, list, client.InNamespace(obj.GetNamespace()), client.MatchingFields{
 			IdxResourceSlicesByComposition: obj.GetName(),
 		})
 		if err != nil {
@@ -214,40 +205,5 @@ func NewCompositionToResourceSliceHandler(cli client.Client) handler.EventHandle
 		DeleteFunc: func(ctx context.Context, de event.DeleteEvent, rli workqueue.RateLimitingInterface) {
 			apply(ctx, rli, de.Object)
 		},
-	}
-}
-
-func PodReferencesComposition(pod *corev1.Pod) bool {
-	labels := pod.GetLabels()
-	if labels == nil || labels[CompositionNameLabelKey] == "" || labels[CompositionNamespaceLabelKey] == "" {
-		return false
-	}
-	return true
-}
-
-func PodToCompMapFunc(ctx context.Context, obj client.Object) []reconcile.Request {
-	pod, ok := obj.(*corev1.Pod)
-	if !ok {
-		logr.FromContextOrDiscard(ctx).V(0).Info("unexpected type given to podToCompMapFunc")
-		return nil
-	}
-	if !PodReferencesComposition(pod) {
-		return nil
-	}
-	return []reconcile.Request{{
-		NamespacedName: types.NamespacedName{
-			Name:      pod.GetLabels()[CompositionNameLabelKey],
-			Namespace: pod.GetLabels()[CompositionNamespaceLabelKey],
-		},
-	}}
-}
-
-func indexController() client.IndexerFunc {
-	return func(o client.Object) []string {
-		owner := metav1.GetControllerOf(o)
-		if owner == nil {
-			return nil
-		}
-		return []string{owner.Name}
 	}
 }
