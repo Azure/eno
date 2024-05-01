@@ -23,7 +23,7 @@ type Cache struct {
 	renv   *readiness.Env
 
 	mut                         sync.Mutex
-	resources                   map[SynthesisRef]map[resource.Ref]*Resource
+	resources                   map[SynthesisRef]map[ManifestRef]*Resource
 	synthesisUUIDsByComposition map[types.NamespacedName][]string
 }
 
@@ -35,12 +35,12 @@ func NewCache(client client.Client) *Cache {
 	return &Cache{
 		client:                      client,
 		renv:                        renv,
-		resources:                   make(map[SynthesisRef]map[resource.Ref]*Resource),
+		resources:                   make(map[SynthesisRef]map[ManifestRef]*Resource),
 		synthesisUUIDsByComposition: make(map[types.NamespacedName][]string),
 	}
 }
 
-func (c *Cache) Get(ctx context.Context, comp *SynthesisRef, ref *resource.Ref) (*Resource, bool) {
+func (c *Cache) Get(ctx context.Context, comp *SynthesisRef, ref *ManifestRef) (*Resource, bool) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
@@ -96,8 +96,8 @@ func (c *Cache) fill(ctx context.Context, comp *apiv1.Composition, synthesis *ap
 	return requests, nil
 }
 
-func (c *Cache) buildResources(ctx context.Context, comp *apiv1.Composition, items []apiv1.ResourceSlice) (map[resource.Ref]*Resource, []*Request, error) {
-	resources := map[resource.Ref]*Resource{}
+func (c *Cache) buildResources(ctx context.Context, comp *apiv1.Composition, items []apiv1.ResourceSlice) (map[ManifestRef]*Resource, []*Request, error) {
+	resources := map[ManifestRef]*Resource{}
 	requests := []*Request{}
 	for _, slice := range items {
 		slice := slice
@@ -114,16 +114,16 @@ func (c *Cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 			if err != nil {
 				return nil, nil, fmt.Errorf("building resource at index %d of slice %s: %w", i, slice.Name, err)
 			}
-			resources[res.Ref] = res
-			requests = append(requests, &Request{
-				Resource: res.Ref,
-				Manifest: ManifestRef{
-					Slice: types.NamespacedName{
-						Namespace: slice.Namespace,
-						Name:      slice.Name,
-					},
-					Index: i,
+			mr := ManifestRef{
+				Slice: types.NamespacedName{
+					Namespace: slice.Namespace,
+					Name:      slice.Name,
 				},
+				Index: i,
+			}
+			resources[mr] = res
+			requests = append(requests, &Request{
+				Manifest:    mr,
 				Composition: types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace},
 			})
 		}
