@@ -16,7 +16,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -51,8 +50,6 @@ type Controller struct {
 	readinessPollInterval time.Duration
 	upstreamClient        client.Client
 	discovery             *discovery.Cache
-
-	WorkQueue workqueue.RateLimitingInterface
 }
 
 func New(opts Options) (*Controller, error) {
@@ -128,24 +125,6 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		return ctrl.Result{}, fmt.Errorf("getting current state: %w", err)
 	}
 
-	// Evaluate resource readiness
-	// - Readiness checks are skipped when this version of the resource's desired state has already become ready
-	// - Readiness checks are skipped when the resource hasn't changed since the last check
-	// - Readiness defaults to true if no checks are given
-	slice := &apiv1.ResourceSlice{}
-	err = c.client.Get(ctx, req.Manifest.Slice, slice)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
-	}
-	var ready *metav1.Time
-	status := req.Manifest.FindStatus(slice)
-	if status == nil || status.Ready == nil {
-		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, current)
-		if ok {
-			ready = &readiness.ReadyTime
-		}
-	}
-
 	// Nil current struct means the resource version hasn't changed since it was last observed
 	// Skip without logging since this is a very hot path
 	var modified bool
@@ -157,20 +136,20 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		}
 	}
 
-	// Evaluate the readiness of resources in the previous readiness group
-	if status == nil || !status.Reconciled {
-		dependencies := c.resourceClient.ListPreviousReadinessGroup(ctx, synRef, resource.ReadinessGroup)
-		for _, dep := range dependencies {
-			slice := &apiv1.ResourceSlice{}
-			err = c.client.Get(ctx, dep.Slice, slice)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
-			}
-			status := req.Manifest.FindStatus(slice)
-			if !status.Reconciled {
-				logger.V(1).Info("skipping because at least one resource in an earlier readiness group isn't ready yet")
-				return ctrl.Result{}, nil
-			}
+	// Evaluate resource readiness
+	// - Readiness checks are skipped when this version of the resource's desired state has already become ready
+	// - Readiness checks are skipped when the resource hasn't changed since the last check
+	// - Readiness defaults to true if no checks are given
+	slice := &apiv1.ResourceSlice{}
+	err = c.client.Get(ctx, req.Manifest.Slice, slice)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
+	}
+	var ready *metav1.Time
+	if status := req.Manifest.FindStatus(slice); status == nil || status.Ready == nil {
+		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, current)
+		if ok {
+			ready = &readiness.ReadyTime
 		}
 	}
 
@@ -181,19 +160,6 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	if current != nil {
 		if rv := current.GetResourceVersion(); rv != "" {
 			resource.ObserveVersion(rv)
-		}
-	}
-
-	// Enqueue reconciliation of resources that depend on this one when transitioning to Reconciled=true
-	// Avoids waiting until their next reconciliation
-	if ready != nil && (status == nil || !status.Reconciled) {
-		dependants := c.resourceClient.ListNextReadinessGroup(ctx, synRef, resource.ReadinessGroup)
-		for _, dep := range dependants {
-			c.WorkQueue.Add(reconstitution.Request{
-				Resource:    resource.Ref{}, // TODO: Remove from request and use index instead?
-				Manifest:    dep,
-				Composition: req.Composition,
-			})
 		}
 	}
 

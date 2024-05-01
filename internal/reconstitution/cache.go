@@ -12,7 +12,6 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/readiness"
 	"github.com/Azure/eno/internal/resource"
-	"github.com/emirpasic/gods/v2/trees/redblacktree"
 	"github.com/go-logr/logr"
 )
 
@@ -24,14 +23,8 @@ type Cache struct {
 	renv   *readiness.Env
 
 	mut                         sync.Mutex
-	resources                   map[SynthesisRef]*resources
+	resources                   map[SynthesisRef]map[resource.Ref]*Resource
 	synthesisUUIDsByComposition map[types.NamespacedName][]string
-}
-
-// resources contains a set of indexed resources scoped to a single Composition
-type resources struct {
-	ByRef            map[resource.Ref]*Resource
-	ByReadinessGroup *redblacktree.Tree[uint8, []ManifestRef]
 }
 
 func NewCache(client client.Client) *Cache {
@@ -42,7 +35,7 @@ func NewCache(client client.Client) *Cache {
 	return &Cache{
 		client:                      client,
 		renv:                        renv,
-		resources:                   make(map[SynthesisRef]*resources),
+		resources:                   make(map[SynthesisRef]map[resource.Ref]*Resource),
 		synthesisUUIDsByComposition: make(map[types.NamespacedName][]string),
 	}
 }
@@ -56,72 +49,12 @@ func (c *Cache) Get(ctx context.Context, comp *SynthesisRef, ref *resource.Ref) 
 		return nil, false
 	}
 
-	res, ok := resources.ByRef[*ref]
+	res, ok := resources[*ref]
 	if !ok {
 		return nil, false
 	}
 
 	return res, ok
-}
-
-func (c *Cache) ListPreviousReadinessGroup(ctx context.Context, comp *SynthesisRef, group uint8) []ManifestRef {
-	c.mut.Lock()
-	defer c.mut.Unlock()
-
-	resources, ok := c.resources[*comp]
-	if !ok {
-		return nil
-	}
-
-	node := resources.ByReadinessGroup.GetNode(group)
-	if node == nil {
-		return nil // the given group must have a resource, otherwise we wouldn't be looking it up
-	}
-
-	// If we're adjacent to the previous group...
-	if node.Right != nil {
-		return node.Right.Value
-	}
-
-	// ...otherwise we need to find it
-	node, ok = resources.ByReadinessGroup.Ceiling(group + 1)
-	if !ok {
-		return nil // no previous node!
-	}
-
-	return node.Value
-}
-
-func (c *Cache) ListNextReadinessGroup(ctx context.Context, comp *SynthesisRef, group uint8) []ManifestRef {
-	if group == 0 {
-		return nil
-	}
-
-	c.mut.Lock()
-	defer c.mut.Unlock()
-
-	resources, ok := c.resources[*comp]
-	if !ok {
-		return nil
-	}
-
-	node := resources.ByReadinessGroup.GetNode(group)
-	if node == nil {
-		return nil // the given group must have a resource, otherwise we wouldn't be looking it up
-	}
-
-	// If we're adjacent to the previous group...
-	if node.Left != nil {
-		return node.Left.Value
-	}
-
-	// ...otherwise we need to find it
-	node, ok = resources.ByReadinessGroup.Floor(group - 1)
-	if !ok {
-		return nil // no previous node!
-	}
-
-	return node.Value
 }
 
 // hasSynthesis returns true when the cache contains the resulting resources of the given synthesis.
@@ -163,17 +96,16 @@ func (c *Cache) fill(ctx context.Context, comp *apiv1.Composition, synthesis *ap
 	return requests, nil
 }
 
-func (c *Cache) buildResources(ctx context.Context, comp *apiv1.Composition, items []apiv1.ResourceSlice) (*resources, []*Request, error) {
-	resources := &resources{
-		ByRef:            map[resource.Ref]*Resource{},
-		ByReadinessGroup: redblacktree.New[uint8, []ManifestRef](),
-	}
+func (c *Cache) buildResources(ctx context.Context, comp *apiv1.Composition, items []apiv1.ResourceSlice) (map[resource.Ref]*Resource, []*Request, error) {
+	resources := map[resource.Ref]*Resource{}
 	requests := []*Request{}
 	for _, slice := range items {
 		slice := slice
 		if slice.DeletionTimestamp == nil && comp.DeletionTimestamp != nil {
 			return nil, nil, errors.New("stale informer - refusing to fill cache")
 		}
+
+		// NOTE: In the future we can build a DAG here to find edges between dependant resources and append them to the Resource structs
 
 		for i, obj := range slice.Spec.Resources {
 			obj := obj
@@ -182,9 +114,8 @@ func (c *Cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 			if err != nil {
 				return nil, nil, fmt.Errorf("building resource at index %d of slice %s: %w", i, slice.Name, err)
 			}
-			resources.ByRef[res.Ref] = res
-
-			req := &Request{
+			resources[res.Ref] = res
+			requests = append(requests, &Request{
 				Resource: res.Ref,
 				Manifest: ManifestRef{
 					Slice: types.NamespacedName{
@@ -194,11 +125,7 @@ func (c *Cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 					Index: i,
 				},
 				Composition: types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace},
-			}
-			requests = append(requests, req)
-
-			current, _ := resources.ByReadinessGroup.Get(res.ReadinessGroup)
-			resources.ByReadinessGroup.Put(res.ReadinessGroup, append(current, req.Manifest))
+			})
 		}
 	}
 
