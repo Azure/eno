@@ -7,11 +7,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/resource"
 	"github.com/Azure/eno/internal/testutil"
 )
 
@@ -49,10 +49,9 @@ func TestControllerIntegration(t *testing.T) {
 	require.NoError(t, client.Create(ctx, slice))
 
 	// Prove the resource was cached
-	ref := &resource.Ref{
-		Name:      "foo",
-		Namespace: "bar",
-		Kind:      "baz",
+	ref := &ManifestRef{
+		Slice: types.NamespacedName{Namespace: slice.Namespace, Name: slice.Name},
+		Index: 0,
 	}
 	testutil.Eventually(t, func() bool {
 		_, exists := r.Get(ctx, compRef, ref)

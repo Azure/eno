@@ -65,7 +65,7 @@ type testReconciler struct {
 }
 
 func (t *testReconciler) Reconcile(ctx context.Context, req *Request) (ctrl.Result, error) {
-	resource, exists := t.cache.Get(ctx, t.comp, &req.Resource)
+	resource, exists := t.cache.Get(ctx, t.comp, &req.Manifest)
 	if !exists {
 		panic("resource should exist in cache")
 	}
