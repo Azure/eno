@@ -65,7 +65,7 @@ func (r *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, fmt.Errorf("processing current state: %w", err)
 	}
 	for _, req := range append(prevReqs, currentReqs...) {
-		r.queue.Add(req)
+		r.queue.Add(*req)
 	}
 	r.Cache.purge(req.NamespacedName, comp)
 

@@ -388,7 +388,7 @@ func (c *Controller) newPatchCallback(ctx context.Context, synRef *reconstitutio
 		if status == nil || !status.Reconciled {
 			dependants := c.resourceClient.ListNextReadinessGroup(ctx, synRef, resource.ReadinessGroup)
 			for _, dep := range dependants {
-				c.WorkQueue.Add(&reconstitution.Request{
+				c.WorkQueue.Add(reconstitution.Request{
 					Resource:    dep.Ref,
 					Composition: types.NamespacedName{Namespace: synRef.Namespace, Name: synRef.CompositionName},
 				})
