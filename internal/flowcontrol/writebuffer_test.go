@@ -105,7 +105,7 @@ func TestResourceSliceStatusUpdateNoUpdates(t *testing.T) {
 	w.PatchStatusAsync(ctx, req, setReconciled())
 
 	// Remove the update leaving the queue message in place
-	w.state = map[types.NamespacedName][]*ResourceSliceStatusUpdate{}
+	w.state = map[types.NamespacedName][]*resourceSliceStatusUpdate{}
 
 	// Slice's status should not have been initialized
 	w.processQueueItem(ctx)
