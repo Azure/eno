@@ -135,7 +135,11 @@ func TestNewResource(t *testing.T) {
 
 	for _, tc := range newResourceTests {
 		t.Run(tc.Name, func(t *testing.T) {
-			r, err := NewResource(ctx, renv, &apiv1.ResourceSlice{}, &apiv1.Manifest{Manifest: tc.Manifest})
+			r, err := NewResource(ctx, renv, &apiv1.ResourceSlice{
+				Spec: apiv1.ResourceSliceSpec{
+					Resources: []apiv1.Manifest{{Manifest: tc.Manifest}},
+				},
+			}, 0)
 			require.NoError(t, err)
 			tc.Assert(t, r)
 		})

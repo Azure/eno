@@ -222,13 +222,6 @@ func newCacheTestFixtures(sliceCount, resPerSliceCount int) (*apiv1.Composition,
 					Namespace: obj.Namespace,
 					Kind:      obj.Kind,
 				},
-				Manifest: ManifestRef{
-					Slice: types.NamespacedName{
-						Name:      slice.Name,
-						Namespace: slice.Namespace,
-					},
-					Index: j,
-				},
 				Composition: types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace},
 			})
 		}
