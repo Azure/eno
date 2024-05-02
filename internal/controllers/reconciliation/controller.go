@@ -109,8 +109,9 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	var prev *reconstitution.Resource
 	if comp.Status.PreviousSynthesis != nil {
-		synRef.UUID = comp.Status.PreviousSynthesis.UUID
-		prev, _ = c.resourceClient.Get(ctx, synRef, &req.Resource)
+		prevSynRef := reconstitution.NewSynthesisRef(comp)
+		prevSynRef.UUID = comp.Status.PreviousSynthesis.UUID
+		prev, _ = c.resourceClient.Get(ctx, prevSynRef, &req.Resource)
 	}
 	logger = logger.WithValues("resourceKind", resource.Ref.Kind, "resourceName", resource.Ref.Name, "resourceNamespace", resource.Ref.Namespace)
 	ctx = logr.NewContext(ctx, logger)
@@ -150,7 +151,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 
 	// Evaluate the readiness of resources in the previous readiness group
-	if status == nil || !status.Reconciled {
+	if (status == nil || !status.Reconciled) && !resource.Deleted() {
 		dependencies := c.resourceClient.ListPreviousReadinessGroup(ctx, synRef, resource.ReadinessGroup)
 		for _, dep := range dependencies {
 			slice := &apiv1.ResourceSlice{}
