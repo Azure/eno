@@ -19,7 +19,7 @@ type Reconciler interface {
 
 // Client provides read/write access to a collection of reconstituted resources.
 type Client interface {
-	Get(ctx context.Context, syn *SynthesisRef, res *ManifestRef) (*resource.Resource, bool)
+	Get(ctx context.Context, syn *SynthesisRef, res *resource.Ref) (*resource.Resource, bool)
 	ListPreviousReadinessGroup(ctx context.Context, syn *SynthesisRef, group uint8) []ManifestRef
 	ListNextReadinessGroup(ctx context.Context, syn *SynthesisRef, group uint8) []ManifestRef
 }
@@ -54,6 +54,7 @@ func NewSynthesisRef(comp *apiv1.Composition) *SynthesisRef {
 // Request is like controller-runtime reconcile.Request but for reconstituted resources.
 // https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/reconcile#Request
 type Request struct {
+	Resource    resource.Ref
 	Manifest    ManifestRef
 	Composition types.NamespacedName
 }

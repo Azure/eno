@@ -30,7 +30,7 @@ type Cache struct {
 
 // resources contains a set of indexed resources scoped to a single Composition
 type resources struct {
-	ByRef            map[ManifestRef]*Resource
+	ByRef            map[resource.Ref]*Resource
 	ByReadinessGroup *redblacktree.Tree[uint8, []ManifestRef]
 }
 
@@ -47,7 +47,7 @@ func NewCache(client client.Client) *Cache {
 	}
 }
 
-func (c *Cache) Get(ctx context.Context, comp *SynthesisRef, ref *ManifestRef) (*Resource, bool) {
+func (c *Cache) Get(ctx context.Context, comp *SynthesisRef, ref *resource.Ref) (*Resource, bool) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
@@ -165,7 +165,7 @@ func (c *Cache) fill(ctx context.Context, comp *apiv1.Composition, synthesis *ap
 
 func (c *Cache) buildResources(ctx context.Context, comp *apiv1.Composition, items []apiv1.ResourceSlice) (*resources, []*Request, error) {
 	resources := &resources{
-		ByRef:            map[ManifestRef]*Resource{},
+		ByRef:            map[resource.Ref]*Resource{},
 		ByReadinessGroup: redblacktree.New[uint8, []ManifestRef](),
 	}
 	requests := []*Request{}
@@ -178,7 +178,13 @@ func (c *Cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 		for i, obj := range slice.Spec.Resources {
 			obj := obj
 
+			res, err := resource.NewResource(ctx, c.renv, &slice, &obj)
+			if err != nil {
+				return nil, nil, fmt.Errorf("building resource at index %d of slice %s: %w", i, slice.Name, err)
+			}
+
 			req := &Request{
+				Resource: res.Ref,
 				Manifest: ManifestRef{
 					Slice: types.NamespacedName{
 						Namespace: slice.Namespace,
@@ -192,11 +198,7 @@ func (c *Cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 				},
 			}
 
-			res, err := resource.NewResource(ctx, c.renv, &slice, &obj)
-			if err != nil {
-				return nil, nil, fmt.Errorf("building resource at index %d of slice %s: %w", i, slice.Name, err)
-			}
-			resources.ByRef[req.Manifest] = res
+			resources.ByRef[req.Resource] = res
 			requests = append(requests, req)
 
 			current, _ := resources.ByReadinessGroup.Get(res.ReadinessGroup)
