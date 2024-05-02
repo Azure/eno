@@ -113,6 +113,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		prev, _ = c.resourceClient.Get(ctx, synRef, &req.Manifest)
 	}
 	logger = logger.WithValues("resourceKind", resource.Ref.Kind, "resourceName", resource.Ref.Name, "resourceNamespace", resource.Ref.Namespace)
+	ctx = logr.NewContext(ctx, logger)
 
 	// Keep track of the last reconciliation time and report on it relative to the resource's reconcile interval
 	// This is useful for identifying cases where the loop can't keep up
@@ -148,17 +149,6 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		}
 	}
 
-	// Nil current struct means the resource version hasn't changed since it was last observed
-	// Skip without logging since this is a very hot path
-	var modified bool
-	if hasChanged {
-		resource.ObserveVersion("") // in case reconciliation fails, invalidate the cache first to avoid skipping the next attempt
-		modified, err = c.reconcileResource(ctx, comp, prev, resource, current)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-	}
-
 	// Evaluate the readiness of resources in the previous readiness group
 	if status == nil || !status.Reconciled {
 		dependencies := c.resourceClient.ListPreviousReadinessGroup(ctx, synRef, resource.ReadinessGroup)
@@ -173,6 +163,17 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 				logger.V(1).Info("skipping because at least one resource in an earlier readiness group isn't ready yet")
 				return ctrl.Result{}, nil
 			}
+		}
+	}
+
+	// Nil current struct means the resource version hasn't changed since it was last observed
+	// Skip without logging since this is a very hot path
+	var modified bool
+	if hasChanged {
+		resource.ObserveVersion("") // in case reconciliation fails, invalidate the cache first to avoid skipping the next attempt
+		modified, err = c.reconcileResource(ctx, comp, prev, resource, current)
+		if err != nil {
+			return ctrl.Result{}, err
 		}
 	}
 

@@ -1,6 +1,9 @@
 package reconciliation
 
 import (
+	"fmt"
+	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -10,7 +13,6 @@ import (
 	"github.com/Azure/eno/internal/controllers/rollout"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/testutil"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,7 +37,7 @@ func TestReadinessGroups(t *testing.T) {
 	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
 		obj := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-obj",
+				Name:      "test-obj-0",
 				Namespace: "default",
 			},
 		}
@@ -56,7 +58,19 @@ func TestReadinessGroups(t *testing.T) {
 		require.NoError(t, err)
 		obj1.GetObjectKind().SetGroupVersionKind(gvks[0])
 
-		return []client.Object{obj, obj1}
+		obj2 := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "test-obj-2",
+				Namespace:   "default",
+				Annotations: map[string]string{"eno.azure.io/readiness-group": "4"},
+			},
+		}
+
+		gvks, _, err = scheme.ObjectKinds(obj2)
+		require.NoError(t, err)
+		obj2.GetObjectKind().SetGroupVersionKind(gvks[0])
+
+		return []client.Object{obj, obj2, obj1}
 	}}))
 
 	// Test subject
@@ -81,19 +95,20 @@ func TestReadinessGroups(t *testing.T) {
 	})
 
 	// Prove resources were created in the expected order
-	cm := &corev1.ConfigMap{}
-	cm.Name = "test-obj"
-	cm.Namespace = "default"
-	err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
-	require.NoError(t, err)
-
-	cm1 := &corev1.ConfigMap{}
-	cm1.Name = "test-obj-1"
-	cm1.Namespace = "default"
-	err = mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm1), cm1)
-	require.NoError(t, err)
-
 	// Technically resource version is an opaque string, realistically it won't be changing
 	// any time soon so it's safe to use here and less flaky than the creation timestamp
-	assert.Greater(t, cm1.ResourceVersion, cm.ResourceVersion)
+	resourceVersions := []int{}
+	for i := 2; i >= 0; i-- {
+		cm := &corev1.ConfigMap{}
+		cm.Name = fmt.Sprintf("test-obj-%d", i)
+		cm.Namespace = "default"
+		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		require.NoError(t, err)
+
+		rv, _ := strconv.Atoi(cm.ResourceVersion)
+		resourceVersions = append(resourceVersions, rv)
+	}
+	if !slices.IsSorted(resourceVersions) { // ascending
+		t.Errorf("expected resource versions to be sorted: %+d", resourceVersions)
+	}
 }
