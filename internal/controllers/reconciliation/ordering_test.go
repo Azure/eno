@@ -93,7 +93,7 @@ func TestReadinessGroups(t *testing.T) {
 	err = mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm1), cm1)
 	require.NoError(t, err)
 
-	println(cm1.ResourceVersion, cm.ResourceVersion, "TODO")
-
+	// Technically resource version is an opaque string, realistically it won't be changing
+	// any time soon so it's safe to use here and less flaky than the creation timestamp
 	assert.Greater(t, cm1.ResourceVersion, cm.ResourceVersion)
 }

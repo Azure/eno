@@ -33,7 +33,10 @@ func TestResourceSliceStatusUpdateBasics(t *testing.T) {
 	req := &reconstitution.ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
-	w.PatchStatusAsync(ctx, req, setReconciled(), func() {})
+	var callbackCalled bool
+	w.PatchStatusAsync(ctx, req, setReconciled(), func() {
+		callbackCalled = true
+	})
 
 	// Slice resource's status should reflect the patch
 	w.processQueueItem(ctx)
@@ -42,6 +45,7 @@ func TestResourceSliceStatusUpdateBasics(t *testing.T) {
 	assert.False(t, slice.Status.Resources[0].Reconciled)
 	assert.True(t, slice.Status.Resources[1].Reconciled)
 	assert.False(t, slice.Status.Resources[2].Reconciled)
+	assert.True(t, callbackCalled)
 
 	// All state has been flushed
 	assert.Len(t, w.state, 0)
