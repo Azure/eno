@@ -141,12 +141,12 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	// - Readiness checks are skipped when the resource hasn't changed since the last check
 	// - Readiness defaults to true if no checks are given
 	slice := &apiv1.ResourceSlice{}
-	err = c.client.Get(ctx, req.Manifest.Slice, slice)
+	err = c.client.Get(ctx, resource.ManifestRef.Slice, slice)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
 	}
 	var ready *metav1.Time
-	if status := req.Manifest.FindStatus(slice); status == nil || status.Ready == nil {
+	if status := resource.FindStatus(slice); status == nil || status.Ready == nil {
 		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, current)
 		if ok {
 			ready = &readiness.ReadyTime
@@ -165,7 +165,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	// Store the results
 	deleted := current == nil || current.GetDeletionTimestamp() != nil
-	c.writeBuffer.PatchStatusAsync(ctx, &req.Manifest, patchResourceState(deleted, ready), func() {})
+	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready), func() {})
 	if ready == nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}

@@ -17,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 var patchGVK = schema.GroupVersionKind{
@@ -30,6 +31,12 @@ type Ref struct {
 	Name, Namespace, Group, Kind string
 }
 
+// ManifestRef references a particular resource manifest within a resource slice.
+type ManifestRef struct {
+	Slice types.NamespacedName
+	Index int // position of this manifest within the slice
+}
+
 // Resource is the controller's internal representation of a single resource out of a ResourceSlice.
 type Resource struct {
 	lastSeenMeta
@@ -37,6 +44,7 @@ type Resource struct {
 
 	Ref               Ref
 	Manifest          *apiv1.Manifest
+	ManifestRef       ManifestRef
 	ReconcileInterval *metav1.Duration
 	GVK               schema.GroupVersionKind
 	SliceDeleted      bool
@@ -52,6 +60,14 @@ func (r *Resource) Deleted() bool {
 func (r *Resource) Parse() (*unstructured.Unstructured, error) {
 	u := &unstructured.Unstructured{}
 	return u, u.UnmarshalJSON([]byte(r.Manifest.Manifest))
+}
+
+func (r *Resource) FindStatus(slice *apiv1.ResourceSlice) *apiv1.ResourceState {
+	if len(slice.Status.Resources) <= r.ManifestRef.Index {
+		return nil
+	}
+	state := slice.Status.Resources[r.ManifestRef.Index]
+	return &state
 }
 
 func (r *Resource) NeedsToBePatched(current *unstructured.Unstructured) bool {
@@ -100,11 +116,19 @@ func (r *Resource) patchSetsDeletionTimestamp() bool {
 	return dt != ""
 }
 
-func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.ResourceSlice, resource *apiv1.Manifest) (*Resource, error) {
+func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.ResourceSlice, index int) (*Resource, error) {
 	logger := logr.FromContextOrDiscard(ctx)
+	resource := slice.Spec.Resources[index]
 	res := &Resource{
-		Manifest:     resource,
+		Manifest:     &resource,
 		SliceDeleted: slice.DeletionTimestamp != nil,
+		ManifestRef: ManifestRef{
+			Slice: types.NamespacedName{
+				Namespace: slice.Namespace,
+				Name:      slice.Name,
+			},
+			Index: index,
+		},
 	}
 
 	parsed, err := res.Parse()

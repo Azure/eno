@@ -21,20 +21,6 @@ type Client interface {
 	Get(ctx context.Context, syn *SynthesisRef, res *resource.Ref) (*resource.Resource, bool)
 }
 
-// ManifestRef references a particular resource manifest within a resource slice.
-type ManifestRef struct {
-	Slice types.NamespacedName
-	Index int // position of this manifest within the slice
-}
-
-func (m *ManifestRef) FindStatus(slice *apiv1.ResourceSlice) *apiv1.ResourceState {
-	if len(slice.Status.Resources) <= m.Index {
-		return nil
-	}
-	state := slice.Status.Resources[m.Index]
-	return &state
-}
-
 // SynthesisRef refers to a specific synthesis of a composition.
 type SynthesisRef struct {
 	CompositionName, Namespace, UUID string
@@ -52,7 +38,6 @@ func NewSynthesisRef(comp *apiv1.Composition) *SynthesisRef {
 // https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/reconcile#Request
 type Request struct {
 	Resource    resource.Ref
-	Manifest    ManifestRef
 	Composition types.NamespacedName
 }
 
