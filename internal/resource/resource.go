@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +44,7 @@ type Resource struct {
 	ReadinessChecks   readiness.Checks
 	Patch             jsonpatch.Patch
 	DisableUpdates    bool
+	ReadinessGroup    uint8
 }
 
 func (r *Resource) Deleted() bool {
@@ -155,7 +157,12 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 	res.DisableUpdates = anno[disableUpdatesKey] == "true"
 	delete(anno, disableUpdatesKey)
 
-	for key, value := range parsed.GetAnnotations() {
+	const readinessGroupKey = "eno.azure.io/readiness-group"
+	rg, _ := strconv.ParseUint(anno[readinessGroupKey], 10, 0)
+	res.ReadinessGroup = uint8(rg)
+	delete(anno, readinessGroupKey)
+
+	for key, value := range anno {
 		if !strings.HasPrefix(key, "eno.azure.io/readiness") {
 			continue
 		}
