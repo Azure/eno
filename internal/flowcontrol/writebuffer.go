@@ -21,7 +21,7 @@ import (
 
 type StatusPatchFn func(*apiv1.ResourceState) *apiv1.ResourceState
 
-type ResourceSliceStatusUpdate struct {
+type resourceSliceStatusUpdate struct {
 	SlicedResource *reconstitution.ManifestRef
 	PatchFn        StatusPatchFn
 }
@@ -34,7 +34,7 @@ type ResourceSliceWriteBuffer struct {
 	// queue items are per-slice.
 	// the state map collects multiple updates per slice to be dispatched by next queue item.
 	mut   sync.Mutex
-	state map[types.NamespacedName][]*ResourceSliceStatusUpdate
+	state map[types.NamespacedName][]*resourceSliceStatusUpdate
 	queue workqueue.RateLimitingInterface
 }
 
@@ -47,7 +47,7 @@ func NewResourceSliceWriteBufferForManager(mgr ctrl.Manager, batchInterval time.
 func NewResourceSliceWriteBuffer(cli client.Client, batchInterval time.Duration, burst int) *ResourceSliceWriteBuffer {
 	return &ResourceSliceWriteBuffer{
 		client: cli,
-		state:  make(map[types.NamespacedName][]*ResourceSliceStatusUpdate),
+		state:  make(map[types.NamespacedName][]*resourceSliceStatusUpdate),
 		queue: workqueue.NewRateLimitingQueueWithConfig(
 			&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Every(batchInterval), burst)},
 			workqueue.RateLimitingQueueConfig{
@@ -69,7 +69,7 @@ func (w *ResourceSliceWriteBuffer) PatchStatusAsync(ctx context.Context, ref *re
 		}
 	}
 
-	w.state[key] = append(currentSlice, &ResourceSliceStatusUpdate{
+	w.state[key] = append(currentSlice, &resourceSliceStatusUpdate{
 		SlicedResource: ref,
 		PatchFn:        patchFn,
 	})
@@ -122,7 +122,7 @@ func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 	return true
 }
 
-func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN types.NamespacedName, updates []*ResourceSliceStatusUpdate) bool {
+func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN types.NamespacedName, updates []*resourceSliceStatusUpdate) bool {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	slice := &apiv1.ResourceSlice{}
