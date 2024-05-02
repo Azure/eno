@@ -26,6 +26,7 @@ import (
 	"github.com/Azure/eno/internal/discovery"
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/reconstitution"
+	"github.com/Azure/eno/internal/resource"
 	"github.com/go-logr/logr"
 )
 
@@ -167,7 +168,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
 			}
-			status := req.Manifest.FindStatus(slice)
+			status := dep.FindStatus(slice)
 			if status == nil || !status.Reconciled {
 				logger.V(1).Info("skipping because at least one resource in an earlier readiness group isn't ready yet")
 				return ctrl.Result{}, nil
@@ -185,22 +186,9 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		}
 	}
 
-	// Enqueue reconciliation of resources that depend on this one when transitioning to Reconciled=true
-	// Avoids waiting until their next reconciliation
-	if ready != nil && (status == nil || !status.Reconciled) {
-		dependants := c.resourceClient.ListNextReadinessGroup(ctx, synRef, resource.ReadinessGroup)
-		for _, dep := range dependants {
-			// TODO: Fix this
-			c.WorkQueue.Add(&reconstitution.Request{
-				Manifest:    dep,
-				Composition: req.Composition,
-			})
-		}
-	}
-
 	// Store the results
 	deleted := current == nil || current.GetDeletionTimestamp() != nil
-	c.writeBuffer.PatchStatusAsync(ctx, &req.Manifest, patchResourceState(deleted, ready))
+	c.writeBuffer.PatchStatusAsync(ctx, &req.Manifest, patchResourceState(deleted, ready), c.newPatchCallback(ctx, req, synRef, resource, status))
 	if ready == nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}
@@ -387,6 +375,22 @@ func patchResourceState(deleted bool, ready *metav1.Time) flowcontrol.StatusPatc
 			Deleted:    deleted,
 			Ready:      ready,
 			Reconciled: true,
+		}
+	}
+}
+
+func (c *Controller) newPatchCallback(ctx context.Context, req *reconstitution.Request, synRef *reconstitution.SynthesisRef, resource *resource.Resource, status *apiv1.ResourceState) func() {
+	return func() {
+		// Enqueue reconciliation of resources that depend on this one when transitioning to Reconciled=true
+		// Avoids waiting until their next reconciliation
+		if status == nil || !status.Reconciled {
+			dependants := c.resourceClient.ListNextReadinessGroup(ctx, synRef, resource.ReadinessGroup)
+			for _, dep := range dependants {
+				c.WorkQueue.Add(&reconstitution.Request{
+					Manifest:    dep,
+					Composition: req.Composition,
+				})
+			}
 		}
 	}
 }
