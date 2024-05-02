@@ -21,9 +21,10 @@ import (
 
 type StatusPatchFn func(*apiv1.ResourceState) *apiv1.ResourceState
 
-type ResourceSliceStatusUpdate struct {
+type resourceSliceStatusUpdate struct {
 	SlicedResource *reconstitution.ManifestRef
 	PatchFn        StatusPatchFn
+	Callback       func()
 }
 
 // ResourceSliceWriteBuffer reduces load on etcd/apiserver by collecting resource slice status
@@ -34,7 +35,7 @@ type ResourceSliceWriteBuffer struct {
 	// queue items are per-slice.
 	// the state map collects multiple updates per slice to be dispatched by next queue item.
 	mut   sync.Mutex
-	state map[types.NamespacedName][]*ResourceSliceStatusUpdate
+	state map[types.NamespacedName][]*resourceSliceStatusUpdate
 	queue workqueue.RateLimitingInterface
 }
 
@@ -47,7 +48,7 @@ func NewResourceSliceWriteBufferForManager(mgr ctrl.Manager, batchInterval time.
 func NewResourceSliceWriteBuffer(cli client.Client, batchInterval time.Duration, burst int) *ResourceSliceWriteBuffer {
 	return &ResourceSliceWriteBuffer{
 		client: cli,
-		state:  make(map[types.NamespacedName][]*ResourceSliceStatusUpdate),
+		state:  make(map[types.NamespacedName][]*resourceSliceStatusUpdate),
 		queue: workqueue.NewRateLimitingQueueWithConfig(
 			&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Every(batchInterval), burst)},
 			workqueue.RateLimitingQueueConfig{
@@ -56,7 +57,7 @@ func NewResourceSliceWriteBuffer(cli client.Client, batchInterval time.Duration,
 	}
 }
 
-func (w *ResourceSliceWriteBuffer) PatchStatusAsync(ctx context.Context, ref *reconstitution.ManifestRef, patchFn StatusPatchFn) {
+func (w *ResourceSliceWriteBuffer) PatchStatusAsync(ctx context.Context, ref *reconstitution.ManifestRef, patchFn StatusPatchFn, cb func()) {
 	w.mut.Lock()
 	defer w.mut.Unlock()
 
@@ -69,9 +70,10 @@ func (w *ResourceSliceWriteBuffer) PatchStatusAsync(ctx context.Context, ref *re
 		}
 	}
 
-	w.state[key] = append(currentSlice, &ResourceSliceStatusUpdate{
+	w.state[key] = append(currentSlice, &resourceSliceStatusUpdate{
 		SlicedResource: ref,
 		PatchFn:        patchFn,
+		Callback:       cb,
 	})
 	w.queue.Add(key)
 }
@@ -122,7 +124,7 @@ func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 	return true
 }
 
-func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN types.NamespacedName, updates []*ResourceSliceStatusUpdate) bool {
+func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN types.NamespacedName, updates []*resourceSliceStatusUpdate) bool {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	slice := &apiv1.ResourceSlice{}
@@ -164,6 +166,7 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN typ
 	// Transform the set of patch funcs into a set of jsonpatch objects
 	unsafeSlice := slice.Status.Resources
 	var patches []*jsonPatch
+	var callbacks []func()
 	for _, update := range updates {
 		unsafeStatusPtr := &unsafeSlice[update.SlicedResource.Index]
 		patch := update.PatchFn(unsafeStatusPtr)
@@ -171,6 +174,7 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN typ
 			continue
 		}
 
+		callbacks = append(callbacks, update.Callback)
 		patches = append(patches, &jsonPatch{
 			Op:    "replace",
 			Path:  fmt.Sprintf("/status/resources/%d", update.SlicedResource.Index),
@@ -195,6 +199,9 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN typ
 
 	logger.V(0).Info(fmt.Sprintf("updated the status of %d resources in slice", len(updates)))
 	sliceStatusUpdates.Inc()
+	for _, cb := range callbacks {
+		cb()
+	}
 	return true
 }
 
