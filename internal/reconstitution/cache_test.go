@@ -295,41 +295,41 @@ func TestCacheListPreviousReadinessGroup(t *testing.T) {
 
 	// Previous
 	refs := c.ListPreviousReadinessGroup(ctx, compRef, 100)
-	assert.Equal(t, []string{}, refsToNames(resources, refs))
+	assert.Equal(t, []string{}, reqsToNames(resources, refs))
 
 	refs = c.ListPreviousReadinessGroup(ctx, &SynthesisRef{CompositionName: "nope"}, 0)
-	assert.Equal(t, []string{}, refsToNames(resources, refs))
+	assert.Equal(t, []string{}, reqsToNames(resources, refs))
 
 	refs = c.ListPreviousReadinessGroup(ctx, compRef, 0)
-	assert.Equal(t, []string{"group-1", "group-also-1"}, refsToNames(resources, refs))
+	assert.Equal(t, []string{"group-1", "group-also-1"}, reqsToNames(resources, refs))
 
 	refs = c.ListPreviousReadinessGroup(ctx, compRef, 1)
-	assert.Equal(t, []string{"group-3"}, refsToNames(resources, refs))
+	assert.Equal(t, []string{"group-3"}, reqsToNames(resources, refs))
 
 	refs = c.ListPreviousReadinessGroup(ctx, compRef, 3)
-	assert.Equal(t, []string{}, refsToNames(resources, refs))
+	assert.Equal(t, []string{}, reqsToNames(resources, refs))
 
 	// Next
 	refs = c.ListNextReadinessGroup(ctx, compRef, 100)
-	assert.Equal(t, []string{}, refsToNames(resources, refs))
+	assert.Equal(t, []string{}, reqsToNames(resources, refs))
 
 	refs = c.ListNextReadinessGroup(ctx, &SynthesisRef{CompositionName: "nope"}, 1)
-	assert.Equal(t, []string{}, refsToNames(resources, refs))
+	assert.Equal(t, []string{}, reqsToNames(resources, refs))
 
 	refs = c.ListNextReadinessGroup(ctx, compRef, 0)
-	assert.Equal(t, []string{}, refsToNames(resources, refs))
+	assert.Equal(t, []string{}, reqsToNames(resources, refs))
 
 	refs = c.ListNextReadinessGroup(ctx, compRef, 1)
-	assert.Equal(t, []string{"default-group"}, refsToNames(resources, refs))
+	assert.Equal(t, []string{"default-group"}, reqsToNames(resources, refs))
 
 	refs = c.ListNextReadinessGroup(ctx, compRef, 3)
-	assert.Equal(t, []string{"group-1", "group-also-1"}, refsToNames(resources, refs))
+	assert.Equal(t, []string{"group-1", "group-also-1"}, reqsToNames(resources, refs))
 }
 
-func refsToNames(resources []client.Object, refs []ManifestRef) []string {
-	strs := make([]string, len(refs))
-	for i, ref := range refs {
-		strs[i] = resources[ref.Index].GetName()
+func reqsToNames(resources []client.Object, reqs []*Request) []string {
+	strs := make([]string, len(reqs))
+	for i, req := range reqs {
+		strs[i] = resources[req.Manifest.Index].GetName()
 	}
 	return strs
 }

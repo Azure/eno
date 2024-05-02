@@ -20,8 +20,8 @@ type Reconciler interface {
 // Client provides read/write access to a collection of reconstituted resources.
 type Client interface {
 	Get(ctx context.Context, syn *SynthesisRef, res *resource.Ref) (*resource.Resource, bool)
-	ListPreviousReadinessGroup(ctx context.Context, syn *SynthesisRef, group uint8) []ManifestRef
-	ListNextReadinessGroup(ctx context.Context, syn *SynthesisRef, group uint8) []ManifestRef
+	ListPreviousReadinessGroup(ctx context.Context, syn *SynthesisRef, group uint8) []*Request
+	ListNextReadinessGroup(ctx context.Context, syn *SynthesisRef, group uint8) []*Request
 }
 
 // ManifestRef references a particular resource manifest within a resource slice.
