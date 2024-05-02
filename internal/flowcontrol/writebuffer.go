@@ -15,14 +15,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/reconstitution"
+	"github.com/Azure/eno/internal/resource"
 	"github.com/go-logr/logr"
 )
 
 type StatusPatchFn func(*apiv1.ResourceState) *apiv1.ResourceState
 
 type resourceSliceStatusUpdate struct {
-	SlicedResource *reconstitution.ManifestRef
+	SlicedResource *resource.ManifestRef
 	PatchFn        StatusPatchFn
 	Callback       func()
 }
@@ -57,7 +57,7 @@ func NewResourceSliceWriteBuffer(cli client.Client, batchInterval time.Duration,
 	}
 }
 
-func (w *ResourceSliceWriteBuffer) PatchStatusAsync(ctx context.Context, ref *reconstitution.ManifestRef, patchFn StatusPatchFn, cb func()) {
+func (w *ResourceSliceWriteBuffer) PatchStatusAsync(ctx context.Context, ref *resource.ManifestRef, patchFn StatusPatchFn, cb func()) {
 	w.mut.Lock()
 	defer w.mut.Unlock()
 

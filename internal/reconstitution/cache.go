@@ -107,23 +107,14 @@ func (c *Cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 
 		// NOTE: In the future we can build a DAG here to find edges between dependant resources and append them to the Resource structs
 
-		for i, obj := range slice.Spec.Resources {
-			obj := obj
-
-			res, err := resource.NewResource(ctx, c.renv, &slice, &obj)
+		for i := range slice.Spec.Resources {
+			res, err := resource.NewResource(ctx, c.renv, &slice, i)
 			if err != nil {
 				return nil, nil, fmt.Errorf("building resource at index %d of slice %s: %w", i, slice.Name, err)
 			}
 			resources[res.Ref] = res
 			requests = append(requests, &Request{
-				Resource: res.Ref,
-				Manifest: ManifestRef{
-					Slice: types.NamespacedName{
-						Namespace: slice.Namespace,
-						Name:      slice.Name,
-					},
-					Index: i,
-				},
+				Resource:    res.Ref,
 				Composition: types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace},
 			})
 		}
