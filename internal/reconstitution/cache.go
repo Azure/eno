@@ -26,12 +26,19 @@ type Cache struct {
 	mut                         sync.Mutex
 	resources                   map[SynthesisRef]*resources
 	synthesisUUIDsByComposition map[types.NamespacedName][]string
+	byIndex                     map[sliceIndex]*Resource
 }
 
 // resources contains a set of indexed resources scoped to a single Composition
 type resources struct {
 	ByRef            map[resource.Ref]*Resource
 	ByReadinessGroup *redblacktree.Tree[uint, []*Resource]
+}
+
+type sliceIndex struct {
+	Index     int
+	SliceName string
+	Namespace string
 }
 
 func NewCache(client client.Client) *Cache {
@@ -44,6 +51,7 @@ func NewCache(client client.Client) *Cache {
 		renv:                        renv,
 		resources:                   make(map[SynthesisRef]*resources),
 		synthesisUUIDsByComposition: make(map[types.NamespacedName][]string),
+		byIndex:                     make(map[sliceIndex]*resource.Resource),
 	}
 }
 
@@ -106,6 +114,18 @@ func (c *Cache) RangeByReadinessGroup(ctx context.Context, comp *SynthesisRef, g
 	return node.Value
 }
 
+func (c *Cache) getByIndex(ctx context.Context, idx *sliceIndex) (*Resource, bool) {
+	c.mut.Lock()
+	defer c.mut.Unlock()
+
+	res, ok := c.byIndex[*idx]
+	if !ok {
+		return nil, false
+	}
+
+	return res, ok
+}
+
 // hasSynthesis returns true when the cache contains the resulting resources of the given synthesis.
 // This should be called before Fill to determine if filling is necessary.
 func (c *Cache) hasSynthesis(comp *apiv1.Composition, synthesis *apiv1.Synthesis) bool {
@@ -163,6 +183,7 @@ func (c *Cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 				return nil, nil, fmt.Errorf("building resource at index %d of slice %s: %w", i, slice.Name, err)
 			}
 			resources.ByRef[res.Ref] = res
+			c.byIndex[sliceIndex{Index: i, SliceName: slice.Name, Namespace: slice.Namespace}] = res
 
 			current, _ := resources.ByReadinessGroup.Get(res.ReadinessGroup)
 			resources.ByReadinessGroup.Put(res.ReadinessGroup, append(current, res))

@@ -26,7 +26,6 @@ import (
 	"github.com/Azure/eno/internal/discovery"
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/reconstitution"
-	"github.com/Azure/eno/internal/resource"
 	"github.com/go-logr/logr"
 )
 
@@ -190,7 +189,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	// Store the results
 	deleted := current == nil || current.GetDeletionTimestamp() != nil
-	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready), c.newPatchCallback(ctx, synRef, resource, status))
+	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready), func() {})
 	if ready == nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}
@@ -377,22 +376,6 @@ func patchResourceState(deleted bool, ready *metav1.Time) flowcontrol.StatusPatc
 			Deleted:    deleted,
 			Ready:      ready,
 			Reconciled: true,
-		}
-	}
-}
-
-func (c *Controller) newPatchCallback(ctx context.Context, synRef *reconstitution.SynthesisRef, resource *resource.Resource, status *apiv1.ResourceState) func() {
-	return func() {
-		// Enqueue reconciliation of resources that depend on this one when transitioning to Reconciled=true
-		// Avoids waiting until their next reconciliation
-		if status == nil || !status.Reconciled {
-			dependants := c.resourceClient.RangeByReadinessGroup(ctx, synRef, resource.ReadinessGroup, 1)
-			for _, dep := range dependants {
-				c.WorkQueue.Add(reconstitution.Request{
-					Resource:    dep.Ref,
-					Composition: types.NamespacedName{Namespace: synRef.Namespace, Name: synRef.CompositionName},
-				})
-			}
 		}
 	}
 }

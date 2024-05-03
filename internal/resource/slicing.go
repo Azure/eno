@@ -75,6 +75,9 @@ func Slice(comp *apiv1.Composition, previous []*apiv1.ResourceSlice, outputs []*
 				BlockOwnerDeletion: &blockOwnerDeletion, // we need the composition in order to successfully delete its resource slices
 				Controller:         &blockOwnerDeletion,
 			}}
+			if comp.Status.CurrentSynthesis != nil {
+				slice.Spec.SynthesisUUID = comp.Status.CurrentSynthesis.UUID
+			}
 			slice.Spec.CompositionGeneration = comp.Generation
 			slices = append(slices, slice)
 		}
