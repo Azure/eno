@@ -14,7 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/reconstitution"
+	"github.com/Azure/eno/internal/resource"
 	"github.com/Azure/eno/internal/testutil"
 )
 
@@ -30,7 +30,7 @@ func TestResourceSliceStatusUpdateBasics(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, slice))
 
 	// One of the resources has been reconciled
-	req := &reconstitution.ManifestRef{}
+	req := &resource.ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
 	var callbackCalled bool
@@ -71,12 +71,12 @@ func TestResourceSliceStatusUpdateBatching(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, slice))
 
 	// Two of the resources have been reconciled within the batch interval
-	req := &reconstitution.ManifestRef{}
+	req := &resource.ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
 	w.PatchStatusAsync(ctx, req, setReconciled(), func() {})
 
-	req = &reconstitution.ManifestRef{}
+	req = &resource.ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 2
 	w.PatchStatusAsync(ctx, req, setReconciled(), func() {})
@@ -103,7 +103,7 @@ func TestResourceSliceStatusUpdateNoUpdates(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, slice))
 
 	// One of the resources has been reconciled
-	req := &reconstitution.ManifestRef{}
+	req := &resource.ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
 	w.PatchStatusAsync(ctx, req, setReconciled(), func() {})
@@ -122,7 +122,7 @@ func TestResourceSliceStatusUpdateMissingSlice(t *testing.T) {
 	cli := testutil.NewClient(t)
 	w := NewResourceSliceWriteBuffer(cli, 0, 1)
 
-	req := &reconstitution.ManifestRef{}
+	req := &resource.ManifestRef{}
 	req.Slice.Name = "test-slice-1" // this doesn't exist
 	w.PatchStatusAsync(ctx, req, setReconciled(), func() {})
 
@@ -152,7 +152,7 @@ func TestResourceSliceStatusUpdateNoChange(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, slice))
 
 	// One of the resources has been reconciled
-	req := &reconstitution.ManifestRef{}
+	req := &resource.ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
 	w.PatchStatusAsync(ctx, req, setReconciled(), func() {})
@@ -176,7 +176,7 @@ func TestResourceSliceStatusUpdateUpdateError(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, slice))
 
 	// One of the resources has been reconciled
-	req := &reconstitution.ManifestRef{}
+	req := &resource.ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
 	w.PatchStatusAsync(ctx, req, setReconciled(), func() {})
