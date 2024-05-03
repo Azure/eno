@@ -105,7 +105,7 @@ func TestReadinessGroups(t *testing.T) {
 	// any time soon so it's safe to use here and less flaky than the creation timestamp
 	assertOrder := func() {
 		resourceVersions := []int{}
-		for i := 2; i >= 0; i-- {
+		for i := 0; i < 2; i++ {
 			cm := &corev1.ConfigMap{}
 			cm.Name = fmt.Sprintf("test-obj-%d", i)
 			cm.Namespace = "default"

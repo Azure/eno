@@ -233,7 +233,7 @@ func newCacheTestFixtures(sliceCount, resPerSliceCount int) (*apiv1.Composition,
 	return comp, synth, resources, requests
 }
 
-func TestCacheListPreviousReadinessGroup(t *testing.T) {
+func TestCacheListReadinessGroups(t *testing.T) {
 	ctx := testutil.NewContext(t)
 
 	cli := testutil.NewClient(t)
