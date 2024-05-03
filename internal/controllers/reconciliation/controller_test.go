@@ -37,7 +37,7 @@ func setupTestSubject(t *testing.T, mgr *testutil.Manager) *Controller {
 	})
 	require.NoError(t, err)
 
-	err = reconstitution.New(mgr.Manager, cache, rc)
+	rc.WorkQueue, err = reconstitution.New(mgr.Manager, cache, rc)
 	require.NoError(t, err)
 
 	return rc

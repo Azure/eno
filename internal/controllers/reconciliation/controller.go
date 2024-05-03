@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -25,6 +26,7 @@ import (
 	"github.com/Azure/eno/internal/discovery"
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/reconstitution"
+	"github.com/Azure/eno/internal/resource"
 	"github.com/go-logr/logr"
 )
 
@@ -50,6 +52,8 @@ type Controller struct {
 	readinessPollInterval time.Duration
 	upstreamClient        client.Client
 	discovery             *discovery.Cache
+
+	WorkQueue workqueue.RateLimitingInterface
 }
 
 func New(opts Options) (*Controller, error) {
@@ -105,9 +109,12 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	var prev *reconstitution.Resource
 	if comp.Status.PreviousSynthesis != nil {
-		synRef.UUID = comp.Status.PreviousSynthesis.UUID
-		prev, _ = c.resourceClient.Get(ctx, synRef, &req.Resource)
+		prevSynRef := reconstitution.NewSynthesisRef(comp)
+		prevSynRef.UUID = comp.Status.PreviousSynthesis.UUID
+		prev, _ = c.resourceClient.Get(ctx, prevSynRef, &req.Resource)
 	}
+	logger = logger.WithValues("resourceKind", resource.Ref.Kind, "resourceName", resource.Ref.Name, "resourceNamespace", resource.Ref.Namespace)
+	ctx = logr.NewContext(ctx, logger)
 
 	// Keep track of the last reconciliation time and report on it relative to the resource's reconcile interval
 	// This is useful for identifying cases where the loop can't keep up
@@ -125,17 +132,6 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		return ctrl.Result{}, fmt.Errorf("getting current state: %w", err)
 	}
 
-	// Nil current struct means the resource version hasn't changed since it was last observed
-	// Skip without logging since this is a very hot path
-	var modified bool
-	if hasChanged {
-		resource.ObserveVersion("") // in case reconciliation fails, invalidate the cache first to avoid skipping the next attempt
-		modified, err = c.reconcileResource(ctx, comp, prev, resource, current)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-	}
-
 	// Evaluate resource readiness
 	// - Readiness checks are skipped when this version of the resource's desired state has already become ready
 	// - Readiness checks are skipped when the resource hasn't changed since the last check
@@ -146,10 +142,39 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
 	}
 	var ready *metav1.Time
-	if status := resource.FindStatus(slice); status == nil || status.Ready == nil {
+	status := resource.FindStatus(slice)
+	if status == nil || status.Ready == nil {
 		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, current)
 		if ok {
 			ready = &readiness.ReadyTime
+		}
+	}
+
+	// Evaluate the readiness of resources in the next readiness group
+	if (status == nil || !status.Reconciled) && !resource.Deleted() {
+		dependencies := c.resourceClient.RangeByReadinessGroup(ctx, synRef, resource.ReadinessGroup, -1)
+		for _, dep := range dependencies {
+			slice := &apiv1.ResourceSlice{}
+			err = c.client.Get(ctx, dep.ManifestRef.Slice, slice)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
+			}
+			status := dep.FindStatus(slice)
+			if status == nil || !status.Reconciled {
+				logger.V(1).Info("skipping because at least one resource in an earlier readiness group isn't ready yet")
+				return ctrl.Result{}, nil
+			}
+		}
+	}
+
+	// Nil current struct means the resource version hasn't changed since it was last observed
+	// Skip without logging since this is a very hot path
+	var modified bool
+	if hasChanged {
+		resource.ObserveVersion("") // in case reconciliation fails, invalidate the cache first to avoid skipping the next attempt
+		modified, err = c.reconcileResource(ctx, comp, prev, resource, current)
+		if err != nil {
+			return ctrl.Result{}, err
 		}
 	}
 
@@ -165,7 +190,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	// Store the results
 	deleted := current == nil || current.GetDeletionTimestamp() != nil
-	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready), func() {})
+	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready), c.newPatchCallback(ctx, synRef, resource, status))
 	if ready == nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}
@@ -352,6 +377,22 @@ func patchResourceState(deleted bool, ready *metav1.Time) flowcontrol.StatusPatc
 			Deleted:    deleted,
 			Ready:      ready,
 			Reconciled: true,
+		}
+	}
+}
+
+func (c *Controller) newPatchCallback(ctx context.Context, synRef *reconstitution.SynthesisRef, resource *resource.Resource, status *apiv1.ResourceState) func() {
+	return func() {
+		// Enqueue reconciliation of resources that depend on this one when transitioning to Reconciled=true
+		// Avoids waiting until their next reconciliation
+		if status == nil || !status.Reconciled {
+			dependants := c.resourceClient.RangeByReadinessGroup(ctx, synRef, resource.ReadinessGroup, 1)
+			for _, dep := range dependants {
+				c.WorkQueue.Add(reconstitution.Request{
+					Resource:    dep.Ref,
+					Composition: types.NamespacedName{Namespace: synRef.Namespace, Name: synRef.CompositionName},
+				})
+			}
 		}
 	}
 }

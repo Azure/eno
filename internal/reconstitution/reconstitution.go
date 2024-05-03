@@ -6,6 +6,7 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/resource"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
@@ -44,10 +45,10 @@ type Request struct {
 
 // New creates a new reconstitution controller, which is responsible for "reconstituting" resources
 // i.e. allowing controllers to treat them as individual resources instead of their storage representation (ResourceSlice).
-func New(mgr ctrl.Manager, cache *Cache, rec Reconciler) error {
+func New(mgr ctrl.Manager, cache *Cache, rec Reconciler) (workqueue.RateLimitingInterface, error) {
 	ctrl, err := newController(mgr, cache)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	qp := &queueProcessor{
@@ -55,5 +56,9 @@ func New(mgr ctrl.Manager, cache *Cache, rec Reconciler) error {
 		Handler: rec,
 		Logger:  mgr.GetLogger().WithValues("controller", "reconciliationController"),
 	}
-	return mgr.Add(qp)
+	if err := mgr.Add(qp); err != nil {
+		return nil, err
+	}
+
+	return ctrl.queue, nil
 }

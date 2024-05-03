@@ -23,7 +23,7 @@ func TestManagerBasics(t *testing.T) {
 
 	cache := NewCache(client)
 	tr := &testReconciler{cache: cache}
-	err := New(mgr.Manager, cache, tr)
+	_, err := New(mgr.Manager, cache, tr)
 	require.NoError(t, err)
 
 	mgr.Start(t)

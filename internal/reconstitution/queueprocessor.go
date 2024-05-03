@@ -30,7 +30,7 @@ func (q *queueProcessor) processQueueItem(ctx context.Context) bool {
 	}
 	defer q.Queue.Done(item)
 
-	req, ok := item.(*Request)
+	req, ok := item.(Request)
 	if !ok {
 		q.Logger.Error(nil, "failed type assertion in queue processor")
 		return false
@@ -39,7 +39,7 @@ func (q *queueProcessor) processQueueItem(ctx context.Context) bool {
 	logger := q.Logger.WithValues("compositionName", req.Composition.Name, "compositionNamespace", req.Composition.Namespace, "resourceKind", req.Resource.Kind, "resourceName", req.Resource.Name, "resourceNamespace", req.Resource.Namespace)
 	ctx = logr.NewContext(ctx, logger)
 
-	result, err := q.Handler.Reconcile(ctx, req)
+	result, err := q.Handler.Reconcile(ctx, &req)
 	if err != nil {
 		q.Queue.AddRateLimited(item)
 		logger.Error(err, "error while processing queue item")
