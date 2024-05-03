@@ -46,7 +46,7 @@ var newResourceTests = []struct {
 				Kind:      "ConfigMap",
 			}, r.Ref)
 			assert.True(t, r.DisableUpdates)
-			assert.Equal(t, uint8(250), r.ReadinessGroup)
+			assert.Equal(t, uint(250), r.ReadinessGroup)
 		},
 	},
 	{
@@ -62,7 +62,7 @@ var newResourceTests = []struct {
 			}
 		}`,
 		Assert: func(t *testing.T, r *Resource) {
-			assert.Equal(t, uint8(0), r.ReadinessGroup)
+			assert.Equal(t, uint(0), r.ReadinessGroup)
 		},
 	},
 	{

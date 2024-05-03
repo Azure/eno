@@ -52,7 +52,7 @@ type Resource struct {
 	ReadinessChecks   readiness.Checks
 	Patch             jsonpatch.Patch
 	DisableUpdates    bool
-	ReadinessGroup    uint8
+	ReadinessGroup    uint
 }
 
 func (r *Resource) Deleted() bool {
@@ -183,7 +183,7 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 
 	const readinessGroupKey = "eno.azure.io/readiness-group"
 	rg, _ := strconv.ParseUint(anno[readinessGroupKey], 10, 0)
-	res.ReadinessGroup = uint8(rg)
+	res.ReadinessGroup = uint(rg)
 	delete(anno, readinessGroupKey)
 
 	for key, value := range anno {
