@@ -28,6 +28,7 @@ var newResourceTests = []struct {
 				"annotations": {
 					"foo": "bar",
 					"eno.azure.io/reconcile-interval": "10s",
+					"eno.azure.io/readiness-group": "250",
 					"eno.azure.io/readiness": "true",
 					"eno.azure.io/readiness-test": "false",
 					"eno.azure.io/disable-updates": "true"
@@ -45,6 +46,23 @@ var newResourceTests = []struct {
 				Kind:      "ConfigMap",
 			}, r.Ref)
 			assert.True(t, r.DisableUpdates)
+			assert.Equal(t, uint(250), r.ReadinessGroup)
+		},
+	},
+	{
+		Name: "negative-readiness-group",
+		Manifest: `{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "foo",
+				"annotations": {
+					"eno.azure.io/readiness-group": "-10"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Resource) {
+			assert.Equal(t, uint(0), r.ReadinessGroup)
 		},
 	},
 	{

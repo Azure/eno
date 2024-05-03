@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -51,6 +52,7 @@ type Resource struct {
 	ReadinessChecks   readiness.Checks
 	Patch             jsonpatch.Patch
 	DisableUpdates    bool
+	ReadinessGroup    uint
 }
 
 func (r *Resource) Deleted() bool {
@@ -171,7 +173,10 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 	}
 
 	const reconcileIntervalKey = "eno.azure.io/reconcile-interval"
-	reconcileInterval, _ := time.ParseDuration(anno[reconcileIntervalKey])
+	reconcileInterval, err := time.ParseDuration(anno[reconcileIntervalKey])
+	if err != nil {
+		logger.V(0).Info("invalid reconcile interval - ignoring")
+	}
 	res.ReconcileInterval = &metav1.Duration{Duration: reconcileInterval}
 	delete(anno, reconcileIntervalKey)
 
@@ -179,7 +184,15 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 	res.DisableUpdates = anno[disableUpdatesKey] == "true"
 	delete(anno, disableUpdatesKey)
 
-	for key, value := range parsed.GetAnnotations() {
+	const readinessGroupKey = "eno.azure.io/readiness-group"
+	rg, err := strconv.ParseUint(anno[readinessGroupKey], 10, 64)
+	if err != nil {
+		logger.V(0).Info("invalid readiness group - ignoring")
+	}
+	res.ReadinessGroup = uint(rg)
+	delete(anno, readinessGroupKey)
+
+	for key, value := range anno {
 		if !strings.HasPrefix(key, "eno.azure.io/readiness") {
 			continue
 		}
