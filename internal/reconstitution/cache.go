@@ -64,9 +64,14 @@ func (c *Cache) Get(ctx context.Context, comp *SynthesisRef, ref *resource.Ref) 
 	return res, ok
 }
 
-func (c *Cache) ListPreviousReadinessGroup(ctx context.Context, comp *SynthesisRef, group uint8) []*Resource {
+// TODO: non-8
+func (c *Cache) ListReadinessGroups(ctx context.Context, comp *SynthesisRef, group uint8, dir int) []*Resource {
 	c.mut.Lock()
 	defer c.mut.Unlock()
+
+	if group == 0 && dir == -1 {
+		return nil
+	}
 
 	resources, ok := c.resources[*comp]
 	if !ok {
@@ -78,45 +83,23 @@ func (c *Cache) ListPreviousReadinessGroup(ctx context.Context, comp *SynthesisR
 		return nil // the given group must have a resource, otherwise we wouldn't be looking it up
 	}
 
-	// If we're adjacent to the previous group...
-	if node.Right != nil {
-		return node.Right.Value
+	// If we're adjacent...
+	if dir > 0 {
+		if node.Right != nil {
+			return node.Right.Value
+		}
+	} else {
+		if node.Left != nil {
+			return node.Left.Value
+		}
 	}
 
 	// ...otherwise we need to find it
-	node, ok = resources.ByReadinessGroup.Ceiling(group + 1)
-	if !ok {
-		return nil // no previous node!
+	if dir > 0 {
+		node, ok = resources.ByReadinessGroup.Ceiling(group + 1)
+	} else {
+		node, ok = resources.ByReadinessGroup.Floor(group - 1)
 	}
-
-	return node.Value
-}
-
-func (c *Cache) ListNextReadinessGroup(ctx context.Context, comp *SynthesisRef, group uint8) []*Resource {
-	if group == 0 {
-		return nil
-	}
-
-	c.mut.Lock()
-	defer c.mut.Unlock()
-
-	resources, ok := c.resources[*comp]
-	if !ok {
-		return nil
-	}
-
-	node := resources.ByReadinessGroup.GetNode(group)
-	if node == nil {
-		return nil // the given group must have a resource, otherwise we wouldn't be looking it up
-	}
-
-	// If we're adjacent to the previous group...
-	if node.Left != nil {
-		return node.Left.Value
-	}
-
-	// ...otherwise we need to find it
-	node, ok = resources.ByReadinessGroup.Floor(group - 1)
 	if !ok {
 		return nil // no previous node!
 	}

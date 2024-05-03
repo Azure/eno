@@ -152,7 +152,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	// Evaluate the readiness of resources in the next readiness group
 	if (status == nil || !status.Reconciled) && !resource.Deleted() {
-		dependencies := c.resourceClient.ListNextReadinessGroup(ctx, synRef, resource.ReadinessGroup)
+		dependencies := c.resourceClient.ListReadinessGroups(ctx, synRef, resource.ReadinessGroup, -1)
 		for _, dep := range dependencies {
 			slice := &apiv1.ResourceSlice{}
 			err = c.client.Get(ctx, dep.ManifestRef.Slice, slice)
@@ -386,7 +386,7 @@ func (c *Controller) newPatchCallback(ctx context.Context, synRef *reconstitutio
 		// Enqueue reconciliation of resources that depend on this one when transitioning to Reconciled=true
 		// Avoids waiting until their next reconciliation
 		if status == nil || !status.Reconciled {
-			dependants := c.resourceClient.ListPreviousReadinessGroup(ctx, synRef, resource.ReadinessGroup)
+			dependants := c.resourceClient.ListReadinessGroups(ctx, synRef, resource.ReadinessGroup, 1)
 			for _, dep := range dependants {
 				c.WorkQueue.Add(reconstitution.Request{
 					Resource:    dep.Ref,

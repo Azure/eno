@@ -286,36 +286,34 @@ func TestCacheListReadinessGroups(t *testing.T) {
 	_, err := c.fill(ctx, comp, synth, []apiv1.ResourceSlice{slice})
 	require.NoError(t, err)
 
-	// Previous
-	refs := c.ListPreviousReadinessGroup(ctx, compRef, 100)
+	refs := c.ListReadinessGroups(ctx, compRef, 100, 1)
 	assert.Equal(t, []string{}, reqsToNames(refs))
 
-	refs = c.ListPreviousReadinessGroup(ctx, &SynthesisRef{CompositionName: "nope"}, 0)
+	refs = c.ListReadinessGroups(ctx, &SynthesisRef{CompositionName: "nope"}, 1, 1)
 	assert.Equal(t, []string{}, reqsToNames(refs))
 
-	refs = c.ListPreviousReadinessGroup(ctx, compRef, 0)
+	refs = c.ListReadinessGroups(ctx, compRef, 100, -1)
+	assert.Equal(t, []string{}, reqsToNames(refs))
+
+	refs = c.ListReadinessGroups(ctx, &SynthesisRef{CompositionName: "nope"}, 1, -1)
+	assert.Equal(t, []string{}, reqsToNames(refs))
+
+	refs = c.ListReadinessGroups(ctx, compRef, 0, 1)
 	assert.Equal(t, []string{"group-1", "group-also-1"}, reqsToNames(refs))
 
-	refs = c.ListPreviousReadinessGroup(ctx, compRef, 1)
+	refs = c.ListReadinessGroups(ctx, compRef, 1, 1)
 	assert.Equal(t, []string{"group-3"}, reqsToNames(refs))
 
-	refs = c.ListPreviousReadinessGroup(ctx, compRef, 3)
+	refs = c.ListReadinessGroups(ctx, compRef, 3, 1)
 	assert.Equal(t, []string{}, reqsToNames(refs))
 
-	// Next
-	refs = c.ListNextReadinessGroup(ctx, compRef, 100)
+	refs = c.ListReadinessGroups(ctx, compRef, 0, -1)
 	assert.Equal(t, []string{}, reqsToNames(refs))
 
-	refs = c.ListNextReadinessGroup(ctx, &SynthesisRef{CompositionName: "nope"}, 1)
-	assert.Equal(t, []string{}, reqsToNames(refs))
-
-	refs = c.ListNextReadinessGroup(ctx, compRef, 0)
-	assert.Equal(t, []string{}, reqsToNames(refs))
-
-	refs = c.ListNextReadinessGroup(ctx, compRef, 1)
+	refs = c.ListReadinessGroups(ctx, compRef, 1, -1)
 	assert.Equal(t, []string{"default-group"}, reqsToNames(refs))
 
-	refs = c.ListNextReadinessGroup(ctx, compRef, 3)
+	refs = c.ListReadinessGroups(ctx, compRef, 3, -1)
 	assert.Equal(t, []string{"group-1", "group-also-1"}, reqsToNames(refs))
 }
 
