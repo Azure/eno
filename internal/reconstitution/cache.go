@@ -64,7 +64,7 @@ func (c *Cache) Get(ctx context.Context, comp *SynthesisRef, ref *resource.Ref) 
 	return res, ok
 }
 
-func (c *Cache) ListReadinessGroups(ctx context.Context, comp *SynthesisRef, group uint, dir int) []*Resource {
+func (c *Cache) RangeByReadinessGroup(ctx context.Context, comp *SynthesisRef, group uint, dir int) []*Resource {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
