@@ -34,12 +34,14 @@ spec:
           resources you expect another user/process to mutate.\n- eno.azure.io/readiness:
           CEL expression used to assert that the resource is ready. More details below.\n-
           eno.azure.io/readiness-*: Same as above, allows for multiple readiness checks.
-          All checks must pass for the resource to be considered ready.\n\n\nReadiness
-          expressions can return either bool or a Kubernetes condition struct.\nIf
-          a condition is returned it will be used as the resource's readiness time,
-          otherwise the controller will use wallclock time at the first moment it
-          noticed the truthy value.\nWhen possible, match on a timestamp to preserve
-          accuracy.\n\n\nExample matching on a condition:\n```cel\n\n\n\tself.status.conditions.filter(item,
+          All checks must pass for the resource to be considered ready.\n- eno.azure.io/readiness-group:
+          (int, default: 0) Eno will not create or update this resource until all
+          resoruces in lower-valued groups have become ready.\n\n\nReadiness expressions
+          can return either bool or a Kubernetes condition struct.\nIf a condition
+          is returned it will be used as the resource's readiness time, otherwise
+          the controller will use wallclock time at the first moment it noticed the
+          truthy value.\nWhen possible, match on a timestamp to preserve accuracy.\n\n\nExample
+          matching on a condition:\n```cel\n\n\n\tself.status.conditions.filter(item,
           item.type == 'Test' && item.status == 'False')\n\n\n```\n\n\nExample matching
           on a boolean:\n```cel\n\n\n\tself.status.foo == 'bar'\n\n\n```\n\n\nA special
           resource can be returned from synthesizers: `eno.azure.io/v1.Patch`.\nExample:\n\n\n```yaml\n\n\n\t
