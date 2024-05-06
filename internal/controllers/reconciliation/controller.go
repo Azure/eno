@@ -144,6 +144,8 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		if ok {
 			ready = &readiness.ReadyTime
 		}
+	} else {
+		ready = status.Ready
 	}
 
 	// Evaluate the readiness of resources in the next readiness group
@@ -174,10 +176,11 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		}
 	}
 
+	// We requeue to make sure the resource is in sync before updating our cache's resource version
+	// Otherwise the next sync would just hit the cache without actually diffing the resource.
 	if modified {
 		return ctrl.Result{Requeue: true}, nil
 	}
-
 	if current != nil {
 		if rv := current.GetResourceVersion(); rv != "" {
 			resource.ObserveVersion(rv)
