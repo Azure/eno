@@ -17,8 +17,6 @@ import (
 	"github.com/Azure/eno/internal/manager"
 )
 
-// TODO: Feedback on updates?
-
 // controller reconstitutes individual resources from resource slices.
 // Similar to an informer but with extra logic to handle expanding the slice resources.
 type controller struct {
@@ -121,6 +119,7 @@ func (r *controller) populateCache(ctx context.Context, comp *apiv1.Composition,
 }
 
 func (r *controller) HandleReadinessTransition(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := logr.FromContextOrDiscard(ctx)
 	slice := &apiv1.ResourceSlice{}
 	err := r.client.Get(ctx, req.NamespacedName, slice)
 	if err != nil {
@@ -143,7 +142,7 @@ func (r *controller) HandleReadinessTransition(ctx context.Context, req ctrl.Req
 			Namespace: slice.Namespace,
 		})
 		if !ok {
-			// TODO: Log
+			logger.V(1).Info("a dependent resource was not found in cache - this is unexpected")
 			return ctrl.Result{}, nil
 		}
 

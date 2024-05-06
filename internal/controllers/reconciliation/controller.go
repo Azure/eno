@@ -16,7 +16,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -51,8 +50,6 @@ type Controller struct {
 	readinessPollInterval time.Duration
 	upstreamClient        client.Client
 	discovery             *discovery.Cache
-
-	WorkQueue workqueue.RateLimitingInterface
 }
 
 func New(opts Options) (*Controller, error) {

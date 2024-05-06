@@ -117,11 +117,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("constructing reconciliation controller: %w", err)
 	}
-	queue, err := reconstitution.New(mgr, rCache, reconciler)
+	err = reconstitution.New(mgr, rCache, reconciler)
 	if err != nil {
 		return fmt.Errorf("constructing reconstitution manager: %w", err)
 	}
-	reconciler.WorkQueue = queue
 
 	return mgr.Start(ctx)
 }
