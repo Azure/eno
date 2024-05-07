@@ -6,9 +6,12 @@ import (
 
 	"github.com/go-logr/logr"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
@@ -33,6 +36,15 @@ func newController(mgr ctrl.Manager, cache *Cache) (*controller, error) {
 	r.queue = workqueue.NewRateLimitingQueueWithConfig(rateLimiter, workqueue.RateLimitingQueueConfig{
 		Name: "reconciliationController",
 	})
+
+	err := ctrl.NewControllerManagedBy(mgr).
+		Named("readinessTransitionResponder").
+		For(&apiv1.ResourceSlice{}).
+		WithLogConstructor(manager.NewLogConstructor(mgr, "readinessTransitionResponder")).
+		Complete(reconcile.Func(r.HandleReadinessTransition))
+	if err != nil {
+		return nil, err
+	}
 
 	return r, ctrl.NewControllerManagedBy(mgr).
 		Named("reconstituter").
@@ -65,7 +77,7 @@ func (r *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, fmt.Errorf("processing current state: %w", err)
 	}
 	for _, req := range append(prevReqs, currentReqs...) {
-		r.queue.Add(req)
+		r.queue.Add(*req)
 	}
 	r.Cache.purge(req.NamespacedName, comp)
 
@@ -104,4 +116,45 @@ func (r *controller) populateCache(ctx context.Context, comp *apiv1.Composition,
 	}
 
 	return r.Cache.fill(ctx, comp, synthesis, slices)
+}
+
+func (r *controller) HandleReadinessTransition(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+	slice := &apiv1.ResourceSlice{}
+	err := r.client.Get(ctx, req.NamespacedName, slice)
+	if err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("unable to get resource slice: %w", err))
+	}
+
+	owner := metav1.GetControllerOf(slice)
+	if owner == nil {
+		return ctrl.Result{}, nil
+	}
+
+	for i, res := range slice.Status.Resources {
+		if res.Ready == nil {
+			continue // only care about resources that have become ready
+		}
+
+		res, ok := r.Cache.getByIndex(ctx, &sliceIndex{
+			Index:     i,
+			SliceName: slice.Name,
+			Namespace: slice.Namespace,
+		})
+		if !ok {
+			logger.V(1).Info("a dependent resource was not found in cache - this is unexpected")
+			return ctrl.Result{}, nil
+		}
+
+		synRef := &SynthesisRef{CompositionName: owner.Name, Namespace: req.Namespace, UUID: slice.Spec.SynthesisUUID}
+		resources := r.Cache.RangeByReadinessGroup(ctx, synRef, res.ReadinessGroup, 1)
+		for _, res := range resources {
+			r.queue.Add(Request{
+				Resource:    res.Ref,
+				Composition: types.NamespacedName{Namespace: slice.Namespace, Name: owner.Name},
+			})
+		}
+	}
+
+	return ctrl.Result{}, nil
 }

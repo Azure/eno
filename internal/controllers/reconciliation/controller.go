@@ -105,9 +105,12 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	var prev *reconstitution.Resource
 	if comp.Status.PreviousSynthesis != nil {
-		synRef.UUID = comp.Status.PreviousSynthesis.UUID
-		prev, _ = c.resourceClient.Get(ctx, synRef, &req.Resource)
+		prevSynRef := reconstitution.NewSynthesisRef(comp)
+		prevSynRef.UUID = comp.Status.PreviousSynthesis.UUID
+		prev, _ = c.resourceClient.Get(ctx, prevSynRef, &req.Resource)
 	}
+	logger = logger.WithValues("resourceKind", resource.Ref.Kind, "resourceName", resource.Ref.Name, "resourceNamespace", resource.Ref.Namespace)
+	ctx = logr.NewContext(ctx, logger)
 
 	// Keep track of the last reconciliation time and report on it relative to the resource's reconcile interval
 	// This is useful for identifying cases where the loop can't keep up
@@ -125,6 +128,43 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		return ctrl.Result{}, fmt.Errorf("getting current state: %w", err)
 	}
 
+	// Evaluate resource readiness
+	// - Readiness checks are skipped when this version of the resource's desired state has already become ready
+	// - Readiness checks are skipped when the resource hasn't changed since the last check
+	// - Readiness defaults to true if no checks are given
+	slice := &apiv1.ResourceSlice{}
+	err = c.client.Get(ctx, resource.ManifestRef.Slice, slice)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
+	}
+	var ready *metav1.Time
+	status := resource.FindStatus(slice)
+	if status == nil || status.Ready == nil {
+		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, current)
+		if ok {
+			ready = &readiness.ReadyTime
+		}
+	} else {
+		ready = status.Ready
+	}
+
+	// Evaluate the readiness of resources in the next readiness group
+	if (status == nil || !status.Reconciled) && !resource.Deleted() {
+		dependencies := c.resourceClient.RangeByReadinessGroup(ctx, synRef, resource.ReadinessGroup, -1)
+		for _, dep := range dependencies {
+			slice := &apiv1.ResourceSlice{}
+			err = c.client.Get(ctx, dep.ManifestRef.Slice, slice)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
+			}
+			status := dep.FindStatus(slice)
+			if status == nil || !status.Reconciled {
+				logger.V(1).Info("skipping because at least one resource in an earlier readiness group isn't ready yet")
+				return ctrl.Result{}, nil
+			}
+		}
+	}
+
 	// Nil current struct means the resource version hasn't changed since it was last observed
 	// Skip without logging since this is a very hot path
 	var modified bool
@@ -136,27 +176,11 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		}
 	}
 
-	// Evaluate resource readiness
-	// - Readiness checks are skipped when this version of the resource's desired state has already become ready
-	// - Readiness checks are skipped when the resource hasn't changed since the last check
-	// - Readiness defaults to true if no checks are given
-	slice := &apiv1.ResourceSlice{}
-	err = c.client.Get(ctx, resource.ManifestRef.Slice, slice)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
-	}
-	var ready *metav1.Time
-	if status := resource.FindStatus(slice); status == nil || status.Ready == nil {
-		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, current)
-		if ok {
-			ready = &readiness.ReadyTime
-		}
-	}
-
+	// We requeue to make sure the resource is in sync before updating our cache's resource version
+	// Otherwise the next sync would just hit the cache without actually diffing the resource.
 	if modified {
 		return ctrl.Result{Requeue: true}, nil
 	}
-
 	if current != nil {
 		if rv := current.GetResourceVersion(); rv != "" {
 			resource.ObserveVersion(rv)
