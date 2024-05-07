@@ -148,7 +148,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		ready = status.Ready
 	}
 
-	// Evaluate the readiness of resources in the next readiness group
+	// Evaluate the readiness of resources in the previous readiness group
 	if (status == nil || !status.Reconciled) && !resource.Deleted() {
 		dependencies := c.resourceClient.RangeByReadinessGroup(ctx, synRef, resource.ReadinessGroup, -1)
 		for _, dep := range dependencies {
