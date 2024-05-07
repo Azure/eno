@@ -136,7 +136,7 @@ func (r *controller) HandleReadinessTransition(ctx context.Context, req ctrl.Req
 			continue // only care about resources that have become ready
 		}
 
-		res, ok := r.Cache.getByIndex(ctx, &sliceIndex{
+		res, ok := r.Cache.getByIndex(&sliceIndex{
 			Index:     i,
 			SliceName: slice.Name,
 			Namespace: slice.Namespace,
@@ -149,6 +149,7 @@ func (r *controller) HandleReadinessTransition(ctx context.Context, req ctrl.Req
 		synRef := &SynthesisRef{CompositionName: owner.Name, Namespace: req.Namespace, UUID: slice.Spec.SynthesisUUID}
 		resources := r.Cache.RangeByReadinessGroup(ctx, synRef, res.ReadinessGroup, 1)
 		for _, res := range resources {
+			// TODO: This can be optimized by skipping the Add call if `res` is already ready
 			r.queue.Add(Request{
 				Resource:    res.Ref,
 				Composition: types.NamespacedName{Namespace: slice.Namespace, Name: owner.Name},

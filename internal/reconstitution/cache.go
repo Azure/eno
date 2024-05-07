@@ -114,7 +114,7 @@ func (c *Cache) RangeByReadinessGroup(ctx context.Context, comp *SynthesisRef, g
 	return node.Value
 }
 
-func (c *Cache) getByIndex(ctx context.Context, idx *sliceIndex) (*Resource, bool) {
+func (c *Cache) getByIndex(idx *sliceIndex) (*Resource, bool) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
