@@ -24,7 +24,6 @@ type StatusPatchFn func(*apiv1.ResourceState) *apiv1.ResourceState
 type resourceSliceStatusUpdate struct {
 	SlicedResource *resource.ManifestRef
 	PatchFn        StatusPatchFn
-	Callback       func()
 }
 
 // ResourceSliceWriteBuffer reduces load on etcd/apiserver by collecting resource slice status
@@ -57,7 +56,7 @@ func NewResourceSliceWriteBuffer(cli client.Client, batchInterval time.Duration,
 	}
 }
 
-func (w *ResourceSliceWriteBuffer) PatchStatusAsync(ctx context.Context, ref *resource.ManifestRef, patchFn StatusPatchFn, cb func()) {
+func (w *ResourceSliceWriteBuffer) PatchStatusAsync(ctx context.Context, ref *resource.ManifestRef, patchFn StatusPatchFn) {
 	w.mut.Lock()
 	defer w.mut.Unlock()
 
@@ -73,7 +72,6 @@ func (w *ResourceSliceWriteBuffer) PatchStatusAsync(ctx context.Context, ref *re
 	w.state[key] = append(currentSlice, &resourceSliceStatusUpdate{
 		SlicedResource: ref,
 		PatchFn:        patchFn,
-		Callback:       cb,
 	})
 	w.queue.Add(key)
 }
@@ -166,7 +164,6 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN typ
 	// Transform the set of patch funcs into a set of jsonpatch objects
 	unsafeSlice := slice.Status.Resources
 	var patches []*jsonPatch
-	var callbacks []func()
 	for _, update := range updates {
 		unsafeStatusPtr := &unsafeSlice[update.SlicedResource.Index]
 		patch := update.PatchFn(unsafeStatusPtr)
@@ -174,7 +171,6 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN typ
 			continue
 		}
 
-		callbacks = append(callbacks, update.Callback)
 		patches = append(patches, &jsonPatch{
 			Op:    "replace",
 			Path:  fmt.Sprintf("/status/resources/%d", update.SlicedResource.Index),
@@ -199,9 +195,6 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN typ
 
 	logger.V(0).Info(fmt.Sprintf("updated the status of %d resources in slice", len(updates)))
 	sliceStatusUpdates.Inc()
-	for _, cb := range callbacks {
-		cb()
-	}
 	return true
 }
 

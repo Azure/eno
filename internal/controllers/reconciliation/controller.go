@@ -165,7 +165,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	// Store the results
 	deleted := current == nil || current.GetDeletionTimestamp() != nil
-	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready), func() {})
+	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 	if ready == nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}

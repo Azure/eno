@@ -33,10 +33,7 @@ func TestResourceSliceStatusUpdateBasics(t *testing.T) {
 	req := &resource.ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
-	var callbackCalled bool
-	w.PatchStatusAsync(ctx, req, setReconciled(), func() {
-		callbackCalled = true
-	})
+	w.PatchStatusAsync(ctx, req, setReconciled())
 
 	// Slice resource's status should reflect the patch
 	w.processQueueItem(ctx)
@@ -45,7 +42,6 @@ func TestResourceSliceStatusUpdateBasics(t *testing.T) {
 	assert.False(t, slice.Status.Resources[0].Reconciled)
 	assert.True(t, slice.Status.Resources[1].Reconciled)
 	assert.False(t, slice.Status.Resources[2].Reconciled)
-	assert.True(t, callbackCalled)
 
 	// All state has been flushed
 	assert.Len(t, w.state, 0)
@@ -74,12 +70,12 @@ func TestResourceSliceStatusUpdateBatching(t *testing.T) {
 	req := &resource.ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
-	w.PatchStatusAsync(ctx, req, setReconciled(), func() {})
+	w.PatchStatusAsync(ctx, req, setReconciled())
 
 	req = &resource.ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 2
-	w.PatchStatusAsync(ctx, req, setReconciled(), func() {})
+	w.PatchStatusAsync(ctx, req, setReconciled())
 
 	// Slice resource's status should be correct after a single update
 	w.processQueueItem(ctx)
@@ -106,7 +102,7 @@ func TestResourceSliceStatusUpdateNoUpdates(t *testing.T) {
 	req := &resource.ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
-	w.PatchStatusAsync(ctx, req, setReconciled(), func() {})
+	w.PatchStatusAsync(ctx, req, setReconciled())
 
 	// Remove the update leaving the queue message in place
 	w.state = map[types.NamespacedName][]*resourceSliceStatusUpdate{}
@@ -124,7 +120,7 @@ func TestResourceSliceStatusUpdateMissingSlice(t *testing.T) {
 
 	req := &resource.ManifestRef{}
 	req.Slice.Name = "test-slice-1" // this doesn't exist
-	w.PatchStatusAsync(ctx, req, setReconciled(), func() {})
+	w.PatchStatusAsync(ctx, req, setReconciled())
 
 	// Slice 404 drops the event and does not retry.
 	// Prevents a deadlock of this queue item.
@@ -155,7 +151,7 @@ func TestResourceSliceStatusUpdateNoChange(t *testing.T) {
 	req := &resource.ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
-	w.PatchStatusAsync(ctx, req, setReconciled(), func() {})
+	w.PatchStatusAsync(ctx, req, setReconciled())
 
 	w.processQueueItem(ctx)
 }
@@ -179,7 +175,7 @@ func TestResourceSliceStatusUpdateUpdateError(t *testing.T) {
 	req := &resource.ManifestRef{}
 	req.Slice.Name = "test-slice-1"
 	req.Index = 1
-	w.PatchStatusAsync(ctx, req, setReconciled(), func() {})
+	w.PatchStatusAsync(ctx, req, setReconciled())
 
 	// Both the queue item and state have persisted
 	w.processQueueItem(ctx)
