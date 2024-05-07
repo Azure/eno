@@ -32,11 +32,12 @@ func TestSliceTombstonesBasics(t *testing.T) {
 		},
 	}}
 
-	slices, err := Slice(&apiv1.Composition{}, []*apiv1.ResourceSlice{}, outputs, 100000)
+	slices, err := Slice(&apiv1.Composition{Status: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{UUID: "test-uuid"}}}, []*apiv1.ResourceSlice{}, outputs, 100000)
 	require.NoError(t, err)
 	require.Len(t, slices, 1)
 	require.Len(t, slices[0].Spec.Resources, 1)
 	assert.False(t, slices[0].Spec.Resources[0].Deleted)
+	assert.Equal(t, "test-uuid", slices[0].Spec.SynthesisUUID)
 
 	// Remove the resource - initial tombstone record is created
 	slices, err = Slice(&apiv1.Composition{}, slices, []*unstructured.Unstructured{}, 100000)
