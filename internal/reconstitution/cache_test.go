@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/resource"
@@ -209,6 +210,7 @@ func newCacheTestFixtures(sliceCount, resPerSliceCount int) (*apiv1.Composition,
 			obj.APIVersion = "v1"
 			obj.Annotations = map[string]string{
 				"eno.azure.io/readiness":            "self.foo > self.bar",
+				"eno.azure.io/readiness-group":      fmt.Sprintf("%d", j%2),
 				"eno.azure.io/readiness-test-check": "self.bar > self.baz",
 			}
 			js, _ := json.Marshal(obj)
@@ -229,4 +231,102 @@ func newCacheTestFixtures(sliceCount, resPerSliceCount int) (*apiv1.Composition,
 	}
 
 	return comp, synth, resources, requests
+}
+
+func TestCacheRangeByReadinessGroup(t *testing.T) {
+	ctx := testutil.NewContext(t)
+
+	cli := testutil.NewClient(t)
+	c := NewCache(cli)
+
+	comp := &apiv1.Composition{}
+	comp.Namespace = string(uuid.NewString())
+	comp.Name = string(uuid.NewString())
+	synth := &apiv1.Synthesis{UUID: uuid.NewString()} // just not 0
+	comp.Status.CurrentSynthesis = synth
+	compRef := NewSynthesisRef(comp)
+
+	obj := &corev1.ConfigMap{}
+	obj.Name = "default-group"
+	obj.Namespace = "default"
+	obj.Kind = "ConfigMap"
+	obj.APIVersion = "v1"
+	resources := []client.Object{}
+	resources = append(resources, obj)
+
+	obj = obj.DeepCopy()
+	obj.Name = "group-1"
+	obj.Annotations = map[string]string{
+		"eno.azure.io/readiness-group": "1",
+	}
+	resources = append(resources, obj)
+
+	obj = obj.DeepCopy()
+	obj.Name = "group-3"
+	obj.Annotations = map[string]string{
+		"eno.azure.io/readiness-group": "3",
+	}
+	resources = append(resources, obj)
+
+	obj = obj.DeepCopy()
+	obj.Name = "group-also-1"
+	obj.Annotations = map[string]string{
+		"eno.azure.io/readiness-group": "1",
+	}
+	resources = append(resources, obj)
+
+	slice := apiv1.ResourceSlice{}
+	slice.Name = string(uuid.NewString())
+	slice.Namespace = "slice-ns"
+	for _, obj := range resources {
+		js, _ := json.Marshal(obj)
+		slice.Spec.Resources = append(slice.Spec.Resources, apiv1.Manifest{Manifest: string(js)})
+	}
+
+	_, err := c.fill(ctx, comp, synth, []apiv1.ResourceSlice{slice})
+	require.NoError(t, err)
+
+	// Ranging backwards from 0 should never return anything
+	refs := c.RangeByReadinessGroup(ctx, compRef, 0, -1)
+	assert.Equal(t, []string{}, reqsToNames(refs))
+
+	// Ranging forwards after all groups should not return anything
+	refs = c.RangeByReadinessGroup(ctx, compRef, 100, 1)
+	assert.Equal(t, []string{}, reqsToNames(refs))
+
+	// Prove synthesis refs are honored
+	refs = c.RangeByReadinessGroup(ctx, &SynthesisRef{CompositionName: "nope"}, 1, 1)
+	assert.Equal(t, []string{}, reqsToNames(refs))
+
+	refs = c.RangeByReadinessGroup(ctx, &SynthesisRef{CompositionName: "nope"}, 1, -1)
+	assert.Equal(t, []string{}, reqsToNames(refs))
+
+	// This node doesn't exist in the tree, this isn't possible at runtime
+	refs = c.RangeByReadinessGroup(ctx, compRef, 100, -1)
+	assert.Equal(t, []string{}, reqsToNames(refs))
+
+	// Ranging forwards returns all resources in the next group, but not groups after that
+	refs = c.RangeByReadinessGroup(ctx, compRef, 0, 1)
+	assert.Equal(t, []string{"group-1", "group-also-1"}, reqsToNames(refs))
+
+	refs = c.RangeByReadinessGroup(ctx, compRef, 1, 1)
+	assert.Equal(t, []string{"group-3"}, reqsToNames(refs))
+
+	refs = c.RangeByReadinessGroup(ctx, compRef, 3, 1)
+	assert.Equal(t, []string{}, reqsToNames(refs))
+
+	// Ranging backwards returns all resources in the previous group, but not groups before that
+	refs = c.RangeByReadinessGroup(ctx, compRef, 1, -1)
+	assert.Equal(t, []string{"default-group"}, reqsToNames(refs))
+
+	refs = c.RangeByReadinessGroup(ctx, compRef, 3, -1)
+	assert.Equal(t, []string{"group-1", "group-also-1"}, reqsToNames(refs))
+}
+
+func reqsToNames(resources []*Resource) []string {
+	strs := make([]string, len(resources))
+	for i, resource := range resources {
+		strs[i] = resource.Ref.Name
+	}
+	return strs
 }

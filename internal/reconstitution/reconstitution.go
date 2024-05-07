@@ -19,6 +19,7 @@ type Reconciler interface {
 // Client provides read/write access to a collection of reconstituted resources.
 type Client interface {
 	Get(ctx context.Context, syn *SynthesisRef, res *resource.Ref) (*resource.Resource, bool)
+	RangeByReadinessGroup(ctx context.Context, syn *SynthesisRef, group uint, dir int) []*Resource
 }
 
 // SynthesisRef refers to a specific synthesis of a composition.
