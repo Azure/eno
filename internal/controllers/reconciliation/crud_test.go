@@ -875,6 +875,7 @@ func TestDisableUpdates(t *testing.T) {
 	assert.Equal(t, "baz", obj.Data["foo"])
 }
 
+// TestOrphanedCompositionDeletion proves that compositions can be deleted when their synthesizer is missing.
 func TestOrphanedCompositionDeletion(t *testing.T) {
 	scheme := runtime.NewScheme()
 	corev1.SchemeBuilder.AddToScheme(scheme)
