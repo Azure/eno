@@ -81,8 +81,8 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	syn := &apiv1.Synthesizer{}
 	syn.Name = comp.Spec.Synthesizer.Name
 	err = c.client.Get(ctx, client.ObjectKeyFromObject(syn), syn)
-	// Don't trust 404 in the first 10sec of composition creation since the informer might just be stale
-	if (errors.IsNotFound(err) || syn.DeletionTimestamp != nil) && time.Since(comp.CreationTimestamp.Time) > time.Second*10 {
+	// Don't trust 404 immediately after composition creation since the informer might just be stale
+	if (errors.IsNotFound(err) || syn.DeletionTimestamp != nil) && time.Since(comp.CreationTimestamp.Time) > time.Second {
 		syn = nil
 		err = nil
 	}
