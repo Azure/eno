@@ -8,6 +8,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/flowcontrol"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -76,13 +77,20 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, fmt.Errorf("listing pods: %w", err)
 	}
 
+	// Tolerate missing synths since we may still need to cleanup
 	syn := &apiv1.Synthesizer{}
 	syn.Name = comp.Spec.Synthesizer.Name
 	err = c.client.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+	if errors.IsNotFound(err) || syn.DeletionTimestamp != nil {
+		syn = nil
+		err = nil
+	}
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("getting synthesizer: %w", err)
 	}
-	logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
+	if syn != nil {
+		logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
+	}
 
 	logger, toDelete, exists := shouldDeletePod(logger, comp, syn, pods)
 	if toDelete != nil {
@@ -91,6 +99,10 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		}
 		logger.V(0).Info("deleted synthesizer pod", "podName", toDelete.Name)
 		return ctrl.Result{}, nil
+	}
+	if comp.DeletionTimestamp != nil {
+		ctx = logr.NewContext(ctx, logger)
+		return c.reconcileDeletedComposition(ctx, comp)
 	}
 	if exists {
 		// The pod is still running.
@@ -101,9 +113,9 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{RequeueAfter: syn.Spec.PodTimeout.Duration}, nil
 	}
 
-	if comp.DeletionTimestamp != nil {
-		ctx = logr.NewContext(ctx, logger)
-		return c.reconcileDeletedComposition(ctx, comp)
+	// Synthesis isn't possible without a synth
+	if syn == nil {
+		return ctrl.Result{}, nil
 	}
 
 	// Swap the state to prepare for resynthesis if needed
@@ -238,6 +250,7 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 	var onePodDeleting bool
 	for _, pod := range pods.Items {
 		pod := pod
+
 		// Allow a single extra pod to be created while the previous one is terminating
 		// in order to break potential deadlocks while avoiding a thundering herd of pods
 		if pod.DeletionTimestamp != nil {
@@ -246,6 +259,11 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 			}
 			onePodDeleting = true
 			continue
+		}
+
+		if syn == nil {
+			logger = logger.WithValues("reason", "SynthesizerDeleted")
+			return logger, &pod, true
 		}
 
 		if comp.DeletionTimestamp != nil {
@@ -295,7 +313,6 @@ func swapStates(comp *apiv1.Composition, syn *apiv1.Synthesizer) {
 	}
 
 	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
-		// TODO: Move here? UUID:                          uuid.NewString(),
 		ObservedCompositionGeneration: comp.Generation,
 		Attempts:                      attempts,
 	}

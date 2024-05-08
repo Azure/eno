@@ -874,3 +874,70 @@ func TestDisableUpdates(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "baz", obj.Data["foo"])
 }
+
+func TestOrphanedCompositionDeletion(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	// Register supporting controllers
+	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
+	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
+	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
+	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
+	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
+		obj := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-obj",
+				Namespace: "default",
+			},
+			Data: map[string]string{"foo": "bar"},
+		}
+
+		gvks, _, err := scheme.ObjectKinds(obj)
+		require.NoError(t, err)
+		obj.GetObjectKind().SetGroupVersionKind(gvks[0])
+		return []client.Object{obj}
+	}}))
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	// Any syn/comp will do since we faked out the synthesizer pod
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "create"
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	// Wait for composition to become ready
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == comp.Generation
+	})
+
+	// Delete the synthesizer
+	require.NoError(t, upstream.Delete(ctx, syn))
+	t.Logf("deleted synth")
+
+	time.Sleep(time.Millisecond * 100) // make sure the synth deletion has hit the informer cache
+
+	require.NoError(t, upstream.Delete(ctx, comp))
+	t.Logf("deleted composition")
+
+	// Everything should eventually be cleaned up
+	testutil.Eventually(t, func() bool {
+		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	})
+}
