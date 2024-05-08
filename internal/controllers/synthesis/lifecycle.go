@@ -8,7 +8,6 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/flowcontrol"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -81,11 +80,12 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	syn := &apiv1.Synthesizer{}
 	syn.Name = comp.Spec.Synthesizer.Name
 	err = c.client.Get(ctx, client.ObjectKeyFromObject(syn), syn)
-	// Don't trust 404 immediately after composition creation since the informer might just be stale
-	if (errors.IsNotFound(err) || syn.DeletionTimestamp != nil) && time.Since(comp.CreationTimestamp.Time) > time.Second {
-		syn = nil
-		err = nil
-	}
+	// TODO
+	// // Don't trust 404 immediately after composition creation since the informer might just be stale
+	// if (errors.IsNotFound(err) || syn.DeletionTimestamp != nil) && time.Since(comp.CreationTimestamp.Time) > time.Second {
+	// 	syn = nil
+	// 	err = nil
+	// }
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("getting synthesizer: %w", err)
 	}
