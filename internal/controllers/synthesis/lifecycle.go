@@ -341,5 +341,3 @@ func shouldUpdateDeletedCompositionStatus(comp *apiv1.Composition) bool {
 func isReconciling(comp *apiv1.Composition) bool {
 	return comp.Status.CurrentSynthesis != nil && (comp.Status.CurrentSynthesis.Reconciled == nil || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation)
 }
-
-	if (errors.IsNotFound(err) || syn.DeletionTimestamp != nil) && comp.Status.CurrentSynthesis != nil {
