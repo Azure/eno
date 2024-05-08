@@ -81,6 +81,9 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	syn := &apiv1.Synthesizer{}
 	syn.Name = comp.Spec.Synthesizer.Name
 	err = c.client.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+	// It's only safe to ignore as a missing synth if we have already started synthesis,
+	// otherwise creating the synth and composition around the same time could result in a deadlock
+	// if the composition is processed before the synth hits the informer cache.
 	if (errors.IsNotFound(err) || syn.DeletionTimestamp != nil) && comp.Status.CurrentSynthesis != nil {
 		syn = nil
 		err = nil
@@ -338,3 +341,5 @@ func shouldUpdateDeletedCompositionStatus(comp *apiv1.Composition) bool {
 func isReconciling(comp *apiv1.Composition) bool {
 	return comp.Status.CurrentSynthesis != nil && (comp.Status.CurrentSynthesis.Reconciled == nil || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation)
 }
+
+	if (errors.IsNotFound(err) || syn.DeletionTimestamp != nil) && comp.Status.CurrentSynthesis != nil {
