@@ -2,6 +2,7 @@ processor:
   ignoreTypes:
     - ".*List$"
     - "ResourceSlice"
+    - "ReferencedResource"
     - "InputResource"
   ignoreFields:
     - "TypeMeta$"

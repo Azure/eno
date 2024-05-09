@@ -106,6 +106,16 @@ type SynthesizerSpec struct {
 	Refs []Ref `json:"refs,omitempty"`
 }
 
+func (s *Synthesizer) GetRef(key string) *Ref {
+	for _, ref := range s.Spec.Refs {
+		if ref.Key == key {
+			return &ref
+		}
+	}
+	return nil
+}
+
+
 type SynthesizerStatus struct {
 }
 

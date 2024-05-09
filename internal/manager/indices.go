@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 
+	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -16,6 +17,7 @@ const (
 	IdxCompositionsBySynthesizer   = ".spec.synthesizer"
 	IdxCompositionsBySymphony      = ".compositionsBySymphony"
 	IdxResourceSlicesByComposition = ".resourceSlicesByComposition"
+	IdxReferencedResourcesByRef    = ".referencedResourcesByRef"
 
 	CompositionNameLabelKey      = "eno.azure.io/composition-name"
 	CompositionNamespaceLabelKey = "eno.azure.io/composition-namespace"
@@ -63,4 +65,19 @@ func indexController() client.IndexerFunc {
 		}
 		return []string{owner.Name}
 	}
+}
+
+func indexReferencedResources() client.IndexerFunc {
+	return func(o client.Object) []string {
+		rr, ok := o.(*apiv1.ReferencedResource)
+		if !ok {
+			return nil
+		}
+
+		return []string{rr.Spec.Input.Group + "/" + rr.Spec.Input.Kind + "/" + rr.Spec.Input.Namespace + "/" + rr.Spec.Input.Name}
+	}
+}
+
+func ReferencedResourceIdxValueFromInputResource(ref *apiv1.InputResource) string {
+	return ref.Group + "/" + ref.Kind + "/" + ref.Namespace + "/" + ref.Name
 }

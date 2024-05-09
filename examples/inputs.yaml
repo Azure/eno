@@ -46,11 +46,22 @@ apiVersion: eno.azure.io/v1
 kind: Composition
 metadata:
   name: test-comp
+  namespace: default
 spec:
   bindings:
   - key: some-input
     resource:
       name: some-cm
-      namespace: some-ns
+      namespace: default
   synthesizer:
     name: test-synth
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: some-cm
+  namespace: default
+data:
+  mykey: myvalue

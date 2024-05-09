@@ -19,7 +19,8 @@ type watchdogController struct {
 
 func NewController(mgr ctrl.Manager, threshold time.Duration) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&apiv1.Composition{}).
+		Named("watchdogController").
+		Watches(&apiv1.Composition{}, manager.SingleEventHandler()).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "watchdogController")).
 		Complete(&watchdogController{
 			client:    mgr.GetClient(),

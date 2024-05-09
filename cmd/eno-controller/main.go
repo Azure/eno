@@ -15,6 +15,7 @@ import (
 	"github.com/Azure/eno/internal/controllers/replication"
 	"github.com/Azure/eno/internal/controllers/rollout"
 	"github.com/Azure/eno/internal/controllers/synthesis"
+	"github.com/Azure/eno/internal/controllers/watch"
 	"github.com/Azure/eno/internal/controllers/watchdog"
 	"github.com/Azure/eno/internal/manager"
 )
@@ -32,6 +33,7 @@ func run() error {
 		debugLogging    bool
 		watchdogThres   time.Duration
 		rolloutCooldown time.Duration
+		watchWriteQPS   int
 		synconf         = &synthesis.Config{}
 
 		mgrOpts = &manager.Options{
@@ -44,6 +46,7 @@ func run() error {
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.DurationVar(&watchdogThres, "watchdog-threshold", time.Minute*5, "How long before the watchdog considers a mid-transition resource to be stuck")
 	flag.DurationVar(&rolloutCooldown, "rollout-cooldown", time.Second*2, "How long before an update to related resource (synthesizer, bindings, etc.) will trigger a composition's re-synthesis")
+	flag.IntVar(&watchWriteQPS, "watch-write-qps", 5, "Max status updates per second for referenced/bound resources")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 
@@ -105,6 +108,11 @@ func run() error {
 	err = aggregation.NewSymphonyController(mgr)
 	if err != nil {
 		return fmt.Errorf("constructing symphony aggregation controller: %w", err)
+	}
+
+	err = watch.NewController(mgr, watchWriteQPS)
+	if err != nil {
+		return fmt.Errorf("constructing watch controller: %w", err)
 	}
 
 	return mgr.Start(ctx)

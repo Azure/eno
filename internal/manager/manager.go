@@ -164,6 +164,11 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 		if err != nil {
 			return nil, err
 		}
+
+		err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ReferencedResource{}, IdxReferencedResourcesByRef, indexReferencedResources())
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if isReconciler {
@@ -213,4 +218,31 @@ func NewCompositionToResourceSliceHandler(cli client.Client) handler.EventHandle
 			apply(ctx, rli, de.Object)
 		},
 	}
+}
+
+// SingleEventHandler enqueues a single, empty request for every event. This is useful for controllers that
+// operate on all objects of a resource type.
+func SingleEventHandler() handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(handler.MapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+		return []reconcile.Request{{}}
+	}))
+}
+
+// SynthToCompositionHandler enqueues work queue items for every composition that references the event's synthesizer.
+func SynthToCompositionHandler(c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(handler.MapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+		list := &apiv1.CompositionList{}
+		err := c.List(ctx, list, client.MatchingFields{
+			IdxCompositionsBySynthesizer: o.GetName(),
+		})
+		if err != nil {
+			logr.FromContextOrDiscard(ctx).Error(err, "unexpected error listing compositions")
+		}
+
+		reqs := make([]reconcile.Request, len(list.Items))
+		for i, comp := range list.Items {
+			reqs[i] = reconcile.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
+		}
+		return reqs
+	}))
 }
