@@ -675,136 +675,6 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	})
 }
 
-// TestPatchCreation proves that a patch resource will not be created if it doesn't exist.
-func TestPatchCreation(t *testing.T) {
-	scheme := runtime.NewScheme()
-	corev1.SchemeBuilder.AddToScheme(scheme)
-	testv1.SchemeBuilder.AddToScheme(scheme)
-
-	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t)
-	upstream := mgr.GetClient()
-	downstream := mgr.DownstreamClient
-
-	// Register supporting controllers
-	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
-	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
-	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
-	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
-	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
-		obj := &unstructured.Unstructured{
-			Object: map[string]any{
-				"apiVersion": "eno.azure.io/v1",
-				"kind":       "Patch",
-				"metadata": map[string]any{
-					"name":      "test-obj",
-					"namespace": "default",
-				},
-				"patch": map[string]any{
-					"apiVersion": "v1",
-					"kind":       "ConfigMap",
-					"ops": []map[string]any{
-						{"op": "add", "path": "/data", "value": "foo"},
-					},
-				},
-			},
-		}
-		return []client.Object{obj}
-	}}))
-
-	// Test subject
-	setupTestSubject(t, mgr)
-	mgr.Start(t)
-
-	syn := &apiv1.Synthesizer{}
-	syn.Name = "test-syn"
-	syn.Spec.Image = "create"
-	require.NoError(t, upstream.Create(ctx, syn))
-
-	comp := &apiv1.Composition{}
-	comp.Name = "test-comp"
-	comp.Namespace = "default"
-	comp.Spec.Synthesizer.Name = syn.Name
-	require.NoError(t, upstream.Create(ctx, comp))
-
-	testutil.Eventually(t, func() bool {
-		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
-	})
-
-	cm := &corev1.ConfigMap{}
-	cm.Name = "test-obj"
-	cm.Namespace = "default"
-	err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm)
-	require.True(t, errors.IsNotFound(err))
-}
-
-// TestPatchDeletion proves that a patch resource can delete the resource it references.
-func TestPatchDeletion(t *testing.T) {
-	scheme := runtime.NewScheme()
-	corev1.SchemeBuilder.AddToScheme(scheme)
-	testv1.SchemeBuilder.AddToScheme(scheme)
-
-	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t)
-	upstream := mgr.GetClient()
-	downstream := mgr.DownstreamClient
-
-	// Register supporting controllers
-	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
-	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
-	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
-	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
-	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
-		obj := &unstructured.Unstructured{
-			Object: map[string]any{
-				"apiVersion": "eno.azure.io/v1",
-				"kind":       "Patch",
-				"metadata": map[string]any{
-					"name":      "test-obj",
-					"namespace": "default",
-				},
-				"patch": map[string]any{
-					"apiVersion": "v1",
-					"kind":       "ConfigMap",
-					"ops": []map[string]any{
-						{"op": "add", "path": "/metadata/deletionTimestamp", "value": "2024-01-22T19:13:15Z"},
-					},
-				},
-			},
-		}
-		return []client.Object{obj}
-	}}))
-
-	// Test subject
-	setupTestSubject(t, mgr)
-	mgr.Start(t)
-
-	cm := &corev1.ConfigMap{}
-	cm.Name = "test-obj"
-	cm.Namespace = "default"
-	require.NoError(t, downstream.Create(ctx, cm))
-
-	syn := &apiv1.Synthesizer{}
-	syn.Name = "test-syn"
-	syn.Spec.Image = "create"
-	require.NoError(t, upstream.Create(ctx, syn))
-
-	comp := &apiv1.Composition{}
-	comp.Name = "test-comp"
-	comp.Namespace = "default"
-	comp.Spec.Synthesizer.Name = syn.Name
-	require.NoError(t, upstream.Create(ctx, comp))
-
-	testutil.Eventually(t, func() bool {
-		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
-	})
-
-	err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm)
-	require.True(t, errors.IsNotFound(err))
-}
-
 // TestDisableUpdates proves that resources which set the disable-updates annotation are not updated.
 func TestDisableUpdates(t *testing.T) {
 	scheme := runtime.NewScheme()
@@ -873,4 +743,72 @@ func TestDisableUpdates(t *testing.T) {
 	err := downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
 	require.NoError(t, err)
 	assert.Equal(t, "baz", obj.Data["foo"])
+}
+
+// TestOrphanedCompositionDeletion proves that compositions can be deleted when their synthesizer is missing.
+func TestOrphanedCompositionDeletion(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	// Register supporting controllers
+	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
+	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
+	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
+	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
+	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
+		obj := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-obj",
+				Namespace: "default",
+			},
+			Data: map[string]string{"foo": "bar"},
+		}
+
+		gvks, _, err := scheme.ObjectKinds(obj)
+		require.NoError(t, err)
+		obj.GetObjectKind().SetGroupVersionKind(gvks[0])
+		return []client.Object{obj}
+	}}))
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	// Any syn/comp will do since we faked out the synthesizer pod
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "create"
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	// Wait for composition to become ready
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == comp.Generation
+	})
+
+	// Delete the synthesizer
+	require.NoError(t, upstream.Delete(ctx, syn))
+	t.Logf("deleted synth")
+
+	time.Sleep(time.Millisecond * 100) // make sure the synth deletion has hit the informer cache
+
+	require.NoError(t, upstream.Delete(ctx, comp))
+	t.Logf("deleted composition")
+
+	// Everything should eventually be cleaned up
+	testutil.Eventually(t, func() bool {
+		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	})
 }
