@@ -21,6 +21,7 @@ type SynthesizerList struct {
 // - eno.azure.io/disable-updates: Ensure that the resource exists but never update it. Useful for populating resources you expect another user/process to mutate.
 // - eno.azure.io/readiness: CEL expression used to assert that the resource is ready. More details below.
 // - eno.azure.io/readiness-*: Same as above, allows for multiple readiness checks. All checks must pass for the resource to be considered ready.
+// - eno.azure.io/readiness-group: (int, default: 0) Eno will not create or update this resource until all resoruces in lower-valued groups have become ready.
 //
 // Readiness expressions can return either bool or a Kubernetes condition struct.
 // If a condition is returned it will be used as the resource's readiness time, otherwise the controller will use wallclock time at the first moment it noticed the truthy value.

@@ -26,12 +26,19 @@ type Cache struct {
 	mut                         sync.Mutex
 	resources                   map[SynthesisRef]*resources
 	synthesisUUIDsByComposition map[types.NamespacedName][]string
+	byIndex                     map[sliceIndex]*Resource
 }
 
 // resources contains a set of indexed resources scoped to a single Composition
 type resources struct {
 	ByRef            map[resource.Ref]*Resource
 	ByReadinessGroup *redblacktree.Tree[uint, []*Resource]
+}
+
+type sliceIndex struct {
+	Index     int
+	SliceName string
+	Namespace string
 }
 
 func NewCache(client client.Client) *Cache {
@@ -44,6 +51,7 @@ func NewCache(client client.Client) *Cache {
 		renv:                        renv,
 		resources:                   make(map[SynthesisRef]*resources),
 		synthesisUUIDsByComposition: make(map[types.NamespacedName][]string),
+		byIndex:                     make(map[sliceIndex]*resource.Resource),
 	}
 }
 
@@ -64,11 +72,11 @@ func (c *Cache) Get(ctx context.Context, comp *SynthesisRef, ref *resource.Ref) 
 	return res, ok
 }
 
-func (c *Cache) RangeByReadinessGroup(ctx context.Context, comp *SynthesisRef, group uint, dir int) []*Resource {
+func (c *Cache) RangeByReadinessGroup(ctx context.Context, comp *SynthesisRef, group uint, dir RangeDirection) []*Resource {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	if group == 0 && dir == -1 {
+	if group == 0 && !dir {
 		return nil
 	}
 
@@ -83,7 +91,7 @@ func (c *Cache) RangeByReadinessGroup(ctx context.Context, comp *SynthesisRef, g
 	}
 
 	// If we're adjacent...
-	if dir > 0 {
+	if dir {
 		if node.Right != nil {
 			return node.Right.Value
 		}
@@ -94,7 +102,7 @@ func (c *Cache) RangeByReadinessGroup(ctx context.Context, comp *SynthesisRef, g
 	}
 
 	// ...otherwise we need to find it
-	if dir > 0 {
+	if dir {
 		node, ok = resources.ByReadinessGroup.Ceiling(group + 1)
 	} else {
 		node, ok = resources.ByReadinessGroup.Floor(group - 1)
@@ -104,6 +112,18 @@ func (c *Cache) RangeByReadinessGroup(ctx context.Context, comp *SynthesisRef, g
 	}
 
 	return node.Value
+}
+
+func (c *Cache) getByIndex(idx *sliceIndex) (*Resource, bool) {
+	c.mut.Lock()
+	defer c.mut.Unlock()
+
+	res, ok := c.byIndex[*idx]
+	if !ok {
+		return nil, false
+	}
+
+	return res, ok
 }
 
 // hasSynthesis returns true when the cache contains the resulting resources of the given synthesis.
@@ -163,6 +183,7 @@ func (c *Cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 				return nil, nil, fmt.Errorf("building resource at index %d of slice %s: %w", i, slice.Name, err)
 			}
 			resources.ByRef[res.Ref] = res
+			c.byIndex[sliceIndex{Index: i, SliceName: slice.Name, Namespace: slice.Namespace}] = res
 
 			current, _ := resources.ByReadinessGroup.Get(res.ReadinessGroup)
 			resources.ByReadinessGroup.Put(res.ReadinessGroup, append(current, res))
