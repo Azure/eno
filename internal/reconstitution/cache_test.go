@@ -287,39 +287,39 @@ func TestCacheRangeByReadinessGroup(t *testing.T) {
 	require.NoError(t, err)
 
 	// Ranging backwards from 0 should never return anything
-	refs := c.RangeByReadinessGroup(ctx, compRef, 0, -1)
+	refs := c.RangeByReadinessGroup(ctx, compRef, 0, RangeDesc)
 	assert.Equal(t, []string{}, reqsToNames(refs))
 
 	// Ranging forwards after all groups should not return anything
-	refs = c.RangeByReadinessGroup(ctx, compRef, 100, 1)
+	refs = c.RangeByReadinessGroup(ctx, compRef, 100, RangeAsc)
 	assert.Equal(t, []string{}, reqsToNames(refs))
 
 	// Prove synthesis refs are honored
-	refs = c.RangeByReadinessGroup(ctx, &SynthesisRef{CompositionName: "nope"}, 1, 1)
+	refs = c.RangeByReadinessGroup(ctx, &SynthesisRef{CompositionName: "nope"}, 1, RangeAsc)
 	assert.Equal(t, []string{}, reqsToNames(refs))
 
-	refs = c.RangeByReadinessGroup(ctx, &SynthesisRef{CompositionName: "nope"}, 1, -1)
+	refs = c.RangeByReadinessGroup(ctx, &SynthesisRef{CompositionName: "nope"}, 1, RangeDesc)
 	assert.Equal(t, []string{}, reqsToNames(refs))
 
 	// This node doesn't exist in the tree, this isn't possible at runtime
-	refs = c.RangeByReadinessGroup(ctx, compRef, 100, -1)
+	refs = c.RangeByReadinessGroup(ctx, compRef, 100, RangeDesc)
 	assert.Equal(t, []string{}, reqsToNames(refs))
 
 	// Ranging forwards returns all resources in the next group, but not groups after that
-	refs = c.RangeByReadinessGroup(ctx, compRef, 0, 1)
+	refs = c.RangeByReadinessGroup(ctx, compRef, 0, RangeAsc)
 	assert.Equal(t, []string{"group-1", "group-also-1"}, reqsToNames(refs))
 
-	refs = c.RangeByReadinessGroup(ctx, compRef, 1, 1)
+	refs = c.RangeByReadinessGroup(ctx, compRef, 1, RangeAsc)
 	assert.Equal(t, []string{"group-3"}, reqsToNames(refs))
 
-	refs = c.RangeByReadinessGroup(ctx, compRef, 3, 1)
+	refs = c.RangeByReadinessGroup(ctx, compRef, 3, RangeAsc)
 	assert.Equal(t, []string{}, reqsToNames(refs))
 
 	// Ranging backwards returns all resources in the previous group, but not groups before that
-	refs = c.RangeByReadinessGroup(ctx, compRef, 1, -1)
+	refs = c.RangeByReadinessGroup(ctx, compRef, 1, RangeDesc)
 	assert.Equal(t, []string{"default-group"}, reqsToNames(refs))
 
-	refs = c.RangeByReadinessGroup(ctx, compRef, 3, -1)
+	refs = c.RangeByReadinessGroup(ctx, compRef, 3, RangeDesc)
 	assert.Equal(t, []string{"group-1", "group-also-1"}, reqsToNames(refs))
 }
 

@@ -150,7 +150,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	// Evaluate the readiness of resources in the previous readiness group
 	if (status == nil || !status.Reconciled) && !resource.Deleted() {
-		dependencies := c.resourceClient.RangeByReadinessGroup(ctx, synRef, resource.ReadinessGroup, -1)
+		dependencies := c.resourceClient.RangeByReadinessGroup(ctx, synRef, resource.ReadinessGroup, reconstitution.RangeDesc)
 		for _, dep := range dependencies {
 			slice := &apiv1.ResourceSlice{}
 			err = c.client.Get(ctx, dep.ManifestRef.Slice, slice)

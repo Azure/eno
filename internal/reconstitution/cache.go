@@ -72,11 +72,11 @@ func (c *Cache) Get(ctx context.Context, comp *SynthesisRef, ref *resource.Ref) 
 	return res, ok
 }
 
-func (c *Cache) RangeByReadinessGroup(ctx context.Context, comp *SynthesisRef, group uint, dir int) []*Resource {
+func (c *Cache) RangeByReadinessGroup(ctx context.Context, comp *SynthesisRef, group uint, dir RangeDirection) []*Resource {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	if group == 0 && dir == -1 {
+	if group == 0 && !dir {
 		return nil
 	}
 
@@ -91,7 +91,7 @@ func (c *Cache) RangeByReadinessGroup(ctx context.Context, comp *SynthesisRef, g
 	}
 
 	// If we're adjacent...
-	if dir > 0 {
+	if dir {
 		if node.Right != nil {
 			return node.Right.Value
 		}
@@ -102,7 +102,7 @@ func (c *Cache) RangeByReadinessGroup(ctx context.Context, comp *SynthesisRef, g
 	}
 
 	// ...otherwise we need to find it
-	if dir > 0 {
+	if dir {
 		node, ok = resources.ByReadinessGroup.Ceiling(group + 1)
 	} else {
 		node, ok = resources.ByReadinessGroup.Floor(group - 1)
