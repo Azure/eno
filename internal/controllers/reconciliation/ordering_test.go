@@ -2,6 +2,7 @@ package reconciliation
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"strconv"
 	"testing"
@@ -13,11 +14,14 @@ import (
 	"github.com/Azure/eno/internal/controllers/rollout"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/testutil"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -141,4 +145,91 @@ func TestReadinessGroups(t *testing.T) {
 		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		return errors.IsNotFound(err)
 	})
+}
+
+func TestCRDOrdering(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	// Register supporting controllers
+	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
+	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
+	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
+	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
+	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
+		crdFixture := "fixtures/crd-runtimetest.yaml"
+		if s.Spec.Image == "updated" {
+			crdFixture = "fixtures/crd-runtimetest-extra-property.yaml"
+		}
+
+		crd := &unstructured.Unstructured{}
+		crdBytes, err := os.ReadFile(crdFixture)
+		require.NoError(t, err)
+		require.NoError(t, yaml.Unmarshal(crdBytes, &crd.Object))
+
+		cr := &unstructured.Unstructured{}
+		cr.SetName("test-obj")
+		cr.SetNamespace("default")
+		cr.SetKind("RuntimeTest")
+		cr.SetAPIVersion("enotest.azure.io/v1")
+		cr.Object["spec"] = map[string]any{"values": []map[string]any{{"int": 123}}}
+
+		if s.Spec.Image == "updated" {
+			cr.Object["spec"].(map[string]any)["addedValue"] = 234
+		}
+
+		return []client.Object{cr, crd}
+	}}))
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "create"
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	// Wait for the initial creation
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
+
+	// Update the CR and CRD to add a new property - it should exist after the next reconciliation
+	// If we didn't order the writes correctly the CR update would succeed with a warning without populating the new (not yet existing) property.
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+		syn.Spec.Image = "updated"
+		return upstream.Update(ctx, syn)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
+
+	cr := &unstructured.Unstructured{}
+	cr.SetName("test-obj")
+	cr.SetNamespace("default")
+	cr.SetKind("RuntimeTest")
+	cr.SetAPIVersion("enotest.azure.io/v1")
+	err = mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cr), cr)
+	require.NoError(t, err)
+
+	val, _, _ := unstructured.NestedInt64(cr.Object, "spec", "addedValue")
+	assert.Equal(t, int64(234), val)
 }

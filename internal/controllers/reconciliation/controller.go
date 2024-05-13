@@ -122,6 +122,32 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		}
 	}
 
+	// CRDs must be reconciled before any CRs that use the type they define.
+	// For initial creation just failing and retrying will eventually converge but updates are tricky
+	// since unknown properties sent from clients are ignored by apiserver.
+	// i.e. ordering is necessary to handle adding a new property and populating it in the same synthesis.
+	crdResource, ok := c.resourceClient.GetDefiningCRD(ctx, synRef, resource.GVK.GroupKind())
+	if ok {
+		slice := &apiv1.ResourceSlice{}
+		err = c.client.Get(ctx, crdResource.ManifestRef.Slice, slice)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
+		}
+		status := crdResource.FindStatus(slice)
+		if status == nil || status.Ready == nil {
+			logger.V(1).Info("skipping because the CRD that defines this resource type isn't ready")
+			return ctrl.Result{}, nil
+		}
+
+		// apiserver doesn't "close the loop" on CRD loading, so there is no way to know
+		// when CRDs are actually ready. This normally only takes a couple of milliseconds
+		// but we round up to a full second here to be safe.
+		if delta := time.Second - time.Since(status.Ready.Time); delta > 0 {
+			logger.V(1).Info("deferring until the defining CRD has been ready for 1 second")
+			return ctrl.Result{RequeueAfter: delta}, nil
+		}
+	}
+
 	// Fetch the current resource
 	current, hasChanged, err := c.getCurrent(ctx, resource)
 	if client.IgnoreNotFound(err) != nil {

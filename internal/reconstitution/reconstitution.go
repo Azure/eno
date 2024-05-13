@@ -5,6 +5,7 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/resource"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
@@ -20,6 +21,7 @@ type Reconciler interface {
 type Client interface {
 	Get(ctx context.Context, syn *SynthesisRef, res *resource.Ref) (*resource.Resource, bool)
 	RangeByReadinessGroup(ctx context.Context, syn *SynthesisRef, group uint, dir RangeDirection) []*Resource
+	GetDefiningCRD(ctx context.Context, syn *SynthesisRef, gk schema.GroupKind) (*Resource, bool)
 }
 
 type RangeDirection bool

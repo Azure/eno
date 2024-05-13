@@ -53,6 +53,9 @@ type Resource struct {
 	Patch             jsonpatch.Patch
 	DisableUpdates    bool
 	ReadinessGroup    uint
+
+	// DefinedGroupKind is set on CRDs to represent the resource type they define.
+	DefinedGroupKind *schema.GroupKind
 }
 
 func (r *Resource) Deleted() bool {
@@ -165,6 +168,12 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 		res.GVK.Version = gv.Version
 		res.GVK.Kind = obj.Patch.Kind
 		res.Patch = obj.Patch.Ops
+	}
+
+	if res.GVK.Group == "apiextensions.k8s.io" && res.GVK.Kind == "CustomResourceDefinition" {
+		res.DefinedGroupKind = &schema.GroupKind{}
+		res.DefinedGroupKind.Group, _, _ = unstructured.NestedString(parsed.Object, "spec", "group")
+		res.DefinedGroupKind.Kind, _, _ = unstructured.NestedString(parsed.Object, "spec", "names", "kind")
 	}
 
 	anno := parsed.GetAnnotations()
