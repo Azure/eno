@@ -148,10 +148,7 @@ func TestReadinessGroups(t *testing.T) {
 }
 
 func TestCRDOrdering(t *testing.T) {
-	scheme := runtime.NewScheme()
-	corev1.SchemeBuilder.AddToScheme(scheme)
-	testv1.SchemeBuilder.AddToScheme(scheme)
-
+	testutil.AtLeastVersion(t, 16) // don't bother to support the old v1beta1 crd api
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
