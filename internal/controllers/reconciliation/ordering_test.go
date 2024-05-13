@@ -148,7 +148,10 @@ func TestReadinessGroups(t *testing.T) {
 }
 
 func TestCRDOrdering(t *testing.T) {
-	testutil.AtLeastVersion(t, 16) // don't bother to support the old v1beta1 crd api
+	if !testutil.AtLeastVersion(t, 16) {
+		t.Skipf("test does not support the old v1beta1 crd api")
+		return
+	}
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
