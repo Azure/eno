@@ -188,6 +188,10 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN typ
 		return false
 	}
 	err = w.client.Status().Patch(ctx, slice, client.RawPatch(types.JSONPatchType, patchJson))
+	if errors.IsNotFound(err) {
+		logger.V(1).Info("resource slice deleted - dropping buffered status updates")
+		return true
+	}
 	if err != nil {
 		logger.Error(err, "unable to update resource slice")
 		return false

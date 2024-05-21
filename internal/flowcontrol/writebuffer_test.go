@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -124,6 +126,32 @@ func TestResourceSliceStatusUpdateMissingSlice(t *testing.T) {
 
 	// Slice 404 drops the event and does not retry.
 	// Prevents a deadlock of this queue item.
+	w.processQueueItem(ctx)
+	w.processQueueItem(ctx)
+	assert.Equal(t, 0, w.queue.Len())
+}
+
+// TestResourceSliceStatusUpdateDeletingSlice is identical to TestResourceSliceStatusUpdateDeletingSlice
+// except the resource slice still exists in the informer because it or its namespace is being deleted.
+func TestResourceSliceStatusUpdateDeletingSlice(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{SubResourcePatch: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+		return k8serrors.NewNotFound(schema.GroupResource{}, "anything")
+	}})
+	w := NewResourceSliceWriteBuffer(cli, 0, 1)
+
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-slice-1"
+	slice.Spec.Resources = make([]apiv1.Manifest, 3)
+	slice.Status.Resources = make([]apiv1.ResourceState, 3)
+	slice.Status.Resources[1].Reconciled = true // already accounted for
+	require.NoError(t, cli.Create(ctx, slice))
+
+	req := &resource.ManifestRef{}
+	req.Slice.Name = slice.Name
+	w.PatchStatusAsync(ctx, req, setReconciled())
+
+	// Status update 404s, drops the event, and does not retry
 	w.processQueueItem(ctx)
 	w.processQueueItem(ctx)
 	assert.Equal(t, 0, w.queue.Len())
