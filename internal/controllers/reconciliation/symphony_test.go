@@ -161,6 +161,77 @@ func TestSymphonyIntegrationNamespaceIsolation(t *testing.T) {
 	require.Len(t, comps.Items, 1)
 }
 
+func TestSymphonyIntegrationTerminatingNS(t *testing.T) {
+	ctx, upstream := symphonyIntegrationSuite(t)
+
+	// Create test namespace.
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test"}}
+	require.NoError(t, upstream.Create(ctx, ns))
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "anything"
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	syn2 := &apiv1.Synthesizer{}
+	syn2.Name = "test-syn-2"
+	syn2.Spec.Image = "anything"
+	require.NoError(t, upstream.Create(ctx, syn2))
+
+	symph := &apiv1.Symphony{}
+	symph.Name = "test-comp"
+	symph.Namespace = "default"
+	symph.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: syn.Name}}}
+	require.NoError(t, upstream.Create(ctx, symph))
+
+	testutil.Eventually(t, func() bool {
+		upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph)
+		if symph.Status.Reconciled == nil || symph.Status.ObservedGeneration != symph.Generation {
+			return false
+		}
+
+		comps := &apiv1.CompositionList{}
+		upstream.List(ctx, comps, client.InNamespace(symph.Namespace))
+		return len(comps.Items) == 1
+	})
+
+	// Mark the namespace as terminating.
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		require.NoError(t, upstream.Get(ctx, client.ObjectKeyFromObject(ns), ns))
+		ns.Status.Phase = corev1.NamespaceTerminating
+		return upstream.Update(ctx, ns)
+	})
+	require.NoError(t, err)
+
+	// Wait for informers to catch up.
+	time.Sleep(time.Millisecond * 100)
+
+	// After the ns is marked as terminating no more compositions should be created.
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		require.NoError(t, upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph))
+		symph.Spec.Variations = append(symph.Spec.Variations, apiv1.Variation{
+			Synthesizer: apiv1.SynthesizerRef{Name: syn2.Name},
+		})
+		return upstream.Update(ctx, symph)
+	})
+	require.NoError(t, err)
+
+	// No other reliable way of ensuring the controller does runs through its loops :(
+	time.Sleep(time.Millisecond * 100)
+	comps := &apiv1.CompositionList{}
+	upstream.List(ctx, comps)
+	require.Len(t, comps.Items, 1)
+
+	// Ensure that the compositions and the symphony are cleaned up.
+	require.NoError(t, upstream.Delete(ctx, symph))
+	testutil.Eventually(t, func() bool {
+		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph))
+	})
+	comps = &apiv1.CompositionList{}
+	upstream.List(ctx, comps)
+	require.Empty(t, comps.Items)
+}
+
 func symphonyIntegrationSuite(t *testing.T) (context.Context, client.Client) {
 	scheme := runtime.NewScheme()
 	corev1.SchemeBuilder.AddToScheme(scheme)
