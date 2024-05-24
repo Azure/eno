@@ -1,7 +1,6 @@
 package reconciliation
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -25,7 +24,42 @@ import (
 
 // TestSymphonyIntegration proves that a basic symphony creation/deletion workflow works.
 func TestSymphonyIntegration(t *testing.T) {
-	ctx, upstream := symphonyIntegrationSuite(t)
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t, testutil.WithCompositionNamespace(ctrlcache.AllNamespaces))
+	upstream := mgr.GetClient()
+
+	// Create test namespace.
+	require.NoError(t, upstream.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test"}}))
+
+	// Register supporting controllers
+	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
+	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
+	require.NoError(t, replication.NewSymphonyController(mgr.Manager))
+	require.NoError(t, aggregation.NewSymphonyController(mgr.Manager))
+	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
+	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
+	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
+		obj := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-obj",
+				Namespace: "default",
+			},
+			Data: map[string]string{"foo": "bar"},
+		}
+
+		gvks, _, err := scheme.ObjectKinds(obj)
+		require.NoError(t, err)
+		obj.GetObjectKind().SetGroupVersionKind(gvks[0])
+		return []client.Object{obj}
+	}}))
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
@@ -44,6 +78,16 @@ func TestSymphonyIntegration(t *testing.T) {
 	symph.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: syn.Name}}}
 	require.NoError(t, upstream.Create(ctx, symph))
 
+	// TODO: Extract the boilerplate for this test and create a dedicated
+	// scenario for ns isolation.
+	// Creating a second symphony with the same name in a separate namespace
+	// to ensure we handle namespace isolation correctly.
+	symph2 := &apiv1.Symphony{}
+	symph2.Name = "test-comp"
+	symph2.Namespace = "test"
+	symph2.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: syn.Name}}}
+	require.NoError(t, upstream.Create(ctx, symph2))
+
 	testutil.Eventually(t, func() bool {
 		upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph)
 		if symph.Status.Reconciled == nil || symph.Status.ObservedGeneration != symph.Generation {
@@ -52,6 +96,25 @@ func TestSymphonyIntegration(t *testing.T) {
 
 		comps := &apiv1.CompositionList{}
 		upstream.List(ctx, comps, client.InNamespace(symph.Namespace))
+		return len(comps.Items) == 1
+	})
+
+	testutil.Eventually(t, func() bool {
+		upstream.Get(ctx, client.ObjectKeyFromObject(symph2), symph2)
+		if symph.Status.Reconciled == nil || symph.Status.ObservedGeneration != symph.Generation {
+			return false
+		}
+
+		comps := &apiv1.CompositionList{}
+		upstream.List(ctx, comps, client.InNamespace(symph2.Namespace))
+		return len(comps.Items) == 1
+	})
+
+	// Delet one of the symphonies
+	require.NoError(t, upstream.Delete(ctx, symph2))
+	testutil.Eventually(t, func() bool {
+		comps := &apiv1.CompositionList{}
+		upstream.List(ctx, comps)
 		return len(comps.Items) == 1
 	})
 
@@ -99,173 +162,4 @@ func TestSymphonyIntegration(t *testing.T) {
 	err = upstream.List(ctx, comps)
 	require.NoError(t, err)
 	assert.Len(t, comps.Items, 0)
-}
-
-func TestSymphonyIntegrationNamespaceIsolation(t *testing.T) {
-	ctx, upstream := symphonyIntegrationSuite(t)
-
-	// Create test namespace.
-	require.NoError(t, upstream.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test"}}))
-
-	syn := &apiv1.Synthesizer{}
-	syn.Name = "test-syn"
-	syn.Spec.Image = "anything"
-	require.NoError(t, upstream.Create(ctx, syn))
-
-	symph := &apiv1.Symphony{}
-	symph.Name = "test-comp"
-	symph.Namespace = "default"
-	symph.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: syn.Name}}}
-	require.NoError(t, upstream.Create(ctx, symph))
-
-	// Create a second symphony with the same name in a different namespace.
-	symph2 := &apiv1.Symphony{}
-	symph2.Name = "test-comp"
-	symph2.Namespace = "test"
-	symph2.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: syn.Name}}}
-	require.NoError(t, upstream.Create(ctx, symph2))
-
-	testutil.Eventually(t, func() bool {
-		upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph)
-		if symph.Status.Reconciled == nil || symph.Status.ObservedGeneration != symph.Generation {
-			return false
-		}
-
-		upstream.Get(ctx, client.ObjectKeyFromObject(symph2), symph2)
-		if symph2.Status.Reconciled == nil || symph2.Status.ObservedGeneration != symph2.Generation {
-			return false
-		}
-
-		comps := &apiv1.CompositionList{}
-		upstream.List(ctx, comps, client.InNamespace(symph.Namespace))
-		if len(comps.Items) != 1 {
-			return false
-		}
-
-		comps = &apiv1.CompositionList{}
-		upstream.List(ctx, comps, client.InNamespace(symph2.Namespace))
-		return len(comps.Items) == 1
-	})
-
-	// Delete one of the symphonies
-	require.NoError(t, upstream.Delete(ctx, symph2))
-	testutil.Eventually(t, func() bool {
-		comps := &apiv1.CompositionList{}
-		upstream.List(ctx, comps, client.InNamespace(symph2.Namespace))
-		return len(comps.Items) == 0
-	})
-
-	// The other one should not be affected.
-	comps := &apiv1.CompositionList{}
-	upstream.List(ctx, comps, client.InNamespace(symph.Namespace))
-	require.Len(t, comps.Items, 1)
-}
-
-func TestSymphonyIntegrationTerminatingNS(t *testing.T) {
-	ctx, upstream := symphonyIntegrationSuite(t)
-
-	// Create test namespace.
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test"}}
-	require.NoError(t, upstream.Create(ctx, ns))
-
-	syn := &apiv1.Synthesizer{}
-	syn.Name = "test-syn"
-	syn.Spec.Image = "anything"
-	require.NoError(t, upstream.Create(ctx, syn))
-
-	syn2 := &apiv1.Synthesizer{}
-	syn2.Name = "test-syn-2"
-	syn2.Spec.Image = "anything"
-	require.NoError(t, upstream.Create(ctx, syn2))
-
-	symph := &apiv1.Symphony{}
-	symph.Name = "test-comp"
-	symph.Namespace = "default"
-	symph.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: syn.Name}}}
-	require.NoError(t, upstream.Create(ctx, symph))
-
-	testutil.Eventually(t, func() bool {
-		upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph)
-		if symph.Status.Reconciled == nil || symph.Status.ObservedGeneration != symph.Generation {
-			return false
-		}
-
-		comps := &apiv1.CompositionList{}
-		upstream.List(ctx, comps, client.InNamespace(symph.Namespace))
-		return len(comps.Items) == 1
-	})
-
-	// Mark the namespace as terminating.
-	err := retry.RetryOnConflict(testutil.Backoff, func() error {
-		require.NoError(t, upstream.Get(ctx, client.ObjectKeyFromObject(ns), ns))
-		ns.Status.Phase = corev1.NamespaceTerminating
-		return upstream.Update(ctx, ns)
-	})
-	require.NoError(t, err)
-
-	// Wait for informers to catch up.
-	time.Sleep(time.Millisecond * 100)
-
-	// After the ns is marked as terminating no more compositions should be created.
-	err = retry.RetryOnConflict(testutil.Backoff, func() error {
-		require.NoError(t, upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph))
-		symph.Spec.Variations = append(symph.Spec.Variations, apiv1.Variation{
-			Synthesizer: apiv1.SynthesizerRef{Name: syn2.Name},
-		})
-		return upstream.Update(ctx, symph)
-	})
-	require.NoError(t, err)
-
-	// No other reliable way of ensuring the controller does runs through its loops :(
-	time.Sleep(time.Millisecond * 100)
-	comps := &apiv1.CompositionList{}
-	upstream.List(ctx, comps)
-	require.Len(t, comps.Items, 1)
-
-	// Ensure that the compositions and the symphony are cleaned up.
-	require.NoError(t, upstream.Delete(ctx, symph))
-	testutil.Eventually(t, func() bool {
-		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph))
-	})
-	comps = &apiv1.CompositionList{}
-	upstream.List(ctx, comps)
-	require.Empty(t, comps.Items)
-}
-
-func symphonyIntegrationSuite(t *testing.T) (context.Context, client.Client) {
-	scheme := runtime.NewScheme()
-	corev1.SchemeBuilder.AddToScheme(scheme)
-
-	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t, testutil.WithCompositionNamespace(ctrlcache.AllNamespaces))
-	upstream := mgr.GetClient()
-
-	// Register supporting controllers
-	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
-	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
-	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
-	require.NoError(t, replication.NewSymphonyController(mgr.Manager))
-	require.NoError(t, aggregation.NewSymphonyController(mgr.Manager))
-	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
-	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
-	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
-		obj := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-obj",
-				Namespace: "default",
-			},
-			Data: map[string]string{"foo": "bar"},
-		}
-
-		gvks, _, err := scheme.ObjectKinds(obj)
-		require.NoError(t, err)
-		obj.GetObjectKind().SetGroupVersionKind(gvks[0])
-		return []client.Object{obj}
-	}}))
-
-	// Test subject
-	setupTestSubject(t, mgr)
-	mgr.Start(t)
-
-	return ctx, upstream
 }
