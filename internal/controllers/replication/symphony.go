@@ -9,7 +9,9 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -65,7 +67,7 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, nil
 	}
 
-	// We reconcile both "forward" and in "reverse" i.e. creating/updateing and deleting.
+	// We reconcile both "forward" and in "reverse" i.e. creating/updating and deleting.
 	// The two stages are broken up for the sake of minimizing and documenting state flowing between them.
 	// Any changes cause the controller to return early and catch the next watch event as is expected from controllers.
 	existingBySynthName, modified, err := c.reconcileReverse(ctx, symph, existing)
@@ -193,6 +195,10 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		}
 
 		err = c.client.Create(ctx, comp)
+		if k8serrors.IsForbidden(err) && k8serrors.HasStatusCause(err, corev1.NamespaceTerminatingCause) {
+			logger.V(0).Info("skipping composition creation because the namespace is being terminated", "compositionName", comp.Name, "compositionNamespace", comp.Namespace)
+			return false, nil
+		}
 		if err != nil {
 			return false, fmt.Errorf("creating composition: %w", err)
 		}
