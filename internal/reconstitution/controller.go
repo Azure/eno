@@ -95,6 +95,11 @@ func (r *controller) populateCache(ctx context.Context, comp *apiv1.Composition,
 		return nil, nil
 	}
 
+	if synthesis.UUID == "" {
+		logger.V(1).Info("refusing to fill cache because synthesis doesn't have a UUID")
+		return nil, nil
+	}
+
 	logger = logger.WithValues("synthesisCompositionGeneration", synthesis.ObservedCompositionGeneration)
 	ctx = logr.NewContext(ctx, logger)
 	if r.Cache.hasSynthesis(comp, synthesis) {

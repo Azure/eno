@@ -322,7 +322,10 @@ func swapStates(comp *apiv1.Composition, syn *apiv1.Synthesizer) {
 }
 
 func shouldSwapStates(comp *apiv1.Composition) bool {
-	return comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation
+	// synthesize when:
+	// - the spec has changed since last synthesis
+	// - synthesis is complete, but the uuid is missing
+	return comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation || (comp.Status.CurrentSynthesis.Synthesized != nil && comp.Status.CurrentSynthesis.UUID == "")
 }
 
 func shouldBackOffPodCreation(comp *apiv1.Composition) bool {
