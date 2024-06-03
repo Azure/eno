@@ -24,6 +24,12 @@ type Config struct {
 	SliceCreationQPS  float64
 	PodNamespace      string
 	PodServiceAccount string
+
+	TaintTolerationKey   string
+	TaintTolerationValue string
+
+	NodeAffinityKey   string
+	NodeAffinityValue string
 }
 
 type podLifecycleController struct {
