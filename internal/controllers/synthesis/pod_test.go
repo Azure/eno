@@ -35,6 +35,7 @@ var newPodTests = []struct {
 		Assert: func(t *testing.T, p *corev1.Pod) {
 			require.NotNil(t, p.Spec.Affinity.NodeAffinity)
 			assert.Equal(t, corev1.NodeSelectorOpIn, p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[0].Operator)
+			assert.Equal(t, []string{"bar"}, p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[0].Values)
 		},
 	},
 	{
@@ -46,6 +47,7 @@ var newPodTests = []struct {
 		Assert: func(t *testing.T, p *corev1.Pod) {
 			require.Len(t, p.Spec.Tolerations, 1)
 			assert.Equal(t, corev1.TolerationOpEqual, p.Spec.Tolerations[0].Operator)
+			assert.Equal(t, "bar", p.Spec.Tolerations[0].Value)
 		},
 	},
 	{
