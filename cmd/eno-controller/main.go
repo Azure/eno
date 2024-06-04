@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-logr/zapr"
@@ -32,6 +33,8 @@ func run() error {
 		debugLogging    bool
 		watchdogThres   time.Duration
 		rolloutCooldown time.Duration
+		taintToleration string
+		nodeAffinity    string
 		synconf         = &synthesis.Config{}
 
 		mgrOpts = &manager.Options{
@@ -44,8 +47,13 @@ func run() error {
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.DurationVar(&watchdogThres, "watchdog-threshold", time.Minute*5, "How long before the watchdog considers a mid-transition resource to be stuck")
 	flag.DurationVar(&rolloutCooldown, "rollout-cooldown", time.Second*2, "How long before an update to related resource (synthesizer, bindings, etc.) will trigger a composition's re-synthesis")
+	flag.StringVar(&taintToleration, "taint-toleration", "", "Node NoSchedule taint to be tolerated by synthesizer pods e.g. taintKey=taintValue to match on value, just taintKey to match on presence of the taint")
+	flag.StringVar(&nodeAffinity, "node-affinity", "", "Synthesizer pods will be created with this required node affinity expression e.g. labelKey=labelValue to match on value, just labelKey to match on presence of the label")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
+
+	synconf.NodeAffinityKey, synconf.NodeAffinityValue = parseKeyValue(nodeAffinity)
+	synconf.TaintTolerationKey, synconf.TaintTolerationValue = parseKeyValue(taintToleration)
 
 	if synconf.PodNamespace == "" {
 		return fmt.Errorf("a value is required in --synthesizer-pod-namespace or POD_NAMESPACE")
@@ -108,4 +116,13 @@ func run() error {
 	}
 
 	return mgr.Start(ctx)
+}
+
+func parseKeyValue(input string) (key, val string) {
+	chunks := strings.SplitN(input, "=", 2)
+	key = chunks[0]
+	if len(chunks) > 1 {
+		val = chunks[1]
+	}
+	return
 }
