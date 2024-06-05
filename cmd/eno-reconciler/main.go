@@ -79,6 +79,7 @@ func run() error {
 		mgrOpts.CompositionSelector = labels.Everything()
 	}
 
+	mgrOpts.Rest.UserAgent = "eno-reconciler"
 	mgr, err := manager.NewReconciler(logger, mgrOpts)
 	if err != nil {
 		return fmt.Errorf("constructing manager: %w", err)

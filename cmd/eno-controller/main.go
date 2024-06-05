@@ -70,6 +70,7 @@ func run() error {
 	}
 	logger := zapr.NewLogger(zl)
 
+	mgrOpts.Rest.UserAgent = "eno-controller"
 	mgr, err := manager.New(logger, mgrOpts)
 	if err != nil {
 		return fmt.Errorf("constructing manager: %w", err)
