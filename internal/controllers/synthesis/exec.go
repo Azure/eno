@@ -2,6 +2,7 @@ package synthesis
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -12,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -107,16 +109,16 @@ func (c *execController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 	}
 
-	// Reset the debounce annotation after synthesis, since the process likely took
-	// longer than the initial debounce period
+	// Best case, the debounce period starts _after_ synthesis.
+	// We also set prior to synthesis to cover the worst case that we crashed before reaching here.
+	//
+	// The patch does not include a resource version so there is no concurrency control,
+	// which makes sense because it's likely the pod has changed since the start of synthesis,
+	// but in ways that cannot conflict since we're the only writer of this annotation.
 	pod.Annotations[execStartAnnotation] = time.Now().UTC().Format(time.RFC3339)
-	err = c.client.Update(ctx, pod)
+	err = c.client.Patch(ctx, pod, client.RawPatch(types.MergePatchType, newExecStartAnnotationPatch(nil)))
 	if err != nil {
-		// Default to waiting the full debounce period on errors, since it's
-		// likely that the error represents a conflict that would otherwise
-		// result in immediately re-entering the loop and skipping the debounce
-		logger.Error(err, "error while setting pod annotation after synthesis")
-		return ctrl.Result{RequeueAfter: debouncePeriod}, nil
+		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
@@ -146,8 +148,7 @@ func (c *execController) shouldDebounce(ctx context.Context, pod *corev1.Pod) (t
 	}
 
 	// Set the annotation and continue
-	pod.Annotations[execStartAnnotation] = time.Now().UTC().Format(time.RFC3339)
-	err = c.client.Update(ctx, pod)
+	err = c.client.Patch(ctx, pod, client.RawPatch(types.MergePatchType, newExecStartAnnotationPatch(pod)))
 	if err != nil {
 		return 0, false, fmt.Errorf("writing annotation: %w", err)
 	}
@@ -270,4 +271,29 @@ func truncateString(str string, length int) (out string) {
 		}
 	}
 	return out + "[truncated]"
+}
+
+// newExecStartAnnotationPatch constructs a merge patch that sets the execStartAnnotation.
+//
+// If a pod is given its resource version will be specified in the patch.
+// In this case the write will fail if the pod has changed since being read.
+// Otherwise the patch will always succeed.
+func newExecStartAnnotationPatch(pod *corev1.Pod) []byte {
+	obj := struct {
+		Metadata struct {
+			Annotations     map[string]string `json:"annotations"`
+			ResourceVersion string            `json:"resourceVersion,omitempty"`
+		} `json:"metadata"`
+	}{}
+
+	obj.Metadata.Annotations = map[string]string{execStartAnnotation: time.Now().UTC().Format(time.RFC3339)}
+	if pod != nil {
+		obj.Metadata.ResourceVersion = pod.ResourceVersion
+	}
+
+	patch, err := json.Marshal(&obj)
+	if err != nil {
+		panic(fmt.Sprintf("impossible json marshaling error: %s", err))
+	}
+	return patch
 }
