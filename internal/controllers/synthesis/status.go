@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -48,29 +49,30 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return c.removeFinalizer(ctx, pod)
 	}
 
-	comp := &apiv1.Composition{}
-	comp.Name = pod.GetLabels()[manager.CompositionNameLabelKey]
-	comp.Namespace = pod.GetLabels()[manager.CompositionNamespaceLabelKey]
-	err = c.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-	if errors.IsNotFound(err) {
-		if pod.DeletionTimestamp != nil {
-			return ctrl.Result{}, nil // nothing to do
+	var shouldRequeue bool
+	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		comp := &apiv1.Composition{}
+		comp.Name = pod.GetLabels()[manager.CompositionNameLabelKey]
+		comp.Namespace = pod.GetLabels()[manager.CompositionNamespaceLabelKey]
+		err = c.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if errors.IsNotFound(err) {
+			return nil
 		}
-		logger.V(0).Info("composition was deleted unexpectedly - releasing synthesizer pod")
-		return c.removeFinalizer(ctx, pod)
-	}
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("getting composition resource: %w", err)
-	}
-	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace)
+		if err != nil {
+			return fmt.Errorf("getting composition resource: %w", err)
+		}
+		logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace)
 
-	// Update composition status
-	var (
-		compGen, _ = strconv.ParseInt(pod.Annotations["eno.azure.io/composition-generation"], 10, 0)
-		synGen, _  = strconv.ParseInt(pod.Annotations["eno.azure.io/synthesizer-generation"], 10, 0)
-	)
-	logger = logger.WithValues("synthesizerGeneration", synGen, "compositionGeneration", compGen)
-	if shouldWriteStatus(comp, compGen, pod.CreationTimestamp) {
+		var (
+			compGen, _ = strconv.ParseInt(pod.Annotations["eno.azure.io/composition-generation"], 10, 0)
+			synGen, _  = strconv.ParseInt(pod.Annotations["eno.azure.io/synthesizer-generation"], 10, 0)
+		)
+		logger = logger.WithValues("synthesizerGeneration", synGen, "compositionGeneration", compGen)
+
+		if !shouldWriteStatus(comp, compGen, pod.CreationTimestamp) {
+			return nil
+		}
+
 		if comp.Status.CurrentSynthesis == nil {
 			comp.Status.CurrentSynthesis = &apiv1.Synthesis{}
 		}
@@ -79,9 +81,17 @@ func (c *statusController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		comp.Status.CurrentSynthesis.Attempts++
 
 		if err := c.client.Status().Update(ctx, comp); err != nil {
-			return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
+			return fmt.Errorf("updating composition status: %w", err)
 		}
 		logger.V(0).Info("wrote synthesizer pod metadata to composition")
+
+		shouldRequeue = true
+		return nil
+	})
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if shouldRequeue {
 		return ctrl.Result{Requeue: true}, nil
 	}
 
