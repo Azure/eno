@@ -129,7 +129,7 @@ func (c *symphonyController) reconcileReverse(ctx context.Context, symph *apiv1.
 			return nil, false, fmt.Errorf("cleaning up composition: %w", err)
 		}
 
-		logger.V(0).Info("deleted composition because its synthesizer was removed from the set", "compositionName", comp.Name, "compositionNamespace", comp.Namespace)
+		logger.V(0).Info("deleted composition because its variation was removed from the symphony", "compositionName", comp.Name, "compositionNamespace", comp.Namespace)
 		return existingBySynthName, true, nil
 	}
 
@@ -203,7 +203,7 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 			return false, fmt.Errorf("creating composition: %w", err)
 		}
 
-		logger.V(0).Info("created composition for the set", "compositionName", comp.Name, "compositionNamespace", comp.Namespace)
+		logger.V(0).Info("created composition for symphony", "compositionName", comp.Name, "compositionNamespace", comp.Namespace)
 		return true, nil
 	}
 
