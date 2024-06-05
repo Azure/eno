@@ -153,6 +153,9 @@ func (r *controller) HandleReadinessTransition(ctx context.Context, req ctrl.Req
 
 		synRef := &SynthesisRef{CompositionName: owner.Name, Namespace: req.Namespace, UUID: slice.Spec.SynthesisUUID}
 		resources := r.Cache.RangeByReadinessGroup(ctx, synRef, res.ReadinessGroup, RangeAsc)
+		if res.DefinedGroupKind != nil {
+			resources = append(resources, r.Cache.getByGK(synRef, *res.DefinedGroupKind)...)
+		}
 		for _, res := range resources {
 			// TODO: This can be optimized by skipping the Add call if `res` is already ready
 			r.queue.Add(Request{

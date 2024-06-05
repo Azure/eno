@@ -144,6 +144,40 @@ var newResourceTests = []struct {
 			assert.True(t, r.patchSetsDeletionTimestamp())
 		},
 	},
+	{
+		Name: "crd",
+		Manifest: `{
+			"apiVersion": "apiextensions.k8s.io/v1",
+			"kind": "CustomResourceDefinition",
+			"metadata": {
+				"name": "foo"
+			},
+			"spec": {
+				"group": "test-group",
+				"names": {
+					"kind": "TestKind"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Resource) {
+			assert.Equal(t, schema.GroupVersionKind{Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition"}, r.GVK)
+			assert.Equal(t, &schema.GroupKind{Group: "test-group", Kind: "TestKind"}, r.DefinedGroupKind)
+		},
+	},
+	{
+		Name: "empty-crd",
+		Manifest: `{
+			"apiVersion": "apiextensions.k8s.io/v1",
+			"kind": "CustomResourceDefinition",
+			"metadata": {
+				"name": "foo"
+			}
+		}`,
+		Assert: func(t *testing.T, r *Resource) {
+			assert.Equal(t, schema.GroupVersionKind{Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition"}, r.GVK)
+			assert.Equal(t, &schema.GroupKind{Group: "", Kind: ""}, r.DefinedGroupKind)
+		},
+	},
 }
 
 func TestNewResource(t *testing.T) {

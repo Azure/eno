@@ -405,3 +405,13 @@ func (e *ExecConn) Synthesize(ctx context.Context, syn *apiv1.Synthesizer, pod *
 
 	return bytes.NewBuffer(js), nil
 }
+
+func AtLeastVersion(t *testing.T, minor int) bool {
+	versionStr := os.Getenv("DOWNSTREAM_VERSION_MINOR")
+	if versionStr == "" {
+		return true // fail open for local dev
+	}
+
+	version, _ := strconv.Atoi(versionStr)
+	return version >= minor
+}

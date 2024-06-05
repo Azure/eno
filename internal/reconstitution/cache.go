@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -33,6 +34,8 @@ type Cache struct {
 type resources struct {
 	ByRef            map[resource.Ref]*Resource
 	ByReadinessGroup *redblacktree.Tree[uint, []*Resource]
+	ByGroupKind      map[schema.GroupKind][]*Resource
+	CrdsByGroupKind  map[schema.GroupKind]*Resource
 }
 
 type sliceIndex struct {
@@ -114,6 +117,23 @@ func (c *Cache) RangeByReadinessGroup(ctx context.Context, comp *SynthesisRef, g
 	return node.Value
 }
 
+func (c *Cache) GetDefiningCRD(ctx context.Context, syn *SynthesisRef, gk schema.GroupKind) (*Resource, bool) {
+	c.mut.Lock()
+	defer c.mut.Unlock()
+
+	resources, ok := c.resources[*syn]
+	if !ok {
+		return nil, false
+	}
+
+	res, ok := resources.CrdsByGroupKind[gk]
+	if !ok {
+		return nil, false
+	}
+
+	return res, true
+}
+
 func (c *Cache) getByIndex(idx *sliceIndex) (*Resource, bool) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
@@ -124,6 +144,18 @@ func (c *Cache) getByIndex(idx *sliceIndex) (*Resource, bool) {
 	}
 
 	return res, ok
+}
+
+func (c *Cache) getByGK(syn *SynthesisRef, gk schema.GroupKind) []*Resource {
+	c.mut.Lock()
+	defer c.mut.Unlock()
+
+	res, ok := c.resources[*syn]
+	if !ok {
+		return nil
+	}
+
+	return res.ByGroupKind[gk]
 }
 
 // hasSynthesis returns true when the cache contains the resulting resources of the given synthesis.
@@ -169,6 +201,8 @@ func (c *Cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 	resources := &resources{
 		ByRef:            map[resource.Ref]*Resource{},
 		ByReadinessGroup: redblacktree.New[uint, []*Resource](),
+		ByGroupKind:      map[schema.GroupKind][]*resource.Resource{},
+		CrdsByGroupKind:  map[schema.GroupKind]*resource.Resource{},
 	}
 	requests := []*Request{}
 	for _, slice := range items {
@@ -184,6 +218,7 @@ func (c *Cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 			}
 			resources.ByRef[res.Ref] = res
 			c.byIndex[sliceIndex{Index: i, SliceName: slice.Name, Namespace: slice.Namespace}] = res
+			resources.ByGroupKind[res.GVK.GroupKind()] = append(resources.ByGroupKind[res.GVK.GroupKind()], res)
 
 			current, _ := resources.ByReadinessGroup.Get(res.ReadinessGroup)
 			resources.ByReadinessGroup.Put(res.ReadinessGroup, append(current, res))
@@ -192,6 +227,10 @@ func (c *Cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 				Resource:    res.Ref,
 				Composition: types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace},
 			})
+
+			if res.DefinedGroupKind != nil {
+				resources.CrdsByGroupKind[*res.DefinedGroupKind] = res
+			}
 		}
 	}
 
