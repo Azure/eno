@@ -23,6 +23,8 @@ import (
 
 // TODO: Retries
 
+// TODO: Switch error handling signal
+
 // maxSliceJsonBytes is the max sum of a resource slice's manifests.
 const maxSliceJsonBytes = 1024 * 512
 
@@ -237,8 +239,15 @@ func NewExecHandler() SynthesizerHandle {
 			command = []string{"synthesize"}
 		}
 
+		if s.Spec.ExecTimeout != nil {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, s.Spec.ExecTimeout.Duration)
+			defer cancel()
+		}
+
 		cmd := exec.CommandContext(ctx, command[0], command[1:]...)
-		cmd.Env = []string{}   // no env
+		cmd.Env = []string{} // no env
+		cmd.Stdin = stdin
 		cmd.Stderr = os.Stdout // logger uses stderr, so use stdout to avoid race condition
 		cmd.Stdout = stdout
 		err = cmd.Run()
