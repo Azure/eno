@@ -23,6 +23,7 @@ import (
 var minimalTestConfig = &Config{
 	SliceCreationQPS: 15,
 	PodNamespace:     "default",
+	ExecutorImage:    "test-image",
 }
 
 // TestControllerHappyPath proves that pods are eventually created and synthesizers are eventually executed

@@ -120,14 +120,17 @@ var shouldDeletePodTests = []struct {
 		Pods: []corev1.Pod{{
 			ObjectMeta: metav1.ObjectMeta{
 				CreationTimestamp: metav1.Now(),
-				Annotations: map[string]string{
-					"eno.azure.io/composition-generation": "2",
+				Labels: map[string]string{
+					"eno.azure.io/synthesis-uuid": "test-uuid",
 				},
 			},
 		}},
 		Composition: &apiv1.Composition{
-			ObjectMeta: metav1.ObjectMeta{
-				Generation: 2,
+			ObjectMeta: metav1.ObjectMeta{},
+			Status: apiv1.CompositionStatus{
+				CurrentSynthesis: &apiv1.Synthesis{
+					UUID: "test-uuid",
+				},
 			},
 		},
 		Synth: &apiv1.Synthesizer{

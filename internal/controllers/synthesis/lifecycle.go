@@ -22,6 +22,7 @@ import (
 
 type Config struct {
 	SliceCreationQPS  float64
+	ExecutorImage     string
 	PodNamespace      string
 	PodServiceAccount string
 
@@ -288,7 +289,7 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 			return logger, &pod, true
 		}
 
-		isCurrent := podDerivedFrom(comp, &pod)
+		isCurrent := podIsCurrent(comp, &pod)
 		if !isCurrent {
 			logger = logger.WithValues("reason", "Superseded")
 			return logger, &pod, true

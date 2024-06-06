@@ -19,6 +19,7 @@ import (
 var testSynthesisConfig = &synthesis.Config{
 	SliceCreationQPS: 15,
 	PodNamespace:     "default",
+	ExecutorImage:    "test-image",
 }
 
 // TestSynthesizerRollout proves that synthesizer changes are eventually rolled out across their compositions.

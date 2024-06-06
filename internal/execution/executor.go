@@ -1,8 +1,12 @@
 package execution
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -23,17 +27,18 @@ import (
 const maxSliceJsonBytes = 1024 * 512
 
 type Env struct {
-	// TODO: Avoid discovery in this process?
 	CompositionName      string
 	CompositionNamespace string
 	SynthesisUUID        string
 }
 
 func LoadEnv() *Env {
-	return &Env{} // TODO
+	return &Env{
+		CompositionName:      os.Getenv("COMPOSITION_NAME"),
+		CompositionNamespace: os.Getenv("COMPOSITION_NAMESPACE"),
+		SynthesisUUID:        os.Getenv("SYNTHESIS_UUID"),
+	}
 }
-
-type SynthesizerHandle func(context.Context, *apiv1.Synthesizer, *krmv1.ResourceList) (*krmv1.ResourceList, error)
 
 type Executor struct {
 	Reader  client.Reader
@@ -213,4 +218,40 @@ func (e *Executor) updateComposition(ctx context.Context, oldComp *apiv1.Composi
 		logger.V(0).Info("composition status has been updated following successful synthesis")
 		return nil
 	})
+}
+
+type SynthesizerHandle func(context.Context, *apiv1.Synthesizer, *krmv1.ResourceList) (*krmv1.ResourceList, error)
+
+func NewExecHandler() SynthesizerHandle {
+	return func(ctx context.Context, s *apiv1.Synthesizer, rl *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		stdin := &bytes.Buffer{}
+		stdout := &bytes.Buffer{}
+
+		err := json.NewEncoder(stdin).Encode(rl)
+		if err != nil {
+			return nil, err
+		}
+
+		command := s.Spec.Command
+		if len(command) == 0 {
+			command = []string{"synthesize"}
+		}
+
+		cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+		cmd.Env = []string{}   // no env
+		cmd.Stderr = os.Stdout // logger uses stderr, so use stdout to avoid race condition
+		cmd.Stdout = stdout
+		err = cmd.Run()
+		if err != nil {
+			return nil, err
+		}
+
+		output := &krmv1.ResourceList{}
+		err = json.NewDecoder(stdout).Decode(output)
+		if err != nil {
+			return nil, err
+		}
+
+		return output, nil
+	}
 }
