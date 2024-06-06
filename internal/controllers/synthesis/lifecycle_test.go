@@ -1,6 +1,7 @@
 package synthesis
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -10,12 +11,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/testutil"
+	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 )
 
 // TestCompositionDeletion proves that a composition's status is eventually updated to reflect its deletion.
@@ -25,19 +28,22 @@ func TestCompositionDeletion(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, &testutil.ExecConn{
-		Hook: func(s *apiv1.Synthesizer) []client.Object {
-			cm := &corev1.ConfigMap{}
-			cm.APIVersion = "v1"
-			cm.Kind = "ConfigMap"
-			cm.Name = "test"
-			cm.Namespace = "default"
-			return []client.Object{cm}
-		},
-	}))
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]string{
+					"name":      "test",
+					"namespace": "default",
+				},
+			},
+		}}
+		return output, nil
+	})
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
-	require.NoError(t, NewStatusController(mgr.Manager))
 	require.NoError(t, NewSliceCleanupController(mgr.Manager))
 	mgr.Start(t)
 
@@ -91,64 +97,6 @@ func TestCompositionDeletion(t *testing.T) {
 	testutil.Eventually(t, func() bool {
 		return errors.IsNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 	})
-}
-
-// TestPodConcurrencyLimit proves that Eno will not create more than two concurrent pods per composition.
-func TestPodConcurrencyLimit(t *testing.T) {
-	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t)
-	cli := mgr.GetClient()
-
-	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
-	mgr.Start(t)
-
-	syn := &apiv1.Synthesizer{}
-	syn.Name = "test-syn-1"
-	syn.Spec.Image = "initial-image"
-	require.NoError(t, cli.Create(ctx, syn))
-
-	comp := &apiv1.Composition{}
-	comp.Name = "test-comp"
-	comp.Namespace = "default"
-	comp.Spec.Synthesizer.Name = syn.Name
-	require.NoError(t, cli.Create(ctx, comp))
-
-	// Wait for the first pod to be created
-	testutil.Eventually(t, func() bool {
-		pods := &corev1.PodList{}
-		cli.List(ctx, pods)
-		return len(pods.Items) > 0
-	})
-
-	// Change something on the composition
-	err := retry.RetryOnConflict(testutil.Backoff, func() error {
-		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Spec.Bindings = []apiv1.Binding{{Key: "new-binding", Resource: apiv1.ResourceBinding{Name: "test"}}}
-		return cli.Update(ctx, comp)
-	})
-	require.NoError(t, err)
-
-	// Wait for the second pod to be created
-	testutil.Eventually(t, func() bool {
-		pods := &corev1.PodList{}
-		cli.List(ctx, pods)
-		return len(pods.Items) > 1
-	})
-
-	// Change something on the composition again
-	err = retry.RetryOnConflict(testutil.Backoff, func() error {
-		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Spec.Bindings = []apiv1.Binding{{Key: "new-binding", Resource: apiv1.ResourceBinding{Name: "test"}}}
-		return cli.Update(ctx, comp)
-	})
-	require.NoError(t, err)
-
-	// A third pod shouldn't be created
-	time.Sleep(time.Millisecond * 100)
-	pods := &corev1.PodList{}
-	err = cli.List(ctx, pods)
-	require.NoError(t, err)
-	assert.Len(t, pods.Items, 2)
 }
 
 var shouldDeletePodTests = []struct {

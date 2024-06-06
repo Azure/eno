@@ -6,14 +6,6 @@ import (
 )
 
 var (
-	synthesisLatency = prometheus.NewHistogram(
-		prometheus.HistogramOpts{
-			Name:    "eno_synthesis_duration_seconds",
-			Help:    "Samples the time between starting and completing the synthesis of a composition",
-			Buckets: []float64{0.5, 1.0, 2.0, 3.0, 5.0, 8.0, 10.0},
-		},
-	)
-
 	sytheses = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "eno_syntheses_total",
@@ -27,22 +19,8 @@ var (
 			Help: "Pods deleted due to timeout",
 		},
 	)
-
-	resourceSliceWrittenBytes = prometheus.NewCounter(
-		prometheus.CounterOpts{
-			Name: "eno_resource_slice_written_bytes_total",
-			Help: "Manifest bytes written to ResourceSlice resources",
-		},
-	)
-
-	synthesisExecFailures = prometheus.NewCounter(
-		prometheus.CounterOpts{
-			Name: "eno_synthesis_exec_errors_total",
-			Help: "Errors exec'ing into synthesizer pods",
-		},
-	)
 )
 
 func init() {
-	metrics.Registry.MustRegister(synthesisLatency, sytheses, synthesPodRecreations, resourceSliceWrittenBytes, synthesisExecFailures)
+	metrics.Registry.MustRegister(sytheses, synthesPodRecreations)
 }

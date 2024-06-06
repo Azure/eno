@@ -1,6 +1,7 @@
 package reconciliation
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -11,9 +12,10 @@ import (
 	"github.com/Azure/eno/internal/controllers/rollout"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/testutil"
+	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,23 +32,23 @@ func TestBulkRollout(t *testing.T) {
 
 	// Register supporting controllers
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
-	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
-	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
-		obj := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-obj",
-				Namespace: "default",
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+				"data": map[string]string{"image": s.Spec.Image},
 			},
-			Data: map[string]string{"image": s.Spec.Image},
-		}
-
-		gvks, _, err := scheme.ObjectKinds(obj)
-		require.NoError(t, err)
-		obj.GetObjectKind().SetGroupVersionKind(gvks[0])
-		return []client.Object{obj}
-	}}))
+		}}
+		return output, nil
+	})
 
 	// Test subject
 	setupTestSubject(t, mgr)

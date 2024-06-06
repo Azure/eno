@@ -15,7 +15,6 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 	pod := &corev1.Pod{}
 	pod.GenerateName = "synthesis-"
 	pod.Namespace = cfg.PodNamespace
-	pod.Finalizers = []string{"eno.azure.io/cleanup"}
 	pod.Labels = map[string]string{
 		manager.CompositionNameLabelKey:      comp.Name,
 		manager.CompositionNamespaceLabelKey: comp.Namespace,
@@ -23,6 +22,7 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 		"eno.azure.io/synthesis-uuid":        comp.Status.CurrentSynthesis.UUID,
 	}
 	pod.Annotations = map[string]string{
+		// TODO: Remove
 		"eno.azure.io/composition-generation": strconv.FormatInt(comp.Generation, 10),
 		"eno.azure.io/synthesizer-generation": strconv.FormatInt(syn.Generation, 10),
 	}
@@ -47,7 +47,21 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 		Containers: []corev1.Container{{
 			Name:    "synthesizer",
 			Image:   syn.Spec.Image,
-			Command: []string{"sleep", "infinity"},
+			Command: []string{"sleep", "infinity"}, // TODO
+			Env: []corev1.EnvVar{
+				{
+					Name:  "COMPOSITION_NAME",
+					Value: comp.Name,
+				},
+				{
+					Name:  "COMPOSITION_NAMESPACE",
+					Value: comp.Namespace,
+				},
+				{
+					Name:  "SYNTHESIS_UUID",
+					Value: comp.Status.CurrentSynthesis.UUID,
+				},
+			},
 			SecurityContext: &corev1.SecurityContext{
 				AllowPrivilegeEscalation: ptr.To(false),
 				ReadOnlyRootFilesystem:   ptr.To(true),

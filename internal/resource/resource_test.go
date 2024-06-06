@@ -1,12 +1,12 @@
 package resource
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/readiness"
-	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -181,7 +181,7 @@ var newResourceTests = []struct {
 }
 
 func TestNewResource(t *testing.T) {
-	ctx := testutil.NewContext(t)
+	ctx := context.Background()
 	renv, err := readiness.NewEnv()
 	require.NoError(t, err)
 

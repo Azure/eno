@@ -76,24 +76,9 @@ func run() error {
 		return fmt.Errorf("constructing manager: %w", err)
 	}
 
-	synconn, err := synthesis.NewSynthesizerConnection(mgr)
-	if err != nil {
-		return fmt.Errorf("constructing synthesizer connection: %w", err)
-	}
-
-	err = synthesis.NewExecController(mgr, synconf, synconn)
-	if err != nil {
-		return fmt.Errorf("constructing execution controller: %w", err)
-	}
-
 	err = rollout.NewController(mgr, rolloutCooldown)
 	if err != nil {
 		return fmt.Errorf("constructing rollout controller: %w", err)
-	}
-
-	err = synthesis.NewStatusController(mgr)
-	if err != nil {
-		return fmt.Errorf("constructing status controller: %w", err)
 	}
 
 	err = synthesis.NewPodLifecycleController(mgr, synconf)

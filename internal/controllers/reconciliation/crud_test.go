@@ -2,6 +2,7 @@ package reconciliation
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -24,7 +25,9 @@ import (
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
 	"github.com/Azure/eno/internal/controllers/rollout"
 	"github.com/Azure/eno/internal/controllers/synthesis"
+	"github.com/Azure/eno/internal/execution"
 	"github.com/Azure/eno/internal/testutil"
+	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 )
 
 func init() {
@@ -214,9 +217,8 @@ func TestCRUD(t *testing.T) {
 
 			// Register supporting controllers
 			require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
-			require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 			require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
-			require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: newSliceBuilder(t, scheme, &test)}))
+			testutil.WithFakeExecutor(t, mgr, newSliceBuilder(t, scheme, &test))
 
 			// Test subject
 			// Only enable rediscoverWhenNotFound on k8s versions that can support it.
@@ -321,8 +323,10 @@ func setImage(t *testing.T, upstream client.Client, syn *apiv1.Synthesizer, imag
 	require.NoError(t, err)
 }
 
-func newSliceBuilder(t *testing.T, scheme *runtime.Scheme, test *crudTestCase) func(s *apiv1.Synthesizer) []client.Object {
-	return func(s *apiv1.Synthesizer) []client.Object {
+func newSliceBuilder(t *testing.T, scheme *runtime.Scheme, test *crudTestCase) execution.SynthesizerHandle {
+	return func(ctx context.Context, s *apiv1.Synthesizer, rl *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+
 		var obj client.Object
 		switch s.Spec.Image {
 		case "create":
@@ -332,7 +336,7 @@ func newSliceBuilder(t *testing.T, scheme *runtime.Scheme, test *crudTestCase) f
 			obj = test.Updated
 			setPhase(obj, "update")
 		case "delete":
-			return []client.Object{}
+			return output, nil
 		default:
 			t.Fatalf("unknown pseudo-image: %s", s.Spec.Image)
 		}
@@ -341,7 +345,12 @@ func newSliceBuilder(t *testing.T, scheme *runtime.Scheme, test *crudTestCase) f
 		require.NoError(t, err)
 		obj.GetObjectKind().SetGroupVersionKind(gvks[0])
 
-		return []client.Object{obj}
+		uobj := &unstructured.Unstructured{}
+		raw, _ := json.Marshal(obj)
+		json.Unmarshal(raw, uobj)
+
+		output.Items = append(output.Items, uobj)
+		return output, nil
 	}
 }
 
@@ -376,25 +385,25 @@ func TestReconcileInterval(t *testing.T) {
 
 	// Register supporting controllers
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
-	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
-	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
-		obj := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-obj",
-				Namespace: "default",
-				Annotations: map[string]string{
-					"eno.azure.io/reconcile-interval": "100ms",
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]string{
+						"eno.azure.io/reconcile-interval": "100ms",
+					},
 				},
+				"data": map[string]string{"foo": "bar"},
 			},
-			Data: map[string]string{"foo": "bar"},
-		}
-
-		gvks, _, err := scheme.ObjectKinds(obj)
-		require.NoError(t, err)
-		obj.GetObjectKind().SetGroupVersionKind(gvks[0])
-		return []client.Object{obj}
-	}}))
+		}}
+		return output, nil
+	})
 
 	// Test subject
 	setupTestSubject(t, mgr)
@@ -421,11 +430,11 @@ func TestReconcileInterval(t *testing.T) {
 		return err == nil
 	})
 
-	// Update the service from outside of Eno
+	// Update the object from outside of Eno
 	obj.Data["foo"] = "baz"
 	require.NoError(t, downstream.Update(ctx, obj))
 
-	// The service should eventually converge with the desired state
+	// The object should eventually converge with the desired state
 	testutil.Eventually(t, func() bool {
 		err := downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
 		return err == nil && obj.Data["foo"] == "bar"
@@ -446,27 +455,26 @@ func TestReconcileCacheRace(t *testing.T) {
 
 	// Register supporting controllers
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
-	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	renderN := 0
-	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
-		renderN++
-		obj := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-obj",
-				Namespace: "default",
-				Annotations: map[string]string{
-					"eno.azure.io/reconcile-interval": "50ms",
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]string{
+						"eno.azure.io/reconcile-interval": "50ms",
+					},
 				},
+				"data": map[string]string{"foo": fmt.Sprintf("rendered-%d-times", renderN)},
 			},
-			Data: map[string]string{"foo": fmt.Sprintf("rendered-%d-times", renderN)},
-		}
-
-		gvks, _, err := scheme.ObjectKinds(obj)
-		require.NoError(t, err)
-		obj.GetObjectKind().SetGroupVersionKind(gvks[0])
-		return []client.Object{obj}
-	}}))
+		}}
+		return output, nil
+	})
 
 	// Test subject
 	setupTestSubject(t, mgr)
@@ -519,27 +527,27 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 
 	// Register supporting controllers
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
-	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
-	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
-		obj := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-obj",
-				Namespace: "default",
-				Annotations: map[string]string{
-					"eno.azure.io/reconcile-interval": "100ms",
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]string{
+						"eno.azure.io/reconcile-interval": "100ms",
+					},
 				},
+				"data": map[string]string{"foo": "bar"},
 			},
-			Data: map[string]string{"foo": "bar"},
-		}
-
-		gvks, _, err := scheme.ObjectKinds(obj)
-		require.NoError(t, err)
-		obj.GetObjectKind().SetGroupVersionKind(gvks[0])
-		return []client.Object{obj}
-	}}))
+		}}
+		return output, nil
+	})
 
 	// Test subject
 	setupTestSubject(t, mgr)
@@ -593,7 +601,6 @@ func TestMidSynthesisDeletion(t *testing.T) {
 
 	// Register supporting controllers
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
-	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
 
@@ -688,26 +695,26 @@ func TestDisableUpdates(t *testing.T) {
 
 	// Register supporting controllers
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
-	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
-	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
-		obj := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-obj",
-				Namespace: "default",
-				Annotations: map[string]string{
-					"eno.azure.io/reconcile-interval": "10ms",
-					"eno.azure.io/disable-updates":    "true",
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]string{
+						"eno.azure.io/reconcile-interval": "10ms",
+						"eno.azure.io/disable-updates":    "true",
+					},
 				},
+				"data": map[string]string{"foo": "bar"},
 			},
-			Data: map[string]string{"foo": "bar"},
-		}
-
-		gvks, _, err := scheme.ObjectKinds(obj)
-		require.NoError(t, err)
-		obj.GetObjectKind().SetGroupVersionKind(gvks[0])
-		return []client.Object{obj}
-	}}))
+		}}
+		return output, nil
+	})
 
 	// Test subject
 	setupTestSubject(t, mgr)
@@ -757,24 +764,24 @@ func TestOrphanedCompositionDeletion(t *testing.T) {
 
 	// Register supporting controllers
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
-	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
-	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
-		obj := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-obj",
-				Namespace: "default",
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+				"data": map[string]string{"foo": "bar"},
 			},
-			Data: map[string]string{"foo": "bar"},
-		}
-
-		gvks, _, err := scheme.ObjectKinds(obj)
-		require.NoError(t, err)
-		obj.GetObjectKind().SetGroupVersionKind(gvks[0])
-		return []client.Object{obj}
-	}}))
+		}}
+		return output, nil
+	})
 
 	// Test subject
 	setupTestSubject(t, mgr)

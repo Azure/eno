@@ -129,7 +129,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Swap the state to prepare for resynthesis if needed
 	if shouldSwapStates(comp) {
-		swapStates(comp, syn)
+		swapStates(comp)
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
 		}
@@ -181,7 +181,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	for _, pod := range pods.Items {
 		if pod.DeletionTimestamp == nil {
-			logger.V(0).Info(fmt.Sprintf("refusing to create new synthesizer pod because the pod %q already exists and has not been deleted", pod.Name))
+			logger.V(1).Info(fmt.Sprintf("refusing to create new synthesizer pod because the pod %q already exists and has not been deleted", pod.Name))
 			return ctrl.Result{}, nil
 		}
 	}
@@ -194,6 +194,14 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	logger.V(0).Info("created synthesizer pod", "podName", pod.Name)
 	sytheses.Inc()
+
+	// This metadata is optional - it's safe for the process to crash before reaching this point
+	comp.Status.CurrentSynthesis.Attempts++
+	comp.Status.CurrentSynthesis.PodCreation = &pod.CreationTimestamp
+	err = c.client.Status().Update(ctx, comp)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("updating composition status after synthesizer pod creation: %w", err)
+	}
 
 	return ctrl.Result{}, nil
 }
@@ -309,13 +317,7 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 	return logger, nil, false
 }
 
-func swapStates(comp *apiv1.Composition, syn *apiv1.Synthesizer) {
-	// Reset the current attempts counter when the composition or synthesizer have changed or synthesis was successful
-	attempts := 0
-	if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized == nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == comp.Generation && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation {
-		attempts = comp.Status.CurrentSynthesis.Attempts
-	}
-
+func swapStates(comp *apiv1.Composition) {
 	// If the previous state has been synthesized but not the current, keep the previous to avoid orphaning deleted resources
 	if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil {
 		comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
@@ -323,7 +325,6 @@ func swapStates(comp *apiv1.Composition, syn *apiv1.Synthesizer) {
 
 	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
 		ObservedCompositionGeneration: comp.Generation,
-		Attempts:                      attempts,
 	}
 }
 
