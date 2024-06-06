@@ -165,13 +165,15 @@ func runExecutor() {
 
 	scheme, err := v1.SchemeBuilder.Build()
 	if err != nil {
-		panic(err)
+		logger.Error(err, "building scheme")
+		os.Exit(1)
 	}
 	client, err := client.New(rc, client.Options{
 		Scheme: scheme,
 	})
 	if err != nil {
-		panic(err)
+		logger.Error(err, "building client")
+		os.Exit(1)
 	}
 
 	e := &execution.Executor{
@@ -179,8 +181,9 @@ func runExecutor() {
 		Writer:  client,
 		Handler: execution.NewExecHandler(),
 	}
-	err = e.Synthesize(ctx, execution.LoadEnv()) // TODO: Should this maybe not return an error?
+	err = e.Synthesize(ctx, execution.LoadEnv())
 	if err != nil {
-		panic(err)
+		logger.Error(err, "synthesizing")
+		os.Exit(1)
 	}
 }
