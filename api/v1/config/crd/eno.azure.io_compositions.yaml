@@ -18,6 +18,12 @@ spec:
     - jsonPath: .spec.synthesizer.name
       name: Synthesizer
       type: string
+    - jsonPath: .status.simplified.status
+      name: Status
+      type: string
+    - jsonPath: .status.simplified.error
+      name: Error
+      type: string
     name: v1
     schema:
       openAPIV3Schema:
@@ -263,6 +269,13 @@ spec:
                     description: |-
                       A random UUID scoped to this particular synthesis operation.
                       Used internally for strict ordering semantics.
+                    type: string
+                type: object
+              simplified:
+                properties:
+                  error:
+                    type: string
+                  status:
                     type: string
                 type: object
             type: object
