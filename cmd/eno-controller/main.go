@@ -12,8 +12,10 @@ import (
 	"github.com/go-logr/zapr"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	v1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/controllers/aggregation"
@@ -163,6 +165,15 @@ func runExecutor() {
 	logger := zapr.NewLogger(zl)
 	ctx := logr.NewContext(ctrl.SetupSignalHandler(), logger)
 
+	hc, err := rest.HTTPClientFor(rc)
+	if err != nil {
+		panic(err)
+	}
+	rm, err := apiutil.NewDynamicRESTMapper(rc, hc)
+	if err != nil {
+		panic(err)
+	}
+
 	scheme, err := v1.SchemeBuilder.Build()
 	if err != nil {
 		logger.Error(err, "building scheme")
@@ -170,6 +181,7 @@ func runExecutor() {
 	}
 	client, err := client.New(rc, client.Options{
 		Scheme: scheme,
+		Mapper: rm,
 	})
 	if err != nil {
 		logger.Error(err, "building client")

@@ -130,6 +130,8 @@ spec:
                           type: string
                         kind:
                           type: string
+                        version:
+                          type: string
                       required:
                       - kind
                       type: object

@@ -126,7 +126,7 @@ func TestWithInputs(t *testing.T) {
 	syn.Name = "test-synth"
 	syn.Spec.Refs = []apiv1.Ref{{
 		Key:      "foo",
-		Resource: apiv1.ResourceRef{Kind: "ConfigMap"},
+		Resource: apiv1.ResourceRef{Kind: "ConfigMap", Version: "v1"},
 	}}
 	err = cli.Create(ctx, syn)
 	require.NoError(t, err)
@@ -182,6 +182,84 @@ func TestWithInputs(t *testing.T) {
 	err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 	require.NoError(t, err)
 	assert.NotNil(t, comp.Status.CurrentSynthesis.Synthesized)
+}
+
+func TestWithVersionedInput(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	require.NoError(t, apiv1.SchemeBuilder.AddToScheme(scheme))
+	require.NoError(t, corev1.SchemeBuilder.AddToScheme(scheme))
+
+	cli := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&apiv1.ResourceSlice{}, &apiv1.Composition{}).
+		Build()
+
+	input := &corev1.ConfigMap{}
+	input.Name = "test-input"
+	input.Namespace = "default"
+	input.Annotations = map[string]string{"eno.azure.io/revision": "123"}
+	err := cli.Create(ctx, input)
+	require.NoError(t, err)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-synth"
+	syn.Spec.Refs = []apiv1.Ref{{
+		Key:      "foo",
+		Resource: apiv1.ResourceRef{Kind: "ConfigMap", Group: "", Version: "v1"},
+	}}
+	err = cli.Create(ctx, syn)
+	require.NoError(t, err)
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Bindings = []apiv1.Binding{{
+		Key: "foo",
+		Resource: apiv1.ResourceBinding{
+			Name:      input.Name,
+			Namespace: input.Namespace,
+		},
+	}}
+	comp.Spec.Synthesizer.Name = syn.Name
+	err = cli.Create(ctx, comp)
+	require.NoError(t, err)
+
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+	err = cli.Status().Update(ctx, comp)
+	require.NoError(t, err)
+
+	e := &Executor{
+		Reader: cli,
+		Writer: cli,
+		Handler: func(ctx context.Context, s *apiv1.Synthesizer, rl *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+			out := &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]string{
+						"name":      "test",
+						"namespace": "default",
+					},
+					"data": map[string]string{"foo": "bar"},
+				},
+			}
+			return &krmv1.ResourceList{Items: []*unstructured.Unstructured{out}}, nil
+		},
+	}
+	env := &Env{
+		CompositionName:      comp.Name,
+		CompositionNamespace: comp.Namespace,
+		SynthesisUUID:        comp.Status.CurrentSynthesis.UUID,
+	}
+
+	err = e.Synthesize(ctx, env)
+	require.NoError(t, err)
+
+	err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+	require.NoError(t, err)
+	require.Len(t, comp.Status.CurrentSynthesis.InputRevisions, 1)
+	assert.Equal(t, 123, *comp.Status.CurrentSynthesis.InputRevisions[0].Revision)
 }
 
 func TestExecHandler(t *testing.T) {

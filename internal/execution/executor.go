@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -16,7 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -64,7 +65,7 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 		return fmt.Errorf("fetching synthesizer: %w", err)
 	}
 
-	input, err := e.buildPodInput(comp, syn)
+	input, revs, err := e.buildPodInput(ctx, comp, syn)
 	if err != nil {
 		return fmt.Errorf("building synthesizer input: %w", err)
 	}
@@ -79,10 +80,10 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 		return err
 	}
 
-	return e.updateComposition(ctx, comp, syn, sliceRefs, output)
+	return e.updateComposition(ctx, comp, syn, sliceRefs, revs, output)
 }
 
-func (e *Executor) buildPodInput(comp *apiv1.Composition, syn *apiv1.Synthesizer) (*krmv1.ResourceList, error) {
+func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, syn *apiv1.Synthesizer) (*krmv1.ResourceList, []apiv1.InputRevisions, error) {
 	bindings := map[string]*apiv1.Binding{}
 	for _, b := range comp.Spec.Bindings {
 		b := b
@@ -93,27 +94,35 @@ func (e *Executor) buildPodInput(comp *apiv1.Composition, syn *apiv1.Synthesizer
 		Kind:       krmv1.ResourceListKind,
 		APIVersion: krmv1.SchemeGroupVersion.String(),
 	}
+	revs := []apiv1.InputRevisions{}
 	for _, r := range syn.Spec.Refs {
 		key := r.Key
 		b, ok := bindings[key]
 		if !ok {
-			return nil, fmt.Errorf("input %q is referenced, but not bound", key)
+			return nil, nil, fmt.Errorf("input %q is referenced, but not bound", key)
 		}
-		// TODO: Get the full resource
-		input := apiv1.NewInput(key, apiv1.InputResource{
-			Name:      b.Resource.Name,
-			Namespace: b.Resource.Namespace,
-			Group:     r.Resource.Group,
-			Kind:      r.Resource.Kind,
-		})
-		u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&input)
-		if err != nil {
-			return nil, fmt.Errorf("input %q could not be converted to Unstructured: %w", key, err)
-		}
-		rl.Items = append(rl.Items, &unstructured.Unstructured{Object: u})
 
+		obj := &unstructured.Unstructured{}
+		obj.SetGroupVersionKind(schema.GroupVersionKind{Group: r.Resource.Group, Version: r.Resource.Version, Kind: r.Resource.Kind})
+		obj.SetName(b.Resource.Name)
+		obj.SetNamespace(b.Resource.Namespace)
+		err := e.Reader.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+		if err != nil {
+			return nil, nil, fmt.Errorf("getting resource for ref %q: %w", key, err)
+		}
+		rl.Items = append(rl.Items, obj)
+
+		ir := apiv1.InputRevisions{
+			Key:             key,
+			ResourceVersion: obj.GetResourceVersion(),
+		}
+		if rev, _ := strconv.Atoi(obj.GetAnnotations()["eno.azure.io/revision"]); rev != 0 {
+			ir.Revision = &rev
+		}
+		revs = append(revs, ir)
 	}
-	return rl, nil
+
+	return rl, revs, nil
 }
 
 func (e *Executor) writeSlices(ctx context.Context, comp *apiv1.Composition, rl *krmv1.ResourceList) ([]*apiv1.ResourceSliceRef, error) {
@@ -187,7 +196,7 @@ func (e *Executor) writeResourceSlice(ctx context.Context, slice *apiv1.Resource
 	})
 }
 
-func (e *Executor) updateComposition(ctx context.Context, oldComp *apiv1.Composition, syn *apiv1.Synthesizer, refs []*apiv1.ResourceSliceRef, rl *krmv1.ResourceList) error {
+func (e *Executor) updateComposition(ctx context.Context, oldComp *apiv1.Composition, syn *apiv1.Synthesizer, refs []*apiv1.ResourceSliceRef, revs []apiv1.InputRevisions, rl *krmv1.ResourceList) error {
 	logger := logr.FromContextOrDiscard(ctx)
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		comp := &apiv1.Composition{}
@@ -206,7 +215,7 @@ func (e *Executor) updateComposition(ctx context.Context, oldComp *apiv1.Composi
 		comp.Status.CurrentSynthesis.Synthesized = &now
 		comp.Status.CurrentSynthesis.ResourceSlices = refs
 		comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration = syn.Generation
-
+		comp.Status.CurrentSynthesis.InputRevisions = revs
 		for _, result := range rl.Results {
 			comp.Status.CurrentSynthesis.Results = append(comp.Status.CurrentSynthesis.Results, apiv1.Result{
 				Message:  result.Message,
@@ -215,7 +224,6 @@ func (e *Executor) updateComposition(ctx context.Context, oldComp *apiv1.Composi
 			})
 		}
 
-		// TODO: Write input version metadata
 		err = e.Writer.Status().Update(ctx, comp)
 		if err != nil {
 			return err

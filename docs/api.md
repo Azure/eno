@@ -101,6 +101,24 @@ _Appears in:_
 
 
 
+#### InputRevisions
+
+
+
+
+
+
+
+_Appears in:_
+- [Synthesis](#synthesis)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `key` _string_ |  |  |  |
+| `resourceVersion` _string_ |  |  |  |
+| `revision` _integer_ |  |  |  |
+
+
 
 
 #### Ref
@@ -158,8 +176,9 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `kind` _string_ |  |  |  |
 | `group` _string_ |  |  |  |
+| `version` _string_ |  |  |  |
+| `kind` _string_ |  |  |  |
 
 
 
@@ -267,6 +286,7 @@ _Appears in:_
 | `ready` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ | Time at which the synthesis's reconciled resources became ready. |  |  |
 | `attempts` _integer_ | Counter used internally to calculate back off when retrying failed syntheses. |  |  |
 | `results` _[Result](#result) array_ | Results are passed through opaquely from the synthesizer's KRM function. |  |  |
+| `inputRevisions` _[InputRevisions](#inputrevisions) array_ | InputRevisions contains the versions of the input resources that were used for this synthesis. |  |  |
 
 
 #### Synthesizer

@@ -84,10 +84,19 @@ type Synthesis struct {
 
 	// Results are passed through opaquely from the synthesizer's KRM function.
 	Results []Result `json:"results,omitempty"`
+
+	// InputRevisions contains the versions of the input resources that were used for this synthesis.
+	InputRevisions []InputRevisions `json:"inputRevisions,omitempty"`
 }
 
 type Result struct {
 	Message  string            `json:"message,omitempty"`
 	Severity string            `json:"severity,omitempty"`
 	Tags     map[string]string `json:"tags,omitempty"`
+}
+
+type InputRevisions struct {
+	Key             string `json:"key,omitempty"`
+	ResourceVersion string `json:"resourceVersion,omitempty"`
+	Revision        *int   `json:"revision,omitempty"`
 }

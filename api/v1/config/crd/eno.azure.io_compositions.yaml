@@ -104,6 +104,19 @@ spec:
                     description: Counter used internally to calculate back off when
                       retrying failed syntheses.
                     type: integer
+                  inputRevisions:
+                    description: InputRevisions contains the versions of the input
+                      resources that were used for this synthesis.
+                    items:
+                      properties:
+                        key:
+                          type: string
+                        resourceVersion:
+                          type: string
+                        revision:
+                          type: integer
+                      type: object
+                    type: array
                   observedCompositionGeneration:
                     description: |-
                       The value of the composition's metadata.generation at the time the synthesis began.
@@ -176,6 +189,19 @@ spec:
                     description: Counter used internally to calculate back off when
                       retrying failed syntheses.
                     type: integer
+                  inputRevisions:
+                    description: InputRevisions contains the versions of the input
+                      resources that were used for this synthesis.
+                    items:
+                      properties:
+                        key:
+                          type: string
+                        resourceVersion:
+                          type: string
+                        revision:
+                          type: integer
+                      type: object
+                    type: array
                   observedCompositionGeneration:
                     description: |-
                       The value of the composition's metadata.generation at the time the synthesis began.

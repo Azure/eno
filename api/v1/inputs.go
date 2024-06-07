@@ -78,6 +78,11 @@ type Ref struct {
 // A reference to a resource kind/group.
 type ResourceRef struct {
 	// +required
-	Kind  string `json:"kind"`
 	Group string `json:"group,omitempty"`
+
+	// +required
+	Version string `json:"version,omitempty"`
+
+	// +required
+	Kind string `json:"kind"`
 }
