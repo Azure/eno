@@ -58,7 +58,10 @@ func TestBasics(t *testing.T) {
 					"data": map[string]string{"foo": "bar"},
 				},
 			}
-			return &krmv1.ResourceList{Items: []*unstructured.Unstructured{out}}, nil
+			return &krmv1.ResourceList{
+				Items:   []*unstructured.Unstructured{out},
+				Results: []*krmv1.Result{{Message: "foo", Severity: "error"}},
+			}, nil
 		},
 	}
 	env := &Env{
@@ -75,6 +78,8 @@ func TestBasics(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, comp.Status.CurrentSynthesis.Synthesized)
 	assert.Len(t, comp.Status.CurrentSynthesis.ResourceSlices, 1)
+	require.Len(t, comp.Status.CurrentSynthesis.Results, 1)
+	assert.Equal(t, "foo", comp.Status.CurrentSynthesis.Results[0].Message)
 
 	for _, ref := range comp.Status.CurrentSynthesis.ResourceSlices {
 		slice := &apiv1.ResourceSlice{}

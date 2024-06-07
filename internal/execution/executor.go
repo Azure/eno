@@ -21,10 +21,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// TODO: Retries
-
-// TODO: Switch error handling signal
-
 // maxSliceJsonBytes is the max sum of a resource slice's manifests.
 const maxSliceJsonBytes = 1024 * 512
 
@@ -83,7 +79,7 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 		return err
 	}
 
-	return e.updateComposition(ctx, comp, syn, sliceRefs)
+	return e.updateComposition(ctx, comp, syn, sliceRefs, output)
 }
 
 func (e *Executor) buildPodInput(comp *apiv1.Composition, syn *apiv1.Synthesizer) (*krmv1.ResourceList, error) {
@@ -191,7 +187,7 @@ func (e *Executor) writeResourceSlice(ctx context.Context, slice *apiv1.Resource
 	})
 }
 
-func (e *Executor) updateComposition(ctx context.Context, oldComp *apiv1.Composition, syn *apiv1.Synthesizer, refs []*apiv1.ResourceSliceRef) error {
+func (e *Executor) updateComposition(ctx context.Context, oldComp *apiv1.Composition, syn *apiv1.Synthesizer, refs []*apiv1.ResourceSliceRef, rl *krmv1.ResourceList) error {
 	logger := logr.FromContextOrDiscard(ctx)
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		comp := &apiv1.Composition{}
@@ -210,7 +206,15 @@ func (e *Executor) updateComposition(ctx context.Context, oldComp *apiv1.Composi
 		comp.Status.CurrentSynthesis.Synthesized = &now
 		comp.Status.CurrentSynthesis.ResourceSlices = refs
 		comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration = syn.Generation
-		// TODO: Write results (error, etc.)
+
+		for _, result := range rl.Results {
+			comp.Status.CurrentSynthesis.Results = append(comp.Status.CurrentSynthesis.Results, apiv1.Result{
+				Message:  result.Message,
+				Severity: result.Severity,
+				Tags:     result.Tags,
+			})
+		}
+
 		// TODO: Write input version metadata
 		err = e.Writer.Status().Update(ctx, comp)
 		if err != nil {

@@ -164,6 +164,24 @@ _Appears in:_
 
 
 
+#### Result
+
+
+
+
+
+
+
+_Appears in:_
+- [Synthesis](#synthesis)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `message` _string_ |  |  |  |
+| `severity` _string_ |  |  |  |
+| `tags` _object (keys:string, values:string)_ |  |  |  |
+
+
 #### Symphony
 
 
@@ -248,6 +266,7 @@ _Appears in:_
 | `reconciled` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ | Time at which the synthesis's resources were reconciled into real Kubernetes resources. |  |  |
 | `ready` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ | Time at which the synthesis's reconciled resources became ready. |  |  |
 | `attempts` _integer_ | Counter used internally to calculate back off when retrying failed syntheses. |  |  |
+| `results` _[Result](#result) array_ | Results are passed through opaquely from the synthesizer's KRM function. |  |  |
 
 
 #### Synthesizer

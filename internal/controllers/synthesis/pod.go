@@ -22,6 +22,7 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 
 	pod.Spec = corev1.PodSpec{
 		ServiceAccountName: cfg.PodServiceAccount,
+		RestartPolicy:      corev1.RestartPolicyOnFailure,
 		Affinity: &corev1.Affinity{
 			PodAntiAffinity: &corev1.PodAntiAffinity{
 				PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{{
