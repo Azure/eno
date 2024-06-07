@@ -66,6 +66,7 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 }
 
 func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, syn *apiv1.Synthesizer) (*krmv1.ResourceList, []apiv1.InputRevisions, error) {
+	logger := logr.FromContextOrDiscard(ctx)
 	bindings := map[string]*apiv1.Binding{}
 	for _, b := range comp.Spec.Bindings {
 		b := b
@@ -84,6 +85,8 @@ func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, s
 			return nil, nil, fmt.Errorf("input %q is referenced, but not bound", key)
 		}
 
+		// Get the resource
+		start := time.Now()
 		obj := &unstructured.Unstructured{}
 		obj.SetGroupVersionKind(schema.GroupVersionKind{Group: r.Resource.Group, Version: r.Resource.Version, Kind: r.Resource.Kind})
 		obj.SetName(b.Resource.Name)
@@ -93,7 +96,9 @@ func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, s
 			return nil, nil, fmt.Errorf("getting resource for ref %q: %w", key, err)
 		}
 		rl.Items = append(rl.Items, obj)
+		logger.V(0).Info("retrieved input", "key", key, "latency", time.Since(start).Milliseconds())
 
+		// Store the revision to be written to the synthesis status later
 		ir := apiv1.InputRevisions{
 			Key:             key,
 			ResourceVersion: obj.GetResourceVersion(),
