@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var patchGVK = schema.GroupVersionKind{
@@ -273,4 +274,15 @@ func (l *lastReconciledMeta) ObserveReconciliation() time.Duration {
 
 	l.lastReconciled = &now
 	return latency
+}
+
+func NewInputRevisions(obj client.Object, refKey string) *apiv1.InputRevisions {
+	ir := apiv1.InputRevisions{
+		Key:             refKey,
+		ResourceVersion: obj.GetResourceVersion(),
+	}
+	if rev, _ := strconv.Atoi(obj.GetAnnotations()["eno.azure.io/revision"]); rev != 0 {
+		ir.Revision = &rev
+	}
+	return &ir
 }

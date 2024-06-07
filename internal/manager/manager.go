@@ -164,6 +164,16 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 		if err != nil {
 			return nil, err
 		}
+
+		err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.Composition{}, IdxCompositionsByBinding, indexResourceBindings())
+		if err != nil {
+			return nil, err
+		}
+
+		err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.Synthesizer{}, IdxSynthesizersByRef, indexSynthRefs())
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if isReconciler {
@@ -213,4 +223,10 @@ func NewCompositionToResourceSliceHandler(cli client.Client) handler.EventHandle
 			apply(ctx, rli, de.Object)
 		},
 	}
+}
+
+func SingleEventHandler() handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(handler.MapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+		return []reconcile.Request{{}}
+	}))
 }

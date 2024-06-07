@@ -81,7 +81,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			continue
 		}
 
-		swapStates(&comp)
+		SwapStates(&comp)
 		err = c.client.Status().Update(ctx, &comp)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
@@ -94,7 +94,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	return ctrl.Result{}, nil
 }
 
-func swapStates(comp *apiv1.Composition) {
+func SwapStates(comp *apiv1.Composition) {
 	// If the previous state has been synthesized but not the current, keep the previous to avoid orphaning deleted resources
 	if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil {
 		comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis

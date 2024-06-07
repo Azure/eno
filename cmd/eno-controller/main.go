@@ -22,6 +22,7 @@ import (
 	"github.com/Azure/eno/internal/controllers/replication"
 	"github.com/Azure/eno/internal/controllers/rollout"
 	"github.com/Azure/eno/internal/controllers/synthesis"
+	"github.com/Azure/eno/internal/controllers/watch"
 	"github.com/Azure/eno/internal/controllers/watchdog"
 	"github.com/Azure/eno/internal/execution"
 	"github.com/Azure/eno/internal/manager"
@@ -124,6 +125,11 @@ func runController() error {
 	err = aggregation.NewCompositionController(mgr)
 	if err != nil {
 		return fmt.Errorf("constructing composition status aggregation controller: %w", err)
+	}
+
+	err = watch.NewController(mgr)
+	if err != nil {
+		return fmt.Errorf("constructing watch controller: %w", err)
 	}
 
 	return mgr.Start(ctx)
