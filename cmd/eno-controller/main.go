@@ -121,6 +121,11 @@ func runController() error {
 		return fmt.Errorf("constructing symphony aggregation controller: %w", err)
 	}
 
+	err = aggregation.NewCompositionController(mgr)
+	if err != nil {
+		return fmt.Errorf("constructing composition status aggregation controller: %w", err)
+	}
+
 	return mgr.Start(ctx)
 }
 

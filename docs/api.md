@@ -95,6 +95,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
+| `simplified` _[SimplifiedStatus](#simplifiedstatus)_ |  |  |  |
 | `currentSynthesis` _[Synthesis](#synthesis)_ |  |  |  |
 | `previousSynthesis` _[Synthesis](#synthesis)_ |  |  |  |
 
@@ -199,6 +200,23 @@ _Appears in:_
 | `message` _string_ |  |  |  |
 | `severity` _string_ |  |  |  |
 | `tags` _object (keys:string, values:string)_ |  |  |  |
+
+
+#### SimplifiedStatus
+
+
+
+
+
+
+
+_Appears in:_
+- [CompositionStatus](#compositionstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `status` _string_ |  |  |  |
+| `error` _string_ |  |  |  |
 
 
 #### Symphony

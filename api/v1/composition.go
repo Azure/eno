@@ -25,6 +25,8 @@ type CompositionList struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Synthesizer",type=string,JSONPath=`.spec.synthesizer.name`
+// +kubebuilder:printcolumn:name="Status",type=string,JSONPath=`.status.simplified.status`
+// +kubebuilder:printcolumn:name="Error",type=string,JSONPath=`.status.simplified.error`
 type Composition struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -44,8 +46,14 @@ type CompositionSpec struct {
 }
 
 type CompositionStatus struct {
-	CurrentSynthesis  *Synthesis `json:"currentSynthesis,omitempty"`
-	PreviousSynthesis *Synthesis `json:"previousSynthesis,omitempty"`
+	Simplified        *SimplifiedStatus `json:"simplified,omitempty"`
+	CurrentSynthesis  *Synthesis        `json:"currentSynthesis,omitempty"`
+	PreviousSynthesis *Synthesis        `json:"previousSynthesis,omitempty"`
+}
+
+type SimplifiedStatus struct {
+	Status string `json:"status,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 // A synthesis is the result of synthesizing a composition.
