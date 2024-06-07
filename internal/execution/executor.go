@@ -3,7 +3,6 @@ package execution
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -99,14 +98,7 @@ func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, s
 		logger.V(0).Info("retrieved input", "key", key, "latency", time.Since(start).Milliseconds())
 
 		// Store the revision to be written to the synthesis status later
-		ir := apiv1.InputRevisions{
-			Key:             key,
-			ResourceVersion: obj.GetResourceVersion(),
-		}
-		if rev, _ := strconv.Atoi(obj.GetAnnotations()["eno.azure.io/revision"]); rev != 0 {
-			ir.Revision = &rev
-		}
-		revs = append(revs, ir)
+		revs = append(revs, *resource.NewInputRevisions(obj, key))
 	}
 
 	return rl, revs, nil
