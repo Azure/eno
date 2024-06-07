@@ -1,6 +1,7 @@
 package rollout
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -12,11 +13,13 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/testutil"
+	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 )
 
 var testSynthesisConfig = &synthesis.Config{
 	SliceCreationQPS: 15,
 	PodNamespace:     "default",
+	ExecutorImage:    "test-image",
 }
 
 // TestSynthesizerRollout proves that synthesizer changes are eventually rolled out across their compositions.
@@ -27,8 +30,10 @@ func TestSynthesizerRollout(t *testing.T) {
 
 	require.NoError(t, NewController(mgr.Manager, time.Millisecond*10))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
-	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
-	require.NoError(t, synthesis.NewExecController(mgr.Manager, testSynthesisConfig, &testutil.ExecConn{}))
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		return output, nil
+	})
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -75,8 +80,10 @@ func TestSynthesizerRolloutCooldown(t *testing.T) {
 
 	require.NoError(t, NewController(mgr.Manager, time.Hour))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
-	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
-	require.NoError(t, synthesis.NewExecController(mgr.Manager, testSynthesisConfig, &testutil.ExecConn{}))
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		return output, nil
+	})
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}

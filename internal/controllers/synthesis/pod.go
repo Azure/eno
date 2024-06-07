@@ -1,8 +1,6 @@
 package synthesis
 
 import (
-	"strconv"
-
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -15,20 +13,16 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 	pod := &corev1.Pod{}
 	pod.GenerateName = "synthesis-"
 	pod.Namespace = cfg.PodNamespace
-	pod.Finalizers = []string{"eno.azure.io/cleanup"}
 	pod.Labels = map[string]string{
 		manager.CompositionNameLabelKey:      comp.Name,
 		manager.CompositionNamespaceLabelKey: comp.Namespace,
 		manager.ManagerLabelKey:              manager.ManagerLabelValue,
 		"eno.azure.io/synthesis-uuid":        comp.Status.CurrentSynthesis.UUID,
 	}
-	pod.Annotations = map[string]string{
-		"eno.azure.io/composition-generation": strconv.FormatInt(comp.Generation, 10),
-		"eno.azure.io/synthesizer-generation": strconv.FormatInt(syn.Generation, 10),
-	}
 
 	pod.Spec = corev1.PodSpec{
 		ServiceAccountName: cfg.PodServiceAccount,
+		RestartPolicy:      corev1.RestartPolicyOnFailure,
 		Affinity: &corev1.Affinity{
 			PodAntiAffinity: &corev1.PodAntiAffinity{
 				PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{{
@@ -44,10 +38,37 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 				}},
 			},
 		},
+		InitContainers: []corev1.Container{{
+			Name:    "synth-installer",
+			Image:   cfg.ExecutorImage,
+			Command: []string{"/eno-controller", "install-executor"},
+			VolumeMounts: []corev1.VolumeMount{{
+				Name:      "sharedfs",
+				MountPath: "/eno",
+			}},
+		}},
 		Containers: []corev1.Container{{
-			Name:    "synthesizer",
+			Name:    "executor",
 			Image:   syn.Spec.Image,
-			Command: []string{"sleep", "infinity"},
+			Command: []string{"/eno/executor"},
+			VolumeMounts: []corev1.VolumeMount{{
+				Name:      "sharedfs",
+				MountPath: "/eno",
+			}},
+			Env: []corev1.EnvVar{
+				{
+					Name:  "COMPOSITION_NAME",
+					Value: comp.Name,
+				},
+				{
+					Name:  "COMPOSITION_NAMESPACE",
+					Value: comp.Namespace,
+				},
+				{
+					Name:  "SYNTHESIS_UUID",
+					Value: comp.Status.CurrentSynthesis.UUID,
+				},
+			},
 			SecurityContext: &corev1.SecurityContext{
 				AllowPrivilegeEscalation: ptr.To(false),
 				ReadOnlyRootFilesystem:   ptr.To(true),
@@ -59,6 +80,14 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 				},
 				SeccompProfile: &corev1.SeccompProfile{
 					Type: corev1.SeccompProfileTypeRuntimeDefault,
+				},
+			},
+		}},
+		Volumes: []corev1.Volume{{
+			Name: "sharedfs",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{
+					Medium: corev1.StorageMediumMemory,
 				},
 			},
 		}},
@@ -98,11 +127,6 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 	return pod
 }
 
-func podDerivedFrom(comp *apiv1.Composition, pod *corev1.Pod) bool {
-	if pod.Annotations == nil {
-		return false
-	}
-
-	compGen, _ := strconv.ParseInt(pod.Annotations["eno.azure.io/composition-generation"], 10, 0)
-	return compGen == comp.Generation
+func podIsCurrent(comp *apiv1.Composition, pod *corev1.Pod) bool {
+	return pod.Labels != nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.UUID == pod.Labels["eno.azure.io/synthesis-uuid"]
 }

@@ -1,6 +1,7 @@
 package synthesis
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"sync/atomic"
@@ -10,16 +11,19 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/testutil"
+	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 )
 
 var minimalTestConfig = &Config{
 	SliceCreationQPS: 15,
 	PodNamespace:     "default",
+	ExecutorImage:    "test-image",
 }
 
 // TestControllerHappyPath proves that pods are eventually created and synthesizers are eventually executed
@@ -30,9 +34,13 @@ func TestControllerHappyPath(t *testing.T) {
 	cli := mgr.GetClient()
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
-	require.NoError(t, NewStatusController(mgr.Manager))
-	conn := &testutil.ExecConn{}
-	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, conn))
+
+	calls := atomic.Int64{}
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		calls.Add(1)
+		return output, nil
+	})
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -77,65 +85,8 @@ func TestControllerHappyPath(t *testing.T) {
 
 	// The synthesizer is eventually executed a second time
 	testutil.Eventually(t, func() bool {
-		return conn.Calls.Load() >= 2
+		return calls.Load() >= 2
 	})
-
-	// The pod is deleted
-	testutil.Eventually(t, func() bool {
-		list := &corev1.PodList{}
-		require.NoError(t, cli.List(ctx, list))
-		return len(list.Items) == 0
-	})
-}
-
-// TestPodNamespaceOverride proves that synthesis Pods are scheduled on the
-// configured namespace.
-func TestPodNamespaceOverride(t *testing.T) {
-	expectedPodNamespace := "eno"
-	var actualPodNamespace atomic.Value
-	podHook := func(p *corev1.Pod) {
-		actualPodNamespace.Store(p.Namespace)
-	}
-
-	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t, testutil.WithPodNamespace(expectedPodNamespace))
-	cli := mgr.GetClient()
-
-	lifecycleConfig := *minimalTestConfig
-	lifecycleConfig.PodNamespace = expectedPodNamespace
-	require.NoError(t, NewPodLifecycleController(mgr.Manager, &lifecycleConfig))
-	require.NoError(t, NewStatusController(mgr.Manager))
-	conn := &testutil.ExecConn{
-		PodHook: podHook,
-	}
-	require.NoError(t, NewExecController(mgr.Manager, &lifecycleConfig, conn))
-	mgr.Start(t)
-
-	ns := &corev1.Namespace{}
-	ns.Name = "eno"
-	require.NoError(t, cli.Create(ctx, ns))
-
-	syn := &apiv1.Synthesizer{}
-	syn.Name = "test-syn"
-	syn.Spec.Image = "test-syn-image"
-	require.NoError(t, cli.Create(ctx, syn))
-
-	comp := &apiv1.Composition{}
-	comp.Name = "test-comp"
-	comp.Namespace = "default"
-	comp.Spec.Synthesizer.Name = syn.Name
-	require.NoError(t, cli.Create(ctx, comp))
-
-	t.Run("initial creation", func(t *testing.T) {
-		// The pod eventually performs the synthesis
-		testutil.Eventually(t, func() bool {
-			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
-		})
-	})
-
-	require.Equal(t, expectedPodNamespace, actualPodNamespace.Load())
-	require.Equal(t, int64(1), conn.Calls.Load())
 
 	// The pod is deleted
 	testutil.Eventually(t, func() bool {
@@ -153,12 +104,12 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 	cli := mgr.GetClient()
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
-	require.NoError(t, NewStatusController(mgr.Manager))
-	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
 		// simulate real pods taking some random amount of time to generation
 		time.Sleep(time.Millisecond * time.Duration(rand.Int63n(300)))
-		return nil
-	}}))
+		return output, nil
+	})
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -200,25 +151,28 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, NewExecController(mgr.Manager, minimalTestConfig, &testutil.ExecConn{
-		Hook: func(s *apiv1.Synthesizer) []client.Object {
-			cm := &corev1.ConfigMap{}
-			cm.APIVersion = "v1"
-			cm.Kind = "ConfigMap"
-			cm.Name = "test"
-			cm.Namespace = "default"
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test",
+					"namespace": "default",
+				},
+			},
+		}}
 
-			if s.Name == "test-syn-2" {
-				// return two objects for the second test synthesizer, we'll assert on that later
-				return []client.Object{cm, cm}
-			}
+		// return two objects for the second test synthesizer, we'll assert on that later
+		if s.Name == "test-syn-2" {
+			output.Items = append(output.Items, output.Items[0].DeepCopy())
+		}
 
-			return []client.Object{cm}
-		},
-	}))
+		return output, nil
+	})
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
-	require.NoError(t, NewStatusController(mgr.Manager))
 	mgr.Start(t)
 
 	syn1 := &apiv1.Synthesizer{}

@@ -19,8 +19,6 @@ var newPodTests = []struct {
 		Name: "basic",
 		Cfg:  &Config{},
 		Assert: func(t *testing.T, p *corev1.Pod) {
-			assert.Equal(t, "123", p.Annotations["eno.azure.io/composition-generation"])
-			assert.Equal(t, "234", p.Annotations["eno.azure.io/synthesizer-generation"])
 			assert.Equal(t, "eno", p.Labels["app.kubernetes.io/managed-by"])
 			assert.Nil(t, p.Spec.Affinity.NodeAffinity)
 			assert.Len(t, p.Spec.Tolerations, 0)

@@ -19,6 +19,26 @@ jobs:
       - name: Create Kind cluster
         uses: helm/kind-action@v1
 
+      - name: Build executor image
+        run: |
+          docker build -t eno-controller:smoketest -f ./docker/eno-controller/Dockerfile .
+          kind load docker-image --name chart-testing eno-controller:smoketest
+          kind export kubeconfig --name chart-testing
+          kubectl apply -f - <<YAML
+            apiVersion: rbac.authorization.k8s.io/v1
+            kind: ClusterRoleBinding
+            metadata:
+              name: admin
+            roleRef:
+              apiGroup: rbac.authorization.k8s.io
+              kind: ClusterRole
+              name: cluster-admin
+            subjects:
+            - kind: ServiceAccount
+              name: default
+              namespace: default
+          YAML
+
       - name: Run tests
         timeout-minutes: 5
-        run: ./hack/smoke-test.sh
+        run: export EXECUTOR_IMAGE=eno-controller:smoketest && ./hack/smoke-test.sh

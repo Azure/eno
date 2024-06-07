@@ -1,6 +1,7 @@
 package reconciliation
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"slices"
@@ -14,11 +15,11 @@ import (
 	"github.com/Azure/eno/internal/controllers/rollout"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/testutil"
+	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/yaml"
@@ -37,51 +38,54 @@ func TestReadinessGroups(t *testing.T) {
 
 	// Register supporting controllers
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
-	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
-	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
-		obj := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-obj-0",
-				Namespace: "default",
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{
+			{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "test-obj-0",
+						"namespace": "default",
+					},
+					"data": map[string]any{"image": s.Spec.Image},
+				},
 			},
-			Data: map[string]string{"image": s.Spec.Image},
-		}
-
-		gvks, _, err := scheme.ObjectKinds(obj)
-		require.NoError(t, err)
-		obj.GetObjectKind().SetGroupVersionKind(gvks[0])
-
-		obj1 := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:        "test-obj-1",
-				Namespace:   "default",
-				Annotations: map[string]string{"eno.azure.io/readiness-group": "2"},
+			{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "test-obj-1",
+						"namespace": "default",
+						"annotations": map[string]string{
+							"eno.azure.io/readiness-group": "2",
+						},
+					},
+					"data": map[string]any{"image": s.Spec.Image},
+				},
 			},
-			Data: map[string]string{"image": s.Spec.Image},
-		}
-
-		gvks, _, err = scheme.ObjectKinds(obj1)
-		require.NoError(t, err)
-		obj1.GetObjectKind().SetGroupVersionKind(gvks[0])
-
-		obj2 := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:        "test-obj-2",
-				Namespace:   "default",
-				Annotations: map[string]string{"eno.azure.io/readiness-group": "4"},
+			{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "test-obj-2",
+						"namespace": "default",
+						"annotations": map[string]string{
+							"eno.azure.io/readiness-group": "4",
+						},
+					},
+					"data": map[string]any{"image": s.Spec.Image},
+				},
 			},
-			Data: map[string]string{"image": s.Spec.Image},
 		}
-
-		gvks, _, err = scheme.ObjectKinds(obj2)
-		require.NoError(t, err)
-		obj2.GetObjectKind().SetGroupVersionKind(gvks[0])
-
-		return []client.Object{obj, obj2, obj1}
-	}}))
+		return output, nil
+	})
 
 	// Test subject
 	setupTestSubject(t, mgr)
@@ -158,11 +162,10 @@ func TestCRDOrdering(t *testing.T) {
 
 	// Register supporting controllers
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
-	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
-	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 		crdFixture := "fixtures/crd-runtimetest.yaml"
 		if s.Spec.Image == "updated" {
 			crdFixture = "fixtures/crd-runtimetest-extra-property.yaml"
@@ -184,8 +187,8 @@ func TestCRDOrdering(t *testing.T) {
 			cr.Object["spec"].(map[string]any)["addedValue"] = 234
 		}
 
-		return []client.Object{cr, crd}
-	}}))
+		return &krmv1.ResourceList{Items: []*unstructured.Unstructured{cr, crd}}, nil
+	})
 
 	// Test subject
 	setupTestSubject(t, mgr)

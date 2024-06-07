@@ -1,6 +1,8 @@
 package v1
 
-import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
 
 // +kubebuilder:object:root=true
 type CompositionList struct {
@@ -79,4 +81,22 @@ type Synthesis struct {
 	// References to every resource slice that contains the resources comprising this synthesis.
 	// Immutable.
 	ResourceSlices []*ResourceSliceRef `json:"resourceSlices,omitempty"`
+
+	// Results are passed through opaquely from the synthesizer's KRM function.
+	Results []Result `json:"results,omitempty"`
+
+	// InputRevisions contains the versions of the input resources that were used for this synthesis.
+	InputRevisions []InputRevisions `json:"inputRevisions,omitempty"`
+}
+
+type Result struct {
+	Message  string            `json:"message,omitempty"`
+	Severity string            `json:"severity,omitempty"`
+	Tags     map[string]string `json:"tags,omitempty"`
+}
+
+type InputRevisions struct {
+	Key             string `json:"key,omitempty"`
+	ResourceVersion string `json:"resourceVersion,omitempty"`
+	Revision        *int   `json:"revision,omitempty"`
 }

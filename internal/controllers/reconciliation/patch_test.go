@@ -1,6 +1,7 @@
 package reconciliation
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/Azure/eno/internal/controllers/rollout"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/testutil"
+	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -31,10 +33,9 @@ func TestPatchCreation(t *testing.T) {
 
 	// Register supporting controllers
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
-	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
-	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 		obj := &unstructured.Unstructured{
 			Object: map[string]any{
 				"apiVersion": "eno.azure.io/v1",
@@ -52,8 +53,8 @@ func TestPatchCreation(t *testing.T) {
 				},
 			},
 		}
-		return []client.Object{obj}
-	}}))
+		return &krmv1.ResourceList{Items: []*unstructured.Unstructured{obj}}, nil
+	})
 
 	// Test subject
 	setupTestSubject(t, mgr)
@@ -95,10 +96,9 @@ func TestPatchDeletion(t *testing.T) {
 
 	// Register supporting controllers
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
-	require.NoError(t, synthesis.NewStatusController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
-	require.NoError(t, synthesis.NewExecController(mgr.Manager, defaultConf, &testutil.ExecConn{Hook: func(s *apiv1.Synthesizer) []client.Object {
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 		obj := &unstructured.Unstructured{
 			Object: map[string]any{
 				"apiVersion": "eno.azure.io/v1",
@@ -116,8 +116,8 @@ func TestPatchDeletion(t *testing.T) {
 				},
 			},
 		}
-		return []client.Object{obj}
-	}}))
+		return &krmv1.ResourceList{Items: []*unstructured.Unstructured{obj}}, nil
+	})
 
 	// Test subject
 	setupTestSubject(t, mgr)

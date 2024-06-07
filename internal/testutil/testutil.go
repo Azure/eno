@@ -1,17 +1,13 @@
 package testutil
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
 	"strconv"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -35,8 +31,8 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
+	"github.com/Azure/eno/internal/execution"
 	"github.com/Azure/eno/internal/manager"
-	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 )
 
 func NewClient(t testing.TB) client.Client {
@@ -166,7 +162,6 @@ func NewManager(t *testing.T, testOpts ...TestManagerOption) *Manager {
 	mgr, err := manager.NewTest(logr.FromContextOrDiscard(NewContext(t)), options)
 	require.NoError(t, err)
 	require.NoError(t, testv1.SchemeBuilder.AddToScheme(mgr.GetScheme())) // test-specific CRDs
-	newFakePodRuntime(t, mgr)
 
 	m := &Manager{
 		Manager:              mgr,
@@ -331,81 +326,6 @@ func SomewhatEventually(t testing.TB, dur time.Duration, fn func() bool) {
 	}
 }
 
-// newFakePodRuntime marks pod containers as running without actually doing anything.
-// Allows fake synthesis using the exec controller, which waits until synthesizer containers are running.
-func newFakePodRuntime(t testing.TB, mgr ctrl.Manager) {
-	cli := mgr.GetClient()
-	podCtrl := reconcile.Func(func(ctx context.Context, r reconcile.Request) (reconcile.Result, error) {
-		pod := &corev1.Pod{}
-		err := cli.Get(ctx, r.NamespacedName, pod)
-		if err != nil {
-			return reconcile.Result{}, client.IgnoreNotFound(err)
-		}
-		if len(pod.Status.ContainerStatuses) > 0 {
-			return reconcile.Result{}, nil
-		}
-
-		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
-			State: corev1.ContainerState{
-				Running: &corev1.ContainerStateRunning{},
-			},
-		}}
-
-		err = cli.Status().Update(ctx, pod)
-		if err != nil {
-			return reconcile.Result{}, err
-		}
-		logr.FromContextOrDiscard(ctx).Info("added container running state")
-
-		return reconcile.Result{}, nil
-	})
-
-	_, err := ctrl.NewControllerManagedBy(mgr).
-		For(&corev1.Pod{}).
-		Build(podCtrl)
-	require.NoError(t, err)
-}
-
-type ExecConn struct {
-	Hook    func(s *apiv1.Synthesizer) []client.Object
-	PodHook func(p *corev1.Pod)
-	Calls   atomic.Int64
-}
-
-func (e *ExecConn) Synthesize(ctx context.Context, syn *apiv1.Synthesizer, pod *corev1.Pod, input []byte) (io.Reader, error) {
-	defer e.Calls.Add(1)
-
-	objs := []client.Object{}
-	if e.Hook != nil {
-		objs = e.Hook(syn)
-	}
-
-	if e.PodHook != nil {
-		e.PodHook(pod)
-	}
-
-	outObjs := []*unstructured.Unstructured{}
-	for _, o := range objs {
-		m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
-		if err != nil {
-			return nil, err
-		}
-		outObjs = append(outObjs, &unstructured.Unstructured{Object: m})
-	}
-	rl := &krmv1.ResourceList{
-		Kind:       krmv1.ResourceListKind,
-		APIVersion: krmv1.SchemeGroupVersion.String(),
-		Items:      outObjs,
-	}
-
-	js, err := json.Marshal(rl)
-	if err != nil {
-		return nil, err
-	}
-
-	return bytes.NewBuffer(js), nil
-}
-
 func AtLeastVersion(t *testing.T, minor int) bool {
 	versionStr := os.Getenv("DOWNSTREAM_VERSION_MINOR")
 	if versionStr == "" {
@@ -414,4 +334,47 @@ func AtLeastVersion(t *testing.T, minor int) bool {
 
 	version, _ := strconv.Atoi(versionStr)
 	return version >= minor
+}
+
+func WithFakeExecutor(t *testing.T, mgr *Manager, sh execution.SynthesizerHandle) {
+	cli := mgr.GetAPIReader()
+	podCtrl := reconcile.Func(func(ctx context.Context, r reconcile.Request) (reconcile.Result, error) {
+		pod := &corev1.Pod{}
+		err := cli.Get(ctx, r.NamespacedName, pod)
+		if err != nil {
+			return reconcile.Result{}, client.IgnoreNotFound(err)
+		}
+		if pod.DeletionTimestamp != nil {
+			return reconcile.Result{}, nil
+		}
+
+		env := &execution.Env{}
+		for _, e := range pod.Spec.Containers[0].Env {
+			switch e.Name {
+			case "COMPOSITION_NAME":
+				env.CompositionName = e.Value
+			case "COMPOSITION_NAMESPACE":
+				env.CompositionNamespace = e.Value
+			case "SYNTHESIS_UUID":
+				env.SynthesisUUID = e.Value
+			}
+		}
+
+		e := &execution.Executor{
+			Reader:  cli,
+			Writer:  mgr.GetClient(),
+			Handler: sh,
+		}
+		err = e.Synthesize(ctx, env)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+
+		return reconcile.Result{}, nil
+	})
+
+	_, err := ctrl.NewControllerManagedBy(mgr.Manager).
+		For(&corev1.Pod{}).
+		Build(podCtrl)
+	require.NoError(t, err)
 }
