@@ -152,7 +152,8 @@ func TestWithInputs(t *testing.T) {
 		Writer: cli,
 		Handler: func(ctx context.Context, s *apiv1.Synthesizer, rl *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 			require.Len(t, rl.Items, 1)
-			// TODO: Assert
+			assert.Equal(t, "ConfigMap", rl.Items[0].GetKind())
+			assert.Equal(t, "test-input", rl.Items[0].GetName())
 
 			out := &unstructured.Unstructured{
 				Object: map[string]any{
