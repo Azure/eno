@@ -11,8 +11,8 @@ export TAG="$(date +%s)"
 
 function build() {
     cmd=$(basename $1)
-    buildah build -t "$REGISTRY/$cmd:$TAG" -f "$f/Dockerfile"
-    buildah push "$REGISTRY/$cmd:$TAG"
+    docker build --quiet -t "$REGISTRY/$cmd:$TAG" -f "$f/Dockerfile" .
+    docker push "$REGISTRY/$cmd:$TAG"
 }
 
 # Build!
