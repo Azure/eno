@@ -370,6 +370,16 @@ func WithFakeExecutor(t *testing.T, mgr *Manager, sh execution.SynthesizerHandle
 			return reconcile.Result{}, err
 		}
 
+		err = mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(pod), pod)
+		if err != nil {
+			return reconcile.Result{}, nil
+		}
+		pod.Status.Phase = corev1.PodSucceeded
+		err = mgr.GetClient().Status().Update(ctx, pod)
+		if err != nil {
+			return reconcile.Result{}, nil
+		}
+
 		return reconcile.Result{}, nil
 	})
 
