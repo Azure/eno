@@ -75,9 +75,9 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 		// Compositions aren't eligible to receive an updated synthesizer when:
 		// - They haven't ever been synthesized (they'll use the latest inputs anyway)
-		// - They are currently being synthesized
+		// - They are currently being synthesized or deleted
 		// - They are already in sync with the latest inputs
-		if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || isInSync(&comp, syn) {
+		if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || comp.DeletionTimestamp != nil || isInSync(&comp, syn) {
 			continue
 		}
 
