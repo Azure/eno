@@ -290,7 +290,7 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 		}
 
 		isCurrent := podIsCurrent(comp, &pod)
-		if !isCurrent {
+		if !isCurrent || pod.Status.Phase == corev1.PodSucceeded {
 			logger = logger.WithValues("reason", "Superseded")
 			return logger, &pod, true
 		}
