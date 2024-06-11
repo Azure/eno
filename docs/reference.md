@@ -22,7 +22,7 @@ updating it will cause resynthesis, etc.
 ### Deletion Modes
 
 To keep any resources created because of a composition,
-Eno supports an orphaning deletion mode by setting this annotation:
+Eno supports an orphaning deletion mode by setting this annotation on the composition resource:
 
 ```yaml
 eno.azure.io/deletion-strategy: orphan
