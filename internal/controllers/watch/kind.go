@@ -8,7 +8,7 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/controllers/rollout"
+	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/Azure/eno/internal/resource"
 	"github.com/go-logr/logr"
@@ -124,7 +124,7 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 			}
 
 			// Input has changed - resynthesize!
-			rollout.SwapStates(&comp)
+			synthesis.SwapStates(&comp)
 			err = k.client.Status().Update(ctx, &comp)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("swapping composition state: %w", err)

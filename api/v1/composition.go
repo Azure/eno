@@ -108,3 +108,12 @@ type InputRevisions struct {
 	ResourceVersion string `json:"resourceVersion,omitempty"`
 	Revision        *int   `json:"revision,omitempty"`
 }
+
+func (s *Synthesis) Failed() bool {
+	for _, result := range s.Results {
+		if result.Severity == "error" {
+			return true
+		}
+	}
+	return false
+}
