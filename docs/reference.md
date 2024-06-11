@@ -30,7 +30,7 @@ eno.azure.io/deletion-strategy: orphan
 
 ## Synthesizer Basics
 
-Synthesizers are container images that have one or more implementations of the [KCM Functions API](https://github.com/kubernetes-sigs/kustomize/blob/master/cmd/config/docs/api-conventions/functions-spec.md).
+Synthesizers are container images that have one or more implementations of the [KRM Functions API](https://github.com/kubernetes-sigs/kustomize/blob/master/cmd/config/docs/api-conventions/functions-spec.md).
 
 For example, one could implement the basics of the API using bash.
 
