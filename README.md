@@ -1,12 +1,12 @@
 # Eno
 
-Eno orchestrates [KRM functions](https://github.com/kubernetes-sigs/kustomize/blob/master/cmd/config/docs/api-conventions/functions-spec.md) and manages the lifecycle of resources they produce.
-
-> Status is very much alpha! Use with caution.
+Eno is a production-grade configuration management tool for platforms built on Kubernetes.
 
 ## Docs
 
 - [Getting Started](./docs/getting-started.md)
+- [Concepts](./docs/concepts.md)
+- [Reference](./docs/reference.md)
 - [API](./docs/api.md)
 
 ## Contributing
