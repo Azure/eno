@@ -1,6 +1,0 @@
-{
-    "name": "test-chart",
-    "description": "chart to test eno rendering",
-    "type": "application",
-    "version": "0.1.0"
-}
