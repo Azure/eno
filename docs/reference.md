@@ -63,6 +63,17 @@ spec:
 ---
 ```
 
+### Error Handling
+
+The synthesizer process's `stderr` is piped to the synthesizer container it's running in,
+so any typical log forwarding infra can be used.
+
+The KRM API supports "results", which are a kind of metadata related to the execution process that would not otherwise be reflected in the generated resources.
+Each result has a severity of info, warning, or error.
+
+Functions that produce one or more results with severity == error will cause the resulting synthesis to be marked as having failed.
+Failed syntheses are not reconciled or retried.
+
 ### Merge Semantics / Drift Detection
 
 Normally any change to resources produced by the synthesizer will be reconciled into the corresponding API resources and any drift will be corrected.
