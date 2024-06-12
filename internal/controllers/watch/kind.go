@@ -146,12 +146,10 @@ func shouldCauseResynthesis(comp *apiv1.Composition, revs *apiv1.InputRevisions)
 			continue
 		}
 		if revs.Revision == nil {
-			if r.Revision != nil && *r.Revision == *revs.Revision {
-				return true
-			}
-		} else {
-			return r.ResourceVersion == revs.ResourceVersion
+			// only compare resource versions if no revision is present
+			return r.ResourceVersion != revs.ResourceVersion
 		}
+		return r.Revision == nil || *r.Revision != *revs.Revision
 	}
 
 	return true // no matching keys
