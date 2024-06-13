@@ -87,7 +87,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 	logger := logr.FromContextOrDiscard(ctx).WithValues("compositionGeneration", comp.Generation)
 
-	if comp.Status.CurrentSynthesis == nil {
+	if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Failed() {
 		return ctrl.Result{}, nil // nothing to do
 	}
 	logger = logger.WithValues("synthesizerName", comp.Spec.Synthesizer.Name, "synthesizerGeneration", comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration)

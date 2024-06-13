@@ -130,7 +130,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Swap the state to prepare for resynthesis if needed
 	if shouldSwapStates(comp) {
-		swapStates(comp)
+		SwapStates(comp)
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
 		}
@@ -318,10 +318,10 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 	return logger, nil, false
 }
 
-func swapStates(comp *apiv1.Composition) {
-	// If the previous state has been synthesized but not the current, keep the previous to avoid orphaning deleted resources
-	if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil {
-		comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
+func SwapStates(comp *apiv1.Composition) {
+	current := comp.Status.CurrentSynthesis
+	if current != nil && current.Synthesized != nil && !current.Failed() {
+		comp.Status.PreviousSynthesis = current
 	}
 
 	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
