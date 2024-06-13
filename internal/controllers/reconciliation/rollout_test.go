@@ -31,7 +31,7 @@ func TestBulkRollout(t *testing.T) {
 	upstream := mgr.GetClient()
 
 	// Register supporting controllers
-	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
+	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager, time.Millisecond))
 	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {

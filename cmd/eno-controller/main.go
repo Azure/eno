@@ -97,7 +97,7 @@ func runController() error {
 		return fmt.Errorf("constructing manager: %w", err)
 	}
 
-	err = rollout.NewController(mgr, rolloutCooldown)
+	err = rollout.NewSynthesizerController(mgr, rolloutCooldown)
 	if err != nil {
 		return fmt.Errorf("constructing rollout controller: %w", err)
 	}

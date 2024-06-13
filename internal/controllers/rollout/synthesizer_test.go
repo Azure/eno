@@ -28,7 +28,7 @@ func TestSynthesizerRollout(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, NewController(mgr.Manager, time.Millisecond*10))
+	require.NoError(t, NewSynthesizerController(mgr.Manager, time.Millisecond*10))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 		output := &krmv1.ResourceList{}
@@ -78,7 +78,7 @@ func TestSynthesizerRolloutCooldown(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, NewController(mgr.Manager, time.Hour))
+	require.NoError(t, NewSynthesizerController(mgr.Manager, time.Hour))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 		output := &krmv1.ResourceList{}
@@ -142,7 +142,7 @@ func TestSynthesizerRolloutDeleted(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, NewController(mgr.Manager, time.Millisecond*10))
+	require.NoError(t, NewSynthesizerController(mgr.Manager, time.Millisecond*10))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 		output := &krmv1.ResourceList{}

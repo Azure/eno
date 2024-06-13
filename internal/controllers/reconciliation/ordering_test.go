@@ -37,7 +37,7 @@ func TestReadinessGroups(t *testing.T) {
 	upstream := mgr.GetClient()
 
 	// Register supporting controllers
-	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
+	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager, time.Millisecond))
 	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
@@ -161,7 +161,7 @@ func TestCRDOrdering(t *testing.T) {
 	upstream := mgr.GetClient()
 
 	// Register supporting controllers
-	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
+	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager, time.Millisecond))
 	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
