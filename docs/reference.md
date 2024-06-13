@@ -215,3 +215,13 @@ patch:
   ops:
     - { "op": "add", "path": "/metadata/deletionTimestamp", "value": "anything" }
 ```
+
+
+# Rollouts
+
+Composition changes are resynthesized immediately.
+Changes to deferred input resources (`ref.defer == true`) and synthesizers are subject to the global cooldown period.
+
+- All effected compositions are marked as pending resynthesis immediately
+- A maximum of one composition pending resynthesis can begin resynthesis per cooldown period
+- The next pending composition can start after the cooldown period has expired AND all resynthesis has completed or been retried at least once

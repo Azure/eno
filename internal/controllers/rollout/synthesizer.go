@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"time"
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -23,15 +22,12 @@ import (
 )
 
 type synthController struct {
-	client   client.Client
-	cooldown time.Duration
+	client client.Client
 }
 
-// NewSynthesizerController re-synthesizes compositions when their synthesizer has changed while honoring a cooldown period.
-func NewSynthesizerController(mgr ctrl.Manager, cooldown time.Duration) error {
+func NewSynthesizerController(mgr ctrl.Manager) error {
 	c := &synthController{
-		client:   mgr.GetClient(),
-		cooldown: cooldown,
+		client: mgr.GetClient(),
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Synthesizer{}).

@@ -43,9 +43,9 @@ type CompositionSpec struct {
 
 type CompositionStatus struct {
 	Simplified         *SimplifiedStatus `json:"simplified,omitempty"`
-	PendingResynthesis *metav1.Time      `json:"pendingResynthesis,omitempty"`
 	CurrentSynthesis   *Synthesis        `json:"currentSynthesis,omitempty"`
 	PreviousSynthesis  *Synthesis        `json:"previousSynthesis,omitempty"`
+	PendingResynthesis *metav1.Time      `json:"pendingResynthesis,omitempty"`
 }
 
 type SimplifiedStatus struct {
@@ -92,6 +92,10 @@ type Synthesis struct {
 
 	// InputRevisions contains the versions of the input resources that were used for this synthesis.
 	InputRevisions []InputRevisions `json:"inputRevisions,omitempty"`
+
+	// Deferred is true when this synthesis was the result of a deferred rollout,
+	// caused by a synthesizer of (deferred) input change.
+	Deferred bool `json:"deferred,omitempty"`
 }
 
 type Result struct {

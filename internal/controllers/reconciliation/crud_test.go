@@ -217,7 +217,8 @@ func TestCRUD(t *testing.T) {
 			downstream := mgr.DownstreamClient
 
 			// Register supporting controllers
-			require.NoError(t, rollout.NewSynthesizerController(mgr.Manager, time.Millisecond))
+			require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
+			require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
 			require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 			testutil.WithFakeExecutor(t, mgr, newSliceBuilder(t, scheme, &test))
 
@@ -385,7 +386,8 @@ func TestReconcileInterval(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager, time.Millisecond))
+	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
+	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 		output := &krmv1.ResourceList{}
@@ -455,7 +457,8 @@ func TestReconcileCacheRace(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager, time.Millisecond))
+	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
+	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	renderN := 0
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
@@ -527,7 +530,8 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager, time.Millisecond))
+	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
+	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
@@ -695,7 +699,8 @@ func TestDisableUpdates(t *testing.T) {
 	downstream := mgr.DownstreamClient
 
 	// Register supporting controllers
-	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager, time.Millisecond))
+	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
+	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 		output := &krmv1.ResourceList{}
@@ -764,7 +769,8 @@ func TestOrphanedCompositionDeletion(t *testing.T) {
 	upstream := mgr.GetClient()
 
 	// Register supporting controllers
-	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager, time.Millisecond))
+	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
+	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, aggregation.NewSliceController(mgr.Manager))

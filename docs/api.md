@@ -91,9 +91,9 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `simplified` _[SimplifiedStatus](#simplifiedstatus)_ |  |  |  |
-| `pendingResynthesis` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ |  |  |  |
 | `currentSynthesis` _[Synthesis](#synthesis)_ |  |  |  |
 | `previousSynthesis` _[Synthesis](#synthesis)_ |  |  |  |
+| `pendingResynthesis` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ |  |  |  |
 
 
 
@@ -301,6 +301,7 @@ _Appears in:_
 | `attempts` _integer_ | Counter used internally to calculate back off when retrying failed syntheses. |  |  |
 | `results` _[Result](#result) array_ | Results are passed through opaquely from the synthesizer's KRM function. |  |  |
 | `inputRevisions` _[InputRevisions](#inputrevisions) array_ | InputRevisions contains the versions of the input resources that were used for this synthesis. |  |  |
+| `deferred` _boolean_ | Deferred is true when this synthesis was the result of a deferred rollout,<br />caused by a synthesizer of (deferred) input change. |  |  |
 
 
 #### Synthesizer
