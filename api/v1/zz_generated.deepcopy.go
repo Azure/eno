@@ -113,6 +113,10 @@ func (in *CompositionStatus) DeepCopyInto(out *CompositionStatus) {
 		*out = new(SimplifiedStatus)
 		**out = **in
 	}
+	if in.PendingResynthesis != nil {
+		in, out := &in.PendingResynthesis, &out.PendingResynthesis
+		*out = (*in).DeepCopy()
+	}
 	if in.CurrentSynthesis != nil {
 		in, out := &in.CurrentSynthesis, &out.CurrentSynthesis
 		*out = new(Synthesis)

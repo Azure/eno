@@ -191,6 +191,7 @@ func (e *Executor) updateComposition(ctx context.Context, oldComp *apiv1.Composi
 		}
 
 		now := metav1.Now()
+		comp.Status.PendingResynthesis = nil
 		comp.Status.CurrentSynthesis.Synthesized = &now
 		comp.Status.CurrentSynthesis.ResourceSlices = refs
 		comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration = syn.Generation

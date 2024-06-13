@@ -42,9 +42,10 @@ type CompositionSpec struct {
 }
 
 type CompositionStatus struct {
-	Simplified        *SimplifiedStatus `json:"simplified,omitempty"`
-	CurrentSynthesis  *Synthesis        `json:"currentSynthesis,omitempty"`
-	PreviousSynthesis *Synthesis        `json:"previousSynthesis,omitempty"`
+	Simplified         *SimplifiedStatus `json:"simplified,omitempty"`
+	PendingResynthesis *metav1.Time      `json:"pendingResynthesis,omitempty"`
+	CurrentSynthesis   *Synthesis        `json:"currentSynthesis,omitempty"`
+	PreviousSynthesis  *Synthesis        `json:"previousSynthesis,omitempty"`
 }
 
 type SimplifiedStatus struct {

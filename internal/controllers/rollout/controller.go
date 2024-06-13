@@ -7,8 +7,11 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/equality"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -16,7 +19,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/manager"
 )
 
@@ -34,7 +36,6 @@ func NewController(mgr ctrl.Manager, cooldown time.Duration) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Synthesizer{}).
 		Watches(&apiv1.Composition{}, newCompositionHandler()).
-		// TODO: Filter some events?
 		WithLogConstructor(manager.NewLogConstructor(mgr, "synthesizerRolloutController")).
 		Complete(c)
 }
@@ -57,16 +58,6 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 	}
 
-	var latestRollout time.Time
-	for _, comp := range compList.Items {
-		if comp.Status.CurrentSynthesis != nil && comp.Status.PreviousSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil && comp.Status.CurrentSynthesis.Synthesized.Time.After(latestRollout) {
-			latestRollout = comp.Status.CurrentSynthesis.Synthesized.Time
-		}
-	}
-	if delta := time.Since(latestRollout); delta < c.cooldown {
-		return ctrl.Result{RequeueAfter: c.cooldown - delta}, nil
-	}
-
 	// randomize list to avoid always rolling out changes in the same order
 	rand.Shuffle(len(compList.Items), func(i, j int) { compList.Items[i] = compList.Items[j] })
 
@@ -77,18 +68,19 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		// Compositions aren't eligible to receive an updated synthesizer when:
 		// - They haven't ever been synthesized (they'll use the latest inputs anyway)
 		// - They are currently being synthesized or deleted
+		// - They are already pending resynthesis
 		// - They are already in sync with the latest inputs
-		if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || comp.DeletionTimestamp != nil || isInSync(&comp, syn) {
+		if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || comp.DeletionTimestamp != nil || comp.Status.PendingResynthesis != nil || isInSync(&comp, syn) {
 			continue
 		}
 
-		synthesis.SwapStates(&comp)
+		comp.Status.PendingResynthesis = ptr.To(metav1.Now())
 		err = c.client.Status().Update(ctx, &comp)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
 		}
 
-		logger.V(1).Info("advancing rollout process")
+		logger.V(1).Info("staged resynthesis of composition because its synthesizer changed")
 		return ctrl.Result{Requeue: true}, nil
 	}
 
@@ -128,7 +120,8 @@ func newCompositionHandler() handler.EventHandler {
 			// Nothing we care about has changed
 			if oldComp.Spec.Synthesizer.Name == newComp.Spec.Synthesizer.Name &&
 				oldComp.Status.CurrentSynthesis != nil && newComp.Status.CurrentSynthesis != nil &&
-				oldComp.Status.CurrentSynthesis.UUID == newComp.Status.CurrentSynthesis.UUID {
+				oldComp.Status.CurrentSynthesis.UUID == newComp.Status.CurrentSynthesis.UUID &&
+				equality.Semantic.DeepEqual(oldComp.Status.CurrentSynthesis.Synthesized, newComp.Status.CurrentSynthesis.Synthesized) {
 				return
 			}
 
