@@ -66,10 +66,10 @@ func TestCompositionSimplification(t *testing.T) {
 			Input: apiv1.CompositionStatus{
 				PendingResynthesis: ptr.To(metav1.Now()),
 				CurrentSynthesis: &apiv1.Synthesis{
-					Ready:   ptr.To(metav1.Now()),
+					Ready: ptr.To(metav1.Now()),
 				}},
 			Expected: apiv1.SimplifiedStatus{
-				Status: "PendingResynthesis",
+				Status: "WaitingForCooldown",
 			},
 		},
 	}
