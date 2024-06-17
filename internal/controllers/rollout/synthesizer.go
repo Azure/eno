@@ -63,6 +63,7 @@ func (c *synthController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 		// Compositions aren't eligible to receive an updated synthesizer when:
 		// - They haven't ever been synthesized (they'll use the latest inputs anyway)
+		// - They are already on the latest version of the synthesizer
 		// - They are currently being synthesized or deleted
 		// - They are already pending resynthesis
 		// - They are already in sync with the latest inputs

@@ -93,8 +93,8 @@ type Synthesis struct {
 	// InputRevisions contains the versions of the input resources that were used for this synthesis.
 	InputRevisions []InputRevisions `json:"inputRevisions,omitempty"`
 
-	// Deferred is true when this synthesis was the result of a deferred rollout,
-	// caused by a synthesizer of (deferred) input change.
+	// Deferred is true when this synthesis was caused by a change to either the synthesizer
+	// or an input with a ref that sets `Defer == true`.
 	Deferred bool `json:"deferred,omitempty"`
 }
 

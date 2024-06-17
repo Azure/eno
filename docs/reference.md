@@ -224,4 +224,4 @@ Changes to deferred input resources (`ref.defer == true`) and synthesizers are s
 
 - All effected compositions are marked as pending resynthesis immediately
 - A maximum of one composition pending resynthesis can begin resynthesis per cooldown period
-- The next pending composition can start after the cooldown period has expired AND all resynthesis has completed or been retried at least once
+- The next pending composition can start after the cooldown period has expired AND all resynthesis has completed (with success or terminal error) or been retried at least once
