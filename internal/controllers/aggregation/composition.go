@@ -83,6 +83,9 @@ func (c *compositionController) aggregate(comp *apiv1.Composition) *apiv1.Simpli
 	if comp.Status.CurrentSynthesis.Ready != nil {
 		copy.Status = "Ready"
 	}
+	if comp.Status.PendingResynthesis != nil {
+		copy.Status = "WaitingForCooldown"
+	}
 
 	return copy
 }

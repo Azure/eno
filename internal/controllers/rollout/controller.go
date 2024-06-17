@@ -3,17 +3,14 @@ package rollout
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"sort"
 	"time"
 
 	"github.com/go-logr/logr"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/util/workqueue"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/controllers/synthesis"
@@ -25,114 +22,81 @@ type controller struct {
 	cooldown time.Duration
 }
 
-// NewController re-synthesizes compositions when their synthesizer has changed while honoring a cooldown period.
 func NewController(mgr ctrl.Manager, cooldown time.Duration) error {
 	c := &controller{
 		client:   mgr.GetClient(),
 		cooldown: cooldown,
 	}
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&apiv1.Synthesizer{}).
-		Watches(&apiv1.Composition{}, newCompositionHandler()).
-		// TODO: Filter some events?
-		WithLogConstructor(manager.NewLogConstructor(mgr, "synthesizerRolloutController")).
+		Named("rolloutController").
+		Watches(&apiv1.Composition{}, manager.SingleEventHandler()).
+		WithLogConstructor(manager.NewLogConstructor(mgr, "rolloutController")).
 		Complete(c)
 }
 
 func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	syn := &apiv1.Synthesizer{}
-	err := c.client.Get(ctx, req.NamespacedName, syn)
-	if err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("gettting synthesizer: %w", err))
-	}
-	logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerNamespace", syn.Namespace, "synthesizerGeneration", syn.Generation)
-
-	compList := &apiv1.CompositionList{}
-	err = c.client.List(ctx, compList, client.MatchingFields{
-		manager.IdxCompositionsBySynthesizer: syn.Name,
-	})
+	comps := &apiv1.CompositionList{}
+	err := c.client.List(ctx, comps)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 	}
 
-	var latestRollout time.Time
-	for _, comp := range compList.Items {
-		if comp.Status.CurrentSynthesis != nil && comp.Status.PreviousSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil && comp.Status.CurrentSynthesis.Synthesized.Time.After(latestRollout) {
-			latestRollout = comp.Status.CurrentSynthesis.Synthesized.Time
+	// Find the current cooldown period, wait for the next if needed
+	// Block on any active deferred syntheses with less than 2 attempts to avoid high concurrency
+	var lastDeferredSynthesisCompletion *metav1.Time
+	for _, comp := range comps.Items {
+		current := comp.Status.CurrentSynthesis
+		if current == nil || !current.Deferred {
+			continue
+		}
+		if current.Synthesized == nil && current.Attempts < 2 {
+			return ctrl.Result{RequeueAfter: c.cooldown}, nil
+		}
+		if lastDeferredSynthesisCompletion == nil || lastDeferredSynthesisCompletion.Before(current.Synthesized) {
+			lastDeferredSynthesisCompletion = current.Synthesized
 		}
 	}
-	if delta := time.Since(latestRollout); delta < c.cooldown {
-		return ctrl.Result{RequeueAfter: c.cooldown - delta}, nil
+	if lastDeferredSynthesisCompletion != nil {
+		delta := c.cooldown - time.Since(lastDeferredSynthesisCompletion.Time)
+		if delta > 0 {
+			return ctrl.Result{RequeueAfter: delta}, nil
+		}
 	}
 
-	// randomize list to avoid always rolling out changes in the same order
-	rand.Shuffle(len(compList.Items), func(i, j int) { compList.Items[i] = compList.Items[j] })
+	// Sort for FIFO
+	sort.Slice(comps.Items, func(i, j int) bool {
+		return ptr.Deref(comps.Items[j].Status.PendingResynthesis, metav1.Time{}).After(ptr.Deref(comps.Items[i].Status.PendingResynthesis, metav1.Time{}).Time)
+	})
 
-	for _, comp := range compList.Items {
-		comp := comp
-		logger := logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
-
-		// Compositions aren't eligible to receive an updated synthesizer when:
-		// - They haven't ever been synthesized (they'll use the latest inputs anyway)
-		// - They are currently being synthesized or deleted
-		// - They are already in sync with the latest inputs
-		if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || comp.DeletionTimestamp != nil || isInSync(&comp, syn) {
+	for _, comp := range comps.Items {
+		logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
+		if comp.Status.PendingResynthesis == nil || comp.Status.CurrentSynthesis == nil {
 			continue
 		}
 
-		synthesis.SwapStates(&comp)
-		err = c.client.Status().Update(ctx, &comp)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
+		// Guarantee that we don't violate the cooldown period in the case of stale informers
+		if comp.Status.CurrentSynthesis.Deferred {
+			delta := c.cooldown - time.Since(comp.Status.PendingResynthesis.Time)
+			if delta > 0 {
+				return ctrl.Result{RequeueAfter: delta}, nil
+			}
 		}
 
-		logger.V(1).Info("advancing rollout process")
-		return ctrl.Result{Requeue: true}, nil
+		pendingTime := comp.Status.PendingResynthesis
+		synthesis.SwapStates(&comp)
+		comp.Status.CurrentSynthesis.Deferred = true
+		comp.Status.PendingResynthesis = nil
+		err = c.client.Status().Update(ctx, &comp)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("initiating resynthesis: %w", err)
+		}
+
+		logger.Info("progressing deferred resynthesis", "latency", time.Since(pendingTime.Time).Milliseconds())
+		return ctrl.Result{RequeueAfter: c.cooldown}, nil
 	}
 
+	// drop the work item until a composition changes
 	return ctrl.Result{}, nil
-}
-
-func isInSync(comp *apiv1.Composition, syn *apiv1.Synthesizer) bool {
-	return comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration >= syn.Generation
-}
-
-func newCompositionHandler() handler.EventHandler {
-	return &handler.Funcs{
-		CreateFunc: func(ctx context.Context, ce event.CreateEvent, rli workqueue.RateLimitingInterface) {
-			// No need to handle creation events since the status will always be nil.
-		},
-		DeleteFunc: func(ctx context.Context, de event.DeleteEvent, rli workqueue.RateLimitingInterface) {
-			// We don't handle deletes on purpose, since a composition being deleted can only ever
-			// result in the cooldown period being shortened i.e. we lose track of a more recent
-			// rollout event.
-			//
-			// It's okay that this state can be lost, since it falls within the promised semantics
-			// of this controller. But ideally we can avoid it when possible.
-		},
-		UpdateFunc: func(ctx context.Context, ue event.UpdateEvent, rli workqueue.RateLimitingInterface) {
-			newComp, ok := ue.ObjectNew.(*apiv1.Composition)
-			if !ok {
-				logr.FromContextOrDiscard(ctx).V(0).Info("unexpected type given to newCompositionToSynthesizerHandler")
-				return
-			}
-
-			oldComp, ok := ue.ObjectOld.(*apiv1.Composition)
-			if !ok {
-				rli.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: newComp.Spec.Synthesizer.Name}})
-				return
-			}
-
-			// Nothing we care about has changed
-			if oldComp.Spec.Synthesizer.Name == newComp.Spec.Synthesizer.Name &&
-				oldComp.Status.CurrentSynthesis != nil && newComp.Status.CurrentSynthesis != nil &&
-				oldComp.Status.CurrentSynthesis.UUID == newComp.Status.CurrentSynthesis.UUID {
-				return
-			}
-
-			rli.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: newComp.Spec.Synthesizer.Name}})
-		},
-	}
 }

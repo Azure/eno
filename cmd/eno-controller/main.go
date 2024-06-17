@@ -64,7 +64,7 @@ func runController() error {
 	flag.StringVar(&synconf.PodServiceAccount, "synthesizer-pod-service-account", "", "Service account name to be assigned to synthesizer Pods.")
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.DurationVar(&watchdogThres, "watchdog-threshold", time.Minute*5, "How long before the watchdog considers a mid-transition resource to be stuck")
-	flag.DurationVar(&rolloutCooldown, "rollout-cooldown", time.Second*2, "How long before an update to related resource (synthesizer, bindings, etc.) will trigger a composition's re-synthesis")
+	flag.DurationVar(&rolloutCooldown, "rollout-cooldown", time.Minute, "How long before an update to a related resource (synthesizer, bindings, etc.) will trigger a second composition's re-synthesis")
 	flag.StringVar(&taintToleration, "taint-toleration", "", "Node NoSchedule taint to be tolerated by synthesizer pods e.g. taintKey=taintValue to match on value, just taintKey to match on presence of the taint")
 	flag.StringVar(&nodeAffinity, "node-affinity", "", "Synthesizer pods will be created with this required node affinity expression e.g. labelKey=labelValue to match on value, just labelKey to match on presence of the label")
 	mgrOpts.Bind(flag.CommandLine)
@@ -98,6 +98,11 @@ func runController() error {
 	}
 
 	err = rollout.NewController(mgr, rolloutCooldown)
+	if err != nil {
+		return fmt.Errorf("constructing rollout controller: %w", err)
+	}
+
+	err = rollout.NewSynthesizerController(mgr)
 	if err != nil {
 		return fmt.Errorf("constructing rollout controller: %w", err)
 	}

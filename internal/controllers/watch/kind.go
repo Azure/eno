@@ -16,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -112,7 +113,7 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 		rand.Shuffle(len(list.Items), func(i, j int) { list.Items[i] = list.Items[j] })
 
 		for _, comp := range list.Items {
-			key := findRefKey(&comp, &synth, meta)
+			key, deferred := findRefKey(&comp, &synth, meta)
 			if key == "" {
 				logger.V(1).Info("no matching input key found for resource")
 				continue
@@ -123,8 +124,14 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 				continue
 			}
 
-			// Input has changed - resynthesize!
-			synthesis.SwapStates(&comp)
+			if deferred && comp.Status.PendingResynthesis != nil {
+				continue
+			} else if deferred {
+				comp.Status.PendingResynthesis = ptr.To(metav1.Now())
+			} else {
+				synthesis.SwapStates(&comp)
+			}
+
 			err = k.client.Status().Update(ctx, &comp)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("swapping composition state: %w", err)
@@ -155,7 +162,7 @@ func shouldCauseResynthesis(comp *apiv1.Composition, revs *apiv1.InputRevisions)
 	return true // no matching keys
 }
 
-func findRefKey(comp *apiv1.Composition, synth *apiv1.Synthesizer, meta *metav1.PartialObjectMetadata) string {
+func findRefKey(comp *apiv1.Composition, synth *apiv1.Synthesizer, meta *metav1.PartialObjectMetadata) (string, bool) {
 	var bindingKey string
 	for _, binding := range comp.Spec.Bindings {
 		if binding.Resource.Name == meta.GetName() && binding.Resource.Namespace == meta.GetNamespace() {
@@ -167,9 +174,9 @@ func findRefKey(comp *apiv1.Composition, synth *apiv1.Synthesizer, meta *metav1.
 	for _, ref := range synth.Spec.Refs {
 		gvk := meta.GetObjectKind().GroupVersionKind()
 		if bindingKey == ref.Key && ref.Resource.Group == gvk.Group && ref.Resource.Version == gvk.Version && ref.Resource.Kind == gvk.Kind {
-			return ref.Key
+			return ref.Key, ref.Defer
 		}
 	}
 
-	return ""
+	return "", false
 }
