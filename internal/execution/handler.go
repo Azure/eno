@@ -49,7 +49,6 @@ func NewExecHandler() SynthesizerHandle {
 		}
 
 		cmd := exec.CommandContext(ctx, command[0], command[1:]...)
-		cmd.Env = []string{} // no env
 		cmd.Stdin = stdin
 		cmd.Stderr = os.Stdout // logger uses stderr, so use stdout to avoid race condition
 		cmd.Stdout = stdout
