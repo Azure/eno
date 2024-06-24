@@ -154,7 +154,6 @@ func TestWithInputs(t *testing.T) {
 			require.Len(t, rl.Items, 1)
 			assert.Equal(t, "ConfigMap", rl.Items[0].GetKind())
 			assert.Equal(t, "test-input", rl.Items[0].GetName())
-			assert.Equal(t, map[string]string{"eno.azure.io/input-key": "foo"}, rl.Items[0].GetAnnotations())
 
 			out := &unstructured.Unstructured{
 				Object: map[string]any{

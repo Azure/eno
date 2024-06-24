@@ -94,12 +94,6 @@ func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, s
 		if err != nil {
 			return nil, nil, fmt.Errorf("getting resource for ref %q: %w", key, err)
 		}
-		anno := obj.GetAnnotations()
-		if anno == nil {
-			anno = map[string]string{}
-		}
-		anno["eno.azure.io/input-key"] = key
-		obj.SetAnnotations(anno)
 		rl.Items = append(rl.Items, obj)
 		logger.V(0).Info("retrieved input", "key", key, "latency", time.Since(start).Milliseconds())
 
