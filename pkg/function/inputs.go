@@ -7,6 +7,7 @@ import (
 	"os"
 
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -47,6 +48,14 @@ func ReadInput[T client.Object](ir *InputReader, key string, out T) error {
 		return fmt.Errorf("input %q was not found", key)
 	}
 	return nil
+}
+
+func (i *InputReader) All() map[string]*unstructured.Unstructured {
+	m := map[string]*unstructured.Unstructured{}
+	for _, o := range i.resources.Items {
+		m[getKey(o)] = o
+	}
+	return m
 }
 
 func getKey(obj client.Object) string {
