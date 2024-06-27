@@ -58,7 +58,7 @@ func NewKindWatchController(ctx context.Context, parent *WatchController, resour
 		return nil, err
 	}
 
-	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), ref), &handler.EnqueueRequestForObject{})
+	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), ref, &handler.TypedEnqueueRequestForObject[*metav1.PartialObjectMetadata]{}))
 	if err != nil {
 		return nil, err
 	}

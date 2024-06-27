@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.name }}
+data:
+  some: "value"
+  input: {{ toJson .Values.foo | quote }}
