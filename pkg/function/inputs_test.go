@@ -19,6 +19,7 @@ func TestInputReader(t *testing.T) {
 	err = ReadInput(r, "foo", cm)
 	require.NoError(t, err)
 	assert.Equal(t, "test-cm", cm.Name)
+	assert.Equal(t, "test-cm", r.All()["foo"].GetName())
 
 	// Missing
 	err = ReadInput(r, "bar", cm)
