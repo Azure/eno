@@ -40,8 +40,9 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 	if equality.Semantic.DeepEqual(next, comp.Status.Simplified) {
 		return ctrl.Result{}, nil
 	}
-	comp.Status.Simplified = next
-	if err := c.client.Status().Update(ctx, comp); err != nil {
+	copy := comp.DeepCopy()
+	copy.Status.Simplified = next
+	if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(comp)); err != nil {
 		return ctrl.Result{}, fmt.Errorf("updating status: %w", err)
 	}
 

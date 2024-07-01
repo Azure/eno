@@ -72,7 +72,7 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 				},
 				{
 					Name:  "SYNTHESIS_ATTEMPT",
-					Value: strconv.Itoa(comp.Status.CurrentSynthesis.Attempts),
+					Value: strconv.Itoa(comp.Status.CurrentSynthesis.Attempts + 1), // we write the next attempt _after_ pod creation
 				},
 			},
 			SecurityContext: &corev1.SecurityContext{

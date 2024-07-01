@@ -357,6 +357,9 @@ func WithFakeExecutor(t *testing.T, mgr *Manager, sh execution.SynthesizerHandle
 				env.CompositionNamespace = e.Value
 			case "SYNTHESIS_UUID":
 				env.SynthesisUUID = e.Value
+			case "SYNTHESIS_ATTEMPT":
+				val, _ := strconv.Atoi(e.Value)
+				env.SynthesisAttempt = val
 			}
 		}
 

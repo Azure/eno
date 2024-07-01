@@ -4,9 +4,12 @@ import (
 	"testing"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func TestCompositionSimplification(t *testing.T) {
@@ -93,4 +96,23 @@ func TestCompositionSimplification(t *testing.T) {
 			assert.Equal(t, tc.Expected, *output)
 		})
 	}
+}
+
+func TestCompositionSimplificationI(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	cli := mgr.GetClient()
+
+	require.NoError(t, NewCompositionController(mgr.Manager))
+	mgr.Start(t)
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test"
+	comp.Namespace = "default"
+	require.NoError(t, cli.Create(ctx, comp))
+
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return comp.Status.Simplified != nil && comp.Status.Simplified.Status != ""
+	})
 }
