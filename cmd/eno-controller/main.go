@@ -19,6 +19,7 @@ import (
 
 	v1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/controllers/aggregation"
+	"github.com/Azure/eno/internal/controllers/flowcontrol"
 	"github.com/Azure/eno/internal/controllers/replication"
 	"github.com/Azure/eno/internal/controllers/rollout"
 	"github.com/Azure/eno/internal/controllers/synthesis"
@@ -47,12 +48,13 @@ func main() {
 func runController() error {
 	ctx := ctrl.SetupSignalHandler()
 	var (
-		debugLogging    bool
-		watchdogThres   time.Duration
-		rolloutCooldown time.Duration
-		taintToleration string
-		nodeAffinity    string
-		synconf         = &synthesis.Config{}
+		debugLogging     bool
+		watchdogThres    time.Duration
+		rolloutCooldown  time.Duration
+		taintToleration  string
+		nodeAffinity     string
+		concurrencyLimit int
+		synconf          = &synthesis.Config{}
 
 		mgrOpts = &manager.Options{
 			Rest: ctrl.GetConfigOrDie(),
@@ -67,6 +69,7 @@ func runController() error {
 	flag.DurationVar(&rolloutCooldown, "rollout-cooldown", time.Minute, "How long before an update to a related resource (synthesizer, bindings, etc.) will trigger a second composition's re-synthesis")
 	flag.StringVar(&taintToleration, "taint-toleration", "", "Node NoSchedule taint to be tolerated by synthesizer pods e.g. taintKey=taintValue to match on value, just taintKey to match on presence of the taint")
 	flag.StringVar(&nodeAffinity, "node-affinity", "", "Synthesizer pods will be created with this required node affinity expression e.g. labelKey=labelValue to match on value, just labelKey to match on presence of the label")
+	flag.IntVar(&concurrencyLimit, "concurrency-limit", 10, "Upper bound on active syntheses. This effectively limits the number of running synthesizer pods spawned by Eno.")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 
@@ -135,6 +138,11 @@ func runController() error {
 	err = watch.NewController(mgr)
 	if err != nil {
 		return fmt.Errorf("constructing watch controller: %w", err)
+	}
+
+	err = flowcontrol.NewSynthesisConcurrencyLimiter(mgr, concurrencyLimit)
+	if err != nil {
+		return fmt.Errorf("constructing synthesis concurrency limiter : %w", err)
 	}
 
 	return mgr.Start(ctx)

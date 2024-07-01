@@ -37,6 +37,8 @@ spec:
             type: object
           spec:
             properties:
+              attempt:
+                type: integer
               compositionGeneration:
                 format: int64
                 type: integer

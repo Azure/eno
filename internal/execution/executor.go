@@ -34,7 +34,7 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 	if err != nil {
 		return fmt.Errorf("fetching composition: %w", err)
 	}
-	if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.UUID != env.SynthesisUUID {
+	if skipSynthesis(comp, env) {
 		// This pod is no longer needed, wait for the controller to clean it up
 		return nil
 	}
@@ -61,7 +61,7 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 		return err
 	}
 
-	return e.updateComposition(ctx, comp, syn, sliceRefs, revs, output)
+	return e.updateComposition(ctx, env, comp, syn, sliceRefs, revs, output)
 }
 
 func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, syn *apiv1.Synthesizer) (*krmv1.ResourceList, []apiv1.InputRevisions, error) {
@@ -181,7 +181,7 @@ func (e *Executor) writeResourceSlice(ctx context.Context, slice *apiv1.Resource
 	})
 }
 
-func (e *Executor) updateComposition(ctx context.Context, oldComp *apiv1.Composition, syn *apiv1.Synthesizer, refs []*apiv1.ResourceSliceRef, revs []apiv1.InputRevisions, rl *krmv1.ResourceList) error {
+func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *apiv1.Composition, syn *apiv1.Synthesizer, refs []*apiv1.ResourceSliceRef, revs []apiv1.InputRevisions, rl *krmv1.ResourceList) error {
 	logger := logr.FromContextOrDiscard(ctx)
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		comp := &apiv1.Composition{}
@@ -189,9 +189,7 @@ func (e *Executor) updateComposition(ctx context.Context, oldComp *apiv1.Composi
 		if err != nil {
 			return err
 		}
-
-		synthesis := comp.Status.CurrentSynthesis
-		if synthesis == nil || synthesis.Synthesized != nil || synthesis.ObservedCompositionGeneration != oldComp.Generation {
+		if skipSynthesis(comp, env) {
 			logger.V(0).Info("synthesis is no longer relevant - discarding its output")
 			return nil
 		}
@@ -217,4 +215,9 @@ func (e *Executor) updateComposition(ctx context.Context, oldComp *apiv1.Composi
 		logger.V(0).Info("composition status has been updated following successful synthesis")
 		return nil
 	})
+}
+
+func skipSynthesis(comp *apiv1.Composition, env *Env) bool {
+	synthesis := comp.Status.CurrentSynthesis
+	return synthesis == nil || synthesis.Synthesized != nil || synthesis.UUID != env.SynthesisUUID || (synthesis.Attempts > 0 && synthesis.Attempts > env.SynthesisAttempt)
 }

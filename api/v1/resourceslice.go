@@ -22,6 +22,7 @@ type ResourceSlice struct {
 type ResourceSliceSpec struct {
 	CompositionGeneration int64      `json:"compositionGeneration,omitempty"`
 	SynthesisUUID         string     `json:"synthesisUUID,omitempty"`
+	Attempt               int        `json:"attempt,omitempty"`
 	Resources             []Manifest `json:"resources,omitempty"`
 }
 

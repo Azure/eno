@@ -1,6 +1,8 @@
 package synthesis
 
 import (
+	"strconv"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -67,6 +69,10 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 				{
 					Name:  "SYNTHESIS_UUID",
 					Value: comp.Status.CurrentSynthesis.UUID,
+				},
+				{
+					Name:  "SYNTHESIS_ATTEMPT",
+					Value: strconv.Itoa(comp.Status.CurrentSynthesis.Attempts + 1), // we write the next attempt _after_ pod creation
 				},
 			},
 			SecurityContext: &corev1.SecurityContext{
