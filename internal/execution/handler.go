@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"strconv"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
@@ -15,13 +16,16 @@ type Env struct {
 	CompositionName      string
 	CompositionNamespace string
 	SynthesisUUID        string
+	SynthesisAttempt     int
 }
 
 func LoadEnv() *Env {
+	attempt, _ := strconv.Atoi(os.Getenv("SYNTHESIS_ATTEMPT"))
 	return &Env{
 		CompositionName:      os.Getenv("COMPOSITION_NAME"),
 		CompositionNamespace: os.Getenv("COMPOSITION_NAMESPACE"),
 		SynthesisUUID:        os.Getenv("SYNTHESIS_UUID"),
+		SynthesisAttempt:     attempt,
 	}
 }
 

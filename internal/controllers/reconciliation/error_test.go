@@ -2,6 +2,7 @@ package reconciliation
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -179,4 +180,55 @@ func TestTerminalError(t *testing.T) {
 	// Prove that the failed synthesis isn't retained
 	assert.Len(t, comp.Status.CurrentSynthesis.Results, 0)
 	assert.Len(t, comp.Status.PreviousSynthesis.Results, 0)
+}
+
+// TestSliceCleanupOutdated proves there is an upper bound on how many resource slices
+// can exist for a given composition even when it's stuck in a synthesis retry loop.
+func TestSliceCleanupOutdated(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	// Register supporting controllers
+	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10))
+	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
+	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
+	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
+	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		return nil, fmt.Errorf("uh oh")
+	})
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "create"
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	// Wait for a few attempts
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Attempts >= 3
+	})
+
+	// There should not be more than one set of resource slices
+	testutil.Eventually(t, func() bool {
+		sliceList := &apiv1.ResourceSliceList{}
+		err := upstream.List(ctx, sliceList)
+		return err == nil && len(sliceList.Items) < 2
+	})
 }
