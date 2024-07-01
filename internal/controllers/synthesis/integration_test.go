@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/controllers/flowcontrol"
 	"github.com/Azure/eno/internal/testutil"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 )
@@ -33,6 +34,7 @@ func TestControllerHappyPath(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
+	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10))
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 
 	calls := atomic.Int64{}
@@ -172,6 +174,7 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 		return output, nil
 	})
 
+	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10))
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	mgr.Start(t)
 

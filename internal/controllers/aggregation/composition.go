@@ -66,6 +66,11 @@ func (c *compositionController) aggregate(comp *apiv1.Composition) *apiv1.Simpli
 		return copy
 	}
 
+	if comp.Status.CurrentSynthesis.UUID == "" {
+		copy.Status = "WaitingForDispatch"
+		return copy
+	}
+
 	for _, result := range comp.Status.CurrentSynthesis.Results {
 		if result.Severity == krmv1.ResultSeverityError {
 			copy.Error = result.Message

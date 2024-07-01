@@ -152,11 +152,10 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	// This will fail if another write has already hit the resource i.e. synthesis completion.
 	// Otherwise it's possible for pod deletion event to land before the synthesis complete event.
 	// In that case a new pod would be created even though the synthesis just completed.
+	//
+	// The UUID is written by the flow control controller - this controller should just wait
+	// until it has "dispatched" this synthesis.
 	if comp.Status.CurrentSynthesis.UUID == "" {
-		comp.Status.CurrentSynthesis.UUID = uuid.NewString()
-		if err := c.client.Status().Update(ctx, comp); err != nil {
-			return ctrl.Result{}, fmt.Errorf("writing started timestamp to status: %w", err)
-		}
 		return ctrl.Result{}, nil
 	}
 

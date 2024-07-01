@@ -24,23 +24,29 @@ func TestCompositionSimplification(t *testing.T) {
 		{
 			Input: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{}},
 			Expected: apiv1.SimplifiedStatus{
+				Status: "WaitingForDispatch",
+			},
+		},
+		{
+			Input: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{UUID: "uuid"}},
+			Expected: apiv1.SimplifiedStatus{
 				Status: "Synthesizing",
 			},
 		},
 		{
-			Input: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{Synthesized: ptr.To(metav1.Now())}},
+			Input: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{UUID: "uuid", Synthesized: ptr.To(metav1.Now())}},
 			Expected: apiv1.SimplifiedStatus{
 				Status: "Reconciling",
 			},
 		},
 		{
-			Input: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{Reconciled: ptr.To(metav1.Now())}},
+			Input: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{UUID: "uuid", Reconciled: ptr.To(metav1.Now())}},
 			Expected: apiv1.SimplifiedStatus{
 				Status: "NotReady",
 			},
 		},
 		{
-			Input: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{Ready: ptr.To(metav1.Now())}},
+			Input: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{UUID: "uuid", Ready: ptr.To(metav1.Now())}},
 			Expected: apiv1.SimplifiedStatus{
 				Status: "Ready",
 			},
@@ -54,6 +60,7 @@ func TestCompositionSimplification(t *testing.T) {
 		{
 			Input: apiv1.CompositionStatus{
 				CurrentSynthesis: &apiv1.Synthesis{
+					UUID:    "uuid",
 					Ready:   ptr.To(metav1.Now()),
 					Results: []apiv1.Result{{Message: "foo", Severity: "error"}},
 				}},
@@ -66,6 +73,7 @@ func TestCompositionSimplification(t *testing.T) {
 			Input: apiv1.CompositionStatus{
 				PendingResynthesis: ptr.To(metav1.Now()),
 				CurrentSynthesis: &apiv1.Synthesis{
+					UUID:  "uuid",
 					Ready: ptr.To(metav1.Now()),
 				}},
 			Expected: apiv1.SimplifiedStatus{
