@@ -37,6 +37,7 @@ func (c *watchdogController) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	var unrecd int
 	var unready int
+	var terminal int
 	for _, comp := range list.Items {
 		if c.pendingReconciliation(&comp) {
 			unrecd++
@@ -44,10 +45,14 @@ func (c *watchdogController) Reconcile(ctx context.Context, req ctrl.Request) (c
 		if c.pendingReadiness(&comp) {
 			unready++
 		}
+		if c.inTerminalError(&comp) {
+			terminal++
+		}
 	}
 
 	pendingReconciliation.Set(float64(unrecd))
 	pendingReadiness.Set(float64(unready))
+	terminalErrors.Set(float64(terminal))
 
 	return ctrl.Result{}, nil
 }
@@ -62,6 +67,11 @@ func (c *watchdogController) pendingReadiness(comp *apiv1.Composition) bool {
 	return !synthesisIsReady(comp.Status.CurrentSynthesis) &&
 		!synthesisIsReady(comp.Status.PreviousSynthesis) &&
 		c.timeSinceReconcilePastThreshold(comp)
+}
+
+func (c *watchdogController) inTerminalError(comp *apiv1.Composition) bool {
+	synthesis := comp.Status.CurrentSynthesis
+	return synthesis != nil && synthesis.Synthesized == nil && synthesis.Failed()
 }
 
 func (c *watchdogController) timeSinceReconcilePastThreshold(comp *apiv1.Composition) bool {

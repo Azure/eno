@@ -19,8 +19,15 @@ var (
 			Help: "Number of compositions that have not become ready since a period after their reconciliation",
 		},
 	)
+
+	terminalErrors = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "eno_compositions_terminal_error_total",
+			Help: "Number of compositions that terminally failed synthesis and will not be retried",
+		},
+	)
 )
 
 func init() {
-	metrics.Registry.MustRegister(pendingReconciliation, pendingReadiness)
+	metrics.Registry.MustRegister(pendingReconciliation, pendingReadiness, terminalErrors)
 }
