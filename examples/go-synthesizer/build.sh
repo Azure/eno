@@ -11,7 +11,7 @@ TAG="$(date +%s)"
 export IMAGE="$REGISTRY/example-go-synthesizer:$TAG"
 
 docker build --quiet -t ${IMAGE} -f "examples/go-synthesizer/Dockerfile" .
-docker push ${IMAGE}
+[[ -z "${SKIP_PUSH}" ]] && docker push ${IMAGE}
 
 kubectl apply -f - <<YAML
     apiVersion: eno.azure.io/v1
@@ -19,9 +19,7 @@ kubectl apply -f - <<YAML
     metadata:
       name: go-synth-example-synth
     spec:
-      image: $REGISTRY/example-go-synthesizer:$TAG
-      podOverrides:
-        serviceAccountName: eno
+      image: $IMAGE
       refs:
         - key: example-input
           resource:

@@ -12,7 +12,7 @@ export TAG="$(date +%s)"
 function build() {
     cmd=$(basename $1)
     docker build --quiet -t "$REGISTRY/$cmd:$TAG" -f "$f/Dockerfile" .
-    docker push "$REGISTRY/$cmd:$TAG"
+    [[ -z "${SKIP_PUSH}" ]] && docker push "$REGISTRY/$cmd:$TAG"
 }
 
 # Build!

@@ -1,29 +1,20 @@
 #!/bin/bash
 
-# Wait for apiserver to be ready
-while true; do
-    kubectl api-resources
-    if [[ $? -eq 0 ]]; then
-        break
-    else
-        sleep 1
-    fi
+set -e
+
+# Apply examples
+for file in ./examples/*/example.yaml; do
+    kubectl apply -f $file
 done
 
-# Start Eno
-kubectl apply -f api/v1/config/crd
-go run ./cmd/eno-controller --health-probe-addr=:0 --metrics-addr=:0 --synthesizer-pod-namespace=default &
-go run ./cmd/eno-reconciler --health-probe-addr=:0 --metrics-addr=:0 &
-
-# Apply example
-kubectl apply -f ./examples/simple.yaml
+set +e
 
 # Wait for the composition to be reconciled
 while true; do
-    json=$(kubectl get composition test-comp -o=json)
-    echo "${json}"
+    output=$(kubectl get compositions --no-headers)
+    echo $output
 
-    echo $json | jq --exit-status '.status.currentSynthesis.ready'
+    echo $output | awk '{ if ($0 !~ "Ready") exit 1 }'
     if [[ $? -eq 0 ]]; then
         break
     else
@@ -31,8 +22,7 @@ while true; do
     fi
 done
 
-# Delete the example and wait for cleanup
-kubectl delete composition test-comp --wait=true --timeout=1m
+set -e
 
-# Clean up controller background jobs
-kill $(jobs -p)
+# Delete the example and wait for cleanup
+kubectl delete composition --all --wait=true --timeout=1m
