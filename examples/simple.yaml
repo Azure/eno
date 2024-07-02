@@ -1,7 +1,8 @@
 apiVersion: eno.azure.io/v1
 kind: Synthesizer
 metadata:
-  name: test-synth
+  name: simple-example-synth
+  namespace: default
 spec:
   image: docker.io/ubuntu:latest
   command:
@@ -29,7 +30,8 @@ spec:
 apiVersion: eno.azure.io/v1
 kind: Composition
 metadata:
-  name: test-comp
+  name: simple-example
+  namespace: default
 spec:
   synthesizer:
-    name: test-synth
+    name: simple-example-synth

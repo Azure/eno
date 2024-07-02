@@ -28,7 +28,6 @@ spec:
         - --executor-image=$REGISTRY/eno-controller:$TAG
         - --leader-election
         - --leader-election-id=controller
-        - --synthesizer-pod-service-account=eno
         resources:
           requests:
             cpu: 50m
