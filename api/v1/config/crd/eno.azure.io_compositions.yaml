@@ -107,8 +107,8 @@ spec:
                     type: integer
                   deferred:
                     description: |-
-                      Deferred is true when this synthesis was the result of a deferred rollout,
-                      caused by a synthesizer of (deferred) input change.
+                      Deferred is true when this synthesis was caused by a change to either the synthesizer
+                      or an input with a ref that sets `Defer == true`.
                     type: boolean
                   inputRevisions:
                     description: InputRevisions contains the versions of the input
@@ -200,8 +200,8 @@ spec:
                     type: integer
                   deferred:
                     description: |-
-                      Deferred is true when this synthesis was the result of a deferred rollout,
-                      caused by a synthesizer of (deferred) input change.
+                      Deferred is true when this synthesis was caused by a change to either the synthesizer
+                      or an input with a ref that sets `Defer == true`.
                     type: boolean
                   inputRevisions:
                     description: InputRevisions contains the versions of the input

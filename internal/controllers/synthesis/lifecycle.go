@@ -152,11 +152,10 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	// This will fail if another write has already hit the resource i.e. synthesis completion.
 	// Otherwise it's possible for pod deletion event to land before the synthesis complete event.
 	// In that case a new pod would be created even though the synthesis just completed.
+	//
+	// The UUID is written by the flow control controller - this controller should just wait
+	// until it has "dispatched" this synthesis.
 	if comp.Status.CurrentSynthesis.UUID == "" {
-		comp.Status.CurrentSynthesis.UUID = uuid.NewString()
-		if err := c.client.Status().Update(ctx, comp); err != nil {
-			return ctrl.Result{}, fmt.Errorf("writing started timestamp to status: %w", err)
-		}
 		return ctrl.Result{}, nil
 	}
 
@@ -197,9 +196,10 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	sytheses.Inc()
 
 	// This metadata is optional - it's safe for the process to crash before reaching this point
-	comp.Status.CurrentSynthesis.Attempts++
-	comp.Status.CurrentSynthesis.PodCreation = &pod.CreationTimestamp
-	err = c.client.Status().Update(ctx, comp)
+	copy := comp.DeepCopy()
+	copy.Status.CurrentSynthesis.Attempts++
+	copy.Status.CurrentSynthesis.PodCreation = &pod.CreationTimestamp
+	err = c.client.Status().Patch(ctx, copy, client.MergeFrom(comp))
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("updating composition status after synthesizer pod creation: %w", err)
 	}
@@ -289,8 +289,13 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 			return logger, &pod, true
 		}
 
+		if pod.Status.Phase == corev1.PodSucceeded {
+			logger = logger.WithValues("reason", "Complete")
+			return logger, &pod, true
+		}
+
 		isCurrent := podIsCurrent(comp, &pod)
-		if !isCurrent || pod.Status.Phase == corev1.PodSucceeded {
+		if !isCurrent {
 			logger = logger.WithValues("reason", "Superseded")
 			return logger, &pod, true
 		}
