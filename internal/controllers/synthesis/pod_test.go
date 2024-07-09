@@ -7,11 +7,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 var newPodTests = []struct {
 	Name     string
 	Cfg      *Config
+	Synth    *apiv1.Synthesizer
 	Expected *corev1.Pod
 	Assert   func(*testing.T, *corev1.Pod)
 }{
@@ -68,10 +70,31 @@ var newPodTests = []struct {
 			assert.Equal(t, corev1.TolerationOpExists, p.Spec.Tolerations[0].Operator)
 		},
 	},
+	{
+		Name: "with full overrides struct",
+		Synth: &apiv1.Synthesizer{
+			Spec: apiv1.SynthesizerSpec{
+				PodOverrides: apiv1.PodOverrides{
+					Labels:      map[string]string{"foo": "bar"},
+					Annotations: map[string]string{"baz": "something"},
+					Resources:   corev1.ResourceRequirements{Limits: corev1.ResourceList{"cpu": resource.MustParse("9001")}},
+				},
+			},
+		},
+		Assert: func(t *testing.T, p *corev1.Pod) {
+			assert.Equal(t, "bar", p.Labels["foo"])
+			assert.Equal(t, "something", p.Annotations["baz"])
+			assert.True(t, p.Spec.Containers[0].Resources.Limits["cpu"].Equal(resource.MustParse("9001")))
+		},
+	},
 }
 
 func TestNewPod(t *testing.T) {
 	for _, tc := range newPodTests {
+		if tc.Cfg == nil {
+			tc.Cfg = minimalTestConfig
+		}
+
 		comp := &apiv1.Composition{}
 		comp.Name = "test-composition"
 		comp.Namespace = "test-composition-ns"
@@ -79,6 +102,9 @@ func TestNewPod(t *testing.T) {
 		comp.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
 
 		syn := &apiv1.Synthesizer{}
+		if tc.Synth != nil {
+			syn = tc.Synth
+		}
 		syn.Name = "test-synth"
 		syn.Generation = 234
 

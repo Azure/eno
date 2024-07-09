@@ -21,6 +21,14 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 		manager.ManagerLabelKey:              manager.ManagerLabelValue,
 		"eno.azure.io/synthesis-uuid":        comp.Status.CurrentSynthesis.UUID,
 	}
+	for k, v := range syn.Spec.PodOverrides.Labels {
+		pod.Labels[k] = v
+	}
+
+	pod.Annotations = map[string]string{}
+	for k, v := range syn.Spec.PodOverrides.Annotations {
+		pod.Annotations[k] = v
+	}
 
 	pod.Spec = corev1.PodSpec{
 		ServiceAccountName: cfg.PodServiceAccount,
@@ -57,6 +65,7 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 				Name:      "sharedfs",
 				MountPath: "/eno",
 			}},
+			Resources: syn.Spec.PodOverrides.Resources,
 			Env: []corev1.EnvVar{
 				{
 					Name:  "COMPOSITION_NAME",
