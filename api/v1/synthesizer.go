@@ -1,6 +1,7 @@
 package v1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -58,6 +59,15 @@ type SynthesizerSpec struct {
 	// Refs define the Synthesizer's input schema without binding it to specific
 	// resources.
 	Refs []Ref `json:"refs,omitempty"`
+
+	// PodOverrides sets values in the pods used to execute this synthesizer.
+	PodOverrides PodOverrides `json:"podOverrides,omitempty"`
+}
+
+type PodOverrides struct {
+	Labels      map[string]string           `json:"labels,omitempty"`
+	Annotations map[string]string           `json:"annotations,omitempty"`
+	Resources   corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
 type SynthesizerStatus struct {

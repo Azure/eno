@@ -118,6 +118,24 @@ _Appears in:_
 
 
 
+#### PodOverrides
+
+
+
+
+
+
+
+_Appears in:_
+- [SynthesizerSpec](#synthesizerspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `labels` _object (keys:string, values:string)_ |  |  |  |
+| `annotations` _object (keys:string, values:string)_ |  |  |  |
+| `resources` _[ResourceRequirements](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#resourcerequirements-v1-core)_ |  |  |  |
+
+
 #### Ref
 
 
@@ -364,6 +382,7 @@ _Appears in:_
 | `podTimeout` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#duration-v1-meta)_ | Pods are recreated after they've existed for at least the pod timeout interval.<br />This helps close the loop in failure modes where a pod may be considered ready but not actually able to run. | 2m |  |
 | `reconcileInterval` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#duration-v1-meta)_ | Synthesized resources can optionally be reconciled at a given interval.<br />Per-resource jitter will be applied to avoid spikes in request rate. |  |  |
 | `refs` _[Ref](#ref) array_ | Refs define the Synthesizer's input schema without binding it to specific<br />resources. |  |  |
+| `podOverrides` _[PodOverrides](#podoverrides)_ | PodOverrides sets values in the pods used to execute this synthesizer. |  |  |
 
 
 #### SynthesizerStatus
