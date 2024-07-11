@@ -407,3 +407,133 @@ func TestShouldDeletePod(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldSwapStates(t *testing.T) {
+	tests := []struct {
+		Name        string
+		Expectation bool
+		Composition apiv1.Composition
+	}{
+		{
+			Name:        "zero value",
+			Expectation: true,
+		},
+		{
+			Name:        "missing input",
+			Expectation: false,
+			Composition: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}},
+				},
+			},
+		},
+		{
+			Name:        "matching input synthesis in progress",
+			Expectation: false,
+			Composition: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						InputRevisions: []apiv1.InputRevisions{{
+							Key: "foo",
+						}},
+					},
+					InputRevisions: []apiv1.InputRevisions{{
+						Key: "foo",
+					}},
+				},
+			},
+		},
+		{
+			Name:        "non-matching composition generation",
+			Expectation: true,
+			Composition: apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Generation: 234,
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						ObservedCompositionGeneration: 123,
+					},
+				},
+			},
+		},
+		{
+			Name:        "matching input synthesis terminal",
+			Expectation: false,
+			Composition: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						InputRevisions: []apiv1.InputRevisions{{
+							Key: "foo",
+						}},
+						Synthesized: ptr.To(metav1.Now()),
+					},
+					InputRevisions: []apiv1.InputRevisions{{
+						Key: "foo",
+					}},
+				},
+			},
+		},
+		{
+			Name:        "non-matching input synthesis terminal",
+			Expectation: true,
+			Composition: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						InputRevisions: []apiv1.InputRevisions{{
+							Key: "foo",
+						}},
+						Synthesized: ptr.To(metav1.Now()),
+					},
+					InputRevisions: []apiv1.InputRevisions{{
+						Key:             "foo",
+						ResourceVersion: "new",
+					}},
+				},
+			},
+		},
+		{
+			Name:        "non-matching input synthesis non-terminal",
+			Expectation: false,
+			Composition: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						InputRevisions: []apiv1.InputRevisions{{
+							Key: "foo",
+						}},
+						// Synthesized: ptr.To(metav1.Now()),
+					},
+					InputRevisions: []apiv1.InputRevisions{{
+						Key:             "foo",
+						ResourceVersion: "new",
+					}},
+				},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.Name, func(t *testing.T) {
+			assert.Equal(t, tc.Expectation, shouldSwapStates(&tc.Composition))
+		})
+	}
+}
+
+func TestSlicesEqualUnordered(t *testing.T) {
+	assert.True(t, slicesEqualUnordered([]int{1, 2, 3}, []int{1, 2, 3}))
+	assert.True(t, slicesEqualUnordered([]int{1, 3, 2}, []int{2, 1, 3}))
+	assert.False(t, slicesEqualUnordered([]int{1, 3, 4}, []int{2, 1, 3}))
+	assert.False(t, slicesEqualUnordered([]int{1, 2, 3}, []int{1, 2, 3, 4}))
+	assert.False(t, slicesEqualUnordered([]int{1}, []int{2}))
+}

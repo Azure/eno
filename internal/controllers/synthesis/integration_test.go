@@ -56,34 +56,38 @@ func TestControllerHappyPath(t *testing.T) {
 	comp.Spec.Synthesizer.Name = syn.Name
 	require.NoError(t, cli.Create(ctx, comp))
 
-	t.Run("initial creation", func(t *testing.T) {
-		// The pod eventually performs the synthesis
-		testutil.Eventually(t, func() bool {
-			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
-		})
+	// The pod eventually performs the synthesis
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
 	})
 
-	t.Run("composition update", func(t *testing.T) {
-		// Updating the composition should cause re-synthesis
-		err := retry.RetryOnConflict(testutil.Backoff, func() error {
-			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			comp.Spec.Bindings = []apiv1.Binding{{Key: "new-binding", Resource: apiv1.ResourceBinding{Name: "test"}}}
-			return cli.Update(ctx, comp)
-		})
-		require.NoError(t, err)
-
-		latest := comp.Generation
-		testutil.Eventually(t, func() bool {
-			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration >= latest
-		})
-
-		// The previous state is retained
-		if comp.Status.PreviousSynthesis == nil {
-			t.Error("state wasn't swapped to previous")
-		}
+	// Discover an input resource - otherwise updating the bindings below will deadlock while waiting for input creation
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Status.InputRevisions = []apiv1.InputRevisions{{Key: "new-binding", ResourceVersion: "foo"}}
+		return cli.Status().Update(ctx, comp)
 	})
+	require.NoError(t, err)
+
+	// Updating the composition should cause re-synthesis
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Spec.Bindings = []apiv1.Binding{{Key: "new-binding", Resource: apiv1.ResourceBinding{Name: "test"}}}
+		return cli.Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	latest := comp.Generation
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration >= latest
+	})
+
+	// The previous state is retained
+	if comp.Status.PreviousSynthesis == nil {
+		t.Error("state wasn't swapped to previous")
+	}
 
 	// The synthesizer is eventually executed a second time
 	testutil.Eventually(t, func() bool {
@@ -127,13 +131,21 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 
 	// Send a bunch of updates in a row
 	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("test-%d", i)
 		err := retry.RetryOnConflict(testutil.Backoff, func() error {
 			err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 			if client.IgnoreNotFound(err) != nil {
 				return err
 			}
-			comp.Spec.Bindings = []apiv1.Binding{{Key: fmt.Sprintf("test-%d", i), Resource: apiv1.ResourceBinding{Name: "test"}}}
+			comp.Spec.Bindings = []apiv1.Binding{{Key: key, Resource: apiv1.ResourceBinding{Name: "test"}}}
 			return cli.Update(ctx, comp)
+		})
+		require.NoError(t, err)
+
+		err = retry.RetryOnConflict(testutil.Backoff, func() error {
+			cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+			comp.Status.InputRevisions = []apiv1.InputRevisions{{Key: key, ResourceVersion: "foo"}}
+			return cli.Status().Update(ctx, comp)
 		})
 		require.NoError(t, err)
 	}

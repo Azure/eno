@@ -14,6 +14,7 @@ import (
 
 func TestCompositionSimplification(t *testing.T) {
 	tests := []struct {
+		Bindings []apiv1.Binding
 		Input    apiv1.CompositionStatus
 		Deleting bool
 		Expected apiv1.SimplifiedStatus
@@ -55,6 +56,13 @@ func TestCompositionSimplification(t *testing.T) {
 			},
 		},
 		{
+			Bindings: []apiv1.Binding{{Key: "foo"}},
+			Input:    apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{UUID: "uuid"}},
+			Expected: apiv1.SimplifiedStatus{
+				Status: "MissingInputs",
+			},
+		},
+		{
 			Deleting: true,
 			Expected: apiv1.SimplifiedStatus{
 				Status: "Deleting",
@@ -89,6 +97,7 @@ func TestCompositionSimplification(t *testing.T) {
 		t.Run(tc.Expected.Status, func(t *testing.T) {
 			c := &compositionController{}
 			comp := &apiv1.Composition{Status: tc.Input}
+			comp.Spec.Bindings = tc.Bindings
 			if tc.Deleting {
 				comp.DeletionTimestamp = ptr.To(metav1.Now())
 			}

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/Azure/eno/internal/resource"
 	"github.com/go-logr/logr"
@@ -119,47 +118,30 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 				continue
 			}
 
-			revs := resource.NewInputRevisions(meta, key)
-			if !shouldCauseResynthesis(&comp, revs) {
-				continue
-			}
+			// TODO: This should always update our internal accounting of the resource revision so that the status is always accurate.
+			// Then, another controller (rollout? lifecycle?) can handle deferral.
+			if deferred {
+				if comp.Status.PendingResynthesis != nil {
+					continue // already pending
+				}
 
-			if deferred && comp.Status.PendingResynthesis != nil {
-				continue
-			} else if deferred {
 				comp.Status.PendingResynthesis = ptr.To(metav1.Now())
 			} else {
-				synthesis.SwapStates(&comp)
+				revs := resource.NewInputRevisions(meta, key)
+				if !setInputRevisions(&comp, revs) {
+					continue
+				}
 			}
 
 			err = k.client.Status().Update(ctx, &comp)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("swapping composition state: %w", err)
 			}
-			logger.V(0).Info("started resynthesis because input changed", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", revs.Key)
+			logger.V(0).Info("noticed input resource change", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key, "deferred", deferred)
 		}
 	}
 
 	return ctrl.Result{}, nil
-}
-
-func shouldCauseResynthesis(comp *apiv1.Composition, revs *apiv1.InputRevisions) bool {
-	if comp.DeletionTimestamp != nil || comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil {
-		return false
-	}
-
-	for _, r := range comp.Status.CurrentSynthesis.InputRevisions {
-		if r.Key != revs.Key {
-			continue
-		}
-		if revs.Revision == nil {
-			// only compare resource versions if no revision is present
-			return r.ResourceVersion != revs.ResourceVersion
-		}
-		return r.Revision == nil || *r.Revision != *revs.Revision
-	}
-
-	return true // no matching keys
 }
 
 func findRefKey(comp *apiv1.Composition, synth *apiv1.Synthesizer, meta *metav1.PartialObjectMetadata) (string, bool) {
@@ -179,4 +161,19 @@ func findRefKey(comp *apiv1.Composition, synth *apiv1.Synthesizer, meta *metav1.
 	}
 
 	return "", false
+}
+
+func setInputRevisions(comp *apiv1.Composition, revs *apiv1.InputRevisions) bool {
+	for i, ir := range comp.Status.InputRevisions {
+		if ir.Key != revs.Key {
+			continue
+		}
+		if ir == *revs {
+			return false // TODO: Unit test for idempotence
+		}
+		comp.Status.InputRevisions[i] = *revs
+		return true
+	}
+	comp.Status.InputRevisions = append(comp.Status.InputRevisions, *revs)
+	return true
 }

@@ -186,6 +186,17 @@ spec:
                       Used internally for strict ordering semantics.
                     type: string
                 type: object
+              inputRevisions:
+                items:
+                  properties:
+                    key:
+                      type: string
+                    resourceVersion:
+                      type: string
+                    revision:
+                      type: integer
+                  type: object
+                type: array
               pendingResynthesis:
                 format: date-time
                 type: string

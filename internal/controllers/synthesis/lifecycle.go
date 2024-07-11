@@ -8,6 +8,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/flowcontrol"
@@ -138,24 +139,8 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// No need to create a pod if everything is in sync
-	if comp.Status.CurrentSynthesis.Synthesized != nil || comp.DeletionTimestamp != nil {
-		return ctrl.Result{}, nil
-	}
-
-	// Don't attempt to synthesize a composition that doesn't reference a synthesizer.
-	if comp.Spec.Synthesizer.Name == "" {
-		return ctrl.Result{}, nil
-	}
-
-	// Before it's safe to create a pod, we need to write _something_ back to the composition.
-	// This will fail if another write has already hit the resource i.e. synthesis completion.
-	// Otherwise it's possible for pod deletion event to land before the synthesis complete event.
-	// In that case a new pod would be created even though the synthesis just completed.
-	//
-	// The UUID is written by the flow control controller - this controller should just wait
-	// until it has "dispatched" this synthesis.
-	if comp.Status.CurrentSynthesis.UUID == "" {
+	// Bail if it isn't time to synthesize yet, or synthesis is already complete
+	if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.UUID == "" || comp.Status.CurrentSynthesis.Synthesized != nil || comp.DeletionTimestamp != nil {
 		return ctrl.Result{}, nil
 	}
 
@@ -335,10 +320,15 @@ func SwapStates(comp *apiv1.Composition) {
 }
 
 func shouldSwapStates(comp *apiv1.Composition) bool {
-	// synthesize when:
-	// - the spec has changed since last synthesis
-	// - synthesis is complete, but the uuid is missing
-	return comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation || (comp.Status.CurrentSynthesis.Synthesized != nil && comp.Status.CurrentSynthesis.UUID == "")
+	// synthesize when (either):
+	// - synthesis has never occurred
+	// - the spec has changed
+	// - the bound input resources have changed
+	// AND
+	// - synthesis is not already pending
+	// - all bound input resources exist
+	syn := comp.Status.CurrentSynthesis
+	return comp.InputsExist() && (syn == nil || syn.ObservedCompositionGeneration != comp.Generation || (!slicesEqualUnordered(comp.Status.InputRevisions, syn.InputRevisions) && syn.Synthesized != nil))
 }
 
 func shouldBackOffPodCreation(comp *apiv1.Composition) bool {
@@ -356,4 +346,19 @@ func shouldUpdateDeletedCompositionStatus(comp *apiv1.Composition) bool {
 
 func isReconciling(comp *apiv1.Composition) bool {
 	return comp.Status.CurrentSynthesis != nil && (comp.Status.CurrentSynthesis.Reconciled == nil || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation)
+}
+
+func slicesEqualUnordered[T comparable](a []T, b []T) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	var equal int
+	for _, a := range a {
+		for _, b := range b {
+			if equality.Semantic.DeepEqual(a, b) {
+				equal++
+			}
+		}
+	}
+	return equal == len(a)
 }
