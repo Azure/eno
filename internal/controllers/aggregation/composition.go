@@ -63,6 +63,9 @@ func (c *compositionController) aggregate(comp *apiv1.Composition) *apiv1.Simpli
 
 	copy.Status = "PendingSynthesis"
 	copy.Error = ""
+	if !comp.InputsExist() {
+		copy.Status = "MissingInputs"
+	}
 	if comp.Status.CurrentSynthesis == nil {
 		return copy
 	}

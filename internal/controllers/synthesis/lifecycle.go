@@ -8,7 +8,6 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/flowcontrol"
@@ -130,7 +129,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Swap the state to prepare for resynthesis if needed
-	if shouldSwapStates(comp) {
+	if shouldSwapStates(syn, comp) {
 		SwapStates(comp)
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
@@ -319,7 +318,7 @@ func SwapStates(comp *apiv1.Composition) {
 	}
 }
 
-func shouldSwapStates(comp *apiv1.Composition) bool {
+func shouldSwapStates(synth *apiv1.Synthesizer, comp *apiv1.Composition) bool {
 	// synthesize when (either):
 	// - synthesis has never occurred
 	// - the spec has changed
@@ -328,7 +327,7 @@ func shouldSwapStates(comp *apiv1.Composition) bool {
 	// - synthesis is not already pending
 	// - all bound input resources exist
 	syn := comp.Status.CurrentSynthesis
-	return comp.InputsExist() && (syn == nil || syn.ObservedCompositionGeneration != comp.Generation || (!slicesEqualUnordered(comp.Status.InputRevisions, syn.InputRevisions) && syn.Synthesized != nil))
+	return comp.InputsExist() && (syn == nil || syn.ObservedCompositionGeneration != comp.Generation || (!inputRevisionsEqual(synth, comp.Status.InputRevisions, syn.InputRevisions) && syn.Synthesized != nil))
 }
 
 func shouldBackOffPodCreation(comp *apiv1.Composition) bool {
@@ -348,17 +347,31 @@ func isReconciling(comp *apiv1.Composition) bool {
 	return comp.Status.CurrentSynthesis != nil && (comp.Status.CurrentSynthesis.Reconciled == nil || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation)
 }
 
-func slicesEqualUnordered[T comparable](a []T, b []T) bool {
+// inputRevisionsEqual compares two sets of input revisions while ignoring deferred values.
+func inputRevisionsEqual(synth *apiv1.Synthesizer, a, b []apiv1.InputRevisions) bool {
 	if len(a) != len(b) {
 		return false
 	}
+
+	refsByKey := map[string]apiv1.Ref{}
+	for _, ref := range synth.Spec.Refs {
+		ref := ref
+		refsByKey[ref.Key] = ref
+	}
+
 	var equal int
 	for _, a := range a {
 		for _, b := range b {
-			if equality.Semantic.DeepEqual(a, b) {
+			if ref, exists := refsByKey[a.Key]; exists && ref.Defer {
+				equal++
+				continue // ignore deferred inputs
+			}
+
+			if a.Equal(b) {
 				equal++
 			}
 		}
 	}
+
 	return equal == len(a)
 }

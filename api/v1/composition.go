@@ -111,6 +111,19 @@ type InputRevisions struct {
 	Revision        *int   `json:"revision,omitempty"`
 }
 
+func (i *InputRevisions) Equal(b InputRevisions) bool {
+	if i.Key != b.Key {
+		return false
+	}
+	if (i.Revision == nil) != (b.Revision == nil) {
+		return false
+	}
+	if i.Revision != nil {
+		return *i.Revision == *b.Revision
+	}
+	return i.ResourceVersion == b.ResourceVersion
+}
+
 func (s *Synthesis) Failed() bool {
 	for _, result := range s.Results {
 		if result.Severity == "error" {

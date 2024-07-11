@@ -118,19 +118,13 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 				continue
 			}
 
-			// TODO: This should always update our internal accounting of the resource revision so that the status is always accurate.
-			// Then, another controller (rollout? lifecycle?) can handle deferral.
-			if deferred {
-				if comp.Status.PendingResynthesis != nil {
-					continue // already pending
-				}
+			revs := resource.NewInputRevisions(meta, key)
+			if !setInputRevisions(&comp, revs) {
+				continue
+			}
 
+			if deferred && comp.Status.PendingResynthesis == nil {
 				comp.Status.PendingResynthesis = ptr.To(metav1.Now())
-			} else {
-				revs := resource.NewInputRevisions(meta, key)
-				if !setInputRevisions(&comp, revs) {
-					continue
-				}
 			}
 
 			err = k.client.Status().Update(ctx, &comp)

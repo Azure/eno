@@ -525,15 +525,19 @@ func TestShouldSwapStates(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.Name, func(t *testing.T) {
-			assert.Equal(t, tc.Expectation, shouldSwapStates(&tc.Composition))
+			assert.Equal(t, tc.Expectation, shouldSwapStates(&apiv1.Synthesizer{}, &tc.Composition))
 		})
 	}
 }
 
-func TestSlicesEqualUnordered(t *testing.T) {
-	assert.True(t, slicesEqualUnordered([]int{1, 2, 3}, []int{1, 2, 3}))
-	assert.True(t, slicesEqualUnordered([]int{1, 3, 2}, []int{2, 1, 3}))
-	assert.False(t, slicesEqualUnordered([]int{1, 3, 4}, []int{2, 1, 3}))
-	assert.False(t, slicesEqualUnordered([]int{1, 2, 3}, []int{1, 2, 3, 4}))
-	assert.False(t, slicesEqualUnordered([]int{1}, []int{2}))
+func TestInputRevisionsEqual(t *testing.T) {
+	synth := &apiv1.Synthesizer{}
+	synth.Spec.Refs = []apiv1.Ref{{Key: "foo"}, {Key: "bar", Defer: true}}
+
+	assert.True(t, inputRevisionsEqual(synth, []apiv1.InputRevisions{{Key: "foo"}}, []apiv1.InputRevisions{{Key: "foo"}}))
+	assert.False(t, inputRevisionsEqual(synth, []apiv1.InputRevisions{{Key: "foo"}}, []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "not-zero"}}))
+	assert.False(t, inputRevisionsEqual(synth, []apiv1.InputRevisions{{Key: "foo"}}, []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(123)}}))
+	assert.False(t, inputRevisionsEqual(synth, []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(234)}}, []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(123)}}))
+	assert.True(t, inputRevisionsEqual(synth, []apiv1.InputRevisions{{Key: "bar"}}, []apiv1.InputRevisions{{Key: "bar", ResourceVersion: "not-zero"}}))
+	assert.False(t, inputRevisionsEqual(synth, []apiv1.InputRevisions{{Key: "foo"}}, []apiv1.InputRevisions{{Key: "bar"}}))
 }

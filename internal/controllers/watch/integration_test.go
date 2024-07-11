@@ -116,9 +116,31 @@ func TestDeferredBasics(t *testing.T) {
 	}}
 	require.NoError(t, cli.Create(ctx, comp))
 
-	// Synthesis becomes pending
+	// The initial status is populated and pending
+	var initialResourceVersion string
 	testutil.Eventually(t, func() bool {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return comp.Status.PendingResynthesis != nil
+		if len(comp.Status.InputRevisions) != 1 {
+			return false
+		}
+
+		rv := comp.Status.InputRevisions[0].ResourceVersion
+		initialResourceVersion = rv
+		return rv != "" && comp.Status.PendingResynthesis != nil
+	})
+
+	// Update the input
+	input.Data = map[string]string{"foo": "bar"}
+	require.NoError(t, cli.Update(ctx, input))
+
+	// The status is eventually updated
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if len(comp.Status.InputRevisions) != 1 {
+			return false
+		}
+
+		rv := comp.Status.InputRevisions[0].ResourceVersion
+		return rv != "" && rv != initialResourceVersion
 	})
 }

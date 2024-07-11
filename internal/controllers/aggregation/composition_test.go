@@ -57,6 +57,13 @@ func TestCompositionSimplification(t *testing.T) {
 		},
 		{
 			Bindings: []apiv1.Binding{{Key: "foo"}},
+			Input:    apiv1.CompositionStatus{},
+			Expected: apiv1.SimplifiedStatus{
+				Status: "MissingInputs",
+			},
+		},
+		{
+			Bindings: []apiv1.Binding{{Key: "foo"}},
 			Input:    apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{UUID: "uuid"}},
 			Expected: apiv1.SimplifiedStatus{
 				Status: "MissingInputs",
