@@ -360,14 +360,14 @@ func inputRevisionsEqual(synth *apiv1.Synthesizer, a, b []apiv1.InputRevisions) 
 	}
 
 	var equal int
-	for _, a := range a {
-		for _, b := range b {
-			if ref, exists := refsByKey[a.Key]; exists && ref.Defer {
+	for _, ar := range a {
+		for _, br := range b {
+			if ref, exists := refsByKey[ar.Key]; exists && ref.Defer {
 				equal++
 				continue // ignore deferred inputs
 			}
 
-			if a.Equal(b) {
+			if ar.Equal(br) {
 				equal++
 			}
 		}
