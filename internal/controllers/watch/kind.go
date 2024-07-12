@@ -44,20 +44,7 @@ func NewKindWatchController(ctx context.Context, parent *WatchController, resour
 	ref := &metav1.PartialObjectMetadata{}
 	ref.SetGroupVersionKind(k.gvk)
 
-	rrc, err := controller.NewUnmanaged("kindWatchController", parent.mgr, controller.Options{
-		LogConstructor: manager.NewLogConstructor(parent.mgr, "kindWatchController"),
-		RateLimiter: &workqueue.BucketRateLimiter{
-			// Be careful about feedback loops - low, hardcoded rate limits make sense here.
-			// Maybe expose as a flag in the future.
-			Limiter: rate.NewLimiter(rate.Every(time.Second), 2),
-		},
-		Reconciler: k,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), ref), &handler.EnqueueRequestForObject{})
+	rrc, err := k.newResourceWatchController(parent, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -72,6 +59,24 @@ func NewKindWatchController(ctx context.Context, parent *WatchController, resour
 	}()
 
 	return k, nil
+}
+
+func (k *KindWatchController) newResourceWatchController(parent *WatchController, ref *metav1.PartialObjectMetadata) (controller.Controller, error) {
+	rrc, err := controller.NewUnmanaged("kindWatchController", parent.mgr, controller.Options{
+		LogConstructor: manager.NewLogConstructor(parent.mgr, "kindWatchController"),
+		RateLimiter: &workqueue.BucketRateLimiter{
+			// Be careful about feedback loops - low, hardcoded rate limits make sense here.
+			// Maybe expose as a flag in the future.
+			Limiter: rate.NewLimiter(rate.Every(time.Second), 2),
+		},
+		Reconciler: k,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), ref), &handler.EnqueueRequestForObject{})
+	return rrc, err
 }
 
 func (k *KindWatchController) Stop(ctx context.Context) {
