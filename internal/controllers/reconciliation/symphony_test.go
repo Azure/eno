@@ -39,7 +39,7 @@ func TestSymphonyIntegration(t *testing.T) {
 	require.NoError(t, upstream.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test"}}))
 
 	// Register supporting controllers
-	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10))
+	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10, 0))
 	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))

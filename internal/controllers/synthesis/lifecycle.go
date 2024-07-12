@@ -10,7 +10,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/util/flowcontrol"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -34,19 +33,17 @@ type Config struct {
 }
 
 type podLifecycleController struct {
-	config           *Config
-	client           client.Client
-	noCacheReader    client.Reader
-	createSliceLimit flowcontrol.RateLimiter
+	config        *Config
+	client        client.Client
+	noCacheReader client.Reader
 }
 
 // NewPodLifecycleController is responsible for creating and deleting pods as needed to synthesize compositions.
 func NewPodLifecycleController(mgr ctrl.Manager, cfg *Config) error {
 	c := &podLifecycleController{
-		config:           cfg,
-		client:           mgr.GetClient(),
-		noCacheReader:    mgr.GetAPIReader(),
-		createSliceLimit: flowcontrol.NewTokenBucketRateLimiter(float32(cfg.SliceCreationQPS), 1),
+		config:        cfg,
+		client:        mgr.GetClient(),
+		noCacheReader: mgr.GetAPIReader(),
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).

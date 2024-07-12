@@ -3,6 +3,8 @@ package flowcontrol
 import (
 	"context"
 	"fmt"
+	"math/rand"
+	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
@@ -13,18 +15,20 @@ import (
 )
 
 type synthesisConcurrencyLimiter struct {
-	client client.Client
-	limit  int
+	client   client.Client
+	limit    int
+	cooldown time.Duration
 }
 
-func NewSynthesisConcurrencyLimiter(mgr ctrl.Manager, limit int) error {
+func NewSynthesisConcurrencyLimiter(mgr ctrl.Manager, limit int, cooldown time.Duration) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("synthesisConcurrencyLimiter").
 		Watches(&apiv1.Composition{}, manager.SingleEventHandler()).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "synthesisConcurrencyLimiter")).
 		Complete(&synthesisConcurrencyLimiter{
-			client: mgr.GetClient(),
-			limit:  limit,
+			client:   mgr.GetClient(),
+			limit:    limit,
+			cooldown: cooldown,
 		})
 }
 
@@ -38,8 +42,7 @@ func (c *synthesisConcurrencyLimiter) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	var active int
-	var pending int
-	var next *apiv1.Composition
+	var pending []*apiv1.Composition
 	for _, comp := range list.Items {
 		comp := comp
 		current := comp.Status.CurrentSynthesis
@@ -47,23 +50,23 @@ func (c *synthesisConcurrencyLimiter) Reconcile(ctx context.Context, req ctrl.Re
 			continue // not ready or already synthesized
 		}
 		if current.UUID == "" {
-			pending++
-			next = &comp
+			pending = append(pending, &comp)
 		} else {
 			active++
 		}
 	}
 	activeSyntheses.Add(float64(active))
-	pendingSyntheses.Add(float64(pending))
+	pendingSyntheses.Add(float64(len(pending)))
 
 	if active >= c.limit {
 		logger.V(1).Info("refusing to dispatch synthesis because concurrency limit has been reached", "active", active, "pending", pending)
 		return ctrl.Result{}, nil
 	}
 
-	if next == nil {
+	if len(pending) == 0 {
 		return ctrl.Result{}, nil // nothing to dispatch
 	}
+	next := pending[rand.Intn(len(pending))]
 	logger = logger.WithValues("compositionName", next.Name, "compositionNamespace", next.Namespace, "compositionGeneration", next.Generation)
 
 	// Dispatch the next pending synthesis
@@ -77,5 +80,5 @@ func (c *synthesisConcurrencyLimiter) Reconcile(ctx context.Context, req ctrl.Re
 	}
 	logger.V(1).Info("dispatched synthesis")
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{Requeue: true, RequeueAfter: c.cooldown}, nil
 }

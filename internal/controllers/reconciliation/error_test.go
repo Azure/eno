@@ -39,7 +39,7 @@ func TestTerminalError(t *testing.T) {
 	upstream := mgr.GetClient()
 
 	// Register supporting controllers
-	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10))
+	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10, 0))
 	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
@@ -194,7 +194,7 @@ func TestSliceCleanupOutdated(t *testing.T) {
 	upstream := mgr.GetClient()
 
 	// Register supporting controllers
-	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10))
+	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10, 0))
 	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
