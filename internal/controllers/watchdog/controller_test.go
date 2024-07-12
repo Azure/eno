@@ -16,6 +16,7 @@ var controllerLogicTests = []struct {
 	Composition                 *apiv1.Composition
 	ExpectPendingReconciliation bool
 	ExpectPendingReadiness      bool
+	ExpectTerminalError         bool
 }{
 	{
 		Name: "ready",
@@ -83,6 +84,20 @@ var controllerLogicTests = []struct {
 			},
 		},
 	},
+	{
+		Name:                        "in terminal error",
+		ExpectTerminalError:         true,
+		ExpectPendingReconciliation: true,
+		Composition: &apiv1.Composition{
+			Status: apiv1.CompositionStatus{
+				CurrentSynthesis: &apiv1.Synthesis{
+					Results: []apiv1.Result{{
+						Severity: "error",
+					}},
+				},
+			},
+		},
+	},
 }
 
 func TestControllerLogic(t *testing.T) {
@@ -91,8 +106,10 @@ func TestControllerLogic(t *testing.T) {
 			c := &watchdogController{threshold: time.Minute}
 			unrecd := c.pendingReconciliation(tc.Composition)
 			unready := c.pendingReadiness(tc.Composition)
+			terminal := c.inTerminalError(tc.Composition)
 			assert.Equal(t, tc.ExpectPendingReconciliation, unrecd, "Reconciliation")
 			assert.Equal(t, tc.ExpectPendingReadiness, unready, "Readiness")
+			assert.Equal(t, tc.ExpectTerminalError, terminal, "TerminalError")
 		})
 	}
 }
