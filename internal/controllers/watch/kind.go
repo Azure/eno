@@ -14,12 +14,14 @@ import (
 	"golang.org/x/time/rate"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
@@ -75,8 +77,85 @@ func (k *KindWatchController) newResourceWatchController(parent *WatchController
 		return nil, err
 	}
 
+	// Watch the input resources
 	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), ref), &handler.EnqueueRequestForObject{})
+	if err != nil {
+		return nil, err
+	}
+
+	// Watch inputs declared by refs/bindings in synthesizers/compositions
+	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), &apiv1.Composition{}),
+		handler.EnqueueRequestsFromMapFunc(handler.MapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+			comp, ok := o.(*apiv1.Composition)
+			if !ok || comp.Spec.Synthesizer.Name == "" {
+				return nil
+			}
+
+			synth := &apiv1.Synthesizer{}
+			err = parent.client.Get(ctx, types.NamespacedName{Name: comp.Spec.Synthesizer.Name}, synth)
+			if err != nil {
+				logr.FromContextOrDiscard(ctx).Error(err, "unable to get synthesizer for composition")
+				return nil
+			}
+
+			return k.buildRequests(synth, *comp)
+		})))
+	if err != nil {
+		return nil, err
+	}
+	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), &apiv1.Synthesizer{}),
+		handler.EnqueueRequestsFromMapFunc(handler.MapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+			synth, ok := o.(*apiv1.Synthesizer)
+			if !ok {
+				return nil
+			}
+
+			compList := &apiv1.CompositionList{}
+			err = parent.client.List(ctx, compList, client.MatchingFields{
+				manager.IdxCompositionsBySynthesizer: synth.Name,
+			})
+			if err != nil {
+				logr.FromContextOrDiscard(ctx).Error(err, "unable to get compositions for synthesizer")
+				return nil
+			}
+
+			return k.buildRequests(synth, compList.Items...)
+		})))
+	if err != nil {
+		return nil, err
+	}
+
 	return rrc, err
+}
+
+// buildRequests returns a reconcile request for every binding to this resource kind.
+func (k *KindWatchController) buildRequests(synth *apiv1.Synthesizer, comps ...apiv1.Composition) []reconcile.Request {
+	keys := map[string]struct{}{}
+	for _, ref := range synth.Spec.Refs {
+		keys[ref.Key] = struct{}{}
+	}
+
+	reqs := []reconcile.Request{}
+	for _, comp := range comps {
+		for _, binding := range comp.Spec.Bindings {
+			if _, found := keys[binding.Key]; !found {
+				continue
+			}
+
+			nsn := types.NamespacedName{Namespace: binding.Resource.Namespace, Name: binding.Resource.Name}
+			var exists bool
+			for _, req := range reqs {
+				if req.NamespacedName == nsn {
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				reqs = append(reqs, reconcile.Request{NamespacedName: nsn})
+			}
+		}
+	}
+	return reqs
 }
 
 func (k *KindWatchController) Stop(ctx context.Context) {
@@ -114,7 +193,6 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 		}
-		rand.Shuffle(len(list.Items), func(i, j int) { list.Items[i] = list.Items[j] })
 
 		for _, comp := range list.Items {
 			key, deferred := findRefKey(&comp, &synth, meta)
@@ -134,9 +212,10 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 
 			err = k.client.Status().Update(ctx, &comp)
 			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("swapping composition state: %w", err)
+				return ctrl.Result{}, fmt.Errorf("updating input revisions: %w", err)
 			}
 			logger.V(0).Info("noticed input resource change", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key, "deferred", deferred)
+			return ctrl.Result{}, nil // wait for requeue
 		}
 	}
 
