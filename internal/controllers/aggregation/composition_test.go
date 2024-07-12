@@ -70,6 +70,18 @@ func TestCompositionSimplification(t *testing.T) {
 			},
 		},
 		{
+			Bindings: []apiv1.Binding{{Key: "foo"}},
+			Input: apiv1.CompositionStatus{
+				CurrentSynthesis: &apiv1.Synthesis{
+					UUID:           "uuid",
+					Ready:          ptr.To(metav1.Now()),
+					InputRevisions: []apiv1.InputRevisions{{Key: "foo"}},
+				}},
+			Expected: apiv1.SimplifiedStatus{
+				Status: "Ready",
+			},
+		},
+		{
 			Deleting: true,
 			Expected: apiv1.SimplifiedStatus{
 				Status: "Deleting",
