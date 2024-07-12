@@ -51,6 +51,7 @@ func runController() error {
 		debugLogging     bool
 		watchdogThres    time.Duration
 		rolloutCooldown  time.Duration
+		dispatchCooldown time.Duration
 		taintToleration  string
 		nodeAffinity     string
 		concurrencyLimit int
@@ -67,6 +68,7 @@ func runController() error {
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.DurationVar(&watchdogThres, "watchdog-threshold", time.Minute*5, "How long before the watchdog considers a mid-transition resource to be stuck")
 	flag.DurationVar(&rolloutCooldown, "rollout-cooldown", time.Minute, "How long before an update to a related resource (synthesizer, bindings, etc.) will trigger a second composition's re-synthesis")
+	flag.DurationVar(&dispatchCooldown, "dispatch-cooldown", time.Millisecond*100, "Min period between the dispatch of two syntheses. Effectively limits the rate of pod creation.")
 	flag.StringVar(&taintToleration, "taint-toleration", "", "Node NoSchedule taint to be tolerated by synthesizer pods e.g. taintKey=taintValue to match on value, just taintKey to match on presence of the taint")
 	flag.StringVar(&nodeAffinity, "node-affinity", "", "Synthesizer pods will be created with this required node affinity expression e.g. labelKey=labelValue to match on value, just labelKey to match on presence of the label")
 	flag.IntVar(&concurrencyLimit, "concurrency-limit", 10, "Upper bound on active syntheses. This effectively limits the number of running synthesizer pods spawned by Eno.")
@@ -140,7 +142,7 @@ func runController() error {
 		return fmt.Errorf("constructing watch controller: %w", err)
 	}
 
-	err = flowcontrol.NewSynthesisConcurrencyLimiter(mgr, concurrencyLimit)
+	err = flowcontrol.NewSynthesisConcurrencyLimiter(mgr, concurrencyLimit, dispatchCooldown)
 	if err != nil {
 		return fmt.Errorf("constructing synthesis concurrency limiter : %w", err)
 	}

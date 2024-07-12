@@ -34,7 +34,7 @@ func TestControllerHappyPath(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10))
+	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10, 0))
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 
 	calls := atomic.Int64{}
@@ -186,7 +186,7 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 		return output, nil
 	})
 
-	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10))
+	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10, 0))
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	mgr.Start(t)
 
