@@ -1,12 +1,13 @@
 package main
 
 import (
-	"fmt"
 	"strconv"
 
-	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/pkg/function"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 )
 
 func main() {
@@ -21,15 +22,25 @@ func main() {
 
 	replicas, _ := strconv.Atoi(input.Data["replicas"])
 
-	for i := 0; i < replicas; i++ {
-		comp := &apiv1.Composition{}
-		comp.APIVersion = "eno.azure.io/v1"
-		comp.Kind = "Composition"
-		comp.Name = fmt.Sprintf("example-%d", i)
-		comp.Namespace = "default"
-		comp.Spec.Synthesizer.Name = "simple-example-synth"
-		w.Add(comp)
+	deploy := &appsv1.Deployment{}
+	deploy.APIVersion = "apps/v1"
+	deploy.Kind = "Deployment"
+	deploy.Name = "example-nginx-deployment"
+	deploy.Namespace = "default"
+	deploy.Spec.Replicas = ptr.To(int32(replicas))
+	deploy.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"app": "nginx-example"}}
+	deploy.Spec.Template = corev1.PodTemplateSpec{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{"app": "nginx-example"},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name:  "nginx",
+				Image: "nginx:latest",
+			}},
+		},
 	}
+	w.Add(deploy)
 
 	w.Write()
 }
