@@ -18,7 +18,7 @@ type WatchController struct {
 }
 
 func NewController(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
+	err := ctrl.NewControllerManagedBy(mgr).
 		Named("watchControllerController").
 		Watches(&apiv1.Synthesizer{}, manager.SingleEventHandler()).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "watchController")).
@@ -26,6 +26,16 @@ func NewController(mgr ctrl.Manager) error {
 			mgr:            mgr,
 			client:         mgr.GetClient(),
 			refControllers: map[apiv1.ResourceRef]*KindWatchController{},
+		})
+	if err != nil {
+		return err
+	}
+
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&apiv1.Composition{}).
+		WithLogConstructor(manager.NewLogConstructor(mgr, "watchPruningController")).
+		Complete(&pruningController{
+			client: mgr.GetClient(),
 		})
 }
 

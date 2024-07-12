@@ -407,3 +407,137 @@ func TestShouldDeletePod(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldSwapStates(t *testing.T) {
+	tests := []struct {
+		Name        string
+		Expectation bool
+		Composition apiv1.Composition
+	}{
+		{
+			Name:        "zero value",
+			Expectation: true,
+		},
+		{
+			Name:        "missing input",
+			Expectation: false,
+			Composition: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}},
+				},
+			},
+		},
+		{
+			Name:        "matching input synthesis in progress",
+			Expectation: false,
+			Composition: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						InputRevisions: []apiv1.InputRevisions{{
+							Key: "foo",
+						}},
+					},
+					InputRevisions: []apiv1.InputRevisions{{
+						Key: "foo",
+					}},
+				},
+			},
+		},
+		{
+			Name:        "non-matching composition generation",
+			Expectation: true,
+			Composition: apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Generation: 234,
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						ObservedCompositionGeneration: 123,
+					},
+				},
+			},
+		},
+		{
+			Name:        "matching input synthesis terminal",
+			Expectation: false,
+			Composition: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						InputRevisions: []apiv1.InputRevisions{{
+							Key: "foo",
+						}},
+						Synthesized: ptr.To(metav1.Now()),
+					},
+					InputRevisions: []apiv1.InputRevisions{{
+						Key: "foo",
+					}},
+				},
+			},
+		},
+		{
+			Name:        "non-matching input synthesis terminal",
+			Expectation: true,
+			Composition: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						InputRevisions: []apiv1.InputRevisions{{
+							Key: "foo",
+						}},
+						Synthesized: ptr.To(metav1.Now()),
+					},
+					InputRevisions: []apiv1.InputRevisions{{
+						Key:             "foo",
+						ResourceVersion: "new",
+					}},
+				},
+			},
+		},
+		{
+			Name:        "non-matching input synthesis non-terminal",
+			Expectation: false,
+			Composition: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						InputRevisions: []apiv1.InputRevisions{{
+							Key: "foo",
+						}},
+						// Synthesized: ptr.To(metav1.Now()),
+					},
+					InputRevisions: []apiv1.InputRevisions{{
+						Key:             "foo",
+						ResourceVersion: "new",
+					}},
+				},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.Name, func(t *testing.T) {
+			assert.Equal(t, tc.Expectation, shouldSwapStates(&apiv1.Synthesizer{}, &tc.Composition))
+		})
+	}
+}
+
+func TestInputRevisionsEqual(t *testing.T) {
+	synth := &apiv1.Synthesizer{}
+	synth.Spec.Refs = []apiv1.Ref{{Key: "foo"}, {Key: "bar", Defer: true}}
+
+	assert.True(t, inputRevisionsEqual(synth, []apiv1.InputRevisions{{Key: "foo"}}, []apiv1.InputRevisions{{Key: "foo"}}))
+	assert.False(t, inputRevisionsEqual(synth, []apiv1.InputRevisions{{Key: "foo"}}, []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "not-zero"}}))
+	assert.False(t, inputRevisionsEqual(synth, []apiv1.InputRevisions{{Key: "foo"}}, []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(123)}}))
+	assert.False(t, inputRevisionsEqual(synth, []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(234)}}, []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(123)}}))
+	assert.True(t, inputRevisionsEqual(synth, []apiv1.InputRevisions{{Key: "bar"}}, []apiv1.InputRevisions{{Key: "bar", ResourceVersion: "not-zero"}}))
+	assert.False(t, inputRevisionsEqual(synth, []apiv1.InputRevisions{{Key: "foo"}}, []apiv1.InputRevisions{{Key: "bar"}}))
+}

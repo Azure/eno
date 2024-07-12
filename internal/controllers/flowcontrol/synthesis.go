@@ -43,10 +43,10 @@ func (c *synthesisConcurrencyLimiter) Reconcile(ctx context.Context, req ctrl.Re
 	for _, comp := range list.Items {
 		comp := comp
 		current := comp.Status.CurrentSynthesis
-		if current != nil && current.Synthesized != nil {
-			continue // already synthesized
+		if current == nil || current.Synthesized != nil {
+			continue // not ready or already synthesized
 		}
-		if current == nil || current.UUID == "" {
+		if current.UUID == "" {
 			pending++
 			next = &comp
 		} else {

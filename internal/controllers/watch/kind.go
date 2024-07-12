@@ -8,19 +8,20 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/Azure/eno/internal/resource"
 	"github.com/go-logr/logr"
 	"golang.org/x/time/rate"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
@@ -45,20 +46,7 @@ func NewKindWatchController(ctx context.Context, parent *WatchController, resour
 	ref := &metav1.PartialObjectMetadata{}
 	ref.SetGroupVersionKind(k.gvk)
 
-	rrc, err := controller.NewUnmanaged("kindWatchController", parent.mgr, controller.Options{
-		LogConstructor: manager.NewLogConstructor(parent.mgr, "kindWatchController"),
-		RateLimiter: &workqueue.BucketRateLimiter{
-			// Be careful about feedback loops - low, hardcoded rate limits make sense here.
-			// Maybe expose as a flag in the future.
-			Limiter: rate.NewLimiter(rate.Every(time.Second), 2),
-		},
-		Reconciler: k,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), ref), &handler.EnqueueRequestForObject{})
+	rrc, err := k.newResourceWatchController(parent, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -73,6 +61,101 @@ func NewKindWatchController(ctx context.Context, parent *WatchController, resour
 	}()
 
 	return k, nil
+}
+
+func (k *KindWatchController) newResourceWatchController(parent *WatchController, ref *metav1.PartialObjectMetadata) (controller.Controller, error) {
+	rrc, err := controller.NewUnmanaged("kindWatchController", parent.mgr, controller.Options{
+		LogConstructor: manager.NewLogConstructor(parent.mgr, "kindWatchController"),
+		RateLimiter: &workqueue.BucketRateLimiter{
+			// Be careful about feedback loops - low, hardcoded rate limits make sense here.
+			// Maybe expose as a flag in the future.
+			Limiter: rate.NewLimiter(rate.Every(time.Second), 2),
+		},
+		Reconciler: k,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Watch the input resources
+	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), ref), &handler.EnqueueRequestForObject{})
+	if err != nil {
+		return nil, err
+	}
+
+	// Watch inputs declared by refs/bindings in synthesizers/compositions
+	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), &apiv1.Composition{}),
+		handler.EnqueueRequestsFromMapFunc(handler.MapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+			comp, ok := o.(*apiv1.Composition)
+			if !ok || comp.Spec.Synthesizer.Name == "" {
+				return nil
+			}
+
+			synth := &apiv1.Synthesizer{}
+			err = parent.client.Get(ctx, types.NamespacedName{Name: comp.Spec.Synthesizer.Name}, synth)
+			if err != nil {
+				logr.FromContextOrDiscard(ctx).Error(err, "unable to get synthesizer for composition")
+				return nil
+			}
+
+			return k.buildRequests(synth, *comp)
+		})))
+	if err != nil {
+		return nil, err
+	}
+	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), &apiv1.Synthesizer{}),
+		handler.EnqueueRequestsFromMapFunc(handler.MapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+			synth, ok := o.(*apiv1.Synthesizer)
+			if !ok {
+				return nil
+			}
+
+			compList := &apiv1.CompositionList{}
+			err = parent.client.List(ctx, compList, client.MatchingFields{
+				manager.IdxCompositionsBySynthesizer: synth.Name,
+			})
+			if err != nil {
+				logr.FromContextOrDiscard(ctx).Error(err, "unable to get compositions for synthesizer")
+				return nil
+			}
+
+			return k.buildRequests(synth, compList.Items...)
+		})))
+	if err != nil {
+		return nil, err
+	}
+
+	return rrc, err
+}
+
+// buildRequests returns a reconcile request for every binding to this resource kind.
+func (k *KindWatchController) buildRequests(synth *apiv1.Synthesizer, comps ...apiv1.Composition) []reconcile.Request {
+	keys := map[string]struct{}{}
+	for _, ref := range synth.Spec.Refs {
+		keys[ref.Key] = struct{}{}
+	}
+
+	reqs := []reconcile.Request{}
+	for _, comp := range comps {
+		for _, binding := range comp.Spec.Bindings {
+			if _, found := keys[binding.Key]; !found {
+				continue
+			}
+
+			nsn := types.NamespacedName{Namespace: binding.Resource.Namespace, Name: binding.Resource.Name}
+			var exists bool
+			for _, req := range reqs {
+				if req.NamespacedName == nsn {
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				reqs = append(reqs, reconcile.Request{NamespacedName: nsn})
+			}
+		}
+	}
+	return reqs
 }
 
 func (k *KindWatchController) Stop(ctx context.Context) {
@@ -110,7 +193,6 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 		}
-		rand.Shuffle(len(list.Items), func(i, j int) { list.Items[i] = list.Items[j] })
 
 		for _, comp := range list.Items {
 			key, deferred := findRefKey(&comp, &synth, meta)
@@ -120,46 +202,24 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 			}
 
 			revs := resource.NewInputRevisions(meta, key)
-			if !shouldCauseResynthesis(&comp, revs) {
+			if !setInputRevisions(&comp, revs) {
 				continue
 			}
 
-			if deferred && comp.Status.PendingResynthesis != nil {
-				continue
-			} else if deferred {
+			if deferred && comp.Status.PendingResynthesis == nil {
 				comp.Status.PendingResynthesis = ptr.To(metav1.Now())
-			} else {
-				synthesis.SwapStates(&comp)
 			}
 
 			err = k.client.Status().Update(ctx, &comp)
 			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("swapping composition state: %w", err)
+				return ctrl.Result{}, fmt.Errorf("updating input revisions: %w", err)
 			}
-			logger.V(0).Info("started resynthesis because input changed", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", revs.Key)
+			logger.V(0).Info("noticed input resource change", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key, "deferred", deferred)
+			return ctrl.Result{}, nil // wait for requeue
 		}
 	}
 
 	return ctrl.Result{}, nil
-}
-
-func shouldCauseResynthesis(comp *apiv1.Composition, revs *apiv1.InputRevisions) bool {
-	if comp.DeletionTimestamp != nil || comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil {
-		return false
-	}
-
-	for _, r := range comp.Status.CurrentSynthesis.InputRevisions {
-		if r.Key != revs.Key {
-			continue
-		}
-		if revs.Revision == nil {
-			// only compare resource versions if no revision is present
-			return r.ResourceVersion != revs.ResourceVersion
-		}
-		return r.Revision == nil || *r.Revision != *revs.Revision
-	}
-
-	return true // no matching keys
 }
 
 func findRefKey(comp *apiv1.Composition, synth *apiv1.Synthesizer, meta *metav1.PartialObjectMetadata) (string, bool) {
@@ -179,4 +239,19 @@ func findRefKey(comp *apiv1.Composition, synth *apiv1.Synthesizer, meta *metav1.
 	}
 
 	return "", false
+}
+
+func setInputRevisions(comp *apiv1.Composition, revs *apiv1.InputRevisions) bool {
+	for i, ir := range comp.Status.InputRevisions {
+		if ir.Key != revs.Key {
+			continue
+		}
+		if ir == *revs {
+			return false // TODO: Unit test for idempotence
+		}
+		comp.Status.InputRevisions[i] = *revs
+		return true
+	}
+	comp.Status.InputRevisions = append(comp.Status.InputRevisions, *revs)
+	return true
 }

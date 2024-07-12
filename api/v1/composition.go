@@ -46,6 +46,7 @@ type CompositionStatus struct {
 	CurrentSynthesis   *Synthesis        `json:"currentSynthesis,omitempty"`
 	PreviousSynthesis  *Synthesis        `json:"previousSynthesis,omitempty"`
 	PendingResynthesis *metav1.Time      `json:"pendingResynthesis,omitempty"`
+	InputRevisions     []InputRevisions  `json:"inputRevisions,omitempty"`
 }
 
 type SimplifiedStatus struct {
@@ -110,6 +111,19 @@ type InputRevisions struct {
 	Revision        *int   `json:"revision,omitempty"`
 }
 
+func (i *InputRevisions) Equal(b InputRevisions) bool {
+	if i.Key != b.Key {
+		return false
+	}
+	if (i.Revision == nil) != (b.Revision == nil) {
+		return false
+	}
+	if i.Revision != nil {
+		return *i.Revision == *b.Revision
+	}
+	return i.ResourceVersion == b.ResourceVersion
+}
+
 func (s *Synthesis) Failed() bool {
 	for _, result := range s.Results {
 		if result.Severity == "error" {
@@ -117,4 +131,20 @@ func (s *Synthesis) Failed() bool {
 		}
 	}
 	return false
+}
+
+func (c *Composition) InputsExist() bool {
+	for _, binding := range c.Spec.Bindings {
+		var found bool
+		for _, rev := range c.Status.InputRevisions {
+			if binding.Key == rev.Key {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }

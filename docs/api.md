@@ -94,6 +94,7 @@ _Appears in:_
 | `currentSynthesis` _[Synthesis](#synthesis)_ |  |  |  |
 | `previousSynthesis` _[Synthesis](#synthesis)_ |  |  |  |
 | `pendingResynthesis` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ |  |  |  |
+| `inputRevisions` _[InputRevisions](#inputrevisions) array_ |  |  |  |
 
 
 
@@ -107,6 +108,7 @@ _Appears in:_
 
 
 _Appears in:_
+- [CompositionStatus](#compositionstatus)
 - [Synthesis](#synthesis)
 
 | Field | Description | Default | Validation |

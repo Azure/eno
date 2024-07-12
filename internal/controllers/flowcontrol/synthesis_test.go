@@ -22,12 +22,35 @@ func TestSynthesisConcurrencyLimitUnder(t *testing.T) {
 	comp.Name = "test-comp"
 	require.NoError(t, cli.Create(ctx, comp))
 
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{}
+	require.NoError(t, cli.Status().Update(ctx, comp))
+
 	_, err := c.Reconcile(ctx, ctrl.Request{})
 	require.NoError(t, err)
 
 	err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 	require.NoError(t, err)
 	assert.NotEmpty(t, comp.Status.CurrentSynthesis.UUID)
+}
+
+func TestSynthesisConcurrencyLimitNotReady(t *testing.T) {
+	cli := testutil.NewClient(t)
+	ctx := testutil.NewContext(t)
+	c := &synthesisConcurrencyLimiter{}
+	c.client = cli
+	c.limit = 1
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	require.NoError(t, cli.Create(ctx, comp))
+	// Nil CurrentSynthesis
+
+	_, err := c.Reconcile(ctx, ctrl.Request{})
+	require.NoError(t, err)
+
+	err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+	require.NoError(t, err)
+	assert.Nil(t, comp.Status.CurrentSynthesis)
 }
 
 func TestSynthesisConcurrencyLimitOver(t *testing.T) {
@@ -41,9 +64,15 @@ func TestSynthesisConcurrencyLimitOver(t *testing.T) {
 	comp.Name = "test-comp"
 	require.NoError(t, cli.Create(ctx, comp))
 
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{}
+	require.NoError(t, cli.Status().Update(ctx, comp))
+
 	comp2 := &apiv1.Composition{}
 	comp2.Name = "test-comp-2"
 	require.NoError(t, cli.Create(ctx, comp2))
+
+	comp2.Status.CurrentSynthesis = &apiv1.Synthesis{}
+	require.NoError(t, cli.Status().Update(ctx, comp2))
 
 	for i := 0; i < 3; i++ {
 		_, err := c.Reconcile(ctx, ctrl.Request{})
