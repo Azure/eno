@@ -290,3 +290,62 @@ func TestSynthesizerChange(t *testing.T) {
 		return len(comp2.Status.InputRevisions) == 1 && comp2.Status.InputRevisions[0].ResourceVersion != ""
 	})
 }
+
+func TestRemoveInput(t *testing.T) {
+	mgr := testutil.NewManager(t)
+	require.NoError(t, NewController(mgr.Manager))
+	mgr.Start(t)
+
+	ctx := testutil.NewContext(t)
+	cli := mgr.GetClient()
+
+	input := &corev1.ConfigMap{}
+	input.Name = "test-input"
+	input.Namespace = "default"
+	require.NoError(t, cli.Create(ctx, input))
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-comp"
+	synth.Namespace = "default"
+	synth.Spec.Refs = []apiv1.Ref{{
+		Key: "foo",
+		Resource: apiv1.ResourceRef{
+			Version: "v1",
+			Kind:    "ConfigMap",
+		},
+	}}
+	require.NoError(t, cli.Create(ctx, synth))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = synth.Name
+	comp.Spec.Bindings = []apiv1.Binding{{
+		Key: "foo",
+		Resource: apiv1.ResourceBinding{
+			Name:      input.Name,
+			Namespace: input.Namespace,
+		},
+	}}
+	require.NoError(t, cli.Create(ctx, comp))
+
+	// The initial status is populated
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return len(comp.Status.InputRevisions) == 1 && comp.Status.InputRevisions[0].ResourceVersion != ""
+	})
+
+	// Remove binding
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Spec.Bindings = nil
+		return mgr.GetClient().Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	// Things converge
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return len(comp.Status.InputRevisions) == 0
+	})
+}
