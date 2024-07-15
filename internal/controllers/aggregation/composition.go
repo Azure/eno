@@ -46,7 +46,6 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, fmt.Errorf("updating status: %w", err)
 	}
 
-	logger.V(1).Info("wrote simplified composition status")
 	return ctrl.Result{}, nil
 }
 
