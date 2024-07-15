@@ -73,12 +73,13 @@ func (c *synthesisConcurrencyLimiter) Reconcile(ctx context.Context, req ctrl.Re
 	if next.Status.CurrentSynthesis == nil {
 		next.Status.CurrentSynthesis = &apiv1.Synthesis{}
 	}
-	next.Status.CurrentSynthesis.UUID = uuid.NewString()
+	copy := next.DeepCopy()
+	copy.Status.CurrentSynthesis.UUID = uuid.NewString()
 
-	if err := c.client.Status().Update(ctx, next); err != nil {
+	if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(next)); err != nil {
 		return ctrl.Result{}, fmt.Errorf("writing uuid to composition status: %w", err)
 	}
-	logger.V(1).Info("dispatched synthesis")
+	logger.V(0).Info("dispatched synthesis")
 
 	return ctrl.Result{Requeue: true, RequeueAfter: c.cooldown}, nil
 }

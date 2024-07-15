@@ -260,6 +260,10 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 			continue
 		}
 
+		if len(pod.Status.ContainerStatuses) > 0 {
+			logger = logger.WithValues("restarts", pod.Status.ContainerStatuses[0].RestartCount)
+		}
+
 		if syn == nil {
 			logger = logger.WithValues("reason", "SynthesizerDeleted")
 			return logger, &pod, true
