@@ -210,6 +210,7 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 				comp.Status.PendingResynthesis = ptr.To(metav1.Now())
 			}
 
+			// TODO: Reduce risk of conflict errors here
 			err = k.client.Status().Update(ctx, &comp)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("updating input revisions: %w", err)
