@@ -192,6 +192,20 @@ func TestCompositionInputsExist(t *testing.T) {
 			Expectation: true,
 		},
 		{
+			Name: "Bindings with matching revisions but missing ref",
+			Comp: Composition{
+				Spec: CompositionSpec{Bindings: []Binding{
+					{Key: "key1"},
+					{Key: "key5"},
+				}},
+				Status: CompositionStatus{InputRevisions: []InputRevisions{
+					{Key: "key1"},
+					{Key: "key5"},
+				}},
+			},
+			Expectation: true,
+		},
+		{
 			Name: "Bindings with non-matching revisions",
 			Comp: Composition{
 				Spec: CompositionSpec{Bindings: []Binding{
@@ -243,7 +257,9 @@ func TestCompositionInputsExist(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
-			result := tt.Comp.InputsExist()
+			s := &Synthesizer{}
+			s.Spec.Refs = []Ref{{Key: "key1"}, {Key: "key2"}, {Key: "key3"}}
+			result := tt.Comp.InputsExist(s)
 			assert.Equal(t, tt.Expectation, result)
 		})
 	}

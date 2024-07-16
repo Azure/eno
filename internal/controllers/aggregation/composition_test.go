@@ -16,6 +16,7 @@ func TestCompositionSimplification(t *testing.T) {
 	tests := []struct {
 		Bindings []apiv1.Binding
 		Input    apiv1.CompositionStatus
+		Synth    apiv1.Synthesizer
 		Deleting bool
 		Expected apiv1.SimplifiedStatus
 	}{
@@ -58,6 +59,11 @@ func TestCompositionSimplification(t *testing.T) {
 		{
 			Bindings: []apiv1.Binding{{Key: "foo"}},
 			Input:    apiv1.CompositionStatus{},
+			Synth: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{{Key: "foo"}},
+				},
+			},
 			Expected: apiv1.SimplifiedStatus{
 				Status: "MissingInputs",
 			},
@@ -65,8 +71,51 @@ func TestCompositionSimplification(t *testing.T) {
 		{
 			Bindings: []apiv1.Binding{{Key: "foo"}},
 			Input:    apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{UUID: "uuid"}},
+			Synth: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{{Key: "foo"}},
+				},
+			},
 			Expected: apiv1.SimplifiedStatus{
 				Status: "MissingInputs",
+			},
+		},
+		{
+			Bindings: []apiv1.Binding{{Key: "foo"}},
+			Input:    apiv1.CompositionStatus{},
+			Synth: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{{Key: "bar"}},
+				},
+			},
+			Expected: apiv1.SimplifiedStatus{
+				Status: "PendingSynthesis",
+			},
+		},
+		{
+			Bindings: []apiv1.Binding{{Key: "foo"}},
+			Input:    apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{UUID: "uuid"}},
+			Synth: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{{Key: "bar"}},
+				},
+			},
+			Expected: apiv1.SimplifiedStatus{
+				Status: "Synthesizing",
+			},
+		},
+		{
+			Bindings: []apiv1.Binding{{Key: "foo"}},
+			Input:    apiv1.CompositionStatus{},
+			Expected: apiv1.SimplifiedStatus{
+				Status: "PendingSynthesis",
+			},
+		},
+		{
+			Bindings: []apiv1.Binding{{Key: "foo"}},
+			Input:    apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{UUID: "uuid"}},
+			Expected: apiv1.SimplifiedStatus{
+				Status: "Synthesizing",
 			},
 		},
 		{
@@ -120,7 +169,7 @@ func TestCompositionSimplification(t *testing.T) {
 			if tc.Deleting {
 				comp.DeletionTimestamp = ptr.To(metav1.Now())
 			}
-			output := c.aggregate(comp)
+			output := c.aggregate(&tc.Synth, comp)
 			assert.Equal(t, tc.Expected, *output)
 		})
 	}

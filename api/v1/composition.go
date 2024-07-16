@@ -133,8 +133,19 @@ func (s *Synthesis) Failed() bool {
 	return false
 }
 
-func (c *Composition) InputsExist() bool {
+func (c *Composition) InputsExist(syn *Synthesizer) bool {
+	refs := map[string]struct{}{}
+	for _, ref := range syn.Spec.Refs {
+		refs[ref.Key] = struct{}{}
+	}
+
 	for _, binding := range c.Spec.Bindings {
+		if _, ok := refs[binding.Key]; !ok {
+			// Ignore missing resources if the synthesizer doesn't require them
+			// This is important for forwards compatibility- compositions can bind to refs that don't exist, but will in future synths
+			continue
+		}
+
 		var found bool
 		for _, rev := range c.Status.InputRevisions {
 			if binding.Key == rev.Key {

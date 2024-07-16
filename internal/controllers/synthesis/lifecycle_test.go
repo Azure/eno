@@ -525,7 +525,9 @@ func TestShouldSwapStates(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.Name, func(t *testing.T) {
-			assert.Equal(t, tc.Expectation, shouldSwapStates(&apiv1.Synthesizer{}, &tc.Composition))
+			syn := &apiv1.Synthesizer{}
+			syn.Spec.Refs = []apiv1.Ref{{Key: "foo"}}
+			assert.Equal(t, tc.Expectation, shouldSwapStates(syn, &tc.Composition))
 		})
 	}
 }

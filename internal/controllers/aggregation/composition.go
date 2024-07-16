@@ -7,8 +7,8 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
-	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -27,16 +27,19 @@ func NewCompositionController(mgr ctrl.Manager) error {
 }
 
 func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := logr.FromContextOrDiscard(ctx)
-
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, req.NamespacedName, comp)
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace)
 
-	next := c.aggregate(comp)
+	synth := &apiv1.Synthesizer{}
+	err = c.client.Get(ctx, types.NamespacedName{Name: comp.Spec.Synthesizer.Name}, synth)
+	if client.IgnoreNotFound(err) != nil {
+		return ctrl.Result{}, err
+	}
+
+	next := c.aggregate(synth, comp)
 	if equality.Semantic.DeepEqual(next, comp.Status.Simplified) {
 		return ctrl.Result{}, nil
 	}
@@ -49,7 +52,7 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 	return ctrl.Result{}, nil
 }
 
-func (c *compositionController) aggregate(comp *apiv1.Composition) *apiv1.SimplifiedStatus {
+func (c *compositionController) aggregate(synth *apiv1.Synthesizer, comp *apiv1.Composition) *apiv1.SimplifiedStatus {
 	copy := comp.Status.Simplified.DeepCopy()
 	if copy == nil {
 		copy = &apiv1.SimplifiedStatus{}
@@ -62,7 +65,7 @@ func (c *compositionController) aggregate(comp *apiv1.Composition) *apiv1.Simpli
 
 	copy.Status = "PendingSynthesis"
 	copy.Error = ""
-	if !comp.InputsExist() {
+	if !comp.InputsExist(synth) {
 		copy.Status = "MissingInputs"
 	}
 	if comp.Status.CurrentSynthesis == nil {
@@ -82,7 +85,7 @@ func (c *compositionController) aggregate(comp *apiv1.Composition) *apiv1.Simpli
 	}
 
 	copy.Status = "Synthesizing"
-	if !comp.InputsExist() {
+	if !comp.InputsExist(synth) {
 		copy.Status = "MissingInputs"
 	}
 	if comp.Status.CurrentSynthesis.Synthesized != nil {
