@@ -17,7 +17,7 @@ kubectl apply -f - <<YAML
     apiVersion: eno.azure.io/v1
     kind: Synthesizer
     metadata:
-      name: go-synth-example-synth
+      name: go-synth-example
     spec:
       image: $IMAGE
       refs:
