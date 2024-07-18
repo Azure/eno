@@ -522,6 +522,44 @@ func TestShouldSwapStates(t *testing.T) {
 				},
 			},
 		},
+		{
+			Name:        "non-matching input synthesis deleting",
+			Expectation: true,
+			Composition: apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					DeletionTimestamp: ptr.To(metav1.Now()),
+					Generation:        2,
+				},
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						InputRevisions: []apiv1.InputRevisions{{
+							Key: "foo",
+						}},
+					},
+					InputRevisions: []apiv1.InputRevisions{{
+						Key:             "foo",
+						ResourceVersion: "new",
+					}},
+				},
+			},
+		},
+		{
+			Name:        "missing input synthesis deleting",
+			Expectation: true,
+			Composition: apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					DeletionTimestamp: ptr.To(metav1.Now()),
+					Generation:        2,
+				},
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}},
+				},
+				Status: apiv1.CompositionStatus{},
+			},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.Name, func(t *testing.T) {
