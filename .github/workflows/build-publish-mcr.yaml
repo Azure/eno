@@ -2,7 +2,6 @@
 # automatically pushed to the trusted registry, Microsoft Container Registry(MCR).
 name: Building and Pushing to MCR
 on:
-on:
   release:
     types: [published]
 
