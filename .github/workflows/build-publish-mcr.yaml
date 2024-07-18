@@ -2,11 +2,8 @@
 # automatically pushed to the trusted registry, Microsoft Container Registry(MCR).
 name: Building and Pushing to MCR
 on:
-  workflow_dispatch:
-    inputs:
-      releaseTag:
-        description: 'Release tag to publish images, defaults to the latest one'
-        type: string
+  release:
+    types: [published]
 
 permissions:
   id-token: write # This is required for requesting the JWT
@@ -19,7 +16,7 @@ jobs:
   prepare-variables:
     runs-on: ubuntu-latest
     outputs:
-      release_tag: ${{ steps.vars.outputs.release_tag }}
+      release_tag: ${{ github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@v4
         with:
