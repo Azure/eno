@@ -17,7 +17,7 @@ metadata:
   name: go-synth-example
 spec:
   synthesizer:
-    name: go-synth-example-synth
+    name: go-synth-example
   bindings:
     - key: example-input
       resource:

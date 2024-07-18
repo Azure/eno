@@ -1,0 +1,68 @@
+apiVersion: eno.azure.io/v1
+kind: Synthesizer
+metadata:
+  name: basic-symphony-example-1
+  namespace: default
+spec:
+  image: docker.io/ubuntu:latest
+  command:
+  - /bin/bash
+  - -c
+  - |
+    echo '
+      {
+        "apiVersion":"config.kubernetes.io/v1",
+        "kind":"ResourceList",
+        "items":[
+          {
+            "apiVersion":"v1",
+            "kind":"ConfigMap",
+            "metadata":{
+              "name":"configmap-from-synth-1",
+              "namespace": "default"
+            }
+          }
+        ]
+      }'
+
+---
+
+apiVersion: eno.azure.io/v1
+kind: Synthesizer
+metadata:
+  name: basic-symphony-example-2
+  namespace: default
+spec:
+  image: docker.io/ubuntu:latest
+  command:
+  - /bin/bash
+  - -c
+  - |
+    echo '
+      {
+        "apiVersion":"config.kubernetes.io/v1",
+        "kind":"ResourceList",
+        "items":[
+          {
+            "apiVersion":"v1",
+            "kind":"ConfigMap",
+            "metadata":{
+              "name":"configmap-from-synth-1",
+              "namespace": "default"
+            }
+          }
+        ]
+      }'
+---
+
+apiVersion: eno.azure.io/v1
+kind: Symphony
+metadata:
+  name: basic-symphony-example
+  namespace: default
+spec:
+  variations:
+    - synthesizer:
+        name: basic-symphony-example-1
+    - synthesizer:
+        name: basic-symphony-example-2
