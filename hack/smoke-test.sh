@@ -14,6 +14,8 @@ while true; do
     output=$(kubectl get compositions --no-headers)
     echo $output
 
+    kubectl logs -l app.kubernetes.io/managed-by=eno --previous
+
     if echo "$output" | grep -qv "Ready"; then
         sleep 1
     else
