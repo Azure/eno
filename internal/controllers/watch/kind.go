@@ -78,16 +78,15 @@ func (k *KindWatchController) newResourceWatchController(parent *WatchController
 	}
 
 	// Watch the input resources
-	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), ref), &handler.EnqueueRequestForObject{})
+	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), ref, &handler.TypedEnqueueRequestForObject[*metav1.PartialObjectMetadata]{}))
 	if err != nil {
 		return nil, err
 	}
 
 	// Watch inputs declared by refs/bindings in synthesizers/compositions
-	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), &apiv1.Composition{}),
-		handler.EnqueueRequestsFromMapFunc(handler.MapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
-			comp, ok := o.(*apiv1.Composition)
-			if !ok || comp.Spec.Synthesizer.Name == "" {
+	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), &apiv1.Composition{},
+		handler.TypedEnqueueRequestsFromMapFunc(handler.TypedMapFunc[*apiv1.Composition](func(ctx context.Context, comp *apiv1.Composition) []reconcile.Request {
+			if comp.Spec.Synthesizer.Name == "" {
 				return nil
 			}
 
@@ -99,17 +98,12 @@ func (k *KindWatchController) newResourceWatchController(parent *WatchController
 			}
 
 			return k.buildRequests(synth, *comp)
-		})))
+		}))))
 	if err != nil {
 		return nil, err
 	}
-	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), &apiv1.Synthesizer{}),
-		handler.EnqueueRequestsFromMapFunc(handler.MapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
-			synth, ok := o.(*apiv1.Synthesizer)
-			if !ok {
-				return nil
-			}
-
+	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), &apiv1.Synthesizer{},
+		handler.TypedEnqueueRequestsFromMapFunc(handler.TypedMapFunc[*apiv1.Synthesizer](func(ctx context.Context, synth *apiv1.Synthesizer) []reconcile.Request {
 			compList := &apiv1.CompositionList{}
 			err = parent.client.List(ctx, compList, client.MatchingFields{
 				manager.IdxCompositionsBySynthesizer: synth.Name,
@@ -120,7 +114,7 @@ func (k *KindWatchController) newResourceWatchController(parent *WatchController
 			}
 
 			return k.buildRequests(synth, compList.Items...)
-		})))
+		}))))
 	if err != nil {
 		return nil, err
 	}
