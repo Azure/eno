@@ -2,6 +2,7 @@ package synthesis
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -177,11 +179,18 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	sytheses.Inc()
 
 	// This metadata is optional - it's safe for the process to crash before reaching this point
-	copy := comp.DeepCopy()
-	copy.Status.CurrentSynthesis.Attempts++
-	copy.Status.CurrentSynthesis.PodCreation = &pod.CreationTimestamp
-	err = c.client.Status().Patch(ctx, copy, client.MergeFrom(comp))
+	patch := []map[string]any{
+		{"op": "test", "path": "/status/currentSynthesis/uuid", "value": comp.Status.CurrentSynthesis.UUID},
+		{"op": "test", "path": "/status/currentSynthesis/synthesized", "value": nil},
+		{"op": "replace", "path": "/status/currentSynthesis/attempts", "value": comp.Status.CurrentSynthesis.Attempts + 1},
+		{"op": "replace", "path": "/status/currentSynthesis/podCreation", "value": pod.CreationTimestamp},
+	}
+	patchJS, err := json.Marshal(&patch)
 	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("encoding patch: %w", err)
+	}
+
+	if err := c.client.Status().Patch(ctx, comp, client.RawPatch(types.JSONPatchType, patchJS)); err != nil {
 		return ctrl.Result{}, fmt.Errorf("updating composition status after synthesizer pod creation: %w", err)
 	}
 
