@@ -10,16 +10,21 @@ done
 set +e
 
 # Wait for the composition to be reconciled
+counter=0
 while true; do
     output=$(kubectl get compositions --no-headers)
     echo $output
-
-    kubectl logs -l app.kubernetes.io/managed-by=eno --previous
 
     if echo "$output" | grep -qv "Ready"; then
         sleep 1
     else
         break
+    fi
+
+    ((counter++))
+    if ((counter % 30 == 0)); then
+        echo "---- controller logs"
+        kubectl logs -l app=eno-controller
     fi
 done
 
