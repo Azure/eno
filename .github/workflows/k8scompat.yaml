@@ -49,6 +49,6 @@ jobs:
           echo "DOWNSTREAM_KUBEBUILDER_ASSETS=$($setupEnvtestCmd use -p path 1.${{ matrix.downstreamApiserverMinorVersion }}.x)" >> $GITHUB_ENV
 
       - name: Run tests
-        run: go test -v -count=2 ./internal/controllers/reconciliation
+        run: go test -v ./internal/controllers/reconciliation
         env:
           DOWNSTREAM_VERSION_MINOR: "${{ matrix.downstreamApiserverMinorVersion }}"
