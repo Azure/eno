@@ -2,6 +2,7 @@ package flowcontrol
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/Azure/eno/internal/manager"
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -70,13 +72,15 @@ func (c *synthesisConcurrencyLimiter) Reconcile(ctx context.Context, req ctrl.Re
 	logger = logger.WithValues("compositionName", next.Name, "compositionNamespace", next.Namespace, "compositionGeneration", next.Generation)
 
 	// Dispatch the next pending synthesis
-	if next.Status.CurrentSynthesis == nil {
-		next.Status.CurrentSynthesis = &apiv1.Synthesis{}
+	patch := []map[string]any{
+		{"op": "add", "path": "/status/currentSynthesis/uuid", "value": uuid.NewString()},
 	}
-	copy := next.DeepCopy()
-	copy.Status.CurrentSynthesis.UUID = uuid.NewString()
+	patchJS, err := json.Marshal(&patch)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("encoding patch: %w", err)
+	}
 
-	if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(next)); err != nil {
+	if err := c.client.Status().Patch(ctx, next, client.RawPatch(types.JSONPatchType, patchJS)); err != nil {
 		return ctrl.Result{}, fmt.Errorf("writing uuid to composition status: %w", err)
 	}
 	logger.V(0).Info("dispatched synthesis")
