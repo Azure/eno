@@ -5,3 +5,6 @@ metadata:
 data:
   some: "value"
   input: {{ toJson .Values.foo | quote }}
+  {{- if .Values.foo }}
+  inputResourceName: {{ .Values.foo.metadata.name }}
+  {{- end }}
