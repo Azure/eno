@@ -27,6 +27,8 @@ type Executor struct {
 }
 
 func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
+	logger := logr.FromContextOrDiscard(ctx)
+
 	comp := &apiv1.Composition{}
 	comp.Name = env.CompositionName
 	comp.Namespace = env.CompositionNamespace
@@ -34,8 +36,8 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 	if err != nil {
 		return fmt.Errorf("fetching composition: %w", err)
 	}
-	if skipSynthesis(comp, env) {
-		// This pod is no longer needed, wait for the controller to clean it up
+	if reason, skip := skipSynthesis(comp, env); skip {
+		logger.V(0).Info("synthesis is no longer relevant - skipping", "reason", reason)
 		return nil
 	}
 
@@ -189,8 +191,8 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 		if err != nil {
 			return err
 		}
-		if skipSynthesis(comp, env) {
-			logger.V(0).Info("synthesis is no longer relevant - discarding its output")
+		if reason, skip := skipSynthesis(comp, env); skip {
+			logger.V(0).Info("synthesis is no longer relevant - discarding its output", "reason", reason)
 			return nil
 		}
 
@@ -217,7 +219,19 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 	})
 }
 
-func skipSynthesis(comp *apiv1.Composition, env *Env) bool {
+func skipSynthesis(comp *apiv1.Composition, env *Env) (string, bool) {
 	synthesis := comp.Status.CurrentSynthesis
-	return synthesis == nil || synthesis.Synthesized != nil || synthesis.UUID != env.SynthesisUUID || (synthesis.Attempts > 0 && synthesis.Attempts > env.SynthesisAttempt)
+	if synthesis == nil {
+		return "MissingSynthesis", true
+	}
+	if synthesis.Synthesized != nil {
+		return "AlreadySynthesized", true
+	}
+	if synthesis.UUID != env.SynthesisUUID {
+		return "UUIDMismatch", true
+	}
+	if synthesis.Attempts > 0 && synthesis.Attempts > env.SynthesisAttempt {
+		return "StaleAttempt", true
+	}
+	return "", false
 }
