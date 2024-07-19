@@ -72,8 +72,10 @@ func (c *synthesisConcurrencyLimiter) Reconcile(ctx context.Context, req ctrl.Re
 	logger = logger.WithValues("compositionName", next.Name, "compositionNamespace", next.Namespace, "compositionGeneration", next.Generation)
 
 	// Dispatch the next pending synthesis
+	path := "/status/currentSynthesis/uuid"
 	patch := []map[string]any{
-		{"op": "add", "path": "/status/currentSynthesis/uuid", "value": uuid.NewString()},
+		{"op": "test", "path": path, "value": nil},
+		{"op": "add", "path": path, "value": uuid.NewString()},
 	}
 	patchJS, err := json.Marshal(&patch)
 	if err != nil {
