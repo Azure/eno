@@ -55,7 +55,7 @@ func renderChart(r *function.InputReader, w *function.OutputWriter, opts ...Rend
 	a.ClientOnly = true
 	a.IncludeCRDs = true
 
-	o := &options{Action: a, ValuesFunc: inputsToValues, ChartPath: "."}
+	o := &options{Action: a, ValuesFunc: inputsToValues, ChartPath: "./chart"}
 	for _, opt := range opts {
 		opt.apply(o)
 	}
@@ -94,7 +94,7 @@ func renderChart(r *function.InputReader, w *function.OutputWriter, opts ...Rend
 func inputsToValues(i *function.InputReader) (map[string]any, error) {
 	m := map[string]any{}
 	for k, o := range i.All() {
-		m[k] = o
+		m[k] = o.Object
 	}
 	return m, nil
 }
