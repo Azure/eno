@@ -7,10 +7,16 @@ for file in ./examples/*/example.yaml; do
     kubectl apply -f $file
 done
 
-# Tail the controller logs
-kubectl logs -l app=eno-controller &
-
 set +e
+
+# Tail the controller logs
+function watch_logs() {
+    while true; do
+        kubectl logs -f -l app=eno-controller
+        sleep 1
+    done
+}
+watch_logs &
 
 # Wait for the composition to be reconciled
 counter=0
