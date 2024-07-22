@@ -65,6 +65,7 @@ func (c *WatchController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			continue
 		}
 		for _, ref := range syn.Spec.Refs {
+			c.mgr.GetLogger().Info(fmt.Sprintf("TODO syncing ref %s - %s/%s/%s", syn.Name, ref.Resource.Group, ref.Resource.Version, ref.Resource.Kind))
 			ref := ref
 			synthsByRef[ref.Resource] = struct{}{}
 
@@ -87,6 +88,7 @@ func (c *WatchController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	// Stop controllers that are no longer needed
 	for ref, rc := range c.refControllers {
+		c.mgr.GetLogger().Info(fmt.Sprintf("TODO rev syncing ref %s/%s/%s", ref.Group, ref.Version, ref.Kind))
 		if _, ok := synthsByRef[ref]; ok {
 			c.mgr.GetLogger().Info("TODO skipping deletion")
 			continue
