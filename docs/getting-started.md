@@ -2,6 +2,8 @@
 
 ## Installing Eno
 
+At the begining, install the Eno CRD resource defined at [here](https://github.com/Azure/eno/tree/main/api/v1/config/crd) to your cluster.
+
 Eno consists of two deployments: the controller and the reconciler.
 They are both typical controller-runtime based controllers and are installed with a static manifest.
 
