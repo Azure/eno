@@ -7,6 +7,9 @@ for file in ./examples/*/example.yaml; do
     kubectl apply -f $file
 done
 
+# Tail the controller logs
+kubectl logs -l app=eno-controller &
+
 set +e
 
 # Wait for the composition to be reconciled
@@ -19,12 +22,6 @@ while true; do
         sleep 1
     else
         break
-    fi
-
-    ((counter++))
-    if ((counter % 30 == 0)); then
-        echo "---- controller logs"
-        kubectl logs -l app=eno-controller
     fi
 done
 
