@@ -87,6 +87,9 @@ func RenderChart(opts ...RenderOption) error {
 		} else if err != nil {
 			return errors.Join(ErrCannotParseChart, err)
 		}
+		if o.Munge != nil {
+			o.Munge(m)
+		}
 		o.Writer.Add(m)
 	}
 
