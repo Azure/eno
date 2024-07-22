@@ -34,19 +34,6 @@ func MustRenderChart(opts ...RenderOption) {
 }
 
 func RenderChart(opts ...RenderOption) error {
-	o := function.NewDefaultOutputWriter()
-	i, err := function.NewDefaultInputReader()
-	if err != nil {
-		return err
-	}
-
-	if err := renderChart(i, o, opts...); err != nil {
-		return err
-	}
-	return o.Write()
-}
-
-func renderChart(r *function.InputReader, w *function.OutputWriter, opts ...RenderOption) error {
 	a := action.NewInstall(&action.Configuration{})
 	a.ReleaseName = "eno-helm-shim"
 	a.Namespace = "default"
@@ -55,9 +42,24 @@ func renderChart(r *function.InputReader, w *function.OutputWriter, opts ...Rend
 	a.ClientOnly = true
 	a.IncludeCRDs = true
 
-	o := &options{Action: a, ValuesFunc: inputsToValues, ChartPath: "./chart"}
+	o := &options{
+		Action:     a,
+		ValuesFunc: inputsToValues,
+		ChartPath:  "./chart",
+	}
 	for _, opt := range opts {
 		opt.apply(o)
+	}
+
+	if o.Reader == nil {
+		var err error
+		o.Reader, err = function.NewDefaultInputReader()
+		if err != nil {
+			return err
+		}
+	}
+	if o.Writer == nil {
+		o.Writer = function.NewDefaultOutputWriter()
 	}
 
 	c, err := loader.Load(o.ChartPath)
@@ -65,7 +67,7 @@ func renderChart(r *function.InputReader, w *function.OutputWriter, opts ...Rend
 		return errors.Join(ErrChartNotFound, err)
 	}
 
-	vals, err := o.ValuesFunc(r)
+	vals, err := o.ValuesFunc(o.Reader)
 	if err != nil {
 		return errors.Join(ErrConstructingValues, err)
 	}
@@ -85,10 +87,10 @@ func renderChart(r *function.InputReader, w *function.OutputWriter, opts ...Rend
 		} else if err != nil {
 			return errors.Join(ErrCannotParseChart, err)
 		}
-		w.Add(m)
+		o.Writer.Add(m)
 	}
 
-	return nil
+	return o.Writer.Write()
 }
 
 func inputsToValues(i *function.InputReader) (map[string]any, error) {

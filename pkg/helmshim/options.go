@@ -13,6 +13,8 @@ type options struct {
 	Action     *action.Install
 	ValuesFunc ValuesFunc
 	ChartPath  string
+	Reader     *function.InputReader
+	Writer     *function.OutputWriter
 }
 
 type RenderOption func(*options)
@@ -45,6 +47,24 @@ func WithChartPath(path string) RenderOption {
 			return
 		}
 		o.ChartPath = path
+	})
+}
+
+func WithInputReader(r *function.InputReader) RenderOption {
+	return RenderOption(func(o *options) {
+		if o == nil {
+			return
+		}
+		o.Reader = r
+	})
+}
+
+func WithOutputWriter(w *function.OutputWriter) RenderOption {
+	return RenderOption(func(o *options) {
+		if o == nil {
+			return
+		}
+		o.Writer = w
 	})
 }
 
