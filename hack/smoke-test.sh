@@ -9,16 +9,24 @@ done
 
 set +e
 
+# Tail the controller logs
+function watch_logs() {
+    while true; do
+        kubectl logs -f -l app=eno-controller
+        sleep 1
+    done
+}
+watch_logs &
+
 # Wait for the composition to be reconciled
 while true; do
     output=$(kubectl get compositions --no-headers)
     echo $output
 
-    echo $output | awk '{ if ($0 !~ "Ready") exit 1 }'
-    if [[ $? -eq 0 ]]; then
-        break
-    else
+    if echo "$output" | grep -qv "Ready"; then
         sleep 1
+    else
+        break
     fi
 done
 
