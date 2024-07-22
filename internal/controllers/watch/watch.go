@@ -48,7 +48,7 @@ func (c *WatchController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	// It's important to randomize the order over which we iterate the synths,
 	// otherwise one bad resource reference can block the loop
-	rand.Shuffle(len(synths.Items), func(i, j int) { synths.Items[i] = synths.Items[j] })
+	rand.Shuffle(len(synths.Items), func(i, j int) { synths.Items[i], synths.Items[j] = synths.Items[j], synths.Items[i] })
 
 	// Start any missing controllers
 	synthsByRef := map[apiv1.ResourceRef]struct{}{}

@@ -183,7 +183,7 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("listing synthesizers: %w", err)
 	}
-	rand.Shuffle(len(list.Items), func(i, j int) { list.Items[i] = list.Items[j] })
+	rand.Shuffle(len(list.Items), func(i, j int) { list.Items[i], list.Items[j] = list.Items[j], list.Items[i] })
 
 	for _, synth := range list.Items {
 		list := &apiv1.CompositionList{}
