@@ -55,7 +55,7 @@ func (c *synthController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// randomize list to avoid always rolling out changes in the same order
-	rand.Shuffle(len(compList.Items), func(i, j int) { compList.Items[i] = compList.Items[j] })
+	rand.Shuffle(len(compList.Items), func(i, j int) { compList.Items[i], compList.Items[j] = compList.Items[j], compList.Items[i] })
 
 	for _, comp := range compList.Items {
 		comp := comp
