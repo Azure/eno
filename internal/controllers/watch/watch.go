@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -46,6 +47,12 @@ func (c *WatchController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, err
 	}
 
+	names := []string{}
+	for _, syn := range synths.Items {
+		names = append(names, syn.Name)
+	}
+	c.mgr.GetLogger().Info(fmt.Sprintf("TODO starting to reconcile %+s", names))
+
 	// It's important to randomize the order over which we iterate the synths,
 	// otherwise one bad resource reference can block the loop
 	rand.Shuffle(len(synths.Items), func(i, j int) { synths.Items[i] = synths.Items[j] })
@@ -54,6 +61,7 @@ func (c *WatchController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	synthsByRef := map[apiv1.ResourceRef]struct{}{}
 	for _, syn := range synths.Items {
 		if syn.DeletionTimestamp != nil {
+			c.mgr.GetLogger().Info("TODO skipping deleted")
 			continue
 		}
 		for _, ref := range syn.Spec.Refs {
@@ -62,14 +70,17 @@ func (c *WatchController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 			current := c.refControllers[ref.Resource]
 			if current != nil {
+				c.mgr.GetLogger().Info("TODO skipping running")
 				continue // already running
 			}
 
 			rc, err := NewKindWatchController(ctx, c, &ref.Resource)
 			if err != nil {
+				c.mgr.GetLogger().Info("TODO ERROR")
 				return ctrl.Result{}, err
 			}
 			c.refControllers[ref.Resource] = rc
+			c.mgr.GetLogger().Info("TODO started, requeu")
 			return ctrl.Result{Requeue: true}, nil
 		}
 	}
@@ -77,13 +88,16 @@ func (c *WatchController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// Stop controllers that are no longer needed
 	for ref, rc := range c.refControllers {
 		if _, ok := synthsByRef[ref]; ok {
+			c.mgr.GetLogger().Info("TODO skipping deletion")
 			continue
 		}
 
 		rc.Stop(ctx)
 		delete(c.refControllers, ref)
+		c.mgr.GetLogger().Info("TODO removed, requeue")
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	c.mgr.GetLogger().Info("TODO nothing to do")
 	return ctrl.Result{}, nil
 }
