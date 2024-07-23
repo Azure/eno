@@ -4,14 +4,9 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/controllers/aggregation"
-	"github.com/Azure/eno/internal/controllers/flowcontrol"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
-	"github.com/Azure/eno/internal/controllers/rollout"
-	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/testutil"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/stretchr/testify/require"
@@ -31,12 +26,7 @@ func TestBulkRollout(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
 
-	// Register supporting controllers
-	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10, 0))
-	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
-	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
-	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
-	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
+	registerControllers(t, mgr)
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 		output := &krmv1.ResourceList{}
 		output.Items = []*unstructured.Unstructured{{
