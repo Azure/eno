@@ -101,17 +101,7 @@ func TestTerminalError(t *testing.T) {
 	// Test subject
 	setupTestSubject(t, mgr)
 	mgr.Start(t)
-
-	syn := &apiv1.Synthesizer{}
-	syn.Name = "test-syn"
-	syn.Spec.Image = "create"
-	require.NoError(t, upstream.Create(ctx, syn))
-
-	comp := &apiv1.Composition{}
-	comp.Name = "test-comp"
-	comp.Namespace = "default"
-	comp.Spec.Synthesizer.Name = syn.Name
-	require.NoError(t, upstream.Create(ctx, comp))
+	syn, comp := writeGenericComposition(t, upstream)
 
 	// Wait for composition to become ready
 	testutil.Eventually(t, func() bool {
@@ -192,17 +182,7 @@ func TestSliceCleanupOutdated(t *testing.T) {
 	// Test subject
 	setupTestSubject(t, mgr)
 	mgr.Start(t)
-
-	syn := &apiv1.Synthesizer{}
-	syn.Name = "test-syn"
-	syn.Spec.Image = "create"
-	require.NoError(t, upstream.Create(ctx, syn))
-
-	comp := &apiv1.Composition{}
-	comp.Name = "test-comp"
-	comp.Namespace = "default"
-	comp.Spec.Synthesizer.Name = syn.Name
-	require.NoError(t, upstream.Create(ctx, comp))
+	_, comp := writeGenericComposition(t, upstream)
 
 	// Wait for a few attempts
 	testutil.Eventually(t, func() bool {

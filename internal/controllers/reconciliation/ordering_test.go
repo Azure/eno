@@ -182,17 +182,7 @@ func TestCRDOrdering(t *testing.T) {
 	// Test subject
 	setupTestSubject(t, mgr)
 	mgr.Start(t)
-
-	syn := &apiv1.Synthesizer{}
-	syn.Name = "test-syn"
-	syn.Spec.Image = "create"
-	require.NoError(t, upstream.Create(ctx, syn))
-
-	comp := &apiv1.Composition{}
-	comp.Name = "test-comp"
-	comp.Namespace = "default"
-	comp.Spec.Synthesizer.Name = syn.Name
-	require.NoError(t, upstream.Create(ctx, comp))
+	syn, comp := writeGenericComposition(t, upstream)
 
 	// Wait for the initial creation
 	testutil.Eventually(t, func() bool {

@@ -112,22 +112,12 @@ func TestPatchDeletion(t *testing.T) {
 	// Test subject
 	setupTestSubject(t, mgr)
 	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
 
 	cm := &corev1.ConfigMap{}
 	cm.Name = "test-obj"
 	cm.Namespace = "default"
 	require.NoError(t, downstream.Create(ctx, cm))
-
-	syn := &apiv1.Synthesizer{}
-	syn.Name = "test-syn"
-	syn.Spec.Image = "create"
-	require.NoError(t, upstream.Create(ctx, syn))
-
-	comp := &apiv1.Composition{}
-	comp.Name = "test-comp"
-	comp.Namespace = "default"
-	comp.Spec.Synthesizer.Name = syn.Name
-	require.NoError(t, upstream.Create(ctx, comp))
 
 	testutil.Eventually(t, func() bool {
 		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)

@@ -54,18 +54,7 @@ func TestResourceReadiness(t *testing.T) {
 	// Test subject
 	setupTestSubject(t, mgr)
 	mgr.Start(t)
-
-	// Any syn/comp will do since we faked out the synthesizer pod
-	syn := &apiv1.Synthesizer{}
-	syn.Name = "test-syn"
-	syn.Spec.Image = "bar"
-	require.NoError(t, upstream.Create(ctx, syn))
-
-	comp := &apiv1.Composition{}
-	comp.Name = "test-comp"
-	comp.Namespace = "default"
-	comp.Spec.Synthesizer.Name = syn.Name
-	require.NoError(t, upstream.Create(ctx, comp))
+	syn, comp := writeGenericComposition(t, upstream)
 
 	// Wait for resource to be created
 	obj := &corev1.ConfigMap{}
@@ -133,12 +122,7 @@ func TestReconcileStatus(t *testing.T) {
 
 	setupTestSubject(t, mgr)
 	mgr.Start(t)
-
-	comp := &apiv1.Composition{}
-	comp.Name = "test-comp"
-	comp.Namespace = "default"
-	require.NoError(t, upstream.Create(ctx, comp))
-	comp.ResourceVersion = "1"
+	_, comp := writeGenericComposition(t, upstream)
 
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = "test-slice"
