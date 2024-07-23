@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.name }}
+data:
+  some: "value"
+  input: {{ toJson .Values.foo | quote }}
+  {{- if .Values.foo }}
+  inputResourceName: {{ .Values.foo.metadata.name }}
+  {{- end }}
