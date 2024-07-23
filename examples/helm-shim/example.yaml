@@ -1,0 +1,23 @@
+# Run build.sh to push the synthesizer to $REGISTRY before `kubectl apply`ing this manifest
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: eno-helm-shim-example
+data:
+  mykey: "myvalue" # this will be provided to Helm when rendering the chart
+
+---
+
+apiVersion: eno.azure.io/v1
+kind: Composition
+metadata:
+  name: helm-shim-example
+spec:
+  synthesizer:
+    name: helm-shim-example
+  bindings:
+    - key: myinput
+      resource:
+        name: eno-helm-shim-example
+        namespace: default
