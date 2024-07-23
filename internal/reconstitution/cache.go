@@ -17,8 +17,6 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// TODO: Log synthesis UUID everywhere
-
 // Cache maintains a fast index of (ResourceRef + Composition + Synthesis) -> Resource.
 type Cache struct {
 	client client.Client
