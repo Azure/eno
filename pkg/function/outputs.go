@@ -16,17 +16,21 @@ type OutputWriter struct {
 	outputs   []*unstructured.Unstructured
 	io        io.Writer
 	committed bool
+	munge     MungeFunc
 }
+
+type MungeFunc func(*unstructured.Unstructured)
 
 func NewDefaultOutputWriter() *OutputWriter {
-	return NewOutputWriter(os.Stdout)
+	return NewOutputWriter(os.Stdout, nil)
 }
 
-func NewOutputWriter(w io.Writer) *OutputWriter {
+func NewOutputWriter(w io.Writer, munge MungeFunc) *OutputWriter {
 	return &OutputWriter{
 		outputs:   []*unstructured.Unstructured{},
 		io:        w,
 		committed: false,
+		munge:     munge,
 	}
 }
 
@@ -49,7 +53,11 @@ func (w *OutputWriter) Add(outs ...client.Object) error {
 				err,
 			)
 		}
-		w.outputs = append(w.outputs, &unstructured.Unstructured{Object: obj})
+		u := &unstructured.Unstructured{Object: obj}
+		if w.munge != nil {
+			w.munge(u)
+		}
+		w.outputs = append(w.outputs, u)
 	}
 	return nil
 }
