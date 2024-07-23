@@ -154,3 +154,98 @@ func TestHelmOwnershipTransfer(t *testing.T) {
 		"app.kubernetes.io/managed-by": "Helm",
 	}, obj.GetLabels())
 }
+
+// TestHelmOwnershipTransfer is similar to TestHelmOwnershipTransfer but covers the adoption of resources initially created by Eno.
+func TestHelmOwnershipTransferAfterCreation(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	// Get a kubeconfig for the Helm CLI
+	u, err := mgr.DownstreamEnv.AddUser(envtest.User{Name: "helm", Groups: []string{"system:masters"}}, nil)
+	require.NoError(t, err)
+	kc, err := u.KubeConfig()
+	require.NoError(t, err)
+	kubeconfigPath := filepath.Join(t.TempDir(), "kubeconfig")
+	require.NoError(t, os.WriteFile(kubeconfigPath, kc, 0600))
+
+	// Register supporting controllers
+	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10, 0))
+	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
+	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
+	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
+	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"labels": map[string]any{
+						"app.kubernetes.io/managed-by": "Helm",
+					},
+					"annotations": map[string]any{
+						"meta.helm.sh/release-name":      "foo",
+						"meta.helm.sh/release-namespace": "default",
+					},
+				},
+				"data": map[string]string{"foo": "bar"},
+			},
+		}}
+		return output, nil
+	})
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "bar"
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	comp.Annotations = map[string]string{"eno.azure.io/deletion-strategy": "orphan"}
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	// Wait for Eno to create the resource
+	obj := &corev1.ConfigMap{}
+	var uid string
+	testutil.Eventually(t, func() bool {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation || comp.Status.CurrentSynthesis.Reconciled == nil {
+			return false
+		}
+
+		obj.SetName("test-obj")
+		obj.SetNamespace("default")
+		err = downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+		uid = string(obj.GetUID())
+		return err == nil
+	})
+
+	// Install Helm release
+	cmd := exec.Command("helm", "--kubeconfig", kubeconfigPath, "install", "foo", "./fixtures/helmchart")
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
+	require.NoError(t, cmd.Run())
+
+	// The resource shouldn't have been deleted
+	obj.SetName("test-obj")
+	obj.SetNamespace("default")
+	err = downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+	require.NoError(t, err)
+	assert.Equal(t, uid, string(obj.GetUID()))
+}
