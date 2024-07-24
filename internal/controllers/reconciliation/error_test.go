@@ -16,11 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/controllers/aggregation"
-	"github.com/Azure/eno/internal/controllers/flowcontrol"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
-	"github.com/Azure/eno/internal/controllers/rollout"
-	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/testutil"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 )
@@ -39,12 +35,7 @@ func TestTerminalError(t *testing.T) {
 	upstream := mgr.GetClient()
 
 	// Register supporting controllers
-	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10, 0))
-	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
-	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
-	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
-	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
-	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
+	registerControllers(t, mgr)
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 		output := &krmv1.ResourceList{}
 		if s.Spec.Image == "empty" {
@@ -110,17 +101,7 @@ func TestTerminalError(t *testing.T) {
 	// Test subject
 	setupTestSubject(t, mgr)
 	mgr.Start(t)
-
-	syn := &apiv1.Synthesizer{}
-	syn.Name = "test-syn"
-	syn.Spec.Image = "create"
-	require.NoError(t, upstream.Create(ctx, syn))
-
-	comp := &apiv1.Composition{}
-	comp.Name = "test-comp"
-	comp.Namespace = "default"
-	comp.Spec.Synthesizer.Name = syn.Name
-	require.NoError(t, upstream.Create(ctx, comp))
+	syn, comp := writeGenericComposition(t, upstream)
 
 	// Wait for composition to become ready
 	testutil.Eventually(t, func() bool {
@@ -193,13 +174,7 @@ func TestSliceCleanupOutdated(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
 
-	// Register supporting controllers
-	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10, 0))
-	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
-	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
-	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
-	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
-	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
+	registerControllers(t, mgr)
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 		return nil, fmt.Errorf("uh oh")
 	})
@@ -207,17 +182,7 @@ func TestSliceCleanupOutdated(t *testing.T) {
 	// Test subject
 	setupTestSubject(t, mgr)
 	mgr.Start(t)
-
-	syn := &apiv1.Synthesizer{}
-	syn.Name = "test-syn"
-	syn.Spec.Image = "create"
-	require.NoError(t, upstream.Create(ctx, syn))
-
-	comp := &apiv1.Composition{}
-	comp.Name = "test-comp"
-	comp.Namespace = "default"
-	comp.Spec.Synthesizer.Name = syn.Name
-	require.NoError(t, upstream.Create(ctx, comp))
+	_, comp := writeGenericComposition(t, upstream)
 
 	// Wait for a few attempts
 	testutil.Eventually(t, func() bool {

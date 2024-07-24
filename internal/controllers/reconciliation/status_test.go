@@ -3,14 +3,9 @@ package reconciliation
 import (
 	"context"
 	"testing"
-	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/controllers/aggregation"
-	"github.com/Azure/eno/internal/controllers/flowcontrol"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
-	"github.com/Azure/eno/internal/controllers/rollout"
-	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/testutil"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/google/uuid"
@@ -36,12 +31,7 @@ func TestResourceReadiness(t *testing.T) {
 	upstream := mgr.GetClient()
 	downstream := mgr.DownstreamClient
 
-	// Register supporting controllers
-	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10, 0))
-	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
-	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
-	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
-	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
+	registerControllers(t, mgr)
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 		output := &krmv1.ResourceList{}
 		output.Items = []*unstructured.Unstructured{{
@@ -64,18 +54,7 @@ func TestResourceReadiness(t *testing.T) {
 	// Test subject
 	setupTestSubject(t, mgr)
 	mgr.Start(t)
-
-	// Any syn/comp will do since we faked out the synthesizer pod
-	syn := &apiv1.Synthesizer{}
-	syn.Name = "test-syn"
-	syn.Spec.Image = "bar"
-	require.NoError(t, upstream.Create(ctx, syn))
-
-	comp := &apiv1.Composition{}
-	comp.Name = "test-comp"
-	comp.Namespace = "default"
-	comp.Spec.Synthesizer.Name = syn.Name
-	require.NoError(t, upstream.Create(ctx, comp))
+	syn, comp := writeGenericComposition(t, upstream)
 
 	// Wait for resource to be created
 	obj := &corev1.ConfigMap{}
@@ -143,12 +122,7 @@ func TestReconcileStatus(t *testing.T) {
 
 	setupTestSubject(t, mgr)
 	mgr.Start(t)
-
-	comp := &apiv1.Composition{}
-	comp.Name = "test-comp"
-	comp.Namespace = "default"
-	require.NoError(t, upstream.Create(ctx, comp))
-	comp.ResourceVersion = "1"
+	_, comp := writeGenericComposition(t, upstream)
 
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = "test-slice"

@@ -157,7 +157,6 @@ func (r *controller) HandleReadinessTransition(ctx context.Context, req ctrl.Req
 			resources = append(resources, r.Cache.getByGK(synRef, *res.DefinedGroupKind)...)
 		}
 		for _, res := range resources {
-			// TODO: This can be optimized by skipping the Add call if `res` is already ready
 			r.queue.Add(Request{
 				Resource:    res.Ref,
 				Composition: types.NamespacedName{Namespace: slice.Namespace, Name: owner.Name},

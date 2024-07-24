@@ -3,14 +3,9 @@ package reconciliation
 import (
 	"context"
 	"testing"
-	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/controllers/aggregation"
-	"github.com/Azure/eno/internal/controllers/flowcontrol"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
-	"github.com/Azure/eno/internal/controllers/rollout"
-	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/testutil"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/stretchr/testify/require"
@@ -32,12 +27,7 @@ func TestPatchCreation(t *testing.T) {
 	upstream := mgr.GetClient()
 	downstream := mgr.DownstreamClient
 
-	// Register supporting controllers
-	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10, 0))
-	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
-	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
-	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
-	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
+	registerControllers(t, mgr)
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 		obj := &unstructured.Unstructured{
 			Object: map[string]any{
@@ -97,12 +87,7 @@ func TestPatchDeletion(t *testing.T) {
 	upstream := mgr.GetClient()
 	downstream := mgr.DownstreamClient
 
-	// Register supporting controllers
-	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10, 0))
-	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
-	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
-	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
-	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
+	registerControllers(t, mgr)
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 		obj := &unstructured.Unstructured{
 			Object: map[string]any{
@@ -127,22 +112,12 @@ func TestPatchDeletion(t *testing.T) {
 	// Test subject
 	setupTestSubject(t, mgr)
 	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
 
 	cm := &corev1.ConfigMap{}
 	cm.Name = "test-obj"
 	cm.Namespace = "default"
 	require.NoError(t, downstream.Create(ctx, cm))
-
-	syn := &apiv1.Synthesizer{}
-	syn.Name = "test-syn"
-	syn.Spec.Image = "create"
-	require.NoError(t, upstream.Create(ctx, syn))
-
-	comp := &apiv1.Composition{}
-	comp.Name = "test-comp"
-	comp.Namespace = "default"
-	comp.Spec.Synthesizer.Name = syn.Name
-	require.NoError(t, upstream.Create(ctx, comp))
 
 	testutil.Eventually(t, func() bool {
 		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
