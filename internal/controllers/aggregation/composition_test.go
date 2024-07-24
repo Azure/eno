@@ -150,6 +150,30 @@ func TestCompositionSimplification(t *testing.T) {
 		},
 		{
 			Input: apiv1.CompositionStatus{
+				CurrentSynthesis: &apiv1.Synthesis{
+					UUID:    "uuid",
+					Ready:   ptr.To(metav1.Now()),
+					Results: []apiv1.Result{{Message: "foo", Severity: "warning"}, {Message: "foo", Severity: "error"}},
+				}},
+			Expected: apiv1.SimplifiedStatus{
+				Status: "Ready",
+				Error:  "foo",
+			},
+		},
+		{
+			Input: apiv1.CompositionStatus{
+				CurrentSynthesis: &apiv1.Synthesis{
+					UUID:    "uuid",
+					Ready:   ptr.To(metav1.Now()),
+					Results: []apiv1.Result{{Message: "foo", Severity: "warning"}, {Message: "bar", Severity: "warning"}},
+				}},
+			Expected: apiv1.SimplifiedStatus{
+				Status: "Ready",
+				Error:  "foo",
+			},
+		},
+		{
+			Input: apiv1.CompositionStatus{
 				PendingResynthesis: ptr.To(metav1.Now()),
 				CurrentSynthesis: &apiv1.Synthesis{
 					UUID:  "uuid",

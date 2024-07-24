@@ -84,6 +84,17 @@ func (c *compositionController) aggregate(synth *apiv1.Synthesizer, comp *apiv1.
 		}
 	}
 
+	// Fall back to using the first warning as the error message if no terminal error is given.
+	// It's still useful to see error messages in the summary - even if they aren't fatal.
+	if copy.Error == "" {
+		for _, result := range comp.Status.CurrentSynthesis.Results {
+			if result.Severity == krmv1.ResultSeverityWarning {
+				copy.Error = result.Message
+				break
+			}
+		}
+	}
+
 	copy.Status = "Synthesizing"
 	if !comp.InputsExist(synth) {
 		copy.Status = "MissingInputs"
