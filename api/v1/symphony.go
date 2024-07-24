@@ -48,6 +48,9 @@ type Variation struct {
 	// Used to populate the composition's metadata.labels.
 	Labels map[string]string `json:"labels,omitempty"`
 
+	// Used to populate the composition's medatada.annotations.
+	Annotations map[string]string `json:"annotations,omitempty"`
+
 	// Used to populate the composition's spec.synthesizer.
 	Synthesizer SynthesizerRef `json:"synthesizer,omitempty"`
 
