@@ -81,6 +81,20 @@ func TestCompositionSimplification(t *testing.T) {
 			},
 		},
 		{
+			Bindings: []apiv1.Binding{{Key: "foo"}, {Key: "bar"}},
+			Input: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{UUID: "uuid", Ready: ptr.To(metav1.Now())},
+				InputRevisions: []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(123)}, {Key: "bar", Revision: ptr.To(234)}},
+			},
+			Synth: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{{Key: "foo"}, {Key: "bar"}},
+				},
+			},
+			Expected: apiv1.SimplifiedStatus{
+				Status: "MismatchedInputs",
+			},
+		},
+		{
 			Bindings: []apiv1.Binding{{Key: "foo"}},
 			Input:    apiv1.CompositionStatus{},
 			Synth: apiv1.Synthesizer{

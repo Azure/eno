@@ -560,6 +560,54 @@ func TestShouldSwapStates(t *testing.T) {
 				Status: apiv1.CompositionStatus{},
 			},
 		},
+		{
+			Name:        "revision mismatch",
+			Expectation: false,
+			Composition: apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Generation: 1,
+				},
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}, {Key: "bar"}},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{},
+					InputRevisions: []apiv1.InputRevisions{{
+						Key:             "foo",
+						ResourceVersion: "new",
+						Revision:        ptr.To(123),
+					}, {
+						Key:             "bar",
+						ResourceVersion: "another",
+						Revision:        ptr.To(234),
+					}},
+				},
+			},
+		},
+		{
+			Name:        "revision match",
+			Expectation: true,
+			Composition: apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Generation: 1,
+				},
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}, {Key: "bar"}},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{},
+					InputRevisions: []apiv1.InputRevisions{{
+						Key:             "foo",
+						ResourceVersion: "new",
+						Revision:        ptr.To(123),
+					}, {
+						Key:             "bar",
+						ResourceVersion: "another",
+						Revision:        ptr.To(123),
+					}},
+				},
+			},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.Name, func(t *testing.T) {

@@ -264,3 +264,82 @@ func TestCompositionInputsExist(t *testing.T) {
 		})
 	}
 }
+
+func TestInputsMismatched(t *testing.T) {
+	revision1 := 1
+	revision2 := 2
+
+	tests := []struct {
+		Name        string
+		Input       Composition
+		Expectation bool
+	}{
+		{
+			Name: "No revisions",
+			Input: Composition{
+				Status: CompositionStatus{
+					InputRevisions: []InputRevisions{},
+				},
+			},
+			Expectation: false,
+		},
+		{
+			Name: "All nil revisions",
+			Input: Composition{
+				Status: CompositionStatus{
+					InputRevisions: []InputRevisions{
+						{Revision: nil, ResourceVersion: "1"},
+						{Revision: nil, ResourceVersion: "2"},
+					},
+				},
+			},
+			Expectation: false,
+		},
+		{
+			Name: "One lagging behind",
+			Input: Composition{
+				Status: CompositionStatus{
+					InputRevisions: []InputRevisions{
+						{Revision: &revision1, ResourceVersion: "1"},
+						{Revision: &revision2, ResourceVersion: "1"},
+						{Revision: &revision1, ResourceVersion: "1"},
+					},
+				},
+			},
+			Expectation: true,
+		},
+		{
+			Name: "Mixed nil and non-nil revisions",
+			Input: Composition{
+				Status: CompositionStatus{
+					InputRevisions: []InputRevisions{
+						{Revision: &revision2, ResourceVersion: "1"},
+						{Revision: nil, ResourceVersion: "1"},
+						{Revision: &revision1, ResourceVersion: "1"},
+					},
+				},
+			},
+			Expectation: true,
+		},
+		{
+			Name: "All revisions the same",
+			Input: Composition{
+				Status: CompositionStatus{
+					InputRevisions: []InputRevisions{
+						{Revision: &revision1, ResourceVersion: "1"},
+						{Revision: &revision1, ResourceVersion: "2"},
+						{Revision: &revision1, ResourceVersion: "3"},
+					},
+				},
+			},
+			Expectation: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.Name, func(t *testing.T) {
+			result := tt.Input.InputsMismatched()
+			assert.Equal(t, tt.Expectation, result)
+		})
+	}
+}

@@ -160,3 +160,29 @@ func (c *Composition) InputsExist(syn *Synthesizer) bool {
 	}
 	return true
 }
+
+func (c *Composition) InputsMismatched() bool {
+	var minRevision *int
+	for _, rev := range c.Status.InputRevisions {
+		if rev.Revision == nil {
+			continue
+		}
+		if minRevision == nil {
+			minRevision = rev.Revision
+			continue
+		}
+		if *rev.Revision > *minRevision {
+			minRevision = rev.Revision
+		}
+	}
+	if minRevision == nil {
+		return false // resource versions are being used - not the eno revision annotation
+	}
+
+	for _, rev := range c.Status.InputRevisions {
+		if rev.Revision == nil || *minRevision > *rev.Revision {
+			return true
+		}
+	}
+	return false
+}

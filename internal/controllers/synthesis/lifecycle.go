@@ -337,7 +337,7 @@ func shouldSwapStates(synth *apiv1.Synthesizer, comp *apiv1.Composition) bool {
 	// - synthesis is not already pending
 	// - all bound input resources exist (or composition is being deleted)
 	syn := comp.Status.CurrentSynthesis
-	return (comp.DeletionTimestamp != nil || comp.InputsExist(synth)) && (syn == nil || syn.ObservedCompositionGeneration != comp.Generation || (!inputRevisionsEqual(synth, comp.Status.InputRevisions, syn.InputRevisions) && syn.Synthesized != nil))
+	return (comp.DeletionTimestamp != nil || (comp.InputsExist(synth) && !comp.InputsMismatched())) && (syn == nil || syn.ObservedCompositionGeneration != comp.Generation || (!inputRevisionsEqual(synth, comp.Status.InputRevisions, syn.InputRevisions) && syn.Synthesized != nil))
 }
 
 func shouldBackOffPodCreation(comp *apiv1.Composition) bool {
