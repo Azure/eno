@@ -18,6 +18,9 @@ spec:
     - jsonPath: .spec.synthesizer.name
       name: Synthesizer
       type: string
+    - jsonPath: .status.currentSynthesis.synthesized
+      name: Age
+      type: date
     - jsonPath: .status.simplified.status
       name: Status
       type: string

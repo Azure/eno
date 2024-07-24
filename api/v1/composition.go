@@ -21,6 +21,7 @@ type CompositionList struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Synthesizer",type=string,JSONPath=`.spec.synthesizer.name`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.status.currentSynthesis.synthesized`
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=`.status.simplified.status`
 // +kubebuilder:printcolumn:name="Error",type=string,JSONPath=`.status.simplified.error`
 type Composition struct {
