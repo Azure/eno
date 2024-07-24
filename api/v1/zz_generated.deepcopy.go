@@ -775,6 +775,13 @@ func (in *Variation) DeepCopyInto(out *Variation) {
 			(*out)[key] = val
 		}
 	}
+	if in.Annotations != nil {
+		in, out := &in.Annotations, &out.Annotations
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
 	out.Synthesizer = in.Synthesizer
 	if in.Bindings != nil {
 		in, out := &in.Bindings, &out.Bindings

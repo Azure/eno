@@ -414,6 +414,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `labels` _object (keys:string, values:string)_ | Used to populate the composition's metadata.labels. |  |  |
+| `annotations` _object (keys:string, values:string)_ | Used to populate the composition's medatada.annotations. |  |  |
 | `synthesizer` _[SynthesizerRef](#synthesizerref)_ | Used to populate the composition's spec.synthesizer. |  |  |
 | `bindings` _[Binding](#binding) array_ | Variation-specific bindings get merged with Symphony bindings and take<br />precedence over them. |  |  |
 

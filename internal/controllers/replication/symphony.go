@@ -164,6 +164,7 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		comp.Spec.Bindings = getBindings(symph, &variation)
 		comp.Spec.Synthesizer = variation.Synthesizer
 		comp.Labels = variation.Labels
+		comp.Annotations = variation.Annotations
 		err := controllerutil.SetControllerReference(symph, comp, c.client.Scheme())
 		if err != nil {
 			return false, fmt.Errorf("setting composition's controller: %w", err)
@@ -177,6 +178,7 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 			}
 			existing.Spec = comp.Spec
 			existing.Labels = comp.Labels
+			existing.Annotations = comp.Annotations
 			err = c.client.Update(ctx, existing)
 			if err != nil {
 				return false, fmt.Errorf("updating existing composition: %w", err)

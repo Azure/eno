@@ -37,7 +37,18 @@ func TestSymphonyCRUD(t *testing.T) {
 			Resource: apiv1.ResourceBinding{Name: "test-resource-2"},
 		},
 	}
-	sym.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: "foosynth"}}, {Synthesizer: apiv1.SynthesizerRef{Name: "barsynth"}}}
+	sym.Spec.Variations = []apiv1.Variation{
+		{
+			Synthesizer: apiv1.SynthesizerRef{Name: "foosynth"},
+			Labels:      map[string]string{"foo": "bar"},
+			Annotations: map[string]string{"foo": "bar"},
+		},
+		{
+			Synthesizer: apiv1.SynthesizerRef{Name: "barsynth"},
+			Labels:      map[string]string{"foo": "bar"},
+			Annotations: map[string]string{"foo": "bar"},
+		},
+	}
 	err = cli.Create(ctx, sym)
 	require.NoError(t, err)
 
@@ -51,8 +62,10 @@ func TestSymphonyCRUD(t *testing.T) {
 		synthsSeen := map[string]struct{}{}
 		for _, comp := range comps.Items {
 			comp := comp
-			if !reflect.DeepEqual(sym.Spec.Bindings, comp.Spec.Bindings) {
-				t.Logf("composition %q has incorrect bindings", comp.Name)
+			if !reflect.DeepEqual(sym.Spec.Bindings, comp.Spec.Bindings) ||
+				!reflect.DeepEqual(comp.Annotations, map[string]string{"foo": "bar"}) ||
+				!reflect.DeepEqual(comp.Labels, map[string]string{"foo": "bar"}) {
+				t.Logf("composition %q has incorrect bindings/labels/annotations", comp.Name)
 				return false
 			}
 			synthsSeen[comp.Spec.Synthesizer.Name] = struct{}{}
@@ -93,11 +106,12 @@ func TestSymphonyCRUD(t *testing.T) {
 		return true
 	})
 
-	// Update the labels and prove they're replicated to the compositions
+	// Update the labels and annotations and prove they're replicated to the compositions
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		cli.Get(ctx, client.ObjectKeyFromObject(sym), sym)
 		for i := range sym.Spec.Variations {
-			sym.Spec.Variations[i].Labels = map[string]string{"foo": "bar"}
+			sym.Spec.Variations[i].Labels = map[string]string{"foo": "baz"}
+			sym.Spec.Variations[i].Annotations = map[string]string{"foo": "baz"}
 		}
 		return cli.Update(ctx, sym)
 	})
@@ -110,8 +124,11 @@ func TestSymphonyCRUD(t *testing.T) {
 			return false
 		}
 		for _, comp := range comps.Items {
-			if comp.Labels == nil || comp.Labels["foo"] != "bar" {
-				t.Logf("composition %q doesn't have the expected label", comp.Name)
+			if comp.Labels == nil ||
+				comp.Labels["foo"] != "baz" ||
+				comp.Annotations == nil ||
+				comp.Annotations["foo"] != "baz" {
+				t.Logf("composition %q doesn't have the expected labels and annotations", comp.Name)
 				return false
 			}
 		}
