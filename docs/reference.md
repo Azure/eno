@@ -169,7 +169,7 @@ spec:
 The composition will be resynthesized whenever `test-input`'s `resourceVersion` changes by default, subject to the global cooldown period.
 
 If several inputs are expected to transition in lockstep, use this annotation to override the resource version.
-Synthesis will only happen once all inputs satisfy `revision >= max(revisions)` where `revisions` is scoped to all resources bound to that composition.
+Synthesis will only happen once all inputs satisfy `revision == max(revisions)` where `revisions` represents the revisions of all resources bound to that composition.
 
 ```yaml
 annotations:

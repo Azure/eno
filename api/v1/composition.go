@@ -162,25 +162,27 @@ func (c *Composition) InputsExist(syn *Synthesizer) bool {
 }
 
 func (c *Composition) InputsMismatched() bool {
-	var minRevision *int
+	// First, the the max revision across all bindings
+	var maxRevision *int
 	for _, rev := range c.Status.InputRevisions {
 		if rev.Revision == nil {
 			continue
 		}
-		if minRevision == nil {
-			minRevision = rev.Revision
+		if maxRevision == nil {
+			maxRevision = rev.Revision
 			continue
 		}
-		if *rev.Revision > *minRevision {
-			minRevision = rev.Revision
+		if *rev.Revision > *maxRevision {
+			maxRevision = rev.Revision
 		}
 	}
-	if minRevision == nil {
-		return false // resource versions are being used - not the eno revision annotation
+	if maxRevision == nil {
+		return false // no inputs declare a revision, so we should assume they're in sync
 	}
 
+	// Now given the max, make sure all inputs match it
 	for _, rev := range c.Status.InputRevisions {
-		if rev.Revision == nil || *minRevision > *rev.Revision {
+		if rev.Revision == nil || *maxRevision > *rev.Revision {
 			return true
 		}
 	}
