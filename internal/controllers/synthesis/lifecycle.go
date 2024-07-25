@@ -335,7 +335,7 @@ func shouldSwapStates(synth *apiv1.Synthesizer, comp *apiv1.Composition) bool {
 	// - the bound input resources have changed
 	// AND
 	// - synthesis is not already pending
-	// - all bound input resources exist (or composition is being deleted)
+	// - all bound input resources exist and are in lockstep (or composition is being deleted)
 	syn := comp.Status.CurrentSynthesis
 	return (comp.DeletionTimestamp != nil || (comp.InputsExist(synth) && !comp.InputsMismatched())) && (syn == nil || syn.ObservedCompositionGeneration != comp.Generation || (!inputRevisionsEqual(synth, comp.Status.InputRevisions, syn.InputRevisions) && syn.Synthesized != nil))
 }
