@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -150,7 +151,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	// Fetch the current resource
 	current, hasChanged, err := c.getCurrent(ctx, resource)
-	if client.IgnoreNotFound(err) != nil {
+	if client.IgnoreNotFound(err) != nil && !isErrMissingNS(err) {
 		return ctrl.Result{}, fmt.Errorf("getting current state: %w", err)
 	}
 
@@ -404,4 +405,15 @@ func patchResourceState(deleted bool, ready *metav1.Time) flowcontrol.StatusPatc
 			Reconciled: true,
 		}
 	}
+}
+
+// isErrMissingNS returns true when given the client-go error returned by mutating requests that do not include a namespace.
+// Sadly, this error isn't exposed anywhere - it's just a plain string, so we have to do string matching here.
+//
+// https://github.com/kubernetes/kubernetes/blob/9edabd617945cd23111fd46cfc9a09fe37ed194a/staging/src/k8s.io/client-go/rest/request.go#L1048
+func isErrMissingNS(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "an empty namespace may not be set")
 }
