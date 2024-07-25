@@ -160,3 +160,31 @@ func (c *Composition) InputsExist(syn *Synthesizer) bool {
 	}
 	return true
 }
+
+func (c *Composition) InputsMismatched() bool {
+	// First, the the max revision across all bindings
+	var maxRevision *int
+	for _, rev := range c.Status.InputRevisions {
+		if rev.Revision == nil {
+			continue
+		}
+		if maxRevision == nil {
+			maxRevision = rev.Revision
+			continue
+		}
+		if *rev.Revision > *maxRevision {
+			maxRevision = rev.Revision
+		}
+	}
+	if maxRevision == nil {
+		return false // no inputs declare a revision, so we should assume they're in sync
+	}
+
+	// Now given the max, make sure all inputs match it
+	for _, rev := range c.Status.InputRevisions {
+		if rev.Revision == nil || *maxRevision != *rev.Revision {
+			return true
+		}
+	}
+	return false
+}

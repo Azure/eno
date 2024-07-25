@@ -168,13 +168,12 @@ spec:
 
 The composition will be resynthesized whenever `test-input`'s `resourceVersion` changes by default, subject to the global cooldown period.
 
-It's possible to defer resynthesis until some other inputs have been modified.
-This is useful for cases in which another process updates several input resources serially.
-
-Setting this annotation to a higher value than any other input of a given composition will not result in resynthesis until all other inputs have the same value.
+If several inputs are expected to transition in lockstep, use this annotation to override the resource version.
+Synthesis will only happen once all inputs satisfy `revision == max(revisions)` where `revisions` represents the revisions of all resources bound to that composition.
 
 ```yaml
-eno.azure.io/revision: 123
+annotations:
+  eno.azure.io/revision: "123"
 ```
 
 # Pseudo-Resources
