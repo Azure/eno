@@ -182,7 +182,7 @@ func (c *Composition) InputsMismatched() bool {
 
 	// Now given the max, make sure all inputs match it
 	for _, rev := range c.Status.InputRevisions {
-		if rev.Revision == nil || *maxRevision > *rev.Revision {
+		if rev.Revision == nil || *maxRevision != *rev.Revision {
 			return true
 		}
 	}
