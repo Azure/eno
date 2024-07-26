@@ -14,6 +14,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/Azure/eno/internal/controllers/aggregation"
+	"github.com/Azure/eno/internal/controllers/liveness"
 	"github.com/Azure/eno/internal/controllers/reconciliation"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/flowcontrol"
@@ -93,6 +94,11 @@ func run() error {
 	err = synthesis.NewSliceCleanupController(mgr)
 	if err != nil {
 		return fmt.Errorf("constructing resource slice cleanup controller: %w", err)
+	}
+
+	err = liveness.NewNamespaceController(mgr)
+	if err != nil {
+		return fmt.Errorf("constructing namespace liveness controller: %w", err)
 	}
 
 	remoteConfig := mgr.GetConfig()

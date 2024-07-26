@@ -8,6 +8,7 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/controllers/aggregation"
 	"github.com/Azure/eno/internal/controllers/flowcontrol"
+	"github.com/Azure/eno/internal/controllers/liveness"
 	"github.com/Azure/eno/internal/controllers/replication"
 	"github.com/Azure/eno/internal/controllers/rollout"
 	"github.com/Azure/eno/internal/controllers/synthesis"
@@ -28,6 +29,7 @@ func registerControllers(t *testing.T, mgr *testutil.Manager) {
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
 	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
 	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10, 0))
+	require.NoError(t, liveness.NewNamespaceController(mgr.Manager))
 }
 
 func writeGenericComposition(t *testing.T, client client.Client) (*apiv1.Synthesizer, *apiv1.Composition) {
