@@ -110,9 +110,9 @@ func (c *namespaceController) cleanup(ctx context.Context, ns string) error {
 		}
 		err = c.client.Patch(ctx, &item, client.RawPatch(types.JSONPatchType, []byte(removeFinalizersPatch)))
 		if err != nil {
-			return fmt.Errorf("removing finalizers from symphony %q: %w", item.Name, err)
+			return fmt.Errorf("removing finalizers from resource slice %q: %w", item.Name, err)
 		}
-		logger := logger.WithValues("symphonyName", item.Name)
+		logger := logger.WithValues("resourceSliceName", item.Name)
 		logger.V(0).Info("forcibly removed finalizers")
 	}
 
