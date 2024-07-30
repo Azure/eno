@@ -10,8 +10,11 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/kubectl/pkg/scheme"
 	ctrlcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -22,9 +25,6 @@ import (
 
 // TestSymphonyIntegration proves that a basic symphony creation/deletion workflow works.
 func TestSymphonyIntegration(t *testing.T) {
-	scheme := runtime.NewScheme()
-	corev1.SchemeBuilder.AddToScheme(scheme)
-
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t, testutil.WithCompositionNamespace(ctrlcache.AllNamespaces))
 	upstream := mgr.GetClient()
@@ -154,4 +154,85 @@ func TestSymphonyIntegration(t *testing.T) {
 	err = upstream.List(ctx, comps)
 	require.NoError(t, err)
 	assert.Len(t, comps.Items, 0)
+}
+
+// TestOrphanedNamespaceSymphony covers a special behavior of symphonies: resilience against missing namespaces.
+// Ripping the namespace out from under a symphony and its associated compositions/resource slices shouldn't prevent them from being deleted.
+func TestOrphanedNamespaceSymphony(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t, testutil.WithCompositionNamespace(ctrlcache.AllNamespaces))
+	upstream := mgr.GetClient()
+
+	// Create test namespace.
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test"}}
+	require.NoError(t, upstream.Create(ctx, ns))
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]string{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "anything"
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	symph := &apiv1.Symphony{}
+	symph.Name = "test-comp"
+	symph.Namespace = ns.Name
+	symph.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: syn.Name}}}
+	require.NoError(t, upstream.Create(ctx, symph))
+
+	testutil.Eventually(t, func() bool {
+		upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph)
+		return symph.Status.Reconciled != nil && symph.Status.ObservedGeneration == symph.Generation
+	})
+
+	// Establish that resource slices did at one point exist
+	slices := &apiv1.ResourceSliceList{}
+	require.NoError(t, upstream.List(ctx, slices))
+	require.True(t, len(slices.Items) > 0)
+
+	// Force delete the namespace
+	require.NoError(t, upstream.Delete(ctx, ns))
+
+	conf := rest.CopyConfig(mgr.RestConfig)
+	conf.GroupVersion = &schema.GroupVersion{Version: "v1"}
+	conf.NegotiatedSerializer = serializer.WithoutConversionCodecFactory{CodecFactory: scheme.Codecs}
+	rc, err := rest.RESTClientFor(conf)
+	require.NoError(t, err)
+
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(ns), ns)
+		ns.Spec.Finalizers = nil
+
+		_, err = rc.Put().
+			AbsPath("/api/v1/namespaces", ns.Name, "/finalize").
+			Body(ns).
+			Do(ctx).Raw()
+		return err
+	})
+	require.NoError(t, err)
+
+	// The symphony and its associated resources should eventually be cleaned up
+	testutil.Eventually(t, func() bool {
+		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph))
+	})
+	require.NoError(t, upstream.List(ctx, slices))
+	require.Empty(t, slices.Items)
 }
