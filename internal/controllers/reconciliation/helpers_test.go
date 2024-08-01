@@ -12,6 +12,7 @@ import (
 	"github.com/Azure/eno/internal/controllers/replication"
 	"github.com/Azure/eno/internal/controllers/rollout"
 	"github.com/Azure/eno/internal/controllers/synthesis"
+	"github.com/Azure/eno/internal/controllers/watch"
 	"github.com/Azure/eno/internal/controllers/watchdog"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/require"
@@ -30,6 +31,7 @@ func registerControllers(t *testing.T, mgr *testutil.Manager) {
 	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
 	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10, 0))
 	require.NoError(t, liveness.NewNamespaceController(mgr.Manager))
+	require.NoError(t, watch.NewController(mgr.Manager))
 }
 
 func writeGenericComposition(t *testing.T, client client.Client) (*apiv1.Synthesizer, *apiv1.Composition) {

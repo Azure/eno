@@ -6,22 +6,15 @@ import (
 	"testing"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
 	"github.com/Azure/eno/internal/testutil"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/stretchr/testify/require"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func TestBulkRollout(t *testing.T) {
-	scheme := runtime.NewScheme()
-	corev1.SchemeBuilder.AddToScheme(scheme)
-	testv1.SchemeBuilder.AddToScheme(scheme)
-
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()

@@ -215,3 +215,101 @@ func TestCRDOrdering(t *testing.T) {
 	val, _, _ := unstructured.NestedInt64(cr.Object, "spec", "addedValue")
 	assert.Equal(t, int64(234), val)
 }
+
+// TestInputMismatch proves that synthesis is not blocked by inputs with matching or missing revisions.
+func TestInputMismatch(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	cm1 := &corev1.ConfigMap{}
+	cm1.Name = "input1"
+	cm1.Namespace = "default"
+	cm1.Annotations = map[string]string{"eno.azure.io/revision": "123"}
+	require.NoError(t, upstream.Create(ctx, cm1))
+
+	cm2 := &corev1.ConfigMap{}
+	cm2.Name = "input2"
+	cm2.Namespace = "default"
+	cm2.Annotations = map[string]string{"eno.azure.io/revision": "123"}
+	require.NoError(t, upstream.Create(ctx, cm2))
+
+	cm3 := &corev1.ConfigMap{}
+	cm3.Name = "input3"
+	cm3.Namespace = "default"
+	cm3.Annotations = map[string]string{"eno.azure.io/not-revision": "the revision annotation is not set - this should be ignored"}
+	require.NoError(t, upstream.Create(ctx, cm3))
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "create"
+	syn.Spec.Refs = []apiv1.Ref{{
+		Key: "foo",
+		Resource: apiv1.ResourceRef{
+			Version: "v1",
+			Kind:    "ConfigMap",
+		},
+	}, {
+		Key: "bar",
+		Resource: apiv1.ResourceRef{
+			Version: "v1",
+			Kind:    "ConfigMap",
+		},
+	}, {
+		Key: "baz",
+		Resource: apiv1.ResourceRef{
+			Version: "v1",
+			Kind:    "ConfigMap",
+		},
+	}}
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	comp.Spec.Bindings = []apiv1.Binding{{
+		Key: "foo",
+		Resource: apiv1.ResourceBinding{
+			Name:      "input1",
+			Namespace: "default",
+		},
+	}, {
+		Key: "bar",
+		Resource: apiv1.ResourceBinding{
+			Name:      "input2",
+			Namespace: "default",
+		},
+	}, {
+		Key: "baz",
+		Resource: apiv1.ResourceBinding{
+			Name:      "input3",
+			Namespace: "default",
+		},
+	}}
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
+	})
+}
