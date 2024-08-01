@@ -322,6 +322,19 @@ func TestInputsMismatched(t *testing.T) {
 			Expectation: true,
 		},
 		{
+			Name: "One matching, one nil revision",
+			Input: Composition{
+				Status: CompositionStatus{
+					InputRevisions: []InputRevisions{
+						{Revision: &revision1, ResourceVersion: "1"},
+						{Revision: &revision1, ResourceVersion: "1"},
+						{Revision: nil, ResourceVersion: "1"},
+					},
+				},
+			},
+			Expectation: false,
+		},
+		{
 			Name: "All revisions the same",
 			Input: Composition{
 				Status: CompositionStatus{

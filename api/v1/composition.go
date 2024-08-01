@@ -180,9 +180,9 @@ func (c *Composition) InputsMismatched() bool {
 		return false // no inputs declare a revision, so we should assume they're in sync
 	}
 
-	// Now given the max, make sure all inputs match it
+	// Now given the max, make sure all inputs with a revision match it
 	for _, rev := range c.Status.InputRevisions {
-		if rev.Revision == nil || *maxRevision != *rev.Revision {
+		if rev.Revision != nil && *maxRevision != *rev.Revision {
 			return true
 		}
 	}
