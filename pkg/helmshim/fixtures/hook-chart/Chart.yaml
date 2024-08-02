@@ -1,0 +1,6 @@
+{
+    "name": "test-hook-chart",
+    "description": "chart to test eno rendering helm chart with hook",
+    "type": "application",
+    "version": "0.1.0"
+}

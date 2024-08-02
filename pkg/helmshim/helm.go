@@ -78,6 +78,11 @@ func RenderChart(opts ...RenderOption) error {
 	}
 
 	b := bytes.NewBufferString(rel.Manifest)
+	// append manifest from hook
+	for _, hook := range rel.Hooks {
+		fmt.Fprintf(b, "---\n# Source: %s\n%s\n", hook.Name, hook.Manifest)
+	}
+
 	d := yaml.NewYAMLToJSONDecoder(b)
 	for {
 		m := &unstructured.Unstructured{}
