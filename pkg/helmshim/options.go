@@ -68,6 +68,15 @@ func WithOutputWriter(w *function.OutputWriter) RenderOption {
 	})
 }
 
+func WithReleaseName(rn string) RenderOption {
+	return RenderOption(func(o *options) {
+		if o == nil {
+			return
+		}
+		o.Action.ReleaseName = rn
+	})
+}
+
 func ParseFlags() []RenderOption {
 	ns := flag.String("ns", "default", "Namespace for the Helm release")
 	chart := flag.String("chart", ".", "Path to the Helm chart")
