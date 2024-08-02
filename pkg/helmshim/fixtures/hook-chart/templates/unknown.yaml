@@ -1,0 +1,4 @@
+apiVersion: somegroup.io/v9001
+kind: ATypeNotKnownByTheScheme
+metadata:
+  name: foo
