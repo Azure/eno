@@ -177,6 +177,14 @@ annotations:
   eno.azure.io/revision: "123"
 ```
 
+Synthesis can also be delayed until an input has time to catch up to the current version of the composition's synthesizer.
+This is useful for cases in which the input is written by a controller that reads synthesizers (annotations, etc.).
+
+```yaml
+annotations:
+  eno.azure.io/synthesizer-revision: "123" # Will block synthesis if < the synthesizer's metadata.generation
+```
+
 # Pseudo-Resources
 
 ## Patch
