@@ -124,6 +124,9 @@ spec:
                           type: string
                         revision:
                           type: integer
+                        synthesizerGeneration:
+                          format: int64
+                          type: integer
                       type: object
                     type: array
                   observedCompositionGeneration:
@@ -198,6 +201,9 @@ spec:
                       type: string
                     revision:
                       type: integer
+                    synthesizerGeneration:
+                      format: int64
+                      type: integer
                   type: object
                 type: array
               pendingResynthesis:
@@ -227,6 +233,9 @@ spec:
                         resourceVersion:
                           type: string
                         revision:
+                          type: integer
+                        synthesizerGeneration:
+                          format: int64
                           type: integer
                       type: object
                     type: array
