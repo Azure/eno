@@ -107,9 +107,10 @@ type Result struct {
 }
 
 type InputRevisions struct {
-	Key             string `json:"key,omitempty"`
-	ResourceVersion string `json:"resourceVersion,omitempty"`
-	Revision        *int   `json:"revision,omitempty"`
+	Key                   string `json:"key,omitempty"`
+	ResourceVersion       string `json:"resourceVersion,omitempty"`
+	Revision              *int   `json:"revision,omitempty"`
+	SynthesizerGeneration *int64 `json:"synthesizerGeneration,omitempty"`
 }
 
 func (i *InputRevisions) Equal(b InputRevisions) bool {
@@ -161,10 +162,13 @@ func (c *Composition) InputsExist(syn *Synthesizer) bool {
 	return true
 }
 
-func (c *Composition) InputsMismatched() bool {
+func (c *Composition) InputsMismatched(synth *Synthesizer) bool {
 	// First, the the max revision across all bindings
 	var maxRevision *int
 	for _, rev := range c.Status.InputRevisions {
+		if rev.SynthesizerGeneration != nil && *rev.SynthesizerGeneration < synth.Generation {
+			return true
+		}
 		if rev.Revision == nil {
 			continue
 		}

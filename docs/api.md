@@ -116,6 +116,7 @@ _Appears in:_
 | `key` _string_ |  |  |  |
 | `resourceVersion` _string_ |  |  |  |
 | `revision` _integer_ |  |  |  |
+| `synthesizerGeneration` _integer_ |  |  |  |
 
 
 
