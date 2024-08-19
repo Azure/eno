@@ -6,7 +6,7 @@ replace github.com/Azure/eno/pkg/helmshim => ../../pkg/helmshim
 
 replace github.com/imdario/mergo => github.com/imdario/mergo v0.3.16
 
-require github.com/Azure/eno/pkg/helmshim v0.0.0-00010101000000-000000000000
+require github.com/Azure/eno/pkg/helmshim v0.0.0-20240808011733-bf45120d4918
 
 require (
 	github.com/AdaLogics/go-fuzz-headers v0.0.0-20230811130428-ced1acdcaa24 // indirect
@@ -30,7 +30,7 @@ require (
 	github.com/distribution/reference v0.5.0 // indirect
 	github.com/docker/cli v25.0.1+incompatible // indirect
 	github.com/docker/distribution v2.8.3+incompatible // indirect
-	github.com/docker/docker v25.0.5+incompatible // indirect
+	github.com/docker/docker v26.1.5+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.7.0 // indirect
 	github.com/docker/go-connections v0.5.0 // indirect
 	github.com/docker/go-metrics v0.0.1 // indirect
