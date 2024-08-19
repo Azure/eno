@@ -1,8 +1,18 @@
-# Pseudo-Resources
+# Advanced Synthesis
 
-## Patch
+## Deletion Modes
 
-Synthesizers can produce resources of a special kind to modify resources not managed by Eno.
+Eno will delete all resources associated with a composition when it's deleted.
+In unusual cases where the resources should be preserved, a special annotation can be set on the composition before it's deleted:
+
+```yaml
+annotations:
+  eno.azure.io/deletion-strategy: orphan
+```
+
+## Patch Unmanaged Resources
+
+Synthesizers can generate special "pseudo resources" to modify objects not managed by Eno.
 
 Standard jsonpatch operations are supported.
 
@@ -19,8 +29,7 @@ patch:
     - { "op": "add", "path": "/data/hello", "value": "world" }
 ```
 
-The resource will not be created if it doesn't already exist.
-Removing the patch pseudo-resource will not cause Eno to delete the resource.
+> Note: the resource will not be created if it doesn't already exist. Similarly, removing the patch pseudo-resource will not cause Eno to delete the resource.
 
 Setting `metadata.deletionTimestamp` to any value will cause the resource to be deleted if it exists.
 
@@ -35,13 +44,4 @@ patch:
   kind: ConfigMap
   ops:
     - { "op": "add", "path": "/metadata/deletionTimestamp", "value": "anything" }
-```
-
-### Deletion Modes
-
-To keep any resources created because of a composition,
-Eno supports an orphaning deletion mode by setting this annotation on the composition resource:
-
-```yaml
-eno.azure.io/deletion-strategy: orphan
 ```

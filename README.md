@@ -2,31 +2,27 @@
 
 ## What is Eno?
 
-Eno is a configuration management tool for Kubernetes.
+Eno is a new take on configuration management for Kubernetes.
 
 - Generate configurations using short-lived pods, language-agnostic
 - Dynamically regenerate when input resources change (without writing a controller!)
-- Safely roll out configuration changes
+- Manage risk when updating many similar configurations
 - Define complex ordering relationships
-- Control many low-trust clusters from a single management cluster
+- Control any number of low-trust clusters from a single management cluster
 - Support high object cardinality (10s of thousands)
 
 ## Getting Started
 
 Install the Eno CRD resource defined at [here](https://github.com/Azure/eno/tree/main/api/v1/config/crd) to your cluster.
 
-Eno consists of two deployments: the controller and the reconciler.
-
-- `eno-reconciler` reconciles Kubernetes resources into the expected state
-- `eno-controller` spawns pods to generate expected resource states
-
 ```bash
 export TAG=$(curl https://api.github.com/repos/Azure/eno/releases | jq -r '.[0].name')
-export REGISTRY="mcr.microsoft.com/aks/eno"
-curl "https://raw.githubusercontent.com/Azure/eno/main/dev/deploy.yaml" | envsubst | kubectl apply -f -
+curl "https://raw.githubusercontent.com/Azure/eno/main/dev/deploy.yaml" \
+    | REGISTRY="mcr.microsoft.com/aks/eno" envsubst \
+    | kubectl apply -f -
 ```
 
-Install the minimum viable Eno configuration to make sure everything works.
+Next, create a minimum viable Eno configuration to make sure everything works.
 This manifest will create a configmap called "some-config" in the default namespace.
 
 ```bash
@@ -40,9 +36,9 @@ kubectl get cm some-config -o=yaml
 
 - [Synthesizer API](./docs/synthesizer-api.md)
 - [Inputs](./docs/inputs.md)
-- [Resource Ordering](./docs/ordering.md)
-- [Pseudo-Resources](./docs/pseudo-resources.md)
+- [Ordering](./docs/ordering.md)
 - [Symphonies](./docs/symphony.md)
+- [Advanced Synthesis](./docs/advanced-synthesis.md)
 - [Generated API Docs](./docs/api.md)
 
 ## Contributing

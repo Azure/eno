@@ -1,4 +1,6 @@
-## Readiness
+# Readiness and Ordering
+
+## CEL Expressions
 
 Resources can include expressions used to determine their readiness.
 Readiness signal is reflected in the status of the corresponding composition and can be used to order other resource operations.
@@ -20,19 +22,26 @@ Example matching on a boolean:
 self.status.foo == 'bar'
 ```
 
+## Annotations
+
 Readiness expressions are set in the `eno.azure.io/readiness` annotation of resources produced by synthesizers.
+
 If more than one expression is needed, arbitrarily-named annotations sharing that prefix are alaso supported i.e. `eno.azure.io/readiness-foo`.
 They are logically AND'd.
 
-Resources that do not have a readiness expression will become ready immediately after reconciliation.
-
-### Ordering
+## Reconciliation Ordering
 
 Resources produced by synthesizers can set this annotation to order their own reconciliation relative to other resources in the same composition.
 
 ```yaml
-eno.azure.io/readiness-group: 1
+annotations:
+  eno.azure.io/readiness-group: 1
 ```
 
-The default group is 0, and lower numbers are reconciled first.
+The default group is 0 and lower numbers are reconciled first.
 So the example above will cause its resource to not be reconciled until all resources without a readiness group have become ready.
+
+Readiness groups (as the name suggests) honor readiness expressions i.e.
+reconciliation will be blocked until the dependency resource has become ready.
+
+> Note: Eno does not infer order from resource kind, so configmaps might not by reconciled before deployments that reference them. One exception: CRDs are always reconciled before CRs of the resource kind they define. 

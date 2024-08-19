@@ -1,6 +1,6 @@
 # Inputs
 
-Eno supports passing any Kubernetes resources to synthesizers as inputs.
+Eno supports passing Kubernetes resources to synthesizers as inputs.
 
 Synthesizers can expose `refs` like:
 
@@ -16,7 +16,7 @@ spec:
         kind: "ConfigMap"
 ```
 
-In this case, compositions must have a `binding` to the input `foo`.
+Compositions that use this synthesizer need to "bind" the ref by providing the input object's name and namespace.
 
 ```yaml
 apiVersion: eno.azure.io/v1
@@ -29,30 +29,43 @@ spec:
         namespace: default
 ```
 
-The composition will be resynthesized whenever `test-input`'s `resourceVersion` changes by default, subject to the global cooldown period.
+The composition will be resynthesized whenever `test-input`'s `resourceVersion` changes.
 
-If several inputs are expected to transition in lockstep, use this annotation to override the resource version.
-Synthesis will only happen once all inputs bound to a particular composition have matching revisions.
-Inputs that do not set a revision "fail open" i.e. will not block synthesis.
+## Revisions
+
+Use this annotation when several inputs are expected to transition in lockstep.
+Synthesis will only happen once all objects bound to the composition have matching revisions.
+
+This pattern is useful when inputs are coupled in such a way that the synthesizer may behave unexpectedly during state transitions.
+Essentially it forms a simple transaction layer on top of the Kubernetes API to provide atomicity across resources.
+
+> Note: Inputs that do not set a revision "fail open" i.e. will not block synthesis.
 
 ```yaml
 annotations:
   eno.azure.io/revision: "123"
 ```
 
-Synthesis can also be delayed until an input has time to catch up to the current version of the composition's synthesizer.
-This is useful for cases in which the input is written by a controller that reads synthesizers (annotations, etc.).
+## Synthesizer Revisions
+
+In more complex use-cases controllers outside of Eno may manage input resources based on the annotations of `Synthesizer` objects.
+This pattern allows synthesizers to "request" certain inputs dynamically without modifying the controller.
+
+To simplify this pattern, Eno supports an annotation that can be used by other controllers to signal that an input resource has caught up to a particular synthesizer generation.
 
 ```yaml
 annotations:
   eno.azure.io/synthesizer-revision: "123" # Will block synthesis if < the synthesizer's metadata.generation
 ```
 
-# Rollouts
+## Rollouts
 
-Composition changes are resynthesized immediately.
-Changes to deferred input resources (`ref.defer == true`) and synthesizers are subject to the global cooldown period.
+A cluster-wide cooldown period used to space out synthesizer changes across compositions is defined by the controller's `--rollout-cooldown` flag.
+No more than one composition for a given synthesizer will be updated per cooldown period.
 
-- All effected compositions are marked as pending resynthesis immediately
-- A maximum of one composition pending resynthesis can begin resynthesis per cooldown period
-- The next pending composition can start after the cooldown period has expired AND all resynthesis has completed (with success or terminal error) or been retried at least once
+The idea is to leave adequate time for other systems to detect and roll back bad configurations before they infect other compositions.
+
+Synthesizers can opt-in to also honor the cooldown period for specific inputs by setting `defer: true` on the ref.
+This is useful for inputs that are shared between many compositions, similar to synthesizers.
+
+> Note: if a synthesis honoring the cooldown fails, Eno will move onto the next period after one retry.
