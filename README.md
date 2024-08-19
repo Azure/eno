@@ -38,8 +38,12 @@ kubectl get cm some-config -o=yaml
 
 ## Docs
 
-- [Reference](./docs/reference.md)
-- [API](./docs/api.md)
+- [Synthesizer API](./docs/synthesizer-api.md)
+- [Inputs](./docs/inputs.md)
+- [Resource Ordering](./docs/ordering.md)
+- [Pseudo-Resources](./docs/pseudo-resources.md)
+- [Symphonies](./docs/symphony.md)
+- [Generated API Docs](./docs/api.md)
 
 ## Contributing
 
