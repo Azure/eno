@@ -38,7 +38,6 @@ kubectl get cm some-config -o=yaml
 
 ## Docs
 
-- [Concepts](./docs/concepts.md)
 - [Reference](./docs/reference.md)
 - [API](./docs/api.md)
 
