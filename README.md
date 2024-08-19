@@ -1,10 +1,43 @@
 # Eno
 
-Eno is a production-grade configuration management tool for platforms built on Kubernetes.
+## What is Eno?
+
+Eno is a configuration management tool for Kubernetes.
+
+- Generate configurations using short-lived pods, language-agnostic
+- Dynamically regenerate when input resources change (without writing a controller!)
+- Safely roll out configuration changes
+- Define complex ordering relationships
+- Control many low-trust clusters from a single management cluster
+- Support high object cardinality (10s of thousands)
+
+## Getting Started
+
+Install the Eno CRD resource defined at [here](https://github.com/Azure/eno/tree/main/api/v1/config/crd) to your cluster.
+
+Eno consists of two deployments: the controller and the reconciler.
+
+- `eno-reconciler` reconciles Kubernetes resources into the expected state
+- `eno-controller` spawns pods to generate expected resource states
+
+```bash
+export TAG=$(curl https://api.github.com/repos/Azure/eno/releases | jq -r '.[0].name')
+export REGISTRY="mcr.microsoft.com/aks/eno"
+curl "https://raw.githubusercontent.com/Azure/eno/main/dev/deploy.yaml" | envsubst | kubectl apply -f -
+```
+
+Install the minimum viable Eno configuration to make sure everything works.
+This manifest will create a configmap called "some-config" in the default namespace.
+
+```bash
+kubectl apply -f "https://raw.githubusercontent.com/Azure/eno/main/examples/minimal.yaml"
+
+# The configmap should be created by Eno soon after
+kubectl get cm some-config -o=yaml
+```
 
 ## Docs
 
-- [Getting Started](./docs/getting-started.md)
 - [Concepts](./docs/concepts.md)
 - [Reference](./docs/reference.md)
 - [API](./docs/api.md)
