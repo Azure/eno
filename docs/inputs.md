@@ -46,7 +46,7 @@ annotations:
   eno.azure.io/revision: "123"
 ```
 
-## Synthesizer Revisions
+## Synthesizer / Input Ordering
 
 In more complex use-cases controllers outside of Eno may manage input resources based on the annotations of `Synthesizer` objects.
 This pattern allows synthesizers to "request" certain inputs dynamically without modifying the controller.
@@ -55,7 +55,7 @@ To simplify this pattern, Eno supports an annotation that can be used by other c
 
 ```yaml
 annotations:
-  eno.azure.io/synthesizer-revision: "123" # Will block synthesis if < the synthesizer's metadata.generation
+  eno.azure.io/synthesizer-generation: "123" # Will block synthesis if < the synthesizer's metadata.generation
 ```
 
 ## Rollouts
