@@ -15,7 +15,7 @@ Eno is a new take on configuration management for Kubernetes.
 
 ```bash
 export TAG=$(curl https://api.github.com/repos/Azure/eno/releases | jq -r '.[0].name')
-curl -L "https://github.com/Azure/eno/releases/download/${TAG}/manifest.yaml" | kubectl apply -f -
+kubectl apply -f "https://github.com/Azure/eno/releases/download/${TAG}/manifest.yaml"
 ```
 
 Next, create a minimum viable Eno configuration to make sure everything works.
