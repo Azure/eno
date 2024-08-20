@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 )
 
 func TestInputRevisionsEqual(t *testing.T) {
@@ -272,6 +274,7 @@ func TestInputsMismatched(t *testing.T) {
 	tests := []struct {
 		Name        string
 		Input       Composition
+		Synth       Synthesizer
 		Expectation bool
 	}{
 		{
@@ -347,11 +350,59 @@ func TestInputsMismatched(t *testing.T) {
 			},
 			Expectation: false,
 		},
+		{
+			Name: "Lagging behind synth",
+			Input: Composition{
+				Status: CompositionStatus{
+					InputRevisions: []InputRevisions{{
+						SynthesizerGeneration: ptr.To(int64(122)),
+					}},
+				},
+			},
+			Synth: Synthesizer{
+				ObjectMeta: metav1.ObjectMeta{
+					Generation: 123,
+				},
+			},
+			Expectation: true,
+		},
+		{
+			Name: "At pace with synth",
+			Input: Composition{
+				Status: CompositionStatus{
+					InputRevisions: []InputRevisions{{
+						SynthesizerGeneration: ptr.To(int64(123)),
+					}},
+				},
+			},
+			Synth: Synthesizer{
+				ObjectMeta: metav1.ObjectMeta{
+					Generation: 123,
+				},
+			},
+			Expectation: false,
+		},
+		{
+			Name: "Ahead of synth",
+			Input: Composition{
+				Status: CompositionStatus{
+					InputRevisions: []InputRevisions{{
+						SynthesizerGeneration: ptr.To(int64(124)),
+					}},
+				},
+			},
+			Synth: Synthesizer{
+				ObjectMeta: metav1.ObjectMeta{
+					Generation: 123,
+				},
+			},
+			Expectation: false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
-			result := tt.Input.InputsMismatched()
+			result := tt.Input.InputsMismatched(&tt.Synth)
 			assert.Equal(t, tt.Expectation, result)
 		})
 	}

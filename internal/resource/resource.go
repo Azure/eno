@@ -284,5 +284,8 @@ func NewInputRevisions(obj client.Object, refKey string) *apiv1.InputRevisions {
 	if rev, _ := strconv.Atoi(obj.GetAnnotations()["eno.azure.io/revision"]); rev != 0 {
 		ir.Revision = &rev
 	}
+	if rev, _ := strconv.ParseInt(obj.GetAnnotations()["eno.azure.io/synthesizer-generation"], 10, 64); rev != 0 {
+		ir.SynthesizerGeneration = &rev
+	}
 	return &ir
 }
