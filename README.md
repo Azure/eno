@@ -13,13 +13,9 @@ Eno is a new take on configuration management for Kubernetes.
 
 ## Getting Started
 
-Install the Eno CRD resource defined at [here](https://github.com/Azure/eno/tree/main/api/v1/config/crd) to your cluster.
-
 ```bash
 export TAG=$(curl https://api.github.com/repos/Azure/eno/releases | jq -r '.[0].name')
-curl "https://raw.githubusercontent.com/Azure/eno/main/dev/deploy.yaml" \
-    | REGISTRY="mcr.microsoft.com/aks/eno" envsubst \
-    | kubectl apply -f -
+curl -L "https://github.com/Azure/eno/releases/download/${TAG}/manifest.yaml" | kubectl apply -f -
 ```
 
 Next, create a minimum viable Eno configuration to make sure everything works.
