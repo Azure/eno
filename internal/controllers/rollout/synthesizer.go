@@ -66,8 +66,14 @@ func (c *synthController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		// - They are already on the latest version of the synthesizer
 		// - They are currently being synthesized or deleted
 		// - They are already pending resynthesis
-		// - They are already in sync with the latest inputs
-		if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil || comp.DeletionTimestamp != nil || comp.Status.PendingResynthesis != nil || isInSync(&comp, syn) {
+		// - They are already in sync with the latest synth
+		// - Their input revisions are not in lockstep
+		if comp.Status.CurrentSynthesis == nil ||
+			comp.Status.CurrentSynthesis.Synthesized == nil ||
+			comp.DeletionTimestamp != nil ||
+			comp.Status.PendingResynthesis != nil ||
+			isInSync(&comp, syn) ||
+			comp.InputsMismatched(syn) {
 			continue
 		}
 

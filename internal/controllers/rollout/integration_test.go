@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -139,6 +140,88 @@ func TestSynthesizerRolloutCooldown(t *testing.T) {
 	original := comp.DeepCopy()
 	require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
 	assert.Equal(t, original.Status.CurrentSynthesis.ObservedSynthesizerGeneration, comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration, "composition has not been resynthesized")
+}
+
+// TestSynthesizerRolloutCooldown proves that the synth rollout controller honors
+// input revisions and does not re-synthesize a composition if its inputs are
+// not in lockstep.
+func TestSynthesizerRolloutInputs(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	cli := mgr.GetClient()
+
+	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10, 0))
+	require.NoError(t, NewSynthesizerController(mgr.Manager))
+	require.NoError(t, NewController(mgr.Manager, time.Hour))
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		return output, nil
+	})
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "test-syn-image"
+	require.NoError(t, cli.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	// Wait for initial sync
+	testutil.Eventually(t, func() bool {
+		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
+		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
+
+	copyForStatus := comp.DeepCopy()
+	copyForStatus.Status.InputRevisions = []apiv1.InputRevisions{
+		{
+			Key:      "some-input",
+			Revision: ptr.To(1),
+		},
+		{
+			Key:      "some-other-input",
+			Revision: ptr.To(2),
+		},
+	}
+	require.NoError(t, cli.Status().Patch(ctx, copyForStatus, client.MergeFrom(comp)))
+
+	// First synthesizer update
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		if err := cli.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
+			return err
+		}
+		syn.Spec.Image = "updated-image"
+		return cli.Update(ctx, syn)
+	})
+	require.NoError(t, err)
+
+	// The synthesizer update should not be applied to the composition because inputs are not in lockstep.
+	time.Sleep(time.Millisecond * 250)
+	require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
+	assert.Equal(t, int64(1), comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration, "composition has not been resynthesized")
+
+	copyForStatus = comp.DeepCopy()
+	copyForStatus.Status.InputRevisions = []apiv1.InputRevisions{
+		{
+			Key:      "some-input",
+			Revision: ptr.To(2),
+		},
+		{
+			Key:      "some-other-input",
+			Revision: ptr.To(2),
+		},
+	}
+	require.NoError(t, cli.Status().Patch(ctx, copyForStatus, client.MergeFrom(comp)))
+	// The synthesizer update should be applied to the composition after the inputs reach lockstep.
+	testutil.Eventually(t, func() bool {
+		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
+		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == int64(2)
+	})
 }
 
 // TestSynthesizerRolloutDeleted proves that compositions will not be updated while deleting.
