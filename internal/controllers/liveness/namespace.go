@@ -92,14 +92,9 @@ const removeFinalizersPatch = `[{ "op": "remove", "path": "/metadata/finalizers"
 
 func (c *namespaceController) cleanup(ctx context.Context, ns string) error {
 	logger := logr.FromContextOrDiscard(ctx).WithValues("symphonyNamespace", ns)
-	logger.V(0).Info("deleting any remaining symphonies in orphaned namespace")
-	err := c.client.DeleteAllOf(ctx, &apiv1.Symphony{}, client.InNamespace(ns))
-	if err != nil {
-		return fmt.Errorf("deleting symphonies: %w", err)
-	}
 
 	list := &apiv1.ResourceSliceList{}
-	err = c.client.List(ctx, list, client.InNamespace(ns))
+	err := c.client.List(ctx, list, client.InNamespace(ns))
 	if err != nil {
 		return fmt.Errorf("listing resource slices: %w", err)
 	}
@@ -114,6 +109,12 @@ func (c *namespaceController) cleanup(ctx context.Context, ns string) error {
 		}
 		logger := logger.WithValues("resourceSliceName", item.Name)
 		logger.V(0).Info("forcibly removed finalizers")
+	}
+
+	logger.V(0).Info("deleting any remaining symphonies in orphaned namespace")
+	err = c.client.DeleteAllOf(ctx, &apiv1.Symphony{}, client.InNamespace(ns))
+	if err != nil {
+		return fmt.Errorf("deleting symphonies: %w", err)
 	}
 
 	return nil
