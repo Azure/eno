@@ -79,14 +79,3 @@ spec:
             name: a-different-input
             namespace: default
 ```
-
-## Deletion Behavior
-
-Symphonies are high-level resources designed to always converge, even in the face of rare split-brain states.
-
-Force deleting namespaces leaves resources in a strange state in which they exist but cannot be updated.
-Symphonies recover from this state by carefully recreating the namespace and forcibly removing internal finalizers.
-
-Because of this it's possible that managed resources will not be cleaned up if they exist outside of the orphaned namespace.
-Worst case, managed resources might be recreated by the Eno reconciler if it outpaces kube-controller-manager's namespace controller.
-Beware of this if you plan to use symphony resources to manage resources outside of the symphony's own namespace.
