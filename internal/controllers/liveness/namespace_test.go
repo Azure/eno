@@ -48,7 +48,7 @@ func testMissingNamespace(t *testing.T, orphan client.Object) {
 	mgr := testutil.NewManager(t, testutil.WithCompositionNamespace(ns.Name))
 	cli := mgr.GetClient()
 
-	require.NoError(t, NewNamespaceController(mgr.Manager, time.Millisecond*200))
+	require.NoError(t, NewNamespaceController(mgr.Manager, time.Second))
 	mgr.Start(t)
 
 	require.NoError(t, cli.Create(ctx, ns))
