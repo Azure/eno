@@ -30,7 +30,7 @@ func registerControllers(t *testing.T, mgr *testutil.Manager) {
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
 	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
 	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10, 0))
-	require.NoError(t, liveness.NewNamespaceController(mgr.Manager))
+	require.NoError(t, liveness.NewNamespaceController(mgr.Manager, time.Millisecond*200))
 	require.NoError(t, watch.NewController(mgr.Manager))
 }
 

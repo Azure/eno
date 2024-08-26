@@ -23,10 +23,11 @@ var orphanableKinds = []string{"Symphony", "Composition", "ResourceSlice"}
 // This can happen if clients get tricky with the /finalize API.
 // Without this controller Eno resources will never be deleted since updates to remove the finalizers will fail.
 type namespaceController struct {
-	client client.Client
+	client              client.Client
+	creationGracePeriod time.Duration
 }
 
-func NewNamespaceController(mgr ctrl.Manager) error {
+func NewNamespaceController(mgr ctrl.Manager, creationGracePeriod time.Duration) error {
 	b := ctrl.NewControllerManagedBy(mgr).For(&corev1.Namespace{})
 
 	for _, kind := range orphanableKinds {
@@ -42,7 +43,8 @@ func NewNamespaceController(mgr ctrl.Manager) error {
 
 	return b.WithLogConstructor(manager.NewLogConstructor(mgr, "namespaceLivenessController")).
 		Complete(&namespaceController{
-			client: mgr.GetClient(),
+			client:              mgr.GetClient(),
+			creationGracePeriod: creationGracePeriod,
 		})
 }
 
@@ -134,7 +136,7 @@ func (c *namespaceController) findOrphans(ctx context.Context, ns, kind string) 
 	if len(list.Items) == 0 {
 		return false, nil, nil // no orphaned resources, nothing to do
 	}
-	if delta := time.Since(mostRecentCreation(list)); delta < time.Second {
+	if delta := time.Since(mostRecentCreation(list)); delta < c.creationGracePeriod {
 		logger.V(1).Info("refusing to free orphaned resources because one or more are too new", "resourceKind", kind)
 		return false, &ctrl.Result{RequeueAfter: delta}, nil // namespace probably just hasn't hit the cache yet
 	}

@@ -2,6 +2,7 @@ package liveness
 
 import (
 	"testing"
+	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/testutil"
@@ -47,7 +48,7 @@ func testMissingNamespace(t *testing.T, orphan client.Object) {
 	mgr := testutil.NewManager(t, testutil.WithCompositionNamespace(ns.Name))
 	cli := mgr.GetClient()
 
-	require.NoError(t, NewNamespaceController(mgr.Manager))
+	require.NoError(t, NewNamespaceController(mgr.Manager, time.Millisecond*200))
 	mgr.Start(t)
 
 	require.NoError(t, cli.Create(ctx, ns))
