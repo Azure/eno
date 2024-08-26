@@ -17,22 +17,52 @@ import (
 )
 
 func TestMissingNamespace(t *testing.T) {
+	t.Run("symphony", func(t *testing.T) {
+		sym := &apiv1.Symphony{}
+		sym.Name = "test-symphony"
+		sym.Finalizers = []string{"eno.azure.io/cleanup"}
+		testMissingNamespace(t, sym)
+	})
+
+	t.Run("composition", func(t *testing.T) {
+		comp := &apiv1.Composition{}
+		comp.Name = "test-composition"
+		comp.Finalizers = []string{"eno.azure.io/cleanup"}
+		testMissingNamespace(t, comp)
+	})
+
+	t.Run("resourceSlice", func(t *testing.T) {
+		rs := &apiv1.ResourceSlice{}
+		rs.Name = "test-resource-slice"
+		rs.Finalizers = []string{"eno.azure.io/cleanup"}
+		testMissingNamespace(t, rs)
+	})
+}
+
+func testMissingNamespace(t *testing.T, orphan client.Object) {
+	ns := &corev1.Namespace{}
+	ns.Name = "test"
+
 	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t)
+	mgr := testutil.NewManager(t, testutil.WithCompositionNamespace(ns.Name))
 	cli := mgr.GetClient()
 
 	require.NoError(t, NewNamespaceController(mgr.Manager))
 	mgr.Start(t)
 
-	ns := &corev1.Namespace{}
-	ns.Name = "test"
 	require.NoError(t, cli.Create(ctx, ns))
+	orphan.SetNamespace(ns.Name)
+	require.NoError(t, cli.Create(ctx, orphan))
 
-	sym := &apiv1.Symphony{}
-	sym.Name = "test-symphony"
-	sym.Namespace = ns.Name
-	sym.Finalizers = []string{"eno.azure.io/cleanup"} // this would normally be set by another controller
-	require.NoError(t, cli.Create(ctx, sym))
+	// Wait for the orphan resource to hit the cache, otherwise the namespace might be deleted first
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, client.ObjectKeyFromObject(orphan), orphan)
+		if err != nil {
+			t.Logf("error while getting orphan resource: %s", err)
+			return false
+		}
+		return true
+	})
 
 	// Force delete the namespace
 	require.NoError(t, cli.Delete(ctx, ns))
@@ -60,20 +90,17 @@ func TestMissingNamespace(t *testing.T) {
 		return errors.IsNotFound(cli.Get(ctx, client.ObjectKeyFromObject(ns), ns))
 	})
 
-	// But we should still be able to eventually remove the symphony's finalizer
-	require.NoError(t, cli.Delete(ctx, sym))
+	// But we should still be able to eventually remove the orphan's finalizer
 	testutil.Eventually(t, func() bool {
-		if sym.Finalizers != nil {
-			sym.Finalizers = nil
-			err = cli.Update(ctx, sym)
-			if err != nil {
-				t.Logf("error while removing finalizer from symphony: %s", err)
-			}
+		orphan.SetFinalizers(nil)
+		err = cli.Update(ctx, orphan)
+		if err != nil {
+			t.Logf("error while removing finalizer from orphan: %s", err)
 		}
 
-		missing := errors.IsNotFound(cli.Get(ctx, client.ObjectKeyFromObject(sym), sym))
+		missing := errors.IsNotFound(cli.Get(ctx, client.ObjectKeyFromObject(orphan), orphan))
 		if !missing {
-			t.Logf("symphony still exists")
+			t.Logf("orphan'd resource still exists")
 		}
 		return missing
 	})
