@@ -60,8 +60,10 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Hold a finalizer
-	if controllerutil.AddFinalizer(symph, "eno.azure.io/cleanup") {
-		err := c.client.Update(ctx, symph)
+	if !controllerutil.ContainsFinalizer(symph, "eno.azure.io/cleanup") {
+		copy := symph.DeepCopy()
+		copy.Finalizers = append(copy.Finalizers, "eno.azure.io/cleanup")
+		err := c.client.Patch(ctx, copy, client.MergeFrom(symph))
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("adding finalizer: %w", err)
 		}
@@ -93,8 +95,10 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 		if len(existing.Items) > 0 {
 			return ctrl.Result{}, nil // wait for composition deletion
 		}
-		if controllerutil.RemoveFinalizer(symph, "eno.azure.io/cleanup") {
-			err := c.client.Update(ctx, symph)
+		if controllerutil.ContainsFinalizer(symph, "eno.azure.io/cleanup") {
+			copy := symph.DeepCopy()
+			controllerutil.RemoveFinalizer(copy, "eno.azure.io/cleanup")
+			err := c.client.Patch(ctx, copy, client.MergeFrom(symph))
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
 			}
