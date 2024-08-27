@@ -242,8 +242,6 @@ func (c *symphonyController) syncStatus(ctx context.Context, symph *apiv1.Sympho
 // Bindings specified by a variation take precedence over the symphony.
 func getBindings(symph *apiv1.Symphony, vrn *apiv1.Variation) []apiv1.Binding {
 	res := append([]apiv1.Binding(nil), symph.Spec.Bindings...)
-	// TODO: validate that variations don't specify a binding more than
-	// once. Probably in a webhook or with cel (check `all` and `exists_one` macros).
 	for _, bnd := range vrn.Bindings {
 		i := slices.IndexFunc(res, func(b apiv1.Binding) bool { return b.Key == bnd.Key })
 		if i >= 0 {
@@ -252,7 +250,15 @@ func getBindings(symph *apiv1.Symphony, vrn *apiv1.Variation) []apiv1.Binding {
 			res = append(res, bnd)
 		}
 	}
-	return res
+	deduped := []apiv1.Binding{}
+	for i, bnd := range res {
+		j := slices.IndexFunc(res, func(b apiv1.Binding) bool { return b.Key == bnd.Key })
+		if i > j {
+			continue // duplicate
+		}
+		deduped = append(deduped, bnd)
+	}
+	return deduped
 }
 
 func sortSynthesizerRefs(refs []apiv1.SynthesizerRef) {
