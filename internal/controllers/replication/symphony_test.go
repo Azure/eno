@@ -272,3 +272,159 @@ func TestGetBindings(t *testing.T) {
 		})
 	}
 }
+
+func TestCoalesceMetadata(t *testing.T) {
+	tests := []struct {
+		name           string
+		variation      *apiv1.Variation
+		existing       *apiv1.Composition
+		expectedLabels map[string]string
+		expectedAnnos  map[string]string
+		expectedChange bool
+	}{
+		{
+			name: "no labels or annotations - no change",
+			variation: &apiv1.Variation{
+				Labels:      map[string]string{},
+				Annotations: map[string]string{},
+			},
+			existing: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels:      map[string]string{},
+					Annotations: map[string]string{},
+				},
+			},
+			expectedLabels: map[string]string{},
+			expectedAnnos:  map[string]string{},
+			expectedChange: false,
+		},
+		{
+			name: "new label added",
+			variation: &apiv1.Variation{
+				Labels: map[string]string{
+					"label1": "value1",
+				},
+				Annotations: map[string]string{},
+			},
+			existing: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels:      map[string]string{},
+					Annotations: map[string]string{},
+				},
+			},
+			expectedLabels: map[string]string{
+				"label1": "value1",
+			},
+			expectedAnnos:  map[string]string{},
+			expectedChange: true,
+		},
+		{
+			name: "existing label modified",
+			variation: &apiv1.Variation{
+				Labels: map[string]string{
+					"label1": "newValue",
+				},
+				Annotations: map[string]string{},
+			},
+			existing: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"label1": "oldValue",
+					},
+					Annotations: map[string]string{},
+				},
+			},
+			expectedLabels: map[string]string{
+				"label1": "newValue",
+			},
+			expectedAnnos:  map[string]string{},
+			expectedChange: true,
+		},
+		{
+			name: "new annotation added",
+			variation: &apiv1.Variation{
+				Labels: map[string]string{},
+				Annotations: map[string]string{
+					"anno1": "value1",
+				},
+			},
+			existing: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels:      map[string]string{},
+					Annotations: map[string]string{},
+				},
+			},
+			expectedLabels: map[string]string{},
+			expectedAnnos: map[string]string{
+				"anno1": "value1",
+			},
+			expectedChange: true,
+		},
+		{
+			name: "label and annotation modified",
+			variation: &apiv1.Variation{
+				Labels: map[string]string{
+					"label1": "newValue",
+				},
+				Annotations: map[string]string{
+					"anno1": "newValue",
+				},
+			},
+			existing: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"label1": "oldValue",
+					},
+					Annotations: map[string]string{
+						"anno1": "oldValue",
+					},
+				},
+			},
+			expectedLabels: map[string]string{
+				"label1": "newValue",
+			},
+			expectedAnnos: map[string]string{
+				"anno1": "newValue",
+			},
+			expectedChange: true,
+		},
+		{
+			name: "no change in labels and annotations",
+			variation: &apiv1.Variation{
+				Labels: map[string]string{
+					"label1": "value1",
+				},
+				Annotations: map[string]string{
+					"anno1": "value1",
+				},
+			},
+			existing: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"label1": "value1",
+					},
+					Annotations: map[string]string{
+						"anno1": "value1",
+					},
+				},
+			},
+			expectedLabels: map[string]string{
+				"label1": "value1",
+			},
+			expectedAnnos: map[string]string{
+				"anno1": "value1",
+			},
+			expectedChange: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			changed := coalesceMetadata(tt.variation, tt.existing)
+
+			assert.Equal(t, tt.expectedChange, changed)
+			assert.Equal(t, tt.expectedLabels, tt.existing.Labels)
+			assert.Equal(t, tt.expectedAnnos, tt.existing.Annotations)
+		})
+	}
+}
