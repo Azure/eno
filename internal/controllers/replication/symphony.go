@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
@@ -238,8 +239,8 @@ func (c *symphonyController) syncStatus(ctx context.Context, symph *apiv1.Sympho
 // Bindings specified by a variation take precedence over the symphony.
 func getBindings(symph *apiv1.Symphony, vrn *apiv1.Variation) []apiv1.Binding {
 	res := append([]apiv1.Binding(nil), symph.Spec.Bindings...)
-	// TODO: validate that variations don't specify a binding more than
-	// once. Probably in a webhook or with cel (check `all` and `exists_one` macros).
+	slices.SortFunc(res, func(i, j apiv1.Binding) int { return strings.Compare(i.Key, j.Key) })
+	res = slices.Compact(res)
 	for _, bnd := range vrn.Bindings {
 		i := slices.IndexFunc(res, func(b apiv1.Binding) bool { return b.Key == bnd.Key })
 		if i >= 0 {
