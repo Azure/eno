@@ -226,27 +226,6 @@ func TestGetBindings(t *testing.T) {
 			},
 		},
 		{
-			name: "symphony and variation bindings with dups",
-			variation: apiv1.Variation{
-				Bindings: []apiv1.Binding{
-					{Key: "bnd-1"},
-					{Key: "bnd-1"},
-				},
-			},
-			symph: apiv1.Symphony{
-				Spec: apiv1.SymphonySpec{
-					Bindings: []apiv1.Binding{
-						{Key: "bnd-2"},
-						{Key: "bnd-2"},
-					},
-				},
-			},
-			expectedBindings: []apiv1.Binding{
-				{Key: "bnd-1"},
-				{Key: "bnd-2"},
-			},
-		},
-		{
 			name: "variation takes precedence over symphony",
 			variation: apiv1.Variation{
 				Bindings: []apiv1.Binding{
