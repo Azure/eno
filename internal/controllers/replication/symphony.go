@@ -177,14 +177,10 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		// Diff and update if needed when the composition for this synthesizer already exists
 		if existings, ok := existingBySynthName[variation.Synthesizer.Name]; ok {
 			existing := existings[0]
-			if equality.Semantic.DeepEqual(comp.Spec, existing.Spec) &&
-				equality.Semantic.DeepEqual(comp.Labels, existing.Labels) &&
-				equality.Semantic.DeepEqual(comp.Annotations, existing.Annotations) {
+			if equality.Semantic.DeepEqual(comp.Spec, existing.Spec) && !coalesceMetadata(&variation, existing) {
 				continue // already matches
 			}
 			existing.Spec = comp.Spec
-			existing.Labels = comp.Labels
-			existing.Annotations = comp.Annotations
 			err = c.client.Update(ctx, existing)
 			if err != nil {
 				return false, fmt.Errorf("updating existing composition: %w", err)
@@ -263,4 +259,21 @@ func getBindings(symph *apiv1.Symphony, vrn *apiv1.Variation) []apiv1.Binding {
 
 func sortSynthesizerRefs(refs []apiv1.SynthesizerRef) {
 	sort.Slice(refs, func(i, j int) bool { return refs[i].Name < refs[j].Name })
+}
+
+func coalesceMetadata(variation *apiv1.Variation, existing *apiv1.Composition) bool {
+	var metaChanged bool
+	for key, val := range variation.Labels {
+		if existing.Labels == nil || existing.Labels[key] != val {
+			metaChanged = true
+		}
+		existing.Labels[key] = val
+	}
+	for key, val := range variation.Annotations {
+		if existing.Annotations == nil || existing.Annotations[key] != val {
+			metaChanged = true
+		}
+		existing.Annotations[key] = val
+	}
+	return metaChanged
 }
