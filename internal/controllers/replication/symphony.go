@@ -173,7 +173,9 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		// Diff and update if needed when the composition for this synthesizer already exists
 		if existings, ok := existingBySynthName[variation.Synthesizer.Name]; ok {
 			existing := existings[0]
-			if equality.Semantic.DeepEqual(comp.Spec, existing.Spec) && equality.Semantic.DeepEqual(comp.Labels, existing.Labels) {
+			if equality.Semantic.DeepEqual(comp.Spec, existing.Spec) &&
+				equality.Semantic.DeepEqual(comp.Labels, existing.Labels) &&
+				equality.Semantic.DeepEqual(comp.Annotations, existing.Annotations) {
 				continue // already matches
 			}
 			existing.Spec = comp.Spec
