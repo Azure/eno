@@ -59,8 +59,10 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Hold a finalizer
-	if controllerutil.AddFinalizer(symph, "eno.azure.io/cleanup") {
-		err := c.client.Update(ctx, symph)
+	if !controllerutil.ContainsFinalizer(symph, "eno.azure.io/cleanup") {
+		copy := symph.DeepCopy()
+		copy.Finalizers = append(copy.Finalizers, "eno.azure.io/cleanup")
+		err := c.client.Patch(ctx, copy, client.MergeFrom(symph))
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("adding finalizer: %w", err)
 		}
@@ -92,8 +94,10 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 		if len(existing.Items) > 0 {
 			return ctrl.Result{}, nil // wait for composition deletion
 		}
-		if controllerutil.RemoveFinalizer(symph, "eno.azure.io/cleanup") {
-			err := c.client.Update(ctx, symph)
+		if controllerutil.ContainsFinalizer(symph, "eno.azure.io/cleanup") {
+			copy := symph.DeepCopy()
+			controllerutil.RemoveFinalizer(copy, "eno.azure.io/cleanup")
+			err := c.client.Patch(ctx, copy, client.MergeFrom(symph))
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
 			}
@@ -173,7 +177,9 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		// Diff and update if needed when the composition for this synthesizer already exists
 		if existings, ok := existingBySynthName[variation.Synthesizer.Name]; ok {
 			existing := existings[0]
-			if equality.Semantic.DeepEqual(comp.Spec, existing.Spec) && equality.Semantic.DeepEqual(comp.Labels, existing.Labels) {
+			if equality.Semantic.DeepEqual(comp.Spec, existing.Spec) &&
+				equality.Semantic.DeepEqual(comp.Labels, existing.Labels) &&
+				equality.Semantic.DeepEqual(comp.Annotations, existing.Annotations) {
 				continue // already matches
 			}
 			existing.Spec = comp.Spec
@@ -236,8 +242,6 @@ func (c *symphonyController) syncStatus(ctx context.Context, symph *apiv1.Sympho
 // Bindings specified by a variation take precedence over the symphony.
 func getBindings(symph *apiv1.Symphony, vrn *apiv1.Variation) []apiv1.Binding {
 	res := append([]apiv1.Binding(nil), symph.Spec.Bindings...)
-	// TODO: validate that variations don't specify a binding more than
-	// once. Probably in a webhook or with cel (check `all` and `exists_one` macros).
 	for _, bnd := range vrn.Bindings {
 		i := slices.IndexFunc(res, func(b apiv1.Binding) bool { return b.Key == bnd.Key })
 		if i >= 0 {
@@ -246,7 +250,15 @@ func getBindings(symph *apiv1.Symphony, vrn *apiv1.Variation) []apiv1.Binding {
 			res = append(res, bnd)
 		}
 	}
-	return res
+	deduped := []apiv1.Binding{}
+	for i, bnd := range res {
+		j := slices.IndexFunc(res, func(b apiv1.Binding) bool { return b.Key == bnd.Key })
+		if i > j {
+			continue // duplicate
+		}
+		deduped = append(deduped, bnd)
+	}
+	return deduped
 }
 
 func sortSynthesizerRefs(refs []apiv1.SynthesizerRef) {

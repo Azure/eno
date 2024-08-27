@@ -49,8 +49,9 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, nil
 	}
 
-	symph.Status = newStatus
-	if err := c.client.Status().Update(ctx, symph); err != nil {
+	copy := symph.DeepCopy()
+	copy.Status = newStatus
+	if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(symph)); err != nil {
 		return ctrl.Result{}, fmt.Errorf("updating status: %w", err)
 	}
 
