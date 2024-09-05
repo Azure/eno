@@ -335,7 +335,7 @@ func (c *podLifecycleController) deletePod(ctx context.Context, comp types.Names
 			continue
 		}
 		err := c.client.Delete(ctx, &pod)
-		if err != nil {
+		if client.IgnoreNotFound(err) != nil {
 			return fmt.Errorf("deleting Pod %s: %w", pod.Name, err)
 		}
 		logger.V(0).Info("deleted synthesizer pod", "podName", pod.Name, "reason", "CompositionDoesNotExist")
