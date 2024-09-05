@@ -58,7 +58,10 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	logger := logr.FromContextOrDiscard(ctx)
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, req.NamespacedName, comp)
-	if err != nil {
+	if errors.IsNotFound(err) {
+		// Clean up Pods for composition that no longer exists.
+		return ctrl.Result{}, c.deletePod(ctx, req.NamespacedName)
+	} else if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition resource: %w", err))
 	}
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
@@ -315,6 +318,30 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 		return logger, nil, true
 	}
 	return logger, nil, false
+}
+
+// deletePod deletes one Pod associated to the given comp unconditionally.
+// Should only be used when the composition no longer exists.
+func (c *podLifecycleController) deletePod(ctx context.Context, comp types.NamespacedName) error {
+	logger := logr.FromContextOrDiscard(ctx)
+	pods := &corev1.PodList{}
+	if err := c.client.List(ctx, pods, client.InNamespace(c.config.PodNamespace), client.MatchingFields{
+		manager.IdxPodsByComposition: manager.PodByCompIdxValueFromNamespacedName(comp),
+	}); err != nil {
+		return fmt.Errorf("listing Pods: %w", err)
+	}
+	for _, pod := range pods.Items {
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		err := c.client.Delete(ctx, &pod)
+		if err != nil {
+			return fmt.Errorf("deleting Pod %s: %w", pod.Name, err)
+		}
+		logger.V(0).Info("deleted synthesizer pod", "podName", pod.Name, "reason", "CompositionDoesNotExist")
+		return nil
+	}
+	return nil
 }
 
 func SwapStates(comp *apiv1.Composition) {
