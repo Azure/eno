@@ -6,38 +6,41 @@ import (
 	"sort"
 	"strconv"
 
-	"gopkg.in/yaml.v3"
 	"helm.sh/helm/v3/pkg/release"
-
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/yaml"
 )
 
 // TODO: move to a common package
 const readinessKey = "eno.azure.io/readiness-group"
 
-func AddReadinessGroup(hooks []*release.Hook) ([]*release.Hook, error) {
+func setReadinessToHooks(hooks []*release.Hook) error {
 	preHooks := []*release.Hook{}
 	postHooks := []*release.Hook{}
 
 	for _, hook := range hooks {
-		// build pre actions
+		// Build pre actions
 		if containsPreHooks(hook) {
 			preHooks = append(preHooks, hook)
 		}
-		// build post actions
+		// Build post actions
 		if containsPostHooks(hook) {
 			postHooks = append(postHooks, hook)
 		}
 	}
 
-	err := addReadinesGroupToPreHooks(preHooks)
+	err := setReadinessToPreHooks(preHooks)
 	if err != nil {
-		return nil, err
+		return err
+	}
+	err = setReadinessToPostHooks(postHooks)
+	if err != nil {
+		return err
 	}
 
-	hs := append(preHooks, postHooks...)
+	hooks = append(preHooks, postHooks...)
 
-	return hs, nil
+	return nil
 }
 
 func containsPreHooks(hook *release.Hook) bool {
@@ -52,28 +55,27 @@ func containsPostHooks(hook *release.Hook) bool {
 		slices.Contains(hook.Events, release.HookPostRollback)
 }
 
-func addReadinesGroupToPreHooks(hooks []*release.Hook) error {
+func setReadinessToPreHooks(hooks []*release.Hook) error {
 	if hooks == nil || len(hooks) == 0 {
 		return nil
 	}
 
-	// descending sort the hooks by weight
+	// Descending sort the hooks by weight
 	sort.Slice(hooks, func(i, j int) bool {
 		return hooks[i].Weight > hooks[j].Weight
 	})
 
-	// start from the hook with largest weight which readiness group will be -1
+	// Start from the hook with largest weight which readiness group will be -1
 	prevWeight := hooks[0].Weight
 	readinessGroup := -1
 	for _, h := range hooks {
-		// if the weight is different from the previous one, decrease the readiness group
+		// If the weight is different from the previous one, decrease the readiness group
 		if h.Weight != prevWeight {
 			prevWeight = h.Weight
 			readinessGroup--
 		}
 
-		var err error
-		h.Manifest, err = addAnnotation(h.Manifest, readinessGroup)
+		err := setReadinessAnnotation(h, readinessGroup)
 		if err != nil {
 			return err
 		}
@@ -82,28 +84,27 @@ func addReadinesGroupToPreHooks(hooks []*release.Hook) error {
 	return nil
 }
 
-func addReadinessToPostHooks(hooks []*release.Hook) error {
+func setReadinessToPostHooks(hooks []*release.Hook) error {
 	if hooks == nil || len(hooks) == 0 {
 		return nil
 	}
 
-	// acending sort the hooks by weight
+	// Acending sort the hooks by weight
 	sort.Slice(hooks, func(i, j int) bool {
 		return hooks[i].Weight < hooks[j].Weight
 	})
 
+	// Start from the hook with the most small weight which readiness group will be 1
 	prevWeight := hooks[0].Weight
 	readinessGroup := 1
-
 	for _, h := range hooks {
-		// if the weight is different from the previous one, increase the readiness group
+		// If the weight is different from the previous one, increase the readiness group
 		if h.Weight != prevWeight {
 			prevWeight = h.Weight
 			readinessGroup++
 		}
 
-		var err error
-		h.Manifest, err = addAnnotation(h.Manifest, readinessGroup)
+		err := setReadinessAnnotation(h, readinessGroup)
 		if err != nil {
 			return err
 		}
@@ -112,27 +113,24 @@ func addReadinessToPostHooks(hooks []*release.Hook) error {
 	return nil
 }
 
-func addAnnotation(manifest string, readinessGroup int) (string, error) {
-	obj := map[string]interface{}{}
-	err := yaml.Unmarshal([]byte(manifest), &obj)
+func setReadinessAnnotation(hook *release.Hook, readinessGroup int) error {
+	un := &unstructured.Unstructured{}
+	err := yaml.Unmarshal([]byte(hook.Manifest), &un.Object)
 	if err != nil {
-		return manifest, err
+		return err
 	}
 
-	un := &unstructured.Unstructured{
-		Object: obj,
-	}
-
-	// helm hook is defined in the annotations and it is impossible to have a helm hook without annotations
+	// Helm hook is defined in the annotations and it is impossible to have a helm hook without annotations
 	anno := un.GetAnnotations()
 	if anno == nil {
-		return manifest, fmt.Errorf("annotations not found in helm hook manifest %s", un.GetName())
+		return fmt.Errorf("annotations not found in helm hook manifest: %s", un.GetName())
 	}
 
 	anno[readinessKey] = strconv.Itoa(readinessGroup)
 	un.SetAnnotations(anno)
 
-	m, _ := yaml.Marshal(un)
+	m, _ := yaml.Marshal(un.Object)
+	hook.Manifest = string(m)
 
-	return string(m), nil
+	return nil
 }
