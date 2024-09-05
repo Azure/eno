@@ -101,6 +101,30 @@ func TestCompositionDeletion(t *testing.T) {
 	})
 }
 
+func TestNonExistetnComposition(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	cli := mgr.GetClient()
+
+	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
+	mgr.Start(t)
+
+	pod := &corev1.Pod{}
+	pod.Name = "some-synthesis-pod"
+	pod.Namespace = "default"
+	pod.Labels = map[string]string{
+		"eno.azure.io/composition-name":      "some-comp",
+		"eno.azure.io/composition-namespace": "default",
+	}
+	pnn := client.ObjectKeyFromObject(pod)
+
+	require.NoError(t, cli.Create(ctx, pod))
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, pnn, pod)
+		return errors.IsNotFound(err)
+	})
+}
+
 var shouldDeletePodTests = []struct {
 	Name               string
 	Pods               []corev1.Pod
