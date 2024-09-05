@@ -50,6 +50,7 @@ func NewNamespaceController(mgr ctrl.Manager, creationGracePeriod time.Duration)
 
 func (c *namespaceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	ns := &corev1.Namespace{}
+	ns.Name = req.Name
 	err := c.client.Get(ctx, req.NamespacedName, ns)
 	if client.IgnoreNotFound(err) != nil {
 		return ctrl.Result{}, fmt.Errorf("getting namespace: %w", err)
@@ -97,7 +98,6 @@ func (c *namespaceController) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Recreate the namespace briefly so we can remove the finalizers.
 	// Any updates (including finalizer updates) will fail if the namespace doesn't exist.
-	ns.Name = req.Name
 	ns.Annotations = map[string]string{annoKey: annoValue}
 	err = c.client.Create(ctx, ns)
 	if err != nil {
