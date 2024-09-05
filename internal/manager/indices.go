@@ -59,6 +59,10 @@ func PodByCompIdxValueFromComp(comp client.Object) string {
 	return comp.GetName() + "/" + comp.GetNamespace()
 }
 
+func PodByCompIdxValueFromNamespacedName(nn types.NamespacedName) string {
+	return nn.Name + "/" + nn.Namespace
+}
+
 func indexController() client.IndexerFunc {
 	return func(o client.Object) []string {
 		owner := metav1.GetControllerOf(o)
