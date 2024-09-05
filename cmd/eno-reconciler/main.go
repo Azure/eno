@@ -40,6 +40,7 @@ func run() error {
 		compositionSelector          string
 		compositionNamespace         string
 		namespaceCreationGracePeriod time.Duration
+		namespaceCleanup             bool
 
 		mgrOpts = &manager.Options{
 			Rest: ctrl.GetConfigOrDie(),
@@ -58,6 +59,7 @@ func run() error {
 	flag.StringVar(&compositionSelector, "composition-label-selector", labels.Everything().String(), "Optional label selector for compositions to be reconciled")
 	flag.StringVar(&compositionNamespace, "composition-namespace", metav1.NamespaceAll, "Optional namespace to limit compositions that will be reconciled")
 	flag.DurationVar(&namespaceCreationGracePeriod, "ns-creation-grace-period", time.Second, "A namespace is assumed to be missing if it doesn't exist once one of its resources has existed for this long")
+	flag.BoolVar(&namespaceCleanup, "namespace-cleanup", true, "Clean up orphaned resources caused by namespace force-deletions")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 
@@ -98,9 +100,11 @@ func run() error {
 		return fmt.Errorf("constructing resource slice cleanup controller: %w", err)
 	}
 
-	err = liveness.NewNamespaceController(mgr, namespaceCreationGracePeriod)
-	if err != nil {
-		return fmt.Errorf("constructing namespace liveness controller: %w", err)
+	if namespaceCleanup {
+		err = liveness.NewNamespaceController(mgr, namespaceCreationGracePeriod)
+		if err != nil {
+			return fmt.Errorf("constructing namespace liveness controller: %w", err)
+		}
 	}
 
 	remoteConfig := mgr.GetConfig()
