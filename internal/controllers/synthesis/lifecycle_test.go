@@ -101,7 +101,7 @@ func TestCompositionDeletion(t *testing.T) {
 	})
 }
 
-func TestNonExistetnComposition(t *testing.T) {
+func TestNonExistentComposition(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
@@ -116,6 +116,10 @@ func TestNonExistetnComposition(t *testing.T) {
 		"eno.azure.io/composition-name":      "some-comp",
 		"eno.azure.io/composition-namespace": "default",
 	}
+	pod.Spec.Containers = []corev1.Container{{
+		Name:  "executor",
+		Image: "some-image-tag",
+	}}
 	pnn := client.ObjectKeyFromObject(pod)
 
 	require.NoError(t, cli.Create(ctx, pod))
