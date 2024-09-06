@@ -1,5 +1,9 @@
 name: Go Unit Tests
-on: [push]
+on:
+  push:
+  pull_request:
+    branches:
+      - main
 
 jobs:
   test:
