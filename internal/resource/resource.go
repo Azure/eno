@@ -53,7 +53,7 @@ type Resource struct {
 	ReadinessChecks   readiness.Checks
 	Patch             jsonpatch.Patch
 	DisableUpdates    bool
-	ReadinessGroup    uint
+	ReadinessGroup    int
 
 	// DefinedGroupKind is set on CRDs to represent the resource type they define.
 	DefinedGroupKind *schema.GroupKind
@@ -195,11 +195,11 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 	delete(anno, disableUpdatesKey)
 
 	const readinessGroupKey = "eno.azure.io/readiness-group"
-	rg, err := strconv.ParseUint(anno[readinessGroupKey], 10, 64)
+	rg, err := strconv.ParseInt(anno[readinessGroupKey], 10, 64)
 	if anno[readinessGroupKey] != "" && err != nil {
 		logger.V(0).Info("invalid readiness group - ignoring")
 	}
-	res.ReadinessGroup = uint(rg)
+	res.ReadinessGroup = int(rg)
 	delete(anno, readinessGroupKey)
 
 	for key, value := range anno {

@@ -46,7 +46,23 @@ var newResourceTests = []struct {
 				Kind:      "ConfigMap",
 			}, r.Ref)
 			assert.True(t, r.DisableUpdates)
-			assert.Equal(t, uint(250), r.ReadinessGroup)
+			assert.Equal(t, int(250), r.ReadinessGroup)
+		},
+	},
+	{
+		Name: "zero-readiness-group",
+		Manifest: `{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "foo",
+				"annotations": {
+					"eno.azure.io/readiness-group": "0"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Resource) {
+			assert.Equal(t, int(0), r.ReadinessGroup)
 		},
 	},
 	{
@@ -62,7 +78,7 @@ var newResourceTests = []struct {
 			}
 		}`,
 		Assert: func(t *testing.T, r *Resource) {
-			assert.Equal(t, uint(0), r.ReadinessGroup)
+			assert.Equal(t, int(-10), r.ReadinessGroup)
 		},
 	},
 	{
