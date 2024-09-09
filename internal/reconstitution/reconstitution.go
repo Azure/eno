@@ -20,7 +20,7 @@ type Reconciler interface {
 // Client provides read/write access to a collection of reconstituted resources.
 type Client interface {
 	Get(ctx context.Context, syn *SynthesisRef, res *resource.Ref) (*resource.Resource, bool)
-	RangeByReadinessGroup(ctx context.Context, syn *SynthesisRef, group uint, dir RangeDirection) []*Resource
+	RangeByReadinessGroup(ctx context.Context, syn *SynthesisRef, group int, dir RangeDirection) []*Resource
 	GetDefiningCRD(ctx context.Context, syn *SynthesisRef, gk schema.GroupKind) (*Resource, bool)
 }
 

@@ -31,7 +31,7 @@ type Cache struct {
 // resources contains a set of indexed resources scoped to a single Composition
 type resources struct {
 	ByRef            map[resource.Ref]*Resource
-	ByReadinessGroup *redblacktree.Tree[uint, []*Resource]
+	ByReadinessGroup *redblacktree.Tree[int, []*Resource]
 	ByGroupKind      map[schema.GroupKind][]*Resource
 	CrdsByGroupKind  map[schema.GroupKind]*Resource
 }
@@ -73,7 +73,7 @@ func (c *Cache) Get(ctx context.Context, comp *SynthesisRef, ref *resource.Ref) 
 	return res, ok
 }
 
-func (c *Cache) RangeByReadinessGroup(ctx context.Context, comp *SynthesisRef, group uint, dir RangeDirection) []*Resource {
+func (c *Cache) RangeByReadinessGroup(ctx context.Context, comp *SynthesisRef, group int, dir RangeDirection) []*Resource {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
@@ -198,7 +198,7 @@ func (c *Cache) fill(ctx context.Context, comp *apiv1.Composition, synthesis *ap
 func (c *Cache) buildResources(ctx context.Context, comp *apiv1.Composition, items []apiv1.ResourceSlice) (*resources, []*Request, error) {
 	resources := &resources{
 		ByRef:            map[resource.Ref]*Resource{},
-		ByReadinessGroup: redblacktree.New[uint, []*Resource](),
+		ByReadinessGroup: redblacktree.New[int, []*Resource](),
 		ByGroupKind:      map[schema.GroupKind][]*resource.Resource{},
 		CrdsByGroupKind:  map[schema.GroupKind]*resource.Resource{},
 	}

@@ -43,6 +43,9 @@ func TestReadinessGroups(t *testing.T) {
 					"metadata": map[string]any{
 						"name":      "test-obj-0",
 						"namespace": "default",
+						"annotations": map[string]string{
+							"eno.azure.io/readiness-group": "-2",
+						},
 					},
 					"data": map[string]any{"image": s.Spec.Image},
 				},
@@ -53,6 +56,17 @@ func TestReadinessGroups(t *testing.T) {
 					"kind":       "ConfigMap",
 					"metadata": map[string]any{
 						"name":      "test-obj-1",
+						"namespace": "default",
+					},
+					"data": map[string]any{"image": s.Spec.Image},
+				},
+			},
+			{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "test-obj-2",
 						"namespace": "default",
 						"annotations": map[string]string{
 							"eno.azure.io/readiness-group": "2",
@@ -66,7 +80,7 @@ func TestReadinessGroups(t *testing.T) {
 					"apiVersion": "v1",
 					"kind":       "ConfigMap",
 					"metadata": map[string]any{
-						"name":      "test-obj-2",
+						"name":      "test-obj-3",
 						"namespace": "default",
 						"annotations": map[string]string{
 							"eno.azure.io/readiness-group": "4",
@@ -105,7 +119,7 @@ func TestReadinessGroups(t *testing.T) {
 	// any time soon so it's safe to use here and less flaky than the creation timestamp
 	assertOrder := func() {
 		resourceVersions := []int{}
-		for i := 0; i < 2; i++ {
+		for i := 0; i < 4; i++ {
 			cm := &corev1.ConfigMap{}
 			cm.Name = fmt.Sprintf("test-obj-%d", i)
 			cm.Namespace = "default"
