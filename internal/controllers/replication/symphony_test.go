@@ -49,6 +49,7 @@ func TestSymphonyCRUD(t *testing.T) {
 			Annotations: map[string]string{"foo": "bar"},
 		},
 	}
+	sym.Spec.IgnoreSideEffects = true
 	err = cli.Create(ctx, sym)
 	require.NoError(t, err)
 
@@ -64,8 +65,9 @@ func TestSymphonyCRUD(t *testing.T) {
 			comp := comp
 			if !reflect.DeepEqual(sym.Spec.Bindings, comp.Spec.Bindings) ||
 				!reflect.DeepEqual(comp.Annotations, map[string]string{"foo": "bar"}) ||
-				!reflect.DeepEqual(comp.Labels, map[string]string{"foo": "bar"}) {
-				t.Logf("composition %q has incorrect bindings/labels/annotations", comp.Name)
+				!reflect.DeepEqual(comp.Labels, map[string]string{"foo": "bar"}) ||
+				!comp.Spec.IgnoreSideEffects {
+				t.Logf("composition %q was not replicated correctly", comp.Name)
 				return false
 			}
 			synthsSeen[comp.Spec.Synthesizer.Name] = struct{}{}
