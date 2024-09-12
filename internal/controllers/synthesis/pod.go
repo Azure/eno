@@ -30,6 +30,29 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 		pod.Annotations[k] = v
 	}
 
+	env := []corev1.EnvVar{
+		{
+			Name:  "COMPOSITION_NAME",
+			Value: comp.Name,
+		},
+		{
+			Name:  "COMPOSITION_NAMESPACE",
+			Value: comp.Namespace,
+		},
+		{
+			Name:  "SYNTHESIS_UUID",
+			Value: comp.Status.CurrentSynthesis.UUID,
+		},
+		{
+			Name:  "SYNTHESIS_ATTEMPT",
+			Value: strconv.Itoa(comp.Status.CurrentSynthesis.Attempts + 1), // we write the next attempt _after_ pod creation
+		},
+	}
+
+	for _, ev := range comp.Spec.SynthesisEnv {
+		env = append(env, corev1.EnvVar{Name: ev.Name, Value: ev.Value})
+	}
+
 	pod.Spec = corev1.PodSpec{
 		ServiceAccountName: cfg.PodServiceAccount,
 		RestartPolicy:      corev1.RestartPolicyOnFailure,
@@ -66,24 +89,7 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 				MountPath: "/eno",
 			}},
 			Resources: syn.Spec.PodOverrides.Resources,
-			Env: []corev1.EnvVar{
-				{
-					Name:  "COMPOSITION_NAME",
-					Value: comp.Name,
-				},
-				{
-					Name:  "COMPOSITION_NAMESPACE",
-					Value: comp.Namespace,
-				},
-				{
-					Name:  "SYNTHESIS_UUID",
-					Value: comp.Status.CurrentSynthesis.UUID,
-				},
-				{
-					Name:  "SYNTHESIS_ATTEMPT",
-					Value: strconv.Itoa(comp.Status.CurrentSynthesis.Attempts + 1), // we write the next attempt _after_ pod creation
-				},
-			},
+			Env:       env,
 			SecurityContext: &corev1.SecurityContext{
 				AllowPrivilegeEscalation: ptr.To(false),
 				ReadOnlyRootFilesystem:   ptr.To(true),

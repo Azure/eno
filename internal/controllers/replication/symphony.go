@@ -167,6 +167,7 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		comp.GenerateName = variation.Synthesizer.Name + "-"
 		comp.Spec.Bindings = getBindings(symph, &variation)
 		comp.Spec.Synthesizer = variation.Synthesizer
+		comp.Spec.SynthesisEnv = symph.Spec.SynthesisEnv
 		comp.Labels = variation.Labels
 		comp.Annotations = variation.Annotations
 		err := controllerutil.SetControllerReference(symph, comp, c.client.Scheme())
