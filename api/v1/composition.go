@@ -40,6 +40,10 @@ type CompositionSpec struct {
 	// Bindings allow compositions to specify which resource to use for a particular input "reference".
 	// Declaring extra bindings not (yet) supported by the synthesizer is valid.
 	Bindings []Binding `json:"bindings,omitempty"`
+
+	// IgnoreSideEffects, if set to true, blocks synthesis due to any event other than a change
+	// to the composition itself.
+	IgnoreSideEffects bool `json:"ignoreSideEffects,omitempty"`
 }
 
 type CompositionStatus struct {

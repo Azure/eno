@@ -34,6 +34,9 @@ type SymphonySpec struct {
 
 	// Bindings are inherited from all compositions managed by this symphony.
 	Bindings []Binding `json:"bindings,omitempty"`
+
+	// IgnoreSideEffects is copied opaquely to every managed Composition's spec.
+	IgnoreSideEffects bool `json:"ignoreSideEffects,omitempty"`
 }
 
 type SymphonyStatus struct {
