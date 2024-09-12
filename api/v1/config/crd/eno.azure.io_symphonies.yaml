@@ -73,10 +73,6 @@ spec:
                   - resource
                   type: object
                 type: array
-              ignoreSideEffects:
-                description: IgnoreSideEffects is copied opaquely to every managed
-                  Composition's spec.
-                type: boolean
               variations:
                 description: |-
                   Each variation will result in the creation of a composition.

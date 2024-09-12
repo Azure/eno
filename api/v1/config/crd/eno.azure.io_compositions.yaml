@@ -89,11 +89,6 @@ spec:
                   - resource
                   type: object
                 type: array
-              ignoreSideEffects:
-                description: |-
-                  IgnoreSideEffects, if set to true, blocks synthesis due to any event other than a change
-                  to the composition itself.
-                type: boolean
               synthesizer:
                 description: Compositions are synthesized by a Synthesizer, referenced
                   by name.

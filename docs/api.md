@@ -75,7 +75,6 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `synthesizer` _[SynthesizerRef](#synthesizerref)_ | Compositions are synthesized by a Synthesizer, referenced by name. |  |  |
 | `bindings` _[Binding](#binding) array_ | Synthesizers can accept Kubernetes resources as inputs.<br />Bindings allow compositions to specify which resource to use for a particular input "reference".<br />Declaring extra bindings not (yet) supported by the synthesizer is valid. |  |  |
-| `ignoreSideEffects` _boolean_ | IgnoreSideEffects, if set to true, blocks synthesis due to any event other than a change<br />to the composition itself. |  |  |
 
 
 #### CompositionStatus
@@ -277,7 +276,6 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `variations` _[Variation](#variation) array_ | Each variation will result in the creation of a composition.<br />Synthesizer refs must be unique across variations.<br />Removing a variation will cause the composition to be deleted! |  |  |
 | `bindings` _[Binding](#binding) array_ | Bindings are inherited from all compositions managed by this symphony. |  |  |
-| `ignoreSideEffects` _boolean_ | IgnoreSideEffects is copied opaquely to every managed Composition's spec. |  |  |
 
 
 #### SymphonyStatus

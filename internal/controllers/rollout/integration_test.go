@@ -100,7 +100,9 @@ func TestRolloutIgnoreSideEffects(t *testing.T) {
 	comp.Name = "test-comp"
 	comp.Namespace = "default"
 	comp.Spec.Synthesizer.Name = syn.Name
-	comp.Spec.IgnoreSideEffects = true
+	comp.Annotations = map[string]string{
+		"eno.azure.io/ignore-side-effects": "true",
+	}
 	require.NoError(t, cli.Create(ctx, comp))
 
 	// Initial creation.
@@ -126,7 +128,9 @@ func TestRolloutIgnoreSideEffects(t *testing.T) {
 
 	// Stop ignoring side effects.
 	compCopy := comp.DeepCopy()
-	comp.Spec.IgnoreSideEffects = false
+	comp.Annotations = map[string]string{
+		"eno.azure.io/ignore-side-effects": "false",
+	}
 	require.NoError(t, cli.Patch(ctx, comp, client.MergeFrom(compCopy)))
 
 	testutil.Eventually(t, func() bool {

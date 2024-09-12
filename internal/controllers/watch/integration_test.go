@@ -130,7 +130,9 @@ func TestIgnoreSideEffects(t *testing.T) {
 	})
 
 	// Start to ignore side effects.
-	comp.Spec.IgnoreSideEffects = true
+	comp.Annotations = map[string]string{
+		"eno.azure.io/ignore-side-effects": "true",
+	}
 	require.NoError(t, cli.Update(ctx, comp))
 
 	// Give some time to the controller to process this.
@@ -148,7 +150,9 @@ func TestIgnoreSideEffects(t *testing.T) {
 	require.Equal(t, initialResourceVersion, comp.Status.InputRevisions[0].ResourceVersion)
 
 	// Side effects are no longer ignored.
-	comp.Spec.IgnoreSideEffects = false
+	comp.Annotations = map[string]string{
+		"eno.azure.io/ignore-side-effects": "false",
+	}
 	require.NoError(t, cli.Update(ctx, comp))
 
 	// The status is eventually updated.

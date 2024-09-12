@@ -189,7 +189,7 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 
 		for _, comp := range list.Items {
-			if comp.Spec.IgnoreSideEffects {
+			if comp.ShouldIgnoreSideEffects() {
 				continue
 			}
 
