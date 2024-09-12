@@ -43,6 +43,7 @@ type CompositionSpec struct {
 
 	// SynthesisEnv
 	// A set of environment variables that will be made available inside the synthesis Pod.
+	// +kubebuilder:validation:MaxItems:=500
 	SynthesisEnv []EnvVar `json:"synthesisEnv,omitempty"`
 }
 

@@ -80,6 +80,7 @@ spec:
                 items:
                   properties:
                     name:
+                      maxLength: 1000
                       type: string
                     value:
                       type: string
@@ -89,6 +90,7 @@ spec:
                   x-kubernetes-validations:
                   - message: name must match [a-zA-Z_][a-zA-Z0-9_]*
                     rule: self.name.matches('^[a-zA-Z_][a-zA-Z0-9_]*$')
+                maxItems: 500
                 type: array
               variations:
                 description: |-

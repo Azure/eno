@@ -37,6 +37,7 @@ type SymphonySpec struct {
 
 	// SynthesisEnv
 	// Copied opaquely into the compositions managed by this symphony.
+	// +kubebuilder:validation:MaxItems:=500
 	SynthesisEnv []EnvVar `json:"synthesisEnv,omitempty"`
 }
 
