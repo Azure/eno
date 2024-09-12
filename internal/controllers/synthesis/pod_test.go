@@ -103,6 +103,25 @@ var newPodTests = []struct {
 			assert.Contains(t, p.Spec.Containers[0].Env, corev1.EnvVar{Name: "some_env", Value: "some-val"})
 		},
 	},
+	{
+		Name: "core variables are not stomped by synthesis env",
+		Comp: func() *apiv1.Composition {
+			comp := &apiv1.Composition{}
+			comp.Name = "test-composition"
+			comp.Namespace = "test-composition-ns"
+			comp.Generation = 123
+			comp.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+			comp.Spec.SynthesisEnv = []apiv1.EnvVar{
+				{Name: "some_env", Value: "some-val"},
+				{Name: "COMPOSITION_NAME", Value: "some-comp"},
+			}
+			return comp
+		}(),
+		Assert: func(t *testing.T, p *corev1.Pod) {
+			assert.Contains(t, p.Spec.Containers[0].Env, corev1.EnvVar{Name: "some_env", Value: "some-val"})
+			assert.Contains(t, p.Spec.Containers[0].Env, corev1.EnvVar{Name: "COMPOSITION_NAME", Value: "test-composition"})
+		},
+	},
 }
 
 func TestNewPod(t *testing.T) {
