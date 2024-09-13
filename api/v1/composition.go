@@ -197,3 +197,7 @@ func (c *Composition) InputsMismatched(synth *Synthesizer) bool {
 	}
 	return false
 }
+
+func (c *Composition) ShouldIgnoreSideEffects() bool {
+	return c.Annotations["eno.azure.io/ignore-side-effects"] == "true"
+}

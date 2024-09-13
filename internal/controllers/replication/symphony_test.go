@@ -72,7 +72,7 @@ func TestSymphonyCRUD(t *testing.T) {
 				!reflect.DeepEqual(comp.Annotations, map[string]string{"foo": "bar"}) ||
 				!reflect.DeepEqual(comp.Labels, map[string]string{"foo": "bar"}) ||
 				!reflect.DeepEqual(comp.Spec.SynthesisEnv, []apiv1.EnvVar{{Name: "some_env", Value: "some-value"}}) {
-				t.Logf("composition %q has incorrect bindings/labels/annotations/synthesisEnv", comp.Name)
+				t.Logf("composition %q was not replicated correctly", comp.Name)
 				return false
 			}
 			synthsSeen[comp.Spec.Synthesizer.Name] = struct{}{}

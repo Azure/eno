@@ -189,6 +189,10 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 
 		for _, comp := range list.Items {
+			if comp.ShouldIgnoreSideEffects() {
+				continue
+			}
+
 			key, deferred := findRefKey(&comp, &synth, meta)
 			if key == "" {
 				logger.V(1).Info("no matching input key found for resource")
