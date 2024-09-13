@@ -203,6 +203,7 @@ func (s *CompositionStatus) GetCurrentSynthesisUUID() string {
 		return ""
 	}
 	return s.CurrentSynthesis.UUID
+}
 
 func (c *Composition) ShouldIgnoreSideEffects() bool {
 	return c.Annotations["eno.azure.io/ignore-side-effects"] == "true"
