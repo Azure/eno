@@ -57,7 +57,13 @@ func (c *sliceCleanupController) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, fmt.Errorf("getting composition: %w", err)
 		}
 		if err == nil {
-			logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace)
+			synthesisID := ""
+			if comp.Status.CurrentSynthesis != nil {
+				synthesisID = comp.Status.CurrentSynthesis.UUID
+			}
+			logger = logger.WithValues("compositionName", comp.Name,
+				"compositionNamespace", comp.Namespace,
+				"synthesisID", synthesisID)
 			doNotDelete = !shouldDeleteSlice(comp, slice)
 			holdFinalizer = !shouldReleaseSliceFinalizer(comp, slice)
 		}

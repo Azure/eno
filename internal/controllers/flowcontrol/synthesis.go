@@ -69,7 +69,14 @@ func (c *synthesisConcurrencyLimiter) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, nil // nothing to dispatch
 	}
 	next := pending[rand.Intn(len(pending))]
-	logger = logger.WithValues("compositionName", next.Name, "compositionNamespace", next.Namespace, "compositionGeneration", next.Generation)
+	synthesisID := ""
+	if next.Status.CurrentSynthesis != nil {
+		synthesisID = next.Status.CurrentSynthesis.UUID
+	}
+	logger = logger.WithValues("compositionName", next.Name,
+		"compositionNamespace", next.Namespace,
+		"compositionGeneration", next.Generation,
+		"synthesisID", synthesisID)
 
 	// Dispatch the next pending synthesis
 	path := "/status/currentSynthesis/uuid"

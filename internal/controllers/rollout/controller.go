@@ -71,7 +71,14 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	})
 
 	for _, comp := range comps.Items {
-		logger := logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
+		synthesisID := ""
+		if comp.Status.CurrentSynthesis != nil {
+			synthesisID = comp.Status.CurrentSynthesis.UUID
+		}
+		logger := logger.WithValues("compositionName", comp.Name,
+			"compositionNamespace", comp.Namespace,
+			"compositionGeneration", comp.Generation,
+			"synthesisID", synthesisID)
 		if comp.Status.PendingResynthesis == nil || comp.Status.CurrentSynthesis == nil {
 			continue
 		}
