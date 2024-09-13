@@ -14,6 +14,7 @@ var newPodTests = []struct {
 	Name     string
 	Cfg      *Config
 	Synth    *apiv1.Synthesizer
+	Comp     *apiv1.Composition
 	Expected *corev1.Pod
 	Assert   func(*testing.T, *corev1.Pod)
 }{
@@ -87,6 +88,40 @@ var newPodTests = []struct {
 			assert.True(t, p.Spec.Containers[0].Resources.Limits["cpu"].Equal(resource.MustParse("9001")))
 		},
 	},
+	{
+		Name: "with synthesis env",
+		Comp: func() *apiv1.Composition {
+			comp := &apiv1.Composition{}
+			comp.Name = "test-composition"
+			comp.Namespace = "test-composition-ns"
+			comp.Generation = 123
+			comp.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+			comp.Spec.SynthesisEnv = []apiv1.EnvVar{{Name: "some_env", Value: "some-val"}}
+			return comp
+		}(),
+		Assert: func(t *testing.T, p *corev1.Pod) {
+			assert.Contains(t, p.Spec.Containers[0].Env, corev1.EnvVar{Name: "some_env", Value: "some-val"})
+		},
+	},
+	{
+		Name: "core variables are not stomped by synthesis env",
+		Comp: func() *apiv1.Composition {
+			comp := &apiv1.Composition{}
+			comp.Name = "test-composition"
+			comp.Namespace = "test-composition-ns"
+			comp.Generation = 123
+			comp.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+			comp.Spec.SynthesisEnv = []apiv1.EnvVar{
+				{Name: "some_env", Value: "some-val"},
+				{Name: "COMPOSITION_NAME", Value: "some-comp"},
+			}
+			return comp
+		}(),
+		Assert: func(t *testing.T, p *corev1.Pod) {
+			assert.Contains(t, p.Spec.Containers[0].Env, corev1.EnvVar{Name: "some_env", Value: "some-val"})
+			assert.Contains(t, p.Spec.Containers[0].Env, corev1.EnvVar{Name: "COMPOSITION_NAME", Value: "test-composition"})
+		},
+	},
 }
 
 func TestNewPod(t *testing.T) {
@@ -95,11 +130,14 @@ func TestNewPod(t *testing.T) {
 			tc.Cfg = minimalTestConfig
 		}
 
-		comp := &apiv1.Composition{}
-		comp.Name = "test-composition"
-		comp.Namespace = "test-composition-ns"
-		comp.Generation = 123
-		comp.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+		if tc.Comp == nil {
+			comp := &apiv1.Composition{}
+			comp.Name = "test-composition"
+			comp.Namespace = "test-composition-ns"
+			comp.Generation = 123
+			comp.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+			tc.Comp = comp
+		}
 
 		syn := &apiv1.Synthesizer{}
 		if tc.Synth != nil {
@@ -109,7 +147,7 @@ func TestNewPod(t *testing.T) {
 		syn.Generation = 234
 
 		t.Run(tc.Name, func(t *testing.T) {
-			pod := newPod(tc.Cfg, comp, syn)
+			pod := newPod(tc.Cfg, tc.Comp, syn)
 			tc.Assert(t, pod)
 		})
 	}

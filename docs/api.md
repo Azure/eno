@@ -75,6 +75,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `synthesizer` _[SynthesizerRef](#synthesizerref)_ | Compositions are synthesized by a Synthesizer, referenced by name. |  |  |
 | `bindings` _[Binding](#binding) array_ | Synthesizers can accept Kubernetes resources as inputs.<br />Bindings allow compositions to specify which resource to use for a particular input "reference".<br />Declaring extra bindings not (yet) supported by the synthesizer is valid. |  |  |
+| `synthesisEnv` _[EnvVar](#envvar) array_ | SynthesisEnv<br />A set of environment variables that will be made available inside the synthesis Pod. |  | MaxItems: 500 <br /> |
 
 
 #### CompositionStatus
@@ -95,6 +96,24 @@ _Appears in:_
 | `previousSynthesis` _[Synthesis](#synthesis)_ |  |  |  |
 | `pendingResynthesis` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ |  |  |  |
 | `inputRevisions` _[InputRevisions](#inputrevisions) array_ |  |  |  |
+
+
+#### EnvVar
+
+
+
+
+
+
+
+_Appears in:_
+- [CompositionSpec](#compositionspec)
+- [SymphonySpec](#symphonyspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ |  |  | MaxLength: 1000 <br /> |
+| `value` _string_ |  |  |  |
 
 
 
@@ -275,7 +294,8 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `variations` _[Variation](#variation) array_ | Each variation will result in the creation of a composition.<br />Synthesizer refs must be unique across variations.<br />Removing a variation will cause the composition to be deleted! |  |  |
-| `bindings` _[Binding](#binding) array_ | Bindings are inherited from all compositions managed by this symphony. |  |  |
+| `bindings` _[Binding](#binding) array_ | Bindings are inherited by all compositions managed by this symphony. |  |  |
+| `synthesisEnv` _[EnvVar](#envvar) array_ | SynthesisEnv<br />Copied opaquely into the compositions managed by this symphony. |  | MaxItems: 500 <br /> |
 
 
 #### SymphonyStatus

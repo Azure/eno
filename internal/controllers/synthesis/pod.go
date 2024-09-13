@@ -1,6 +1,7 @@
 package synthesis
 
 import (
+	"slices"
 	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
@@ -28,6 +29,29 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 	pod.Annotations = map[string]string{}
 	for k, v := range syn.Spec.PodOverrides.Annotations {
 		pod.Annotations[k] = v
+	}
+
+	env := []corev1.EnvVar{
+		{
+			Name:  "COMPOSITION_NAME",
+			Value: comp.Name,
+		},
+		{
+			Name:  "COMPOSITION_NAMESPACE",
+			Value: comp.Namespace,
+		},
+		{
+			Name:  "SYNTHESIS_UUID",
+			Value: comp.Status.CurrentSynthesis.UUID,
+		},
+		{
+			Name:  "SYNTHESIS_ATTEMPT",
+			Value: strconv.Itoa(comp.Status.CurrentSynthesis.Attempts + 1), // we write the next attempt _after_ pod creation
+		},
+	}
+
+	for _, ev := range filterEnv(env, comp.Spec.SynthesisEnv) {
+		env = append(env, corev1.EnvVar{Name: ev.Name, Value: ev.Value})
 	}
 
 	pod.Spec = corev1.PodSpec{
@@ -66,24 +90,7 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 				MountPath: "/eno",
 			}},
 			Resources: syn.Spec.PodOverrides.Resources,
-			Env: []corev1.EnvVar{
-				{
-					Name:  "COMPOSITION_NAME",
-					Value: comp.Name,
-				},
-				{
-					Name:  "COMPOSITION_NAMESPACE",
-					Value: comp.Namespace,
-				},
-				{
-					Name:  "SYNTHESIS_UUID",
-					Value: comp.Status.CurrentSynthesis.UUID,
-				},
-				{
-					Name:  "SYNTHESIS_ATTEMPT",
-					Value: strconv.Itoa(comp.Status.CurrentSynthesis.Attempts + 1), // we write the next attempt _after_ pod creation
-				},
-			},
+			Env:       env,
 			SecurityContext: &corev1.SecurityContext{
 				AllowPrivilegeEscalation: ptr.To(false),
 				ReadOnlyRootFilesystem:   ptr.To(true),
@@ -144,4 +151,19 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 
 func podIsCurrent(comp *apiv1.Composition, pod *corev1.Pod) bool {
 	return pod.Labels != nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.UUID == pod.Labels["eno.azure.io/synthesis-uuid"]
+}
+
+// filterEnv returns env taking out any items that have the same name as
+// any item in filter.
+func filterEnv(filter []corev1.EnvVar, env []apiv1.EnvVar) []apiv1.EnvVar {
+	res := []apiv1.EnvVar{}
+	for _, ev := range env {
+		if slices.ContainsFunc(filter, func(f corev1.EnvVar) bool {
+			return f.Name == ev.Name
+		}) {
+			continue
+		}
+		res = append(res, ev)
+	}
+	return res
 }

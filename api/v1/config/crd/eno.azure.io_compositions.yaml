@@ -89,6 +89,25 @@ spec:
                   - resource
                   type: object
                 type: array
+              synthesisEnv:
+                description: |-
+                  SynthesisEnv
+                  A set of environment variables that will be made available inside the synthesis Pod.
+                items:
+                  properties:
+                    name:
+                      maxLength: 1000
+                      type: string
+                    value:
+                      type: string
+                  required:
+                  - name
+                  type: object
+                  x-kubernetes-validations:
+                  - message: name must match [a-zA-Z_][a-zA-Z0-9_]*
+                    rule: self.name.matches('^[a-zA-Z_][a-zA-Z0-9_]*$')
+                maxItems: 500
+                type: array
               synthesizer:
                 description: Compositions are synthesized by a Synthesizer, referenced
                   by name.
