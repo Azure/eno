@@ -192,3 +192,10 @@ func (c *Composition) InputsMismatched(synth *Synthesizer) bool {
 	}
 	return false
 }
+
+func (s *CompositionStatus) GetCurrentSynthesisUUID() string {
+	if s.CurrentSynthesis == nil {
+		return ""
+	}
+	return s.CurrentSynthesis.UUID
+}
