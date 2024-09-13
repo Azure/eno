@@ -64,7 +64,11 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	} else if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition resource: %w", err))
 	}
-	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
+
+	logger = logger.WithValues("compositionName", comp.Name,
+		"compositionNamespace", comp.Namespace,
+		"compositionGeneration", comp.Generation,
+		"synthesisID", comp.Status.GetCurrentSynthesisUUID())
 
 	// It isn't safe to delete compositions until their resource slices have been cleaned up,
 	// since reconciling resources necessarily requires the composition.

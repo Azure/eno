@@ -59,7 +59,10 @@ func (c *synthController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	for _, comp := range compList.Items {
 		comp := comp
-		logger := logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
+		logger := logger.WithValues("compositionName", comp.Name,
+			"compositionNamespace", comp.Namespace,
+			"compositionGeneration", comp.Generation,
+			"synthesisID", comp.Status.GetCurrentSynthesisUUID())
 
 		// Compositions aren't eligible to receive an updated synthesizer when:
 		// - They haven't ever been synthesized (they'll use the latest inputs anyway)

@@ -36,7 +36,11 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition: %w", err))
 	}
-	logger = logger.WithValues("compositionGeneration", comp.Generation, "compositionName", comp.Name, "compositionNamespace", comp.Namespace)
+
+	logger = logger.WithValues("compositionGeneration", comp.Generation,
+		"compositionName", comp.Name,
+		"compositionNamespace", comp.Namespace,
+		"synthesisID", comp.Status.GetCurrentSynthesisUUID())
 
 	if compositionStatusTerminal(comp) {
 		return ctrl.Result{}, nil

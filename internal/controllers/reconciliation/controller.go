@@ -91,7 +91,9 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Failed() {
 		return ctrl.Result{}, nil // nothing to do
 	}
-	logger = logger.WithValues("synthesizerName", comp.Spec.Synthesizer.Name, "synthesizerGeneration", comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration)
+	logger = logger.WithValues("synthesizerName", comp.Spec.Synthesizer.Name,
+		"synthesizerGeneration", comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration,
+		"synthesisID", comp.Status.GetCurrentSynthesisUUID())
 	ctx = logr.NewContext(ctx, logger)
 
 	// Find the current and (optionally) previous desired states in the cache
