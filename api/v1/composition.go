@@ -40,6 +40,11 @@ type CompositionSpec struct {
 	// Bindings allow compositions to specify which resource to use for a particular input "reference".
 	// Declaring extra bindings not (yet) supported by the synthesizer is valid.
 	Bindings []Binding `json:"bindings,omitempty"`
+
+	// SynthesisEnv
+	// A set of environment variables that will be made available inside the synthesis Pod.
+	// +kubebuilder:validation:MaxItems:=500
+	SynthesisEnv []EnvVar `json:"synthesisEnv,omitempty"`
 }
 
 type CompositionStatus struct {
@@ -198,4 +203,7 @@ func (s *CompositionStatus) GetCurrentSynthesisUUID() string {
 		return ""
 	}
 	return s.CurrentSynthesis.UUID
+
+func (c *Composition) ShouldIgnoreSideEffects() bool {
+	return c.Annotations["eno.azure.io/ignore-side-effects"] == "true"
 }

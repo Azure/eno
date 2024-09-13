@@ -46,8 +46,8 @@ spec:
           spec:
             properties:
               bindings:
-                description: Bindings are inherited from all compositions managed
-                  by this symphony.
+                description: Bindings are inherited by all compositions managed by
+                  this symphony.
                 items:
                   description: |-
                     Bindings map a specific Kubernetes resource to a ref exposed by a synthesizer.
@@ -72,6 +72,25 @@ spec:
                   - key
                   - resource
                   type: object
+                type: array
+              synthesisEnv:
+                description: |-
+                  SynthesisEnv
+                  Copied opaquely into the compositions managed by this symphony.
+                items:
+                  properties:
+                    name:
+                      maxLength: 1000
+                      type: string
+                    value:
+                      type: string
+                  required:
+                  - name
+                  type: object
+                  x-kubernetes-validations:
+                  - message: name must match [a-zA-Z_][a-zA-Z0-9_]*
+                    rule: self.name.matches('^[a-zA-Z_][a-zA-Z0-9_]*$')
+                maxItems: 500
                 type: array
               variations:
                 description: |-

@@ -75,6 +75,85 @@ func TestSynthesizerRollout(t *testing.T) {
 	})
 }
 
+// TestRolloutIgnoreSideEffects proves that synthesizer changes are not rolled out to compositions which are ignoring side effects.
+func TestRolloutIgnoreSideEffects(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	cli := mgr.GetClient()
+
+	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10, 0))
+	require.NoError(t, NewSynthesizerController(mgr.Manager))
+	require.NoError(t, NewController(mgr.Manager, time.Millisecond*10))
+	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		return output, nil
+	})
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "test-syn-image"
+	require.NoError(t, cli.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	comp.Annotations = map[string]string{
+		"eno.azure.io/ignore-side-effects": "true",
+	}
+	require.NoError(t, cli.Create(ctx, comp))
+
+	// Initial creation.
+	testutil.Eventually(t, func() bool {
+		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
+		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
+	})
+
+	// Update the synthesizer while ignoring side effects.
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		if err := cli.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
+			return err
+		}
+		syn.Spec.Image = "updated-image"
+		return cli.Update(ctx, syn)
+	})
+	require.NoError(t, err)
+	// Give some time to the controller to process the change.
+	time.Sleep(time.Second)
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	require.NotNil(t, comp.Status.CurrentSynthesis)
+	require.Less(t, comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration, syn.Generation)
+
+	// Stop ignoring side effects.
+	compCopy := comp.DeepCopy()
+	comp.Annotations = map[string]string{
+		"eno.azure.io/ignore-side-effects": "false",
+	}
+	require.NoError(t, cli.Patch(ctx, comp, client.MergeFrom(compCopy)))
+
+	testutil.Eventually(t, func() bool {
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+		return comp.Status.CurrentSynthesis != nil && isInSync(comp, syn)
+	})
+
+	// Update the synthesizer while honoring side effects.
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		if err := cli.Get(ctx, client.ObjectKeyFromObject(syn), syn); err != nil {
+			return err
+		}
+		syn.Spec.Image = "another-updated-image"
+		return cli.Update(ctx, syn)
+	})
+
+	// This time the rollout is observed.
+	testutil.Eventually(t, func() bool {
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+		return comp.Status.CurrentSynthesis != nil && isInSync(comp, syn)
+	})
+}
+
 // TestSynthesizerRolloutCooldown proves that the synth rollout cooldown period is honored when
 // rolling out changes across compositions.
 func TestSynthesizerRolloutCooldown(t *testing.T) {

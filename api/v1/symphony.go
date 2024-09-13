@@ -32,8 +32,13 @@ type SymphonySpec struct {
 	// Removing a variation will cause the composition to be deleted!
 	Variations []Variation `json:"variations,omitempty"`
 
-	// Bindings are inherited from all compositions managed by this symphony.
+	// Bindings are inherited by all compositions managed by this symphony.
 	Bindings []Binding `json:"bindings,omitempty"`
+
+	// SynthesisEnv
+	// Copied opaquely into the compositions managed by this symphony.
+	// +kubebuilder:validation:MaxItems:=500
+	SynthesisEnv []EnvVar `json:"synthesisEnv,omitempty"`
 }
 
 type SymphonyStatus struct {
