@@ -2,6 +2,7 @@ package watch
 
 import (
 	"testing"
+	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/testutil"
@@ -26,8 +27,7 @@ func TestBasics(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, input))
 
 	synth := &apiv1.Synthesizer{}
-	synth.Name = "test-comp"
-	synth.Namespace = "default"
+	synth.Name = "test-synth"
 	synth.Spec.Refs = []apiv1.Ref{{
 		Key: "foo",
 		Resource: apiv1.ResourceRef{
@@ -68,6 +68,94 @@ func TestBasics(t *testing.T) {
 	require.NoError(t, cli.Update(ctx, input))
 
 	// The status is eventually updated
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if len(comp.Status.InputRevisions) != 1 {
+			return false
+		}
+
+		rv := comp.Status.InputRevisions[0].ResourceVersion
+		return rv != "" && rv != initialResourceVersion
+	})
+}
+
+func TestIgnoreSideEffects(t *testing.T) {
+	mgr := testutil.NewManager(t)
+	require.NoError(t, NewController(mgr.Manager))
+	mgr.Start(t)
+
+	ctx := testutil.NewContext(t)
+	cli := mgr.GetClient()
+
+	input := &corev1.ConfigMap{}
+	input.Name = "test-input"
+	input.Namespace = "default"
+	require.NoError(t, cli.Create(ctx, input))
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	synth.Spec.Refs = []apiv1.Ref{{
+		Key: "foo",
+		Resource: apiv1.ResourceRef{
+			Version: "v1",
+			Kind:    "ConfigMap",
+		},
+	}}
+	require.NoError(t, cli.Create(ctx, synth))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = synth.Name
+	comp.Spec.Bindings = []apiv1.Binding{{
+		Key: "foo",
+		Resource: apiv1.ResourceBinding{
+			Name:      input.Name,
+			Namespace: input.Namespace,
+		},
+	}}
+	require.NoError(t, cli.Create(ctx, comp))
+
+	// The initial status is populated
+	var initialResourceVersion string
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if len(comp.Status.InputRevisions) != 1 {
+			return false
+		}
+
+		rv := comp.Status.InputRevisions[0].ResourceVersion
+		initialResourceVersion = rv
+		return rv != ""
+	})
+
+	// Start to ignore side effects.
+	comp.Annotations = map[string]string{
+		"eno.azure.io/ignore-side-effects": "true",
+	}
+	require.NoError(t, cli.Update(ctx, comp))
+
+	// Give some time to the controller to process this.
+	time.Sleep(time.Millisecond * 500)
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	require.Equal(t, initialResourceVersion, comp.Status.InputRevisions[0].ResourceVersion)
+
+	// Update the input
+	input.Data = map[string]string{"foo": "bar"}
+	require.NoError(t, cli.Update(ctx, input))
+
+	// Give some time to the controller to process this.
+	time.Sleep(time.Millisecond * 500)
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	require.Equal(t, initialResourceVersion, comp.Status.InputRevisions[0].ResourceVersion)
+
+	// Side effects are no longer ignored.
+	comp.Annotations = map[string]string{
+		"eno.azure.io/ignore-side-effects": "false",
+	}
+	require.NoError(t, cli.Update(ctx, comp))
+
+	// The status is eventually updated.
 	testutil.Eventually(t, func() bool {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		if len(comp.Status.InputRevisions) != 1 {

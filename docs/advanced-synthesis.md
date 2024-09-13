@@ -10,6 +10,16 @@ annotations:
   eno.azure.io/deletion-strategy: orphan
 ```
 
+## Ignore side effects
+
+Consider a "side effect" any event that's not a change to the composition spec. A new synthesizer version or a change to an input are examples of this.
+Setting this annotation on a composition (or through a Symphony's variation) will prevent it from being resynthesized on side effects.
+
+```yaml
+annotations:
+  eno.azure.io/ignore-side-effects: "true"
+```
+
 ## Patch Unmanaged Resources
 
 Synthesizers can generate special "pseudo resources" to modify objects not managed by Eno.

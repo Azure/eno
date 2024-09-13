@@ -68,12 +68,14 @@ func (c *synthController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		// - They are already pending resynthesis
 		// - They are already in sync with the latest synth
 		// - Their input revisions are not in lockstep
+		// - They're ignoring side effects
 		if comp.Status.CurrentSynthesis == nil ||
 			comp.Status.CurrentSynthesis.Synthesized == nil ||
 			comp.DeletionTimestamp != nil ||
 			comp.Status.PendingResynthesis != nil ||
 			isInSync(&comp, syn) ||
-			comp.InputsMismatched(syn) {
+			comp.InputsMismatched(syn) ||
+			comp.ShouldIgnoreSideEffects() {
 			continue
 		}
 
@@ -124,7 +126,8 @@ func newCompositionHandler() handler.EventHandler {
 			if oldComp.Spec.Synthesizer.Name == newComp.Spec.Synthesizer.Name &&
 				oldComp.Status.CurrentSynthesis != nil && newComp.Status.CurrentSynthesis != nil &&
 				oldComp.Status.CurrentSynthesis.UUID == newComp.Status.CurrentSynthesis.UUID &&
-				equality.Semantic.DeepEqual(oldComp.Status.CurrentSynthesis.Synthesized, newComp.Status.CurrentSynthesis.Synthesized) {
+				equality.Semantic.DeepEqual(oldComp.Status.CurrentSynthesis.Synthesized, newComp.Status.CurrentSynthesis.Synthesized) &&
+				oldComp.ShouldIgnoreSideEffects() == newComp.ShouldIgnoreSideEffects() {
 				return
 			}
 
