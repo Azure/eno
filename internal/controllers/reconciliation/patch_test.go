@@ -127,3 +127,175 @@ func TestPatchDeletion(t *testing.T) {
 	err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm)
 	require.True(t, errors.IsNotFound(err))
 }
+
+// TestPatchDeletionBeforeCreation proves that a patch resource can delete the resource it references before the resource is created.
+// Basically, this is the same behavior as Helm hook event with delete policy "before-hook-creation".
+func TestPatchDeletionBeforeCreation(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	// Test configmap setup
+	cmName := "test-obj"
+	cmNamespace := "default"
+	key := "foo"
+	val := "bar"
+	cm := &corev1.ConfigMap{}
+	cm.Name = cmName
+	cm.Namespace = cmNamespace
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		cm := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      cmName,
+					"namespace": cmNamespace,
+					"annotations": map[string]string{
+						"eno.azure.io/readiness-group": "2",
+					},
+				},
+				"data": map[string]any{
+					key: val,
+				},
+			},
+		}
+		obj := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "eno.azure.io/v1",
+				"kind":       "Patch",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]string{
+						// This patch should be applied before the configmap is created.
+						"eno.azure.io/readiness-group": "1",
+					},
+				},
+				"patch": map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"ops": []map[string]any{
+						{"op": "add", "path": "/metadata/deletionTimestamp", "value": "2024-01-22T19:13:15Z"},
+					},
+				},
+			},
+		}
+		return &krmv1.ResourceList{Items: []*unstructured.Unstructured{obj, cm}}, nil
+	})
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
+	})
+
+	// Verify the configmap should be created after the deletion patch is applied.
+	err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+	require.NoError(t, err)
+	require.NotNil(t, cm)
+	require.Equal(t, val, cm.Data[key])
+}
+
+// TestPatchDeletionBeforeUpgrade proves that a patch resource can delete the resource it references before the resource is upgraded.
+// Basically, this is the same behavior as Helm hook event with delete policy "before-hook-creation".
+func TestPatchDeletionBeforeUpgrade(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	// Test configmap setup
+	cmName := "test-obj"
+	cmNamespace := "default"
+	key := "foo"
+	val := "bar"
+	cm := &corev1.ConfigMap{}
+	cm.Name = cmName
+	cm.Namespace = cmNamespace
+	cm.Annotations = map[string]string{
+		"eno.azure.io/readiness-group": "2",
+	}
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		obj := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "eno.azure.io/v1",
+				"kind":       "Patch",
+				"metadata": map[string]any{
+					"name":      cmName,
+					"namespace": cmNamespace,
+					"annotations": map[string]string{
+						// This patch should be applied before the configmap is re-created.
+						"eno.azure.io/readiness-group": "1",
+					},
+				},
+				"patch": map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"ops": []map[string]any{
+						{"op": "add", "path": "/metadata/deletionTimestamp", "value": "2024-01-22T19:13:15Z"},
+					},
+				},
+			},
+		}
+
+		// Update the configmap by adding new annotation
+		cm := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      cmName,
+					"namespace": cmNamespace,
+					"annotations": map[string]string{
+						"eno.azure.io/readiness-group": "2",
+					},
+				},
+				"data": map[string]any{
+					key: val,
+				},
+			},
+		}
+		return &krmv1.ResourceList{Items: []*unstructured.Unstructured{obj, cm}}, nil
+	})
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	// Create configmap first before the patch deletion is applied.
+	require.NoError(t, downstream.Create(ctx, cm))
+	creationUID := cm.GetUID()
+
+	// Create deletion patch and configmap with new change.
+	_, comp := writeGenericComposition(t, upstream)
+
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
+	})
+
+	err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+	require.NoError(t, err)
+
+	recreationUID := cm.GetUID()
+	// Verify the configmap is re-created with new uid and data.
+	require.NotEqual(t, creationUID, recreationUID)
+	require.Equal(t, val, cm.Data[key])
+}
