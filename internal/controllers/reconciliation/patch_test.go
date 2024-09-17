@@ -3,7 +3,6 @@ package reconciliation
 import (
 	"context"
 	"testing"
-	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
@@ -282,11 +281,7 @@ func TestPatchDeletionBeforeUpgrade(t *testing.T) {
 
 	// Create configmap first before the patch deletion is applied.
 	require.NoError(t, downstream.Create(ctx, cm))
-	creationTime := cm.GetCreationTimestamp()
-	creationResourceVersion := cm.GetResourceVersion()
-	// Wait for more than one second to ensure the createTimestamp is changed when recreating configmap,
-	// or it might have same createTimestamp and fail to pass test.
-	time.Sleep(1500 * time.Millisecond)
+	creationUID := cm.GetUID()
 
 	// Create deletion patch and configmap with new change.
 	_, comp := writeGenericComposition(t, upstream)
@@ -299,10 +294,8 @@ func TestPatchDeletionBeforeUpgrade(t *testing.T) {
 	err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm)
 	require.NoError(t, err)
 
-	recreationTime := cm.GetCreationTimestamp()
-	recreationResourceVersion := cm.GetResourceVersion()
-	// Verify the configmap is re-created with new creationTime, resourceVersion and data.
-	require.True(t, creationTime.Before(&recreationTime))
-	require.NotEqual(t, creationResourceVersion, recreationResourceVersion)
+	recreationUID := cm.GetUID()
+	// Verify the configmap is re-created with new uid and data.
+	require.NotEqual(t, creationUID, recreationUID)
 	require.Equal(t, val, cm.Data[key])
 }
