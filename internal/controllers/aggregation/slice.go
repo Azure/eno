@@ -98,7 +98,9 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 		if synthed := comp.Status.CurrentSynthesis.Synthesized; synthed != nil {
 			latency := maxReadyTime.Sub(synthed.Time)
-			logger.V(0).Info("composition became ready", "latency", latency.Milliseconds())
+			if latency.Milliseconds() > 0 {
+				logger.V(0).Info("composition became ready", "latency", latency.Milliseconds())
+			}
 		}
 	} else {
 		comp.Status.CurrentSynthesis.Ready = nil
