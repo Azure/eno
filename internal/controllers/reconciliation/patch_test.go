@@ -3,6 +3,7 @@ package reconciliation
 import (
 	"context"
 	"testing"
+	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
@@ -298,4 +299,91 @@ func TestPatchDeletionBeforeUpgrade(t *testing.T) {
 	// Verify the configmap is re-created with new uid and data.
 	require.NotEqual(t, creationUID, recreationUID)
 	require.Equal(t, val, cm.Data[key])
+}
+
+// TestPatchDeletionForResourceWithReconciliationFromInput proves that a patch resource won't be triggered to
+// delete the resource with reconcile-interval it references if the patch with lower readiness group
+func TestPatchDeletionForResourceWithReconciliationFromInput(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	// Test configmap setup
+	cmName := "test-obj"
+	cmNamespace := "default"
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		obj := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "eno.azure.io/v1",
+				"kind":       "Patch",
+				"metadata": map[string]any{
+					"name":      cmName,
+					"namespace": cmNamespace,
+					"annotations": map[string]string{
+						// This patch should be applied before the configmap is re-created.
+						"eno.azure.io/readiness-group": "1",
+					},
+				},
+				"patch": map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"ops": []map[string]any{
+						{"op": "add", "path": "/metadata/deletionTimestamp", "value": "2024-01-22T19:13:15Z"},
+					},
+				},
+			},
+		}
+
+		cm := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      cmName,
+					"namespace": cmNamespace,
+					"annotations": map[string]string{
+						"eno.azure.io/readiness-group":    "2",
+						"eno.azure.io/reconcile-interval": "1ms",
+					},
+				},
+			},
+		}
+
+		return &krmv1.ResourceList{Items: []*unstructured.Unstructured{obj, cm}}, nil
+	})
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	// Create deletion patch and configmap.
+	_, comp := writeGenericComposition(t, upstream)
+
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
+	})
+
+	cm := &corev1.ConfigMap{}
+	cm.Name = cmName
+	cm.Namespace = cmNamespace
+	err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+	require.NoError(t, err)
+
+	uid := cm.GetUID()
+	// Ensure the configmap is reconciled at least once.
+	time.Sleep(100 * time.Millisecond)
+	err = downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+	require.NoError(t, err)
+
+	newUID := cm.GetUID()
+	// Verify the configmap is not re-created.
+	require.Equal(t, uid, newUID)
 }
