@@ -103,7 +103,7 @@ func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, s
 		anno["eno.azure.io/input-key"] = key
 		obj.SetAnnotations(anno)
 		rl.Items = append(rl.Items, obj)
-		logger.V(0).Info("retrieved input", "key", key, "latency", time.Since(start).Milliseconds())
+		logger.V(0).Info("retrieved input", "key", key, "latency", time.Since(start).Abs().Milliseconds())
 
 		// Store the revision to be written to the synthesis status later
 		revs = append(revs, *resource.NewInputRevisions(obj, key))
