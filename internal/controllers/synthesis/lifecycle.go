@@ -363,12 +363,17 @@ func shouldSwapStates(synth *apiv1.Synthesizer, comp *apiv1.Composition) bool {
 	// synthesize when (either):
 	// - synthesis has never occurred
 	// - the spec has changed
-	// - the bound input resources have changed
+	// - a side effect that has not observed a synthesis has occurred
+	//		The side effects observed by this controller are:
+	//			- changes to non-defferred inputs.
 	// AND
 	// - synthesis is not already pending
 	// - all bound input resources exist and are in lockstep (or composition is being deleted)
 	syn := comp.Status.CurrentSynthesis
-	return (comp.DeletionTimestamp != nil || (comp.InputsExist(synth) && !comp.InputsMismatched(synth))) && (syn == nil || syn.ObservedCompositionGeneration != comp.Generation || (!inputRevisionsEqual(synth, comp.Status.InputRevisions, syn.InputRevisions) && syn.Synthesized != nil))
+	return (syn == nil ||
+		syn.ObservedCompositionGeneration != comp.Generation ||
+		(!inputRevisionsEqual(synth, comp.Status.InputRevisions, syn.InputRevisions) && syn.Synthesized != nil && !comp.ShouldIgnoreSideEffects())) &&
+		(comp.DeletionTimestamp != nil || (comp.InputsExist(synth) && !comp.InputsMismatched(synth)))
 }
 
 func shouldBackOffPodCreation(comp *apiv1.Composition) bool {
