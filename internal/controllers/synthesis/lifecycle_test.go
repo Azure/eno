@@ -530,6 +530,32 @@ func TestShouldSwapStates(t *testing.T) {
 			},
 		},
 		{
+			Name:        "non-matching input synthesis terminal ignore side effects",
+			Expectation: false,
+			Composition: apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"eno.azure.io/ignore-side-effects": "true",
+					},
+				},
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						InputRevisions: []apiv1.InputRevisions{{
+							Key: "foo",
+						}},
+						Synthesized: ptr.To(metav1.Now()),
+					},
+					InputRevisions: []apiv1.InputRevisions{{
+						Key:             "foo",
+						ResourceVersion: "new",
+					}},
+				},
+			},
+		},
+		{
 			Name:        "non-matching input synthesis non-terminal",
 			Expectation: false,
 			Composition: apiv1.Composition{

@@ -65,6 +65,20 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 	}
 
+	// Cancel pending resynthesis for compositions that are ignoring side effects.
+	// Do this before calculating selecting the next composition to avoid
+	// skewing the results.
+	for _, comp := range comps.Items {
+		if comp.Status.PendingResynthesis != nil && comp.ShouldIgnoreSideEffects() {
+			comp.Status.PendingResynthesis = nil
+			err := c.client.Status().Update(ctx, &comp)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("clearing PendingResythesis field for %s in namespace %s: %w", comp.Name, comp.Namespace, err)
+			}
+			return ctrl.Result{}, nil
+		}
+	}
+
 	// Sort for FIFO
 	sort.Slice(comps.Items, func(i, j int) bool {
 		return ptr.Deref(comps.Items[j].Status.PendingResynthesis, metav1.Time{}).After(ptr.Deref(comps.Items[i].Status.PendingResynthesis, metav1.Time{}).Time)

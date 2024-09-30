@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -103,12 +104,15 @@ func TestRolloutIgnoreSideEffects(t *testing.T) {
 	comp.Annotations = map[string]string{
 		"eno.azure.io/ignore-side-effects": "true",
 	}
+	comp.Status.PendingResynthesis = ptr.To(metav1.Now())
 	require.NoError(t, cli.Create(ctx, comp))
 
 	// Initial creation.
 	testutil.Eventually(t, func() bool {
 		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
+		return comp.Status.CurrentSynthesis != nil &&
+			comp.Status.CurrentSynthesis.Synthesized != nil &&
+			comp.Status.PendingResynthesis == nil // Any pending resynthesis are cleared.
 	})
 
 	// Update the synthesizer while ignoring side effects.
@@ -146,6 +150,7 @@ func TestRolloutIgnoreSideEffects(t *testing.T) {
 		syn.Spec.Image = "another-updated-image"
 		return cli.Update(ctx, syn)
 	})
+	require.NoError(t, err)
 
 	// This time the rollout is observed.
 	testutil.Eventually(t, func() bool {
