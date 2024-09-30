@@ -189,10 +189,6 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 
 		for _, comp := range list.Items {
-			if comp.ShouldIgnoreSideEffects() {
-				continue
-			}
-
 			key, deferred := findRefKey(&comp, &synth, meta)
 			if key == "" {
 				logger.V(1).Info("no matching input key found for resource")
@@ -204,7 +200,7 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 				continue
 			}
 
-			if deferred && comp.Status.PendingResynthesis == nil {
+			if deferred && comp.Status.PendingResynthesis == nil && !comp.ShouldIgnoreSideEffects() {
 				comp.Status.PendingResynthesis = ptr.To(metav1.Now())
 			}
 
