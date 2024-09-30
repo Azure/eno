@@ -232,7 +232,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	logger := logr.FromContextOrDiscard(ctx)
 	start := time.Now()
 	defer func() {
-		reconciliationLatency.Observe(float64(time.Since(start).Microseconds()))
+		reconciliationLatency.Observe(float64(time.Since(start).Milliseconds()))
 	}()
 
 	if resource.Deleted() {
