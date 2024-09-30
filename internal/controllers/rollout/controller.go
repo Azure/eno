@@ -75,7 +75,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("clearing PendingResythesis field for %s in namespace %s: %w", comp.Name, comp.Namespace, err)
 			}
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{}, nil
 		}
 	}
 
