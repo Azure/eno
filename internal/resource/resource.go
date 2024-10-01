@@ -273,7 +273,7 @@ func (l *lastReconciledMeta) ObserveReconciliation() time.Duration {
 	}
 
 	l.lastReconciled = &now
-	return latency
+	return time.Duration(latency.Abs().Milliseconds())
 }
 
 func NewInputRevisions(obj client.Object, refKey string) *apiv1.InputRevisions {

@@ -155,7 +155,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		wait := base * time.Duration(comp.Status.CurrentSynthesis.Attempts)
 		nextAttempt := comp.Status.CurrentSynthesis.PodCreation.Time.Add(wait)
 		if time.Since(nextAttempt) < 0 { // positive when past the nextAttempt
-			logger.V(1).Info("backing off pod creation", "latency", wait.Milliseconds())
+			logger.V(1).Info("backing off pod creation", "latency", wait.Abs().Milliseconds())
 			return ctrl.Result{RequeueAfter: wait}, nil
 		}
 	}
@@ -304,7 +304,7 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 		// Synthesis is done
 		if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil {
 			if comp.Status.CurrentSynthesis.PodCreation != nil {
-				logger = logger.WithValues("latency", time.Since(comp.Status.CurrentSynthesis.PodCreation.Time).Milliseconds())
+				logger = logger.WithValues("latency", time.Since(comp.Status.CurrentSynthesis.PodCreation.Time).Abs().Milliseconds())
 			}
 			logger = logger.WithValues("reason", "Success")
 			return logger, &pod, true

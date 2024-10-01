@@ -99,7 +99,7 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if synthed := comp.Status.CurrentSynthesis.Synthesized; synthed != nil {
 			latency := maxReadyTime.Sub(synthed.Time)
 			if latency.Milliseconds() > 0 {
-				logger.V(0).Info("composition became ready", "latency", latency.Milliseconds())
+				logger.V(0).Info("composition became ready", "latency", latency.Abs().Milliseconds(), "compositionName", comp.Name)
 			}
 		}
 	} else {
@@ -111,7 +111,9 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 		if synthed := comp.Status.CurrentSynthesis.Synthesized; synthed != nil {
 			latency := now.Sub(synthed.Time)
-			logger.V(0).Info("composition was reconciled", "latency", latency.Milliseconds())
+			logger.V(0).Info("composition was reconciled",
+				"latency", latency.Abs().Milliseconds(),
+				"compositionName", comp.Name)
 		}
 	} else {
 		comp.Status.CurrentSynthesis.Reconciled = nil
@@ -119,9 +121,10 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	err = s.client.Status().Update(ctx, comp)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
+		return ctrl.Result{}, fmt.Errorf("updating composition '%s' status: %w", comp.Name, err)
+
 	}
-	logger.V(0).Info("aggregated resource status into composition")
+	logger.V(0).Info("aggregated resource status into composition", "compositionName", comp.Name)
 
 	return ctrl.Result{}, nil
 }

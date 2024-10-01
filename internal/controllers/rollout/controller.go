@@ -110,7 +110,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			return ctrl.Result{}, fmt.Errorf("initiating resynthesis: %w", err)
 		}
 
-		logger.Info("progressing deferred resynthesis", "latency", time.Since(pendingTime.Time).Milliseconds())
+		logger.Info("progressing deferred resynthesis", "latency", time.Since(pendingTime.Time).Abs().Milliseconds())
 		return ctrl.Result{RequeueAfter: c.cooldown}, nil
 	}
 
