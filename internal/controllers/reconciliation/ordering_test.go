@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"testing"
+	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
@@ -398,4 +399,75 @@ func TestInputSynthesizerOrdering(t *testing.T) {
 		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
 	})
 	assert.Equal(t, input.ResourceVersion, comp.Status.InputRevisions[0].ResourceVersion)
+}
+
+func TestInputRevisionDebounce(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	input := &corev1.ConfigMap{}
+	input.Name = "input1"
+	input.Namespace = "default"
+	input.Annotations = map[string]string{"eno.azure.io/revision": "9001"}
+	require.NoError(t, upstream.Create(ctx, input))
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "create"
+	syn.Spec.Refs = []apiv1.Ref{{
+		Key: "foo",
+		Resource: apiv1.ResourceRef{
+			Version: "v1",
+			Kind:    "ConfigMap",
+		},
+	}}
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	comp.Spec.Bindings = []apiv1.Binding{{
+		Key: "foo",
+		Resource: apiv1.ResourceBinding{
+			Name:      "input1",
+			Namespace: "default",
+		},
+	}}
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	// Wait for initial synthesis
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && (comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil)
+	})
+
+	// Increment the input's resource version
+	input.Annotations["foo"] = "bar"
+	require.NoError(t, upstream.Update(ctx, input))
+
+	// It doesn't resynthesize
+	time.Sleep(time.Millisecond * 50)
+	require.NoError(t, upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	assert.Nil(t, comp.Status.PreviousSynthesis)
 }
