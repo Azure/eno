@@ -101,6 +101,20 @@ func TestInputRevisionsEqual(t *testing.T) {
 			},
 			Expectation: false,
 		},
+		{
+			Name: "Same Revision, different ResourceVersion",
+			A: InputRevisions{
+				Key:             "key7",
+				Revision:        &revision1,
+				ResourceVersion: "v7",
+			},
+			B: InputRevisions{
+				Key:             "key7",
+				Revision:        &revision1,
+				ResourceVersion: "v8",
+			},
+			Expectation: false,
+		},
 	}
 
 	for _, tt := range tests {
