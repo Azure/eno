@@ -124,7 +124,7 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, fmt.Errorf("updating composition status: %w", err)
 
 	}
-	logger.V(0).Info("aggregated resource status into composition")
+	logger.V(0).Info("aggregated resource status into composition", "compositionName", comp.Name)
 
 	return ctrl.Result{}, nil
 }
