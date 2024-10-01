@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
@@ -98,7 +99,7 @@ func (k *KindWatchController) newResourceWatchController(parent *WatchController
 			}
 
 			return k.buildRequests(synth, *comp)
-		}))))
+		})), &predicate.TypedGenerationChangedPredicate[*apiv1.Composition]{}))
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +115,7 @@ func (k *KindWatchController) newResourceWatchController(parent *WatchController
 			}
 
 			return k.buildRequests(synth, compList.Items...)
-		}))))
+		})), &predicate.TypedGenerationChangedPredicate[*apiv1.Synthesizer]{}))
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +210,7 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("updating input revisions: %w", err)
 			}
-			logger.V(0).Info("noticed input resource change", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key, "deferred", deferred)
+			logger.V(0).Info("noticed input resource change", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key, "deferred", deferred, "revisions", revs)
 			return ctrl.Result{}, nil // wait for requeue
 		}
 	}

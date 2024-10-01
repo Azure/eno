@@ -1,6 +1,8 @@
 package v1
 
 import (
+	"fmt"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -129,6 +131,13 @@ func (i *InputRevisions) Equal(b InputRevisions) bool {
 		return *i.Revision == *b.Revision
 	}
 	return i.ResourceVersion == b.ResourceVersion
+}
+
+func (i *InputRevisions) String() string {
+	if i.Revision != nil {
+		return fmt.Sprintf("revision=%d", i.Revision)
+	}
+	return fmt.Sprintf("resourceVersion=%s", i.ResourceVersion)
 }
 
 func (s *Synthesis) Failed() bool {
