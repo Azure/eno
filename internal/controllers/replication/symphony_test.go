@@ -319,7 +319,7 @@ func TestCoalesceMetadata(t *testing.T) {
 			expectedLabels: map[string]string{
 				"label1": "value1",
 			},
-			expectedAnnos:  nil,
+			expectedAnnos:  map[string]string{},
 			expectedChange: true,
 		},
 		{
@@ -355,7 +355,7 @@ func TestCoalesceMetadata(t *testing.T) {
 			existing: &apiv1.Composition{
 				ObjectMeta: metav1.ObjectMeta{},
 			},
-			expectedLabels: nil,
+			expectedLabels: map[string]string{},
 			expectedAnnos: map[string]string{
 				"anno1": "value1",
 			},
