@@ -265,13 +265,21 @@ func sortSynthesizerRefs(refs []apiv1.SynthesizerRef) {
 func coalesceMetadata(variation *apiv1.Variation, existing *apiv1.Composition) bool {
 	var metaChanged bool
 	for key, val := range variation.Labels {
-		if existing.Labels == nil || existing.Labels[key] != val {
+		if existing.Labels == nil {
+			existing.Labels = map[string]string{}
+			metaChanged = true
+		}
+		if existing.Labels[key] != val {
 			metaChanged = true
 		}
 		existing.Labels[key] = val
 	}
 	for key, val := range variation.Annotations {
-		if existing.Annotations == nil || existing.Annotations[key] != val {
+		if existing.Annotations == nil {
+			existing.Annotations = map[string]string{}
+			metaChanged = true
+		}
+		if existing.Annotations[key] != val {
 			metaChanged = true
 		}
 		existing.Annotations[key] = val
