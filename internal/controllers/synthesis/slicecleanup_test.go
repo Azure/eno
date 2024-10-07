@@ -192,12 +192,12 @@ func TestShouldDeleteSlice(t *testing.T) {
 			name: "synthesis terminated, newer composition generation, different synthesis",
 			comp: &apiv1.Composition{
 				ObjectMeta: metav1.ObjectMeta{
-					Generation: 2,
+					Generation: 3,
 				},
 				Status: apiv1.CompositionStatus{
 					CurrentSynthesis: &apiv1.Synthesis{
 						Synthesized:                   &metav1.Time{Time: time.Now()},
-						ObservedCompositionGeneration: 1,
+						ObservedCompositionGeneration: 2,
 					},
 				},
 			},
@@ -214,11 +214,11 @@ func TestShouldDeleteSlice(t *testing.T) {
 			name: "synthesis in-progress, newer composition generation, different synthesis",
 			comp: &apiv1.Composition{
 				ObjectMeta: metav1.ObjectMeta{
-					Generation: 2,
+					Generation: 3,
 				},
 				Status: apiv1.CompositionStatus{
 					CurrentSynthesis: &apiv1.Synthesis{
-						ObservedCompositionGeneration: 1,
+						ObservedCompositionGeneration: 2,
 					},
 				},
 			},
