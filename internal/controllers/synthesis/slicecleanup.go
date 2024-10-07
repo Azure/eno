@@ -93,23 +93,23 @@ func (c *sliceCleanupController) Reconcile(ctx context.Context, req ctrl.Request
 }
 
 func shouldDeleteSlice(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
-	if comp.Status.CurrentSynthesis != nil && slice.Spec.CompositionGeneration > comp.Status.CurrentSynthesis.ObservedCompositionGeneration {
+	if comp.Status.CurrentSynthesis == nil || slice.Spec.CompositionGeneration > comp.Status.CurrentSynthesis.ObservedCompositionGeneration {
 		return false // stale informer
 	}
 	isOutdated := slice.Spec.Attempt != 0 && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Attempts > slice.Spec.Attempt
 	isReferencedByComp := synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) || synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice)
-	isPendingSynthesis := comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
+	isSynthesized := comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
 	compIsDeleted := comp.DeletionTimestamp != nil
-	return isOutdated || (isPendingSynthesis && compIsDeleted || (!isReferencedByComp && slice.Spec.CompositionGeneration < comp.Generation))
+	return isOutdated || (isSynthesized && compIsDeleted || (!isReferencedByComp && slice.Spec.CompositionGeneration < comp.Generation))
 }
 
 func shouldReleaseSliceFinalizer(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
-	if comp.Status.CurrentSynthesis != nil && slice.Spec.CompositionGeneration > comp.Status.CurrentSynthesis.ObservedCompositionGeneration {
+	if comp.Status.CurrentSynthesis == nil || slice.Spec.CompositionGeneration > comp.Status.CurrentSynthesis.ObservedCompositionGeneration {
 		return false // stale informer
 	}
 	isOutdated := slice.Spec.Attempt != 0 && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Attempts > slice.Spec.Attempt
-	isPendingSynthesis := comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
-	return isOutdated || (isPendingSynthesis && (!resourcesRemain(comp, slice) || (!synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) && !synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice))))
+	isSynthesized := comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
+	return isOutdated || (isSynthesized && (!resourcesRemain(comp, slice) || (!synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) && !synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice))))
 }
 
 func synthesisReferencesSlice(syn *apiv1.Synthesis, slice *apiv1.ResourceSlice) bool {
