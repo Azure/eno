@@ -167,7 +167,8 @@ func (c *Composition) InputsExist(syn *Synthesizer) bool {
 	return true
 }
 
-func (c *Composition) InputsMismatched(synth *Synthesizer) bool {
+// InputsInLockstep returns false when one or more inputs that specify a revision do not match the others.
+func (c *Composition) InputsInLockstep(synth *Synthesizer) bool {
 	// First, the the max revision across all bindings
 	var maxRevision *int
 	for _, rev := range c.Status.InputRevisions {

@@ -77,7 +77,7 @@ func (c *synthController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			comp.DeletionTimestamp != nil ||
 			comp.Status.PendingResynthesis != nil ||
 			isInSync(&comp, syn) ||
-			comp.InputsMismatched(syn) ||
+			comp.InputsInLockstep(syn) ||
 			comp.ShouldIgnoreSideEffects() {
 			continue
 		}
