@@ -406,6 +406,9 @@ func inputRevisionsEqual(synth *apiv1.Synthesizer, a, b []apiv1.InputRevisions) 
 		refsByKey[ref.Key] = ref
 	}
 
+	// It's important that ordering isn't strict since input revisions may
+	// either be ordered by the corresponding refs, or appended to the slice
+	// as they are discovered by the watch controller
 	sort.Slice(a, func(i, j int) bool { return a[i].Key < a[j].Key })
 	sort.Slice(b, func(i, j int) bool { return b[i].Key < b[j].Key })
 
