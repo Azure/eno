@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -404,6 +405,9 @@ func inputRevisionsEqual(synth *apiv1.Synthesizer, a, b []apiv1.InputRevisions) 
 		ref := ref
 		refsByKey[ref.Key] = ref
 	}
+
+	sort.Slice(a, func(i, j int) bool { return a[i].Key < a[j].Key })
+	sort.Slice(b, func(i, j int) bool { return b[i].Key < b[j].Key })
 
 	var equal int
 	for _, ar := range a {

@@ -683,3 +683,14 @@ func TestInputRevisionsEqual(t *testing.T) {
 	assert.True(t, inputRevisionsEqual(synth, []apiv1.InputRevisions{{Key: "bar"}}, []apiv1.InputRevisions{{Key: "bar", ResourceVersion: "not-zero"}}))
 	assert.False(t, inputRevisionsEqual(synth, []apiv1.InputRevisions{{Key: "foo"}}, []apiv1.InputRevisions{{Key: "bar"}}))
 }
+
+func TestInputRevisionsEqualOrdering(t *testing.T) {
+	synth := &apiv1.Synthesizer{}
+	synth.Spec.Refs = []apiv1.Ref{{Key: "foo"}, {Key: "bar"}}
+
+	assert.True(t, inputRevisionsEqual(synth, []apiv1.InputRevisions{
+		{Key: "bar"}, {Key: "foo"},
+	}, []apiv1.InputRevisions{
+		{Key: "foo"}, {Key: "bar"},
+	}))
+}
