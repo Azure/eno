@@ -95,7 +95,30 @@ func TestShouldDeleteSlice(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "slice is outdated",
+			name: "another attempt started for a different synthesis, old one still references the slice",
+			comp: &apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						Attempts: 5,
+						UUID:     "the-next-one",
+					},
+					PreviousSynthesis: &apiv1.Synthesis{
+						ResourceSlices: []*apiv1.ResourceSliceRef{{Name: "test-slice"}},
+					},
+				},
+			},
+			slice: &apiv1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-slice",
+				},
+				Spec: apiv1.ResourceSliceSpec{
+					Attempt: 3,
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "another attempt started for the same synthesis",
 			comp: &apiv1.Composition{
 				Status: apiv1.CompositionStatus{
 					CurrentSynthesis: &apiv1.Synthesis{

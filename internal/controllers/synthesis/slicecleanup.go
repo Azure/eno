@@ -98,7 +98,7 @@ func shouldDeleteSlice(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool
 	}
 
 	var (
-		hasBeenRetried     = slice.Spec.Attempt != 0 && comp.Status.CurrentSynthesis.Attempts > slice.Spec.Attempt
+		hasBeenRetried     = slice.Spec.Attempt != 0 && comp.Status.CurrentSynthesis.Attempts > slice.Spec.Attempt && slice.Spec.SynthesisUUID == comp.Status.CurrentSynthesis.UUID
 		isReferencedByComp = synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) || synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice)
 		isSynthesized      = comp.Status.CurrentSynthesis.Synthesized != nil
 		compIsDeleted      = comp.DeletionTimestamp != nil
@@ -106,7 +106,7 @@ func shouldDeleteSlice(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool
 	)
 
 	// We can only safely delete resource slices when either:
-	// - Another retry of the same synthesis has already started (TODO)
+	// - Another retry of the same synthesis has already started
 	// - Synthesis is complete and the composition is being deleted
 	// - The slice was derived from an older composition
 	return hasBeenRetried || (isSynthesized && compIsDeleted) || (!isReferencedByComp && fromOldComposition)
