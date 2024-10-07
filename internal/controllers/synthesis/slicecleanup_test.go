@@ -2,7 +2,9 @@ package synthesis
 
 import (
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -55,4 +57,132 @@ func TestSliceCleanupControllerOrphanedSlice(t *testing.T) {
 	testutil.Eventually(t, func() bool {
 		return errors.IsNotFound(mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(slice), slice))
 	})
+}
+
+func TestShouldDeleteSlice(t *testing.T) {
+	tests := []struct {
+		name     string
+		comp     *apiv1.Composition
+		slice    *apiv1.ResourceSlice
+		expected bool
+	}{
+		{
+			name: "stale informer (CurrentSynthesis is nil)",
+			comp: &apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: nil,
+				},
+			},
+			slice: &apiv1.ResourceSlice{
+				Spec: apiv1.ResourceSliceSpec{
+					CompositionGeneration: 2,
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "stale informer (synthesis is stale)",
+			comp: &apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{ObservedCompositionGeneration: 1},
+				},
+			},
+			slice: &apiv1.ResourceSlice{
+				Spec: apiv1.ResourceSliceSpec{
+					CompositionGeneration: 2,
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "slice is outdated",
+			comp: &apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						Attempts: 5,
+					},
+				},
+			},
+			slice: &apiv1.ResourceSlice{
+				Spec: apiv1.ResourceSliceSpec{
+					Attempt: 3,
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "slice is referenced by composition",
+			comp: &apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{},
+				},
+			},
+			slice: &apiv1.ResourceSlice{
+				Spec: apiv1.ResourceSliceSpec{
+					CompositionGeneration: 1,
+				},
+			},
+			expected: false, // assumes synthesisReferencesSlice returns true
+		},
+		{
+			name: "synthesis terminated and composition is deleted",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					DeletionTimestamp: &metav1.Time{Time: time.Now()},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						Synthesized: &metav1.Time{Time: time.Now()},
+					},
+				},
+			},
+			slice:    &apiv1.ResourceSlice{},
+			expected: true,
+		},
+		{
+			name: "composition is deleted but synthesis not terminated",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					DeletionTimestamp: &metav1.Time{Time: time.Now()},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: nil,
+				},
+			},
+			slice: &apiv1.ResourceSlice{
+				Spec: apiv1.ResourceSliceSpec{
+					CompositionGeneration: 1,
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "slice is outdated, not referenced, and comp.Generation is higher",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					DeletionTimestamp: &metav1.Time{Time: time.Now()},
+					Generation:        5,
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						Attempts: 3,
+					},
+				},
+			},
+			slice: &apiv1.ResourceSlice{
+				Spec: apiv1.ResourceSliceSpec{
+					Attempt:               1,
+					CompositionGeneration: 2,
+				},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := shouldDeleteSlice(tt.comp, tt.slice)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }
