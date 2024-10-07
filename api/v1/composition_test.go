@@ -267,7 +267,7 @@ func TestCompositionInputsExist(t *testing.T) {
 	}
 }
 
-func TestInputsMismatched(t *testing.T) {
+func TestInputsInLockstep(t *testing.T) {
 	revision1 := 1
 	revision2 := 2
 
@@ -402,7 +402,7 @@ func TestInputsMismatched(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
-			result := tt.Input.InputsMismatched(&tt.Synth)
+			result := tt.Input.InputsInLockstep(&tt.Synth)
 			assert.Equal(t, tt.Expectation, result)
 		})
 	}

@@ -373,7 +373,7 @@ func shouldSwapStates(synth *apiv1.Synthesizer, comp *apiv1.Composition) bool {
 	return (syn == nil ||
 		syn.ObservedCompositionGeneration != comp.Generation ||
 		(!inputRevisionsEqual(synth, comp.Status.InputRevisions, syn.InputRevisions) && syn.Synthesized != nil && !comp.ShouldIgnoreSideEffects())) &&
-		(comp.DeletionTimestamp != nil || (comp.InputsExist(synth) && !comp.InputsMismatched(synth)))
+		(comp.DeletionTimestamp != nil || (comp.InputsExist(synth) && !comp.InputsInLockstep(synth)))
 }
 
 func shouldBackOffPodCreation(comp *apiv1.Composition) bool {
