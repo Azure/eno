@@ -413,16 +413,15 @@ func inputRevisionsEqual(synth *apiv1.Synthesizer, a, b []apiv1.InputRevisions) 
 	sort.Slice(b, func(i, j int) bool { return b[i].Key < b[j].Key })
 
 	var equal int
-	for _, ar := range a {
-		for _, br := range b {
-			if ref, exists := refsByKey[ar.Key]; exists && ref.Defer {
-				equal++
-				continue // ignore deferred inputs
-			}
+	for i, ar := range a {
+		br := b[i]
+		if ref, exists := refsByKey[ar.Key]; exists && ref.Defer {
+			equal++
+			continue // ignore deferred inputs
+		}
 
-			if ar.Equal(br) {
-				equal++
-			}
+		if ar.Equal(br) {
+			equal++
 		}
 	}
 
