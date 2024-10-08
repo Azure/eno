@@ -95,7 +95,30 @@ func TestShouldDeleteSlice(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "slice is outdated",
+			name: "another attempt started for a different synthesis, old one still references the slice",
+			comp: &apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						Attempts: 5,
+						UUID:     "the-next-one",
+					},
+					PreviousSynthesis: &apiv1.Synthesis{
+						ResourceSlices: []*apiv1.ResourceSliceRef{{Name: "test-slice"}},
+					},
+				},
+			},
+			slice: &apiv1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-slice",
+				},
+				Spec: apiv1.ResourceSliceSpec{
+					Attempt: 3,
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "another attempt started for the same synthesis",
 			comp: &apiv1.Composition{
 				Status: apiv1.CompositionStatus{
 					CurrentSynthesis: &apiv1.Synthesis{
@@ -138,6 +161,162 @@ func TestShouldDeleteSlice(t *testing.T) {
 			},
 			slice:    &apiv1.ResourceSlice{},
 			expected: true,
+		},
+		{
+			name: "synthesis terminated and slice referenced",
+			comp: &apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						Synthesized:    &metav1.Time{Time: time.Now()},
+						ResourceSlices: []*apiv1.ResourceSliceRef{{Name: "test-slice"}},
+					},
+				},
+			},
+			slice: &apiv1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-slice"},
+			},
+			expected: false,
+		},
+		{
+			name: "synthesis terminated, different composition generation, same synthesis",
+			comp: &apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						Synthesized: &metav1.Time{Time: time.Now()},
+					},
+				},
+			},
+			slice: &apiv1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-slice"},
+				Spec: apiv1.ResourceSliceSpec{
+					CompositionGeneration: 2,
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "synthesis terminated, same composition generation, different synthesis",
+			comp: &apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						Synthesized: &metav1.Time{Time: time.Now()},
+					},
+				},
+			},
+			slice: &apiv1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-slice"},
+				Spec: apiv1.ResourceSliceSpec{
+					SynthesisUUID: "foo",
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "synthesis terminated, newer composition generation, different synthesis",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Generation: 3,
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						Synthesized:                   &metav1.Time{Time: time.Now()},
+						ObservedCompositionGeneration: 2,
+					},
+				},
+			},
+			slice: &apiv1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-slice"},
+				Spec: apiv1.ResourceSliceSpec{
+					SynthesisUUID:         "foo",
+					CompositionGeneration: 1,
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "synthesis in-progress, newer composition generation, different synthesis",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Generation: 3,
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						ObservedCompositionGeneration: 2,
+					},
+				},
+			},
+			slice: &apiv1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-slice"},
+				Spec: apiv1.ResourceSliceSpec{
+					SynthesisUUID:         "foo",
+					CompositionGeneration: 1,
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "synthesis in-progress, newer composition generation, same synthesis",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Generation: 2,
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						ObservedCompositionGeneration: 1,
+					},
+				},
+			},
+			slice: &apiv1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-slice"},
+				Spec: apiv1.ResourceSliceSpec{
+					CompositionGeneration: 1,
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "synthesis terminated, newer composition and synthesis generation, different synthesis",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Generation: 2,
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						Synthesized:                   &metav1.Time{Time: time.Now()},
+						ObservedCompositionGeneration: 2,
+					},
+				},
+			},
+			slice: &apiv1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-slice"},
+				Spec: apiv1.ResourceSliceSpec{
+					SynthesisUUID:         "foo",
+					CompositionGeneration: 1,
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "synthesis terminated, older composition generation, different synthesis",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Generation: 1,
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						Synthesized:                   &metav1.Time{Time: time.Now()},
+						ObservedCompositionGeneration: 1,
+					},
+				},
+			},
+			slice: &apiv1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-slice"},
+				Spec: apiv1.ResourceSliceSpec{
+					SynthesisUUID:         "foo",
+					CompositionGeneration: 2,
+				},
+			},
+			expected: false,
 		},
 		{
 			name: "composition is deleted but synthesis not terminated",
