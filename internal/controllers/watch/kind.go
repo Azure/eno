@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"path"
+	"reflect"
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -161,7 +162,7 @@ func (k *KindWatchController) Stop(ctx context.Context) {
 }
 
 func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := logr.FromContextOrDiscard(ctx)
+	logger := logr.FromContextOrDiscard(ctx).WithValues("group", k.gvk.Group, "version", k.gvk.Version, "kind", k.gvk.Kind)
 
 	meta := &metav1.PartialObjectMetadata{}
 	meta.SetGroupVersionKind(k.gvk)
@@ -241,8 +242,8 @@ func setInputRevisions(comp *apiv1.Composition, revs *apiv1.InputRevisions) bool
 		if ir.Key != revs.Key {
 			continue
 		}
-		if ir == *revs {
-			return false // TODO: Unit test for idempotence
+		if reflect.DeepEqual(ir, *revs) {
+			return false
 		}
 		comp.Status.InputRevisions[i] = *revs
 		return true
