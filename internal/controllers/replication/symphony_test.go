@@ -1,6 +1,7 @@
 package replication
 
 import (
+	"context"
 	"reflect"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
@@ -428,4 +430,105 @@ func TestCoalesceMetadata(t *testing.T) {
 			assert.Equal(t, tt.expectedAnnos, tt.existing.Annotations)
 		})
 	}
+}
+
+func TestReconcileForward_NamespaceTerminating(t *testing.T) {
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-namespace",
+		},
+		Status: corev1.NamespaceStatus{
+			Phase: corev1.NamespaceTerminating,
+		},
+	}
+
+	symph := &apiv1.Symphony{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "test-namespace",
+		},
+		Spec: apiv1.SymphonySpec{
+			Variations: []apiv1.Variation{{
+				Synthesizer: apiv1.SynthesizerRef{Name: "test-synth"},
+			}},
+		},
+	}
+
+	cli := testutil.NewClient(t, ns, symph)
+	controller := &symphonyController{client: cli, reader: cli}
+
+	// Execute the reconcileForward function
+	ctx := context.Background()
+	existingBySynthName := make(map[string][]*apiv1.Composition)
+	result, err := controller.reconcileForward(ctx, symph, existingBySynthName)
+	require.NoError(t, err)
+	assert.True(t, result)
+
+	// No compositions were created
+	compositions := &apiv1.CompositionList{}
+	err = cli.List(ctx, compositions, &client.ListOptions{Namespace: symph.Namespace})
+	assert.NoError(t, err)
+	assert.Len(t, compositions.Items, 0)
+}
+
+func TestReconcileForward_NamespaceNotFound(t *testing.T) {
+	symph := &apiv1.Symphony{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "test-namespace",
+		},
+		Spec: apiv1.SymphonySpec{
+			Variations: []apiv1.Variation{{
+				Synthesizer: apiv1.SynthesizerRef{Name: "test-synth"},
+			}},
+		},
+	}
+
+	cli := testutil.NewClient(t, symph)
+	controller := &symphonyController{client: cli, reader: cli}
+
+	ctx := context.Background()
+	existingBySynthName := make(map[string][]*apiv1.Composition)
+	result, err := controller.reconcileForward(ctx, symph, existingBySynthName)
+	require.NoError(t, err)
+	assert.True(t, result)
+
+	// No compositions were created
+	compositions := &apiv1.CompositionList{}
+	err = cli.List(ctx, compositions, &client.ListOptions{Namespace: symph.Namespace})
+	assert.NoError(t, err)
+	assert.Len(t, compositions.Items, 0)
+}
+
+func TestReconcileForward_CreateComposition(t *testing.T) {
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-namespace",
+		},
+	}
+
+	symph := &apiv1.Symphony{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-symph",
+			Namespace: "test-namespace",
+		},
+		Spec: apiv1.SymphonySpec{
+			Variations: []apiv1.Variation{{
+				Synthesizer: apiv1.SynthesizerRef{Name: "test-synth"},
+			}},
+		},
+	}
+
+	cli := testutil.NewClient(t, ns, symph)
+	controller := &symphonyController{client: cli, reader: cli}
+
+	ctx := context.Background()
+	existingBySynthName := make(map[string][]*apiv1.Composition)
+	result, err := controller.reconcileForward(ctx, symph, existingBySynthName)
+	require.NoError(t, err)
+	assert.True(t, result)
+
+	// A composition was created
+	compositions := &apiv1.CompositionList{}
+	err = cli.List(ctx, compositions, &client.ListOptions{Namespace: ns.Name})
+	assert.NoError(t, err)
+	assert.Len(t, compositions.Items, 1)
 }

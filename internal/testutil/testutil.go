@@ -35,18 +35,19 @@ import (
 	"github.com/Azure/eno/internal/manager"
 )
 
-func NewClient(t testing.TB) client.Client {
-	return NewClientWithInterceptors(t, nil)
+func NewClient(t testing.TB, objs ...client.Object) client.Client {
+	return NewClientWithInterceptors(t, nil, objs...)
 }
 
-func NewClientWithInterceptors(t testing.TB, ict *interceptor.Funcs) client.Client {
+func NewClientWithInterceptors(t testing.TB, ict *interceptor.Funcs, objs ...client.Object) client.Client {
 	scheme := runtime.NewScheme()
 	require.NoError(t, apiv1.SchemeBuilder.AddToScheme(scheme))
 	require.NoError(t, corev1.SchemeBuilder.AddToScheme(scheme))
 
 	builder := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithStatusSubresource(&apiv1.ResourceSlice{}, &apiv1.Composition{})
+		WithObjects(objs...).
+		WithStatusSubresource(&apiv1.ResourceSlice{}, &apiv1.Composition{}, &apiv1.Symphony{})
 
 	if ict != nil {
 		builder.WithInterceptorFuncs(*ict)
