@@ -11,6 +11,7 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/errors"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -19,6 +20,7 @@ import (
 
 type symphonyController struct {
 	client client.Client
+	reader client.Reader
 }
 
 func NewSymphonyController(mgr ctrl.Manager) error {
@@ -28,6 +30,7 @@ func NewSymphonyController(mgr ctrl.Manager) error {
 		WithLogConstructor(manager.NewLogConstructor(mgr, "symphonyReplicationController")).
 		Complete(&symphonyController{
 			client: mgr.GetClient(),
+			reader: mgr.GetAPIReader(),
 		})
 }
 
@@ -189,6 +192,24 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 
 			logger.V(0).Info("updated composition because its variation changed", "compositionName", existing.Name, "compositionNamespace", existing.Namespace)
 			return true, nil
+		}
+
+		// Do not create any compositions if the namespace is terminating or somehow gone.
+		// This is required because controller manager might delete the composition before the symphony.
+		// Eno actually behaves correctly except the symphony status will oscillate e.g.
+		// - The composition name will be added to status below, to serialize creation
+		// - Creation will fail due to the namespace's state
+		// - The composition name will be pruned from the status
+		// - goto 1
+		ns := &corev1.Namespace{}
+		ns.Name = symph.Namespace
+		err = c.reader.Get(ctx, client.ObjectKeyFromObject(ns), ns)
+		if errors.IsNotFound(err) || ns.Status.Phase == corev1.NamespaceTerminating {
+			logger.V(1).Info("refusing to create composition because the namespace is missing or terminating")
+			return true, nil
+		}
+		if err != nil {
+			return false, fmt.Errorf("getting namespace: %w", err)
 		}
 
 		// Update the symphony status before creating to avoid conflicts
