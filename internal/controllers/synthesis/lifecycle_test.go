@@ -359,6 +359,32 @@ var shouldDeletePodTests = []struct {
 		PodShouldBeDeleted: false,
 	},
 	{
+		Name: "container-timeout-too-many-retries",
+		Pods: []corev1.Pod{{
+			ObjectMeta: metav1.ObjectMeta{
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
+				Labels:            map[string]string{},
+			},
+			Status: corev1.PodStatus{Conditions: []corev1.PodCondition{{
+				Type:               corev1.PodScheduled,
+				Status:             corev1.ConditionTrue,
+				LastTransitionTime: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
+			}}},
+		}},
+		Composition: &apiv1.Composition{
+			Status: apiv1.CompositionStatus{
+				CurrentSynthesis: &apiv1.Synthesis{Attempts: 4},
+			},
+		},
+		Synth: &apiv1.Synthesizer{
+			Spec: apiv1.SynthesizerSpec{
+				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
+			},
+		},
+		PodShouldExist:     true,
+		PodShouldBeDeleted: false,
+	},
+	{
 		Name: "pod-timeout",
 		Pods: []corev1.Pod{{
 			ObjectMeta: metav1.ObjectMeta{
