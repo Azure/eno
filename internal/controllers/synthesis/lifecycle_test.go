@@ -228,23 +228,141 @@ var shouldDeletePodTests = []struct {
 		PodShouldBeDeleted: true,
 	},
 	{
-		Name: "pod-timeout",
+		Name: "container-timeout",
 		Pods: []corev1.Pod{{
 			ObjectMeta: metav1.ObjectMeta{
-				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
-				Annotations: map[string]string{
-					"eno.azure.io/composition-generation": "2",
-				},
+				CreationTimestamp: metav1.Now(),
+				DeletionTimestamp: ptr.To(metav1.Now()),
 			},
+		}, {
+			ObjectMeta: metav1.ObjectMeta{
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
+				Labels:            map[string]string{},
+			},
+			Status: corev1.PodStatus{Conditions: []corev1.PodCondition{{
+				Type:               corev1.PodScheduled,
+				Status:             corev1.ConditionTrue,
+				LastTransitionTime: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
+			}}},
 		}},
 		Composition: &apiv1.Composition{
-			ObjectMeta: metav1.ObjectMeta{
-				Generation: 2,
+			Status: apiv1.CompositionStatus{
+				CurrentSynthesis: &apiv1.Synthesis{},
 			},
 		},
 		Synth: &apiv1.Synthesizer{
 			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: ptr.To(metav1.Duration{Duration: time.Minute}),
+				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
+			},
+		},
+		PodShouldExist:     true,
+		PodShouldBeDeleted: true,
+	},
+	{
+		Name: "container-timeout-negative",
+		Pods: []corev1.Pod{{
+			ObjectMeta: metav1.ObjectMeta{
+				CreationTimestamp: metav1.Now(),
+				DeletionTimestamp: ptr.To(metav1.Now()),
+			},
+		}, {
+			ObjectMeta: metav1.ObjectMeta{
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
+				Labels:            map[string]string{},
+			},
+			Spec: corev1.PodSpec{NodeName: "anything"},
+			Status: corev1.PodStatus{
+				ContainerStatuses: []corev1.ContainerStatus{{}},
+				Conditions: []corev1.PodCondition{{
+					Type:               corev1.PodScheduled,
+					Status:             corev1.ConditionTrue,
+					LastTransitionTime: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
+				}},
+			},
+		}},
+		Composition: &apiv1.Composition{
+			Status: apiv1.CompositionStatus{
+				CurrentSynthesis: &apiv1.Synthesis{},
+			},
+		},
+		Synth: &apiv1.Synthesizer{
+			Spec: apiv1.SynthesizerSpec{
+				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
+			},
+		},
+		PodShouldExist:     true,
+		PodShouldBeDeleted: false,
+	},
+	{
+		Name: "container-timeout-not-scheduled",
+		Pods: []corev1.Pod{{
+			ObjectMeta: metav1.ObjectMeta{
+				CreationTimestamp: metav1.Now(),
+				DeletionTimestamp: ptr.To(metav1.Now()),
+			},
+		}, {
+			ObjectMeta: metav1.ObjectMeta{
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
+				Labels:            map[string]string{},
+			},
+			Status: corev1.PodStatus{},
+		}},
+		Composition: &apiv1.Composition{
+			Status: apiv1.CompositionStatus{
+				CurrentSynthesis: &apiv1.Synthesis{},
+			},
+		},
+		Synth: &apiv1.Synthesizer{
+			Spec: apiv1.SynthesizerSpec{
+				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
+			},
+		},
+		PodShouldExist:     true,
+		PodShouldBeDeleted: false,
+	},
+	{
+		Name: "container-timeout-not-scheduled-but-somehow-created",
+		Pods: []corev1.Pod{{
+			ObjectMeta: metav1.ObjectMeta{
+				CreationTimestamp: metav1.Now(),
+				DeletionTimestamp: ptr.To(metav1.Now()),
+			},
+		}, {
+			ObjectMeta: metav1.ObjectMeta{
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
+				Labels:            map[string]string{},
+			},
+			Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{}}},
+		}},
+		Composition: &apiv1.Composition{
+			Status: apiv1.CompositionStatus{
+				CurrentSynthesis: &apiv1.Synthesis{},
+			},
+		},
+		Synth: &apiv1.Synthesizer{
+			Spec: apiv1.SynthesizerSpec{
+				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
+			},
+		},
+		PodShouldExist:     true,
+		PodShouldBeDeleted: false,
+	},
+	{
+		Name: "pod-timeout",
+		Pods: []corev1.Pod{{
+			ObjectMeta: metav1.ObjectMeta{
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Second * 2)),
+				Labels:            map[string]string{},
+			},
+		}},
+		Composition: &apiv1.Composition{
+			Status: apiv1.CompositionStatus{
+				CurrentSynthesis: &apiv1.Synthesis{},
+			},
+		},
+		Synth: &apiv1.Synthesizer{
+			Spec: apiv1.SynthesizerSpec{
+				PodTimeout: ptr.To(metav1.Duration{Duration: time.Second}),
 			},
 		},
 		PodShouldExist:     true,
@@ -428,7 +546,7 @@ func TestShouldDeletePod(t *testing.T) {
 
 	for _, tc := range shouldDeletePodTests {
 		t.Run(tc.Name, func(t *testing.T) {
-			logger, pod, exists := shouldDeletePod(logger, tc.Composition, tc.Synth, &corev1.PodList{Items: tc.Pods})
+			logger, pod, exists := shouldDeletePod(logger, tc.Composition, tc.Synth, &corev1.PodList{Items: tc.Pods}, time.Minute)
 			assert.Equal(t, tc.PodShouldExist, exists)
 			assert.Equal(t, tc.PodShouldBeDeleted, pod != nil)
 			logger.V(0).Info("logging to see the appended fields for debugging purposes")
