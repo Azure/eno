@@ -33,6 +33,8 @@ type Config struct {
 
 	NodeAffinityKey   string
 	NodeAffinityValue string
+
+	ContainerCreationTimeout time.Duration
 }
 
 type podLifecycleController struct {
@@ -109,7 +111,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
 	}
 
-	logger, toDelete, exists := shouldDeletePod(logger, comp, syn, pods)
+	logger, toDelete, exists := shouldDeletePod(logger, comp, syn, pods, c.config.ContainerCreationTimeout)
 	if toDelete != nil {
 		if err := c.client.Delete(ctx, toDelete); err != nil {
 			return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("deleting pod: %w", err))
@@ -257,23 +259,26 @@ func (c *podLifecycleController) reconcileDeletedComposition(ctx context.Context
 	return ctrl.Result{}, nil
 }
 
-func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Synthesizer, pods *corev1.PodList) (logr.Logger, *corev1.Pod, bool /* exists */) {
+func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Synthesizer, pods *corev1.PodList, creationTTL time.Duration) (logr.Logger, *corev1.Pod, bool /* exists */) {
 	if len(pods.Items) == 0 {
 		return logger, nil, false
 	}
 
-	// Only create pods when the previous one is deleting or non-existant
+	// Allow a single extra pod to be created while the previous one is terminating
+	// in order to break potential deadlocks while avoiding a thundering herd of pods
 	var onePodDeleting bool
 	for _, pod := range pods.Items {
-		pod := pod
-
-		// Allow a single extra pod to be created while the previous one is terminating
-		// in order to break potential deadlocks while avoiding a thundering herd of pods
 		if pod.DeletionTimestamp != nil {
 			if onePodDeleting {
 				return logger, nil, true
 			}
 			onePodDeleting = true
+		}
+	}
+
+	for _, pod := range pods.Items {
+		pod := pod
+		if pod.DeletionTimestamp != nil {
 			continue
 		}
 
@@ -303,11 +308,25 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 		}
 
 		// Synthesis is done
+		if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.PodCreation != nil {
+			logger = logger.WithValues("latency", time.Since(comp.Status.CurrentSynthesis.PodCreation.Time).Abs().Milliseconds())
+		}
 		if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil {
-			if comp.Status.CurrentSynthesis.PodCreation != nil {
-				logger = logger.WithValues("latency", time.Since(comp.Status.CurrentSynthesis.PodCreation.Time).Abs().Milliseconds())
-			}
 			logger = logger.WithValues("reason", "Success")
+			return logger, &pod, true
+		}
+
+		// Delete pods if they have been scheduled but not picked up by that node's kubelet
+		// This can happen when the node is Ready but recently partitioned from apiserver
+		//
+		// Clock jitter is a risk since the scheduled timestamp is written by the scheduler
+		// So we only enforce this timeout when a new pod can be created immediately
+		// i.e. when another pod for this synthesis isn't already terminating
+		// AND we bail out when the synthesis has already been tried a few times (what's a few more seconds latency at that point)
+		seenByKubelet := len(pod.Status.ContainerStatuses) != 0
+		retryPressure := comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Attempts > 3
+		if scheduledTime := getPodScheduledTime(&pod); !onePodDeleting && !seenByKubelet && !retryPressure && scheduledTime != nil && time.Since(*scheduledTime) > creationTTL {
+			logger = logger.WithValues("reason", "ContainerCreationTimeout", "scheduledTime", scheduledTime.UnixMilli())
 			return logger, &pod, true
 		}
 
@@ -426,4 +445,17 @@ func inputRevisionsEqual(synth *apiv1.Synthesizer, a, b []apiv1.InputRevisions) 
 	}
 
 	return equal == len(a)
+}
+
+func getPodScheduledTime(pod *corev1.Pod) *time.Time {
+	for _, cond := range pod.Status.Conditions {
+		if cond.Type != corev1.PodScheduled {
+			continue
+		}
+		if cond.Status == corev1.ConditionFalse {
+			return nil
+		}
+		return &cond.LastTransitionTime.Time
+	}
+	return nil
 }
