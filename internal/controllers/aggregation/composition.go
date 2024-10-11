@@ -111,7 +111,7 @@ func (c *compositionController) aggregate(synth *apiv1.Synthesizer, comp *apiv1.
 	if comp.Status.PendingResynthesis != nil {
 		copy.Status = "WaitingForCooldown"
 	}
-	if comp.InputsInLockstep(synth) {
+	if comp.InputsOutOfLockstep(synth) {
 		copy.Status = "MismatchedInputs"
 	}
 

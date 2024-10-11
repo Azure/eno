@@ -402,7 +402,7 @@ func TestInputsInLockstep(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
-			result := tt.Input.InputsInLockstep(&tt.Synth)
+			result := tt.Input.InputsOutOfLockstep(&tt.Synth)
 			assert.Equal(t, tt.Expectation, result)
 		})
 	}
