@@ -322,8 +322,8 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 		// Clock jitter is a risk since the scheduled timestamp is written by the scheduler
 		// So we only enforce this timeout when a new pod can be created immediately
 		// i.e. when another pod for this synthesis isn't already terminating
-		if scheduledTime := getPodScheduledTime(&pod); onePodDeleting && scheduledTime != nil && len(pod.Status.ContainerStatuses) == 0 && time.Since(*scheduledTime) > creationTTL {
-			logger = logger.WithValues("reason", "ContainerCreationTimeout")
+		if scheduledTime := getPodScheduledTime(&pod); !onePodDeleting && scheduledTime != nil && len(pod.Status.ContainerStatuses) == 0 && time.Since(*scheduledTime) > creationTTL {
+			logger = logger.WithValues("reason", "ContainerCreationTimeout", "scheduledTime", scheduledTime.UnixMilli())
 			return logger, &pod, true
 		}
 

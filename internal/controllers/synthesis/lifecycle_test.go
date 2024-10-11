@@ -231,11 +231,6 @@ var shouldDeletePodTests = []struct {
 		Name: "container-timeout",
 		Pods: []corev1.Pod{{
 			ObjectMeta: metav1.ObjectMeta{
-				CreationTimestamp: metav1.Now(),
-				DeletionTimestamp: ptr.To(metav1.Now()),
-			},
-		}, {
-			ObjectMeta: metav1.ObjectMeta{
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
 				Labels:            map[string]string{},
 			},
@@ -261,11 +256,6 @@ var shouldDeletePodTests = []struct {
 	{
 		Name: "container-timeout-negative",
 		Pods: []corev1.Pod{{
-			ObjectMeta: metav1.ObjectMeta{
-				CreationTimestamp: metav1.Now(),
-				DeletionTimestamp: ptr.To(metav1.Now()),
-			},
-		}, {
 			ObjectMeta: metav1.ObjectMeta{
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
 				Labels:            map[string]string{},
@@ -297,11 +287,6 @@ var shouldDeletePodTests = []struct {
 		Name: "container-timeout-not-scheduled",
 		Pods: []corev1.Pod{{
 			ObjectMeta: metav1.ObjectMeta{
-				CreationTimestamp: metav1.Now(),
-				DeletionTimestamp: ptr.To(metav1.Now()),
-			},
-		}, {
-			ObjectMeta: metav1.ObjectMeta{
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
 				Labels:            map[string]string{},
 			},
@@ -324,6 +309,28 @@ var shouldDeletePodTests = []struct {
 		Name: "container-timeout-not-scheduled-but-somehow-created",
 		Pods: []corev1.Pod{{
 			ObjectMeta: metav1.ObjectMeta{
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
+				Labels:            map[string]string{},
+			},
+			Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{}}},
+		}},
+		Composition: &apiv1.Composition{
+			Status: apiv1.CompositionStatus{
+				CurrentSynthesis: &apiv1.Synthesis{},
+			},
+		},
+		Synth: &apiv1.Synthesizer{
+			Spec: apiv1.SynthesizerSpec{
+				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
+			},
+		},
+		PodShouldExist:     true,
+		PodShouldBeDeleted: false,
+	},
+	{
+		Name: "container-timeout-another-pod-deleting",
+		Pods: []corev1.Pod{{
+			ObjectMeta: metav1.ObjectMeta{
 				CreationTimestamp: metav1.Now(),
 				DeletionTimestamp: ptr.To(metav1.Now()),
 			},
@@ -332,7 +339,11 @@ var shouldDeletePodTests = []struct {
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
 				Labels:            map[string]string{},
 			},
-			Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{}}},
+			Status: corev1.PodStatus{Conditions: []corev1.PodCondition{{
+				Type:               corev1.PodScheduled,
+				Status:             corev1.ConditionTrue,
+				LastTransitionTime: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
+			}}},
 		}},
 		Composition: &apiv1.Composition{
 			Status: apiv1.CompositionStatus{
