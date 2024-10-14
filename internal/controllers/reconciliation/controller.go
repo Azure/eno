@@ -364,7 +364,6 @@ func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Re
 	current := &unstructured.Unstructured{}
 	current.SetName(resource.Ref.Name)
 	current.SetNamespace(resource.Ref.Namespace)
-	current.SetKind(resource.Ref.Kind)
 	current.SetKind(resource.GVK.Kind)
 	current.SetAPIVersion(resource.GVK.GroupVersion().String())
 	err := c.upstreamClient.Get(ctx, client.ObjectKeyFromObject(current), current)
@@ -380,6 +379,7 @@ func mungePatch(patch []byte, rv string) ([]byte, error) {
 	if err != nil {
 		return nil, reconcile.TerminalError(err)
 	}
+	delete(patchMap, "status")
 
 	u := unstructured.Unstructured{Object: patchMap}
 	a, err := meta.Accessor(&u)

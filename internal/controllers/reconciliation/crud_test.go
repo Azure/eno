@@ -63,15 +63,17 @@ var crudTests = []crudTestCase{
 					Protocol: corev1.ProtocolTCP,
 				}},
 			},
+			Status: corev1.ServiceStatus{LoadBalancer: corev1.LoadBalancerStatus{Ingress: []corev1.LoadBalancerIngress{}}},
 		},
 		AssertCreated: func(t *testing.T, obj client.Object) {
-			svc := obj.(*corev1.Service).Spec
+			svc := obj.(*corev1.Service)
 			assert.Equal(t, []corev1.ServicePort{{
 				Name:       "first",
 				Port:       1234,
 				Protocol:   corev1.ProtocolTCP,
 				TargetPort: intstr.FromInt(1234),
-			}}, svc.Ports)
+			}}, svc.Spec.Ports)
+			assert.Nil(t, svc.Status.LoadBalancer.Ingress)
 		},
 		ApplyExternalUpdate: func(t *testing.T, obj client.Object) client.Object {
 			svc := obj.(*corev1.Service).DeepCopy()
