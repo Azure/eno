@@ -90,12 +90,13 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 		Cache: cache.Options{
 			ByObject: make(map[client.Object]cache.ByObject),
 		},
-		LeaderElection:             opts.LeaderElection,
-		LeaderElectionNamespace:    opts.LeaderElectionNamespace,
-		LeaderElectionResourceLock: opts.LeaderElectionResourceLock,
-		LeaderElectionID:           opts.LeaderElectionID,
-		LeaseDuration:              &opts.ElectionLeaseDuration,
-		RenewDeadline:              &opts.ElectionLeaseRenewDeadline,
+		LeaderElection:                opts.LeaderElection,
+		LeaderElectionNamespace:       opts.LeaderElectionNamespace,
+		LeaderElectionResourceLock:    opts.LeaderElectionResourceLock,
+		LeaderElectionID:              opts.LeaderElectionID,
+		LeaseDuration:                 &opts.ElectionLeaseDuration,
+		RenewDeadline:                 &opts.ElectionLeaseRenewDeadline,
+		LeaderElectionReleaseOnCancel: true,
 	}
 
 	if isController {
