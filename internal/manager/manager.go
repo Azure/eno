@@ -94,6 +94,8 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 		LeaderElectionNamespace:    opts.LeaderElectionNamespace,
 		LeaderElectionResourceLock: opts.LeaderElectionResourceLock,
 		LeaderElectionID:           opts.LeaderElectionID,
+		LeaseDuration:              &opts.ElectionLeaseDuration,
+		RenewDeadline:              &opts.ElectionLeaseRenewDeadline,
 	}
 
 	if isController {
