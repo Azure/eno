@@ -57,8 +57,8 @@ func (c *synthesisConcurrencyLimiter) Reconcile(ctx context.Context, req ctrl.Re
 			active++
 		}
 	}
-	activeSyntheses.Add(float64(active))
-	pendingSyntheses.Add(float64(len(pending)))
+	activeSyntheses.Set(float64(active))
+	pendingSyntheses.Set(float64(len(pending)))
 
 	if active >= c.limit {
 		logger.V(1).Info("refusing to dispatch synthesis because concurrency limit has been reached", "active", active, "pending", pending)
