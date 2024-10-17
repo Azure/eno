@@ -6,14 +6,14 @@ import (
 )
 
 var (
-	pendingSyntheses = prometheus.NewCounter(
-		prometheus.CounterOpts{
+	pendingSyntheses = prometheus.NewGauge(
+		prometheus.GaugeOpts{
 			Name: "eno_pending_syntheses_total",
 			Help: "Count of the syntheses that are being deferred by a flow control mechanism",
 		},
 	)
-	activeSyntheses = prometheus.NewCounter(
-		prometheus.CounterOpts{
+	activeSyntheses = prometheus.NewGauge(
+		prometheus.GaugeOpts{
 			Name: "eno_active_syntheses_total",
 			Help: "Count of the syntheses that are being synthesized",
 		},
