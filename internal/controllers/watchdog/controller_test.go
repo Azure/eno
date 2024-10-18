@@ -104,7 +104,7 @@ func TestControllerLogic(t *testing.T) {
 	for _, tc := range controllerLogicTests {
 		t.Run(tc.Name, func(t *testing.T) {
 			c := &watchdogController{threshold: time.Minute}
-			unrecd := c.pendingReconciliation(tc.Composition)
+			unrecd := c.pendingInitialReconciliation(tc.Composition)
 			unready := c.pendingReadiness(tc.Composition)
 			terminal := c.inTerminalError(tc.Composition)
 			assert.Equal(t, tc.ExpectPendingReconciliation, unrecd, "Reconciliation")
