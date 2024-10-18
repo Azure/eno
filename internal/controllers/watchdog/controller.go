@@ -35,12 +35,16 @@ func (c *watchdogController) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
-	var unrecd int
+	var pendingInit int
+	var pending int
 	var unready int
 	var terminal int
 	for _, comp := range list.Items {
 		if c.pendingInitialReconciliation(&comp) {
-			unrecd++
+			pendingInit++
+		}
+		if c.pendingReconciliation(&comp) {
+			pending++
 		}
 		if c.pendingReadiness(&comp) {
 			unready++
@@ -50,7 +54,8 @@ func (c *watchdogController) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	pendingInitialReconciliation.Set(float64(unrecd))
+	pendingInitialReconciliation.Set(float64(pendingInit))
+	stuckReconciling.Set(float64(pending))
 	pendingReadiness.Set(float64(unready))
 	terminalErrors.Set(float64(terminal))
 
@@ -61,6 +66,13 @@ func (c *watchdogController) pendingInitialReconciliation(comp *apiv1.Compositio
 	return !synthesisHasReconciled(comp.Status.CurrentSynthesis) &&
 		!synthesisHasReconciled(comp.Status.PreviousSynthesis) &&
 		time.Since(comp.CreationTimestamp.Time) > c.threshold
+}
+
+func (c *watchdogController) pendingReconciliation(comp *apiv1.Composition) bool {
+	return comp.Status.CurrentSynthesis != nil &&
+		comp.Status.CurrentSynthesis.Initialized != nil && // important: this is a new CRD property - ignore if nil
+		!synthesisHasReconciled(comp.Status.CurrentSynthesis) &&
+		time.Since(comp.Status.CurrentSynthesis.Initialized.Time) > c.threshold
 }
 
 func (c *watchdogController) pendingReadiness(comp *apiv1.Composition) bool {
