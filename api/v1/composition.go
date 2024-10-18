@@ -76,7 +76,7 @@ type Synthesis struct {
 	ObservedSynthesizerGeneration int64 `json:"observedSynthesizerGeneration,omitempty"`
 
 	// Initialized is set when the synthesis process is initiated.
-	Initialized *metav1.Time `json:"started,omitempty"`
+	Initialized *metav1.Time `json:"initialized,omitempty"`
 
 	// Time at which the most recent synthesizer pod was created.
 	PodCreation *metav1.Time `json:"podCreation,omitempty"`
