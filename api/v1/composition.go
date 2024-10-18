@@ -75,6 +75,9 @@ type Synthesis struct {
 	// This is a min i.e. a newer composition may have been used.
 	ObservedSynthesizerGeneration int64 `json:"observedSynthesizerGeneration,omitempty"`
 
+	// Initialized is set when the synthesis process is initiated.
+	Initialized *metav1.Time `json:"started,omitempty"`
+
 	// Time at which the most recent synthesizer pod was created.
 	PodCreation *metav1.Time `json:"podCreation,omitempty"`
 

@@ -200,6 +200,11 @@ spec:
                           type: object
                       type: object
                     type: array
+                  started:
+                    description: Initialized is set when the synthesis process is
+                      initiated.
+                    format: date-time
+                    type: string
                   synthesized:
                     description: Time at which the synthesis completed i.e. resourceSlices
                       was written
@@ -310,6 +315,11 @@ spec:
                           type: object
                       type: object
                     type: array
+                  started:
+                    description: Initialized is set when the synthesis process is
+                      initiated.
+                    format: date-time
+                    type: string
                   synthesized:
                     description: Time at which the synthesis completed i.e. resourceSlices
                       was written
