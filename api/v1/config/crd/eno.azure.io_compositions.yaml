@@ -132,6 +132,11 @@ spec:
                       Deferred is true when this synthesis was caused by a change to either the synthesizer
                       or an input with a ref that sets `Defer == true`.
                     type: boolean
+                  initialized:
+                    description: Initialized is set when the synthesis process is
+                      initiated.
+                    format: date-time
+                    type: string
                   inputRevisions:
                     description: InputRevisions contains the versions of the input
                       resources that were used for this synthesis.
@@ -242,6 +247,11 @@ spec:
                       Deferred is true when this synthesis was caused by a change to either the synthesizer
                       or an input with a ref that sets `Defer == true`.
                     type: boolean
+                  initialized:
+                    description: Initialized is set when the synthesis process is
+                      initiated.
+                    format: date-time
+                    type: string
                   inputRevisions:
                     description: InputRevisions contains the versions of the input
                       resources that were used for this synthesis.

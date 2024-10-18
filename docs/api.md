@@ -335,6 +335,7 @@ _Appears in:_
 | `uuid` _string_ | A random UUID scoped to this particular synthesis operation.<br />Used internally for strict ordering semantics. |  |  |
 | `observedCompositionGeneration` _integer_ | The value of the composition's metadata.generation at the time the synthesis began.<br />This is a min i.e. a newer composition may have been used. |  |  |
 | `observedSynthesizerGeneration` _integer_ | The value of the synthesizer's metadata.generation at the time the synthesis began.<br />This is a min i.e. a newer composition may have been used. |  |  |
+| `initialized` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ | Initialized is set when the synthesis process is initiated. |  |  |
 | `podCreation` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ | Time at which the most recent synthesizer pod was created. |  |  |
 | `synthesized` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ | Time at which the synthesis completed i.e. resourceSlices was written |  |  |
 | `reconciled` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ | Time at which the synthesis's resources were reconciled into real Kubernetes resources. |  |  |

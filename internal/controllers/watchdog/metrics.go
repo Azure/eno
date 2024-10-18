@@ -6,10 +6,17 @@ import (
 )
 
 var (
-	pendingReconciliation = prometheus.NewGauge(
+	pendingInitialReconciliation = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "eno_compositions_pending_initial_reconciliation",
+			Help: "Number of compositions that have not been reconciled since a period after their creation",
+		},
+	)
+
+	stuckReconciling = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "eno_compositions_stuck_reconciling_total",
-			Help: "Number of compositions that have not been reconciled since a period after their creation",
+			Help: "Number of compositions that have not been reconciled since a period after their current synthesis was initialized",
 		},
 	)
 
@@ -29,5 +36,5 @@ var (
 )
 
 func init() {
-	metrics.Registry.MustRegister(pendingReconciliation, pendingReadiness, terminalErrors)
+	metrics.Registry.MustRegister(pendingInitialReconciliation, stuckReconciling, pendingReadiness, terminalErrors)
 }

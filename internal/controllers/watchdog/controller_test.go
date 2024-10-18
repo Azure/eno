@@ -12,11 +12,12 @@ import (
 )
 
 var controllerLogicTests = []struct {
-	Name                        string
-	Composition                 *apiv1.Composition
-	ExpectPendingReconciliation bool
-	ExpectPendingReadiness      bool
-	ExpectTerminalError         bool
+	Name                               string
+	Composition                        *apiv1.Composition
+	ExpectPendingInitialReconciliation bool
+	ExpectPendingReconciliation        bool
+	ExpectPendingReadiness             bool
+	ExpectTerminalError                bool
 }{
 	{
 		Name: "ready",
@@ -57,8 +58,34 @@ var controllerLogicTests = []struct {
 			},
 			Status: apiv1.CompositionStatus{},
 		},
-		ExpectPendingReconciliation: true,
+		ExpectPendingInitialReconciliation: true,
 		// readiness isn't firing yet, since we haven't finished reconciliation
+	},
+	{
+		Name: "initial reconciliation outside of synthesis creation threshold",
+		Composition: &apiv1.Composition{
+			ObjectMeta: metav1.ObjectMeta{},
+			Status: apiv1.CompositionStatus{
+				CurrentSynthesis: &apiv1.Synthesis{
+					Initialized: ptr.To(metav1.NewTime(time.Now().Add(-time.Minute * 3))),
+				},
+			},
+		},
+		ExpectPendingInitialReconciliation: true,
+		ExpectPendingReconciliation:        true,
+	},
+	{
+		Name: "subsequent reconciliation outside of synthesis creation threshold",
+		Composition: &apiv1.Composition{
+			ObjectMeta: metav1.ObjectMeta{},
+			Status: apiv1.CompositionStatus{
+				CurrentSynthesis: &apiv1.Synthesis{
+					Initialized: ptr.To(metav1.NewTime(time.Now().Add(-time.Minute * 3))),
+				},
+				PreviousSynthesis: &apiv1.Synthesis{Reconciled: &metav1.Time{}},
+			},
+		},
+		ExpectPendingReconciliation: true,
 	},
 	{
 		Name: "readiness outside of threshold",
@@ -85,9 +112,9 @@ var controllerLogicTests = []struct {
 		},
 	},
 	{
-		Name:                        "in terminal error",
-		ExpectTerminalError:         true,
-		ExpectPendingReconciliation: true,
+		Name:                               "in terminal error",
+		ExpectTerminalError:                true,
+		ExpectPendingInitialReconciliation: true,
 		Composition: &apiv1.Composition{
 			Status: apiv1.CompositionStatus{
 				CurrentSynthesis: &apiv1.Synthesis{
@@ -104,9 +131,11 @@ func TestControllerLogic(t *testing.T) {
 	for _, tc := range controllerLogicTests {
 		t.Run(tc.Name, func(t *testing.T) {
 			c := &watchdogController{threshold: time.Minute}
+			unrecdInit := c.pendingInitialReconciliation(tc.Composition)
 			unrecd := c.pendingReconciliation(tc.Composition)
 			unready := c.pendingReadiness(tc.Composition)
 			terminal := c.inTerminalError(tc.Composition)
+			assert.Equal(t, tc.ExpectPendingInitialReconciliation, unrecdInit, "InitialReconciliation")
 			assert.Equal(t, tc.ExpectPendingReconciliation, unrecd, "Reconciliation")
 			assert.Equal(t, tc.ExpectPendingReadiness, unready, "Readiness")
 			assert.Equal(t, tc.ExpectTerminalError, terminal, "TerminalError")

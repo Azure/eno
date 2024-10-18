@@ -67,7 +67,7 @@ func runController() error {
 	flag.StringVar(&synconf.PodServiceAccount, "synthesizer-pod-service-account", "", "Service account name to be assigned to synthesizer Pods.")
 	flag.DurationVar(&synconf.ContainerCreationTimeout, "container-creation-ttl", time.Second*3, "Timeout when waiting for kubelet to ack scheduled pods. Protects tail latency from kubelet network partitions")
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
-	flag.DurationVar(&watchdogThres, "watchdog-threshold", time.Minute*5, "How long before the watchdog considers a mid-transition resource to be stuck")
+	flag.DurationVar(&watchdogThres, "watchdog-threshold", time.Minute, "How long before the watchdog considers a mid-transition resource to be stuck")
 	flag.DurationVar(&rolloutCooldown, "rollout-cooldown", time.Minute, "How long before an update to a related resource (synthesizer, bindings, etc.) will trigger a second composition's re-synthesis")
 	flag.DurationVar(&dispatchCooldown, "dispatch-cooldown", time.Millisecond*100, "Min period between the dispatch of two syntheses. Effectively limits the rate of pod creation.")
 	flag.StringVar(&taintToleration, "taint-toleration", "", "Node NoSchedule taint to be tolerated by synthesizer pods e.g. taintKey=taintValue to match on value, just taintKey to match on presence of the taint")

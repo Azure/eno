@@ -65,6 +65,7 @@ func TestCompositionDeletion(t *testing.T) {
 		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
 		return comp.Status.CurrentSynthesis != nil && len(comp.Status.CurrentSynthesis.ResourceSlices) > 0
 	})
+	assert.NotNil(t, comp.Status.CurrentSynthesis.Initialized, "initialized timestamp is set")
 
 	// Wait for the resource slice to be created
 	testutil.Eventually(t, func() bool {
