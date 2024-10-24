@@ -89,7 +89,7 @@ func run() error {
 	}
 
 	if namespaceCleanup {
-		err = liveness.NewNamespaceController(mgr, namespaceCreationGracePeriod)
+		err = liveness.NewNamespaceController(mgr, 5, namespaceCreationGracePeriod)
 		if err != nil {
 			return fmt.Errorf("constructing namespace liveness controller: %w", err)
 		}
