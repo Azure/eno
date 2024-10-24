@@ -13,10 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	"github.com/Azure/eno/internal/controllers/aggregation"
 	"github.com/Azure/eno/internal/controllers/liveness"
 	"github.com/Azure/eno/internal/controllers/reconciliation"
-	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/k8s"
 	"github.com/Azure/eno/internal/manager"
@@ -88,16 +86,6 @@ func run() error {
 	mgr, err := manager.NewReconciler(logger, mgrOpts)
 	if err != nil {
 		return fmt.Errorf("constructing manager: %w", err)
-	}
-
-	err = aggregation.NewSliceController(mgr)
-	if err != nil {
-		return fmt.Errorf("constructing status aggregation controller: %w", err)
-	}
-
-	err = synthesis.NewSliceCleanupController(mgr)
-	if err != nil {
-		return fmt.Errorf("constructing resource slice cleanup controller: %w", err)
 	}
 
 	if namespaceCleanup {

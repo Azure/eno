@@ -118,6 +118,11 @@ func runController() error {
 		return fmt.Errorf("constructing pod lifecycle controller: %w", err)
 	}
 
+	err = synthesis.NewSliceCleanupController(mgr)
+	if err != nil {
+		return fmt.Errorf("constructing resource slice cleanup controller: %w", err)
+	}
+
 	err = watchdog.NewController(mgr, watchdogThres)
 	if err != nil {
 		return fmt.Errorf("constructing watchdog controller: %w", err)
@@ -136,6 +141,11 @@ func runController() error {
 	err = aggregation.NewCompositionController(mgr)
 	if err != nil {
 		return fmt.Errorf("constructing composition status aggregation controller: %w", err)
+	}
+
+	err = aggregation.NewSliceController(mgr)
+	if err != nil {
+		return fmt.Errorf("constructing status aggregation controller: %w", err)
 	}
 
 	err = watch.NewController(mgr)
