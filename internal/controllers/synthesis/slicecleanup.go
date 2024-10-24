@@ -11,6 +11,7 @@ import (
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -96,10 +97,12 @@ func (c *sliceCleanupController) buildCleanupDecision(ctx context.Context, slice
 	}
 
 	// Don't run the actual (non-cached) check if the resource is too new - the cache is probably just stale
+	// This is not intended to improve safety, only to reduce the number of unnecessary gets to apiserver
 	age := time.Since(slice.CreationTimestamp.Time)
-	if age < time.Second*5 {
+	const threshold = time.Second * 5
+	if age < threshold {
 		logger.V(1).Info("refusing to delete resource slice because it's too new", "age", age.Milliseconds())
-		return cleanupDecision{DeferBy: &age}, nil
+		return cleanupDecision{DeferBy: ptr.To(threshold - age)}, nil
 	}
 
 	// Check the state against apiserver without any caching before making a final decision
