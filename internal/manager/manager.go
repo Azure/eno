@@ -111,9 +111,9 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 		}
 	}
 
-	mgrOpts.Cache.ByObject[&apiv1.Composition{}] = opts.cacheOptions()
+	mgrOpts.Cache.ByObject[&apiv1.Composition{}] = newCacheOptions(opts.CompositionNamespace, opts.CompositionSelector)
 
-	sliceCacheOpts := opts.cacheOptions()
+	sliceCacheOpts := newCacheOptions(opts.CompositionNamespace, labels.Everything())
 	sliceCacheOpts.UnsafeDisableDeepCopy = ptr.To(true)
 	sliceCacheOpts.Transform = func(obj any) (any, error) {
 		slice, ok := obj.(*apiv1.ResourceSlice)

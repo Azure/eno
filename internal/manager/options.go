@@ -40,17 +40,13 @@ func (o *Options) Bind(set *flag.FlagSet) {
 	set.DurationVar(&o.ElectionLeaseRenewDeadline, "leader-election-lease-renew-deadline", time.Second*60, "")
 }
 
-func (o *Options) cacheOptions() cache.ByObject {
-	if o.CompositionNamespace == cache.AllNamespaces {
-		return cache.ByObject{
-			Label: o.CompositionSelector,
-		}
+func newCacheOptions(ns string, selector labels.Selector) cache.ByObject {
+	if ns == cache.AllNamespaces {
+		return cache.ByObject{Label: selector}
 	}
 	return cache.ByObject{
 		Namespaces: map[string]cache.Config{
-			o.CompositionNamespace: {
-				LabelSelector: o.CompositionSelector,
-			},
+			ns: {LabelSelector: selector},
 		},
 	}
 }
