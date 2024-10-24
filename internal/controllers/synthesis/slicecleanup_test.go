@@ -365,3 +365,36 @@ func TestShouldDeleteSlice(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildCleanupDecision_StaleCache(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	c := &sliceCleanupController{}
+
+	staleComp := &apiv1.Composition{}
+	staleComp.Name = "test-comp"
+	staleComp.Namespace = "default"
+	staleComp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		Synthesized: ptr.To(metav1.Now()),
+	}
+
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-slice"
+	slice.Namespace = staleComp.Namespace
+	slice.CreationTimestamp = metav1.NewTime(time.Now().Add(-time.Minute * 5))
+
+	comp := staleComp.DeepCopy()
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
+	}
+
+	c.client = testutil.NewClient(t, staleComp)
+	c.noCacheReader = testutil.NewClient(t, comp)
+
+	owner := &metav1.OwnerReference{Name: comp.Name}
+	dec, err := c.buildCleanupDecision(ctx, slice, owner)
+	require.NoError(t, err)
+	assert.Equal(t, cleanupDecision{
+		DoNotDelete:   true,
+		HoldFinalizer: true,
+	}, dec)
+}

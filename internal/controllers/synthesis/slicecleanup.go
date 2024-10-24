@@ -3,6 +3,7 @@ package synthesis
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -10,13 +11,15 @@ import (
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 type sliceCleanupController struct {
-	client client.Client
+	client        client.Client
+	noCacheReader client.Reader
 }
 
 func NewSliceCleanupController(mgr ctrl.Manager) error {
@@ -25,7 +28,8 @@ func NewSliceCleanupController(mgr ctrl.Manager) error {
 		Watches(&apiv1.Composition{}, manager.NewCompositionToResourceSliceHandler(mgr.GetClient())).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "resourceSliceCleanupController")).
 		Complete(&sliceCleanupController{
-			client: mgr.GetClient(),
+			client:        mgr.GetClient(),
+			noCacheReader: mgr.GetAPIReader(),
 		})
 }
 
@@ -39,36 +43,20 @@ func (c *sliceCleanupController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	owner := metav1.GetControllerOf(slice)
-
-	// We only get the composition if it exists
-	// It shouldn't be possible that it doesn't exist, but still worth handling in case anyone creates an ad-hoc resource slice for some reason (it won't do anything tho)
-	var doNotDelete bool
-	var holdFinalizer bool
 	if owner != nil {
-		comp := &apiv1.Composition{}
-		comp.Name = owner.Name
-		comp.Namespace = slice.Namespace
-		err = c.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		if errors.IsNotFound(err) && time.Since(slice.CreationTimestamp.Time) < time.Minute {
-			logger.V(1).Info("didn't find a composition for this resource slice - ignoring because resource slice is new so informer may just be stale")
-			return ctrl.Result{RequeueAfter: time.Minute}, nil
-		}
-		if client.IgnoreNotFound(err) != nil {
-			return ctrl.Result{}, fmt.Errorf("getting composition: %w", err)
-		}
-		if err == nil {
-			logger = logger.WithValues("compositionName", comp.Name,
-				"compositionNamespace", comp.Namespace,
-				"synthesisID", comp.Status.GetCurrentSynthesisUUID())
-			doNotDelete = !shouldDeleteSlice(comp, slice)
-			holdFinalizer = !shouldReleaseSliceFinalizer(comp, slice)
-		}
+		logger = logger.WithValues("compositionName", owner.Name, "compositionNamespace", req.Namespace)
 	}
 
-	// Release the finalizer once all resources in the current slices have been deleted to make sure we don't orphan any resources.
-	// Also release the finalizer if the composition somehow doesn't exist since that implies we've lost control anyway.
+	decision, err := c.buildCleanupDecision(ctx, slice, owner)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("building cleanup decision: %w", err)
+	}
+	if decision.DeferBy != nil {
+		return ctrl.Result{RequeueAfter: *decision.DeferBy}, nil
+	}
+
 	if slice.DeletionTimestamp != nil || owner == nil {
-		if holdFinalizer {
+		if decision.HoldFinalizer {
 			return ctrl.Result{}, nil
 		}
 		if !controllerutil.RemoveFinalizer(slice, "eno.azure.io/cleanup") {
@@ -81,15 +69,81 @@ func (c *sliceCleanupController) Reconcile(ctx context.Context, req ctrl.Request
 		logger.V(0).Info("released unused resource slice")
 		return ctrl.Result{}, nil
 	}
-
-	if doNotDelete {
+	if decision.DoNotDelete {
 		return ctrl.Result{}, nil
 	}
+
 	if err := c.client.Delete(ctx, slice); err != nil {
 		return ctrl.Result{}, fmt.Errorf("deleting resource slice: %w", err)
 	}
 	logger.V(0).Info("deleted unused resource slice")
 	return ctrl.Result{}, nil
+}
+
+func (c *sliceCleanupController) buildCleanupDecision(ctx context.Context, slice *apiv1.ResourceSlice, owner *metav1.OwnerReference) (cleanupDecision, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+	if owner == nil {
+		logger.V(1).Info("resource slice can be deleted because it does not have an owner")
+		return cleanupDecision{}, nil // delete
+	}
+
+	// Bail out early if the cache suggests that we shouldn't delete the resource slice
+	informerDecision, err := checkCompositionState(ctx, c.client, slice, owner)
+	if err != nil {
+		return cleanupDecision{}, err
+	}
+	if informerDecision.DoNotDelete && informerDecision.HoldFinalizer {
+		return informerDecision, nil
+	}
+
+	// Don't run the actual (non-cached) check if the resource is too new - the cache is probably just stale
+	// This is not intended to improve safety, only to reduce the number of unnecessary gets to apiserver
+	age := time.Since(slice.CreationTimestamp.Time)
+	const threshold = time.Second * 5
+	if age < threshold {
+		logger.V(1).Info("refusing to delete resource slice because it's too new", "age", age.Milliseconds())
+		return cleanupDecision{DeferBy: ptr.To(threshold - age)}, nil
+	}
+
+	// Check the state against apiserver without any caching before making a final decision
+	apiDecision, err := checkCompositionState(ctx, c.noCacheReader, slice, owner)
+	if err != nil {
+		return cleanupDecision{}, err
+	}
+	if !reflect.DeepEqual(informerDecision, apiDecision) {
+		// We trust the apiserver decision even if it doesn't align with the cache,
+		// although this is should rarely happen and might be reason for concern
+		logger.Info("cleanup decisions derived from informer cache and non-caching client do not agree!", "cache", informerDecision.String(), "noCache", apiDecision.String())
+	}
+
+	return apiDecision, nil
+}
+
+func checkCompositionState(ctx context.Context, reader client.Reader, slice *apiv1.ResourceSlice, owner *metav1.OwnerReference) (cleanupDecision, error) {
+	comp := &apiv1.Composition{}
+	comp.Name = owner.Name
+	comp.Namespace = slice.Namespace
+	err := reader.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+	if errors.IsNotFound(err) {
+		return cleanupDecision{}, nil // delete
+	}
+	if err != nil {
+		return cleanupDecision{}, fmt.Errorf("getting composition: %w", err)
+	}
+	return cleanupDecision{
+		DoNotDelete:   !shouldDeleteSlice(comp, slice),
+		HoldFinalizer: !shouldReleaseSliceFinalizer(comp, slice),
+	}, nil
+}
+
+type cleanupDecision struct {
+	DoNotDelete   bool
+	HoldFinalizer bool
+	DeferBy       *time.Duration
+}
+
+func (c *cleanupDecision) String() string {
+	return fmt.Sprintf("DoNotDelete=%t,HoldFinalizer=%t", c.DoNotDelete, c.HoldFinalizer)
 }
 
 func shouldDeleteSlice(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {

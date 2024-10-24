@@ -7,6 +7,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/leaderelection"
 )
 
@@ -37,4 +38,15 @@ func (o *Options) Bind(set *flag.FlagSet) {
 	set.StringVar(&o.LeaderElectionID, "leader-election-id", "", "Determines the name of the resource that leader election will use for holding the leader lock")
 	set.DurationVar(&o.ElectionLeaseDuration, "leader-election-lease-duration", time.Second*90, "")
 	set.DurationVar(&o.ElectionLeaseRenewDeadline, "leader-election-lease-renew-deadline", time.Second*60, "")
+}
+
+func newCacheOptions(ns string, selector labels.Selector) cache.ByObject {
+	if ns == cache.AllNamespaces {
+		return cache.ByObject{Label: selector}
+	}
+	return cache.ByObject{
+		Namespaces: map[string]cache.Config{
+			ns: {LabelSelector: selector},
+		},
+	}
 }
