@@ -111,35 +111,21 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 		}
 	}
 
-	if isReconciler {
-		if opts.CompositionNamespace != cache.AllNamespaces {
-			mgrOpts.Cache.ByObject[&apiv1.Composition{}] = cache.ByObject{
-				Namespaces: map[string]cache.Config{
-					opts.CompositionNamespace: {
-						LabelSelector: opts.CompositionSelector,
-					},
-				},
-			}
-		} else {
-			mgrOpts.Cache.ByObject[&apiv1.Composition{}] = cache.ByObject{
-				Label: opts.CompositionSelector,
-			}
-		}
-	}
+	mgrOpts.Cache.ByObject[&apiv1.Composition{}] = opts.cacheOptions()
 
-	mgrOpts.Cache.ByObject[&apiv1.ResourceSlice{}] = cache.ByObject{
-		UnsafeDisableDeepCopy: ptr.To(true),
-		Transform: func(obj any) (any, error) {
-			slice, ok := obj.(*apiv1.ResourceSlice)
-			if !ok {
-				return obj, nil
-			}
-			for i := range slice.Spec.Resources {
-				slice.Spec.Resources[i].Manifest = "" // remove big manifest that we don't need
-			}
-			return slice, nil
-		},
+	sliceCacheOpts := opts.cacheOptions()
+	sliceCacheOpts.UnsafeDisableDeepCopy = ptr.To(true)
+	sliceCacheOpts.Transform = func(obj any) (any, error) {
+		slice, ok := obj.(*apiv1.ResourceSlice)
+		if !ok {
+			return obj, nil
+		}
+		for i := range slice.Spec.Resources {
+			slice.Spec.Resources[i].Manifest = "" // remove big manifest that we don't need
+		}
+		return slice, nil
 	}
+	mgrOpts.Cache.ByObject[&apiv1.ResourceSlice{}] = sliceCacheOpts
 
 	mgr, err := ctrl.NewManager(opts.Rest, mgrOpts)
 	if err != nil {
