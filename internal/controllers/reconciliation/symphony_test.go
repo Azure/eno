@@ -233,6 +233,7 @@ func TestOrphanedNamespaceSymphony(t *testing.T) {
 	testutil.Eventually(t, func() bool {
 		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph))
 	})
-	require.NoError(t, upstream.List(ctx, slices))
-	require.Empty(t, slices.Items)
+	testutil.Eventually(t, func() bool {
+		return upstream.List(ctx, slices) == nil && len(slices.Items) == 0
+	})
 }
