@@ -23,11 +23,12 @@ var orphanableKinds = []string{"Symphony", "Composition", "ResourceSlice"}
 // This can happen if clients get tricky with the /finalize API.
 // Without this controller Eno resources will never be deleted since updates to remove the finalizers will fail.
 type namespaceController struct {
-	client              client.Client
-	creationGracePeriod time.Duration
+	client                client.Client
+	creationGracePeriod   time.Duration
+	orphanCheckIterations int
 }
 
-func NewNamespaceController(mgr ctrl.Manager, creationGracePeriod time.Duration) error {
+func NewNamespaceController(mgr ctrl.Manager, checks int, creationGracePeriod time.Duration) error {
 	b := ctrl.NewControllerManagedBy(mgr).For(&corev1.Namespace{})
 
 	for _, kind := range orphanableKinds {
@@ -43,8 +44,9 @@ func NewNamespaceController(mgr ctrl.Manager, creationGracePeriod time.Duration)
 
 	return b.WithLogConstructor(manager.NewLogConstructor(mgr, "namespaceLivenessController")).
 		Complete(&namespaceController{
-			client:              mgr.GetClient(),
-			creationGracePeriod: creationGracePeriod,
+			client:                mgr.GetClient(),
+			creationGracePeriod:   creationGracePeriod,
+			orphanCheckIterations: checks,
 		})
 }
 
@@ -79,21 +81,29 @@ func (c *namespaceController) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Avoid recreating the namespace when it doesn't have any orphaned resources
-	var foundOrphans bool
-	for _, kind := range orphanableKinds {
-		hasOrphans, res, err := c.findOrphans(ctx, ns.Name, kind)
-		if err != nil {
-			return ctrl.Result{}, err
+	for i := 1; true; i++ {
+		var foundOrphans bool
+		for _, kind := range orphanableKinds {
+			hasOrphans, res, err := c.findOrphans(ctx, ns.Name, kind)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			if res != nil {
+				return *res, nil
+			}
+			if hasOrphans {
+				foundOrphans = true
+			}
 		}
-		if res != nil {
-			return *res, nil
+		if !foundOrphans {
+			return ctrl.Result{}, nil
 		}
-		if hasOrphans {
-			foundOrphans = true
+		if i >= c.orphanCheckIterations {
+			break
 		}
-	}
-	if !foundOrphans {
-		return ctrl.Result{}, nil
+
+		// Sleep a bit before the next check to let informers catch up.
+		time.Sleep(time.Second / 2)
 	}
 
 	// Recreate the namespace briefly so we can remove the finalizers.
