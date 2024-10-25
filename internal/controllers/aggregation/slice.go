@@ -92,6 +92,11 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, nil
 	}
 
+	// Empty compositions should logically become ready immediately after reconciliation
+	if len(comp.Status.CurrentSynthesis.ResourceSlices) == 0 {
+		maxReadyTime = comp.Status.CurrentSynthesis.Reconciled
+	}
+
 	now := metav1.Now()
 	if ready && maxReadyTime != nil {
 		comp.Status.CurrentSynthesis.Ready = maxReadyTime

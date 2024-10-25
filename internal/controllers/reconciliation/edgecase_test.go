@@ -105,3 +105,37 @@ func TestMissingNamespaceDeletion(t *testing.T) {
 		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 	})
 }
+
+func TestEmptySynthesis(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		return &krmv1.ResourceList{}, nil
+	})
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	syn, comp := writeGenericComposition(t, upstream)
+
+	// Initial synthesis
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
+
+	// Readiness
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	// Deletion
+	require.NoError(t, upstream.Delete(ctx, comp))
+	testutil.Eventually(t, func() bool {
+		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	})
+}
