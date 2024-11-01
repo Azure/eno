@@ -220,3 +220,26 @@ func setReconciled() StatusPatchFn {
 		return &apiv1.ResourceState{Reconciled: true}
 	}
 }
+
+func TestRateLimiter(t *testing.T) {
+	r := newRateLimiter(time.Second, 1)
+
+	r.When(234) // purge the first token
+
+	// The first attempt of this item should wait for roughly the batching interval
+	wait := r.When(123)
+	assert.Less(t, wait, 2*time.Second)
+	assert.Greater(t, wait, 600*time.Millisecond)
+
+	// A few retries use exponential backoff
+	for i := 0; i < 4; i++ {
+		wait = r.When(123)
+		assert.Less(t, wait, 100*time.Millisecond, "attempt %d", i)
+		assert.Greater(t, wait, 5*time.Millisecond, "attempt %d", i)
+	}
+
+	// Eventually we fall back to the batching interval
+	wait = r.When(123)
+	assert.Less(t, wait, 2*time.Second)
+	assert.Greater(t, wait, 600*time.Millisecond)
+}
