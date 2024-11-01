@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -49,7 +50,7 @@ func NewResourceSliceWriteBuffer(cli client.Client, batchInterval time.Duration,
 		client: cli,
 		state:  make(map[types.NamespacedName][]*resourceSliceStatusUpdate),
 		queue: workqueue.NewRateLimitingQueueWithConfig(
-			&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Every(batchInterval), burst)},
+			newRateLimiter(batchInterval, burst),
 			workqueue.RateLimitingQueueConfig{
 				Name: "writeBuffer",
 			}),
@@ -206,4 +207,45 @@ type jsonPatch struct {
 	Op    string `json:"op"`
 	Path  string `json:"path"`
 	Value any    `json:"value"`
+}
+
+type rateLimiter struct {
+	failuresLock sync.Mutex
+	failures     map[interface{}]int
+	limiter      *rate.Limiter
+}
+
+func newRateLimiter(batchInterval time.Duration, burst int) workqueue.RateLimiter {
+	return &rateLimiter{
+		failures: map[interface{}]int{},
+		limiter:  rate.NewLimiter(rate.Every(batchInterval), burst),
+	}
+}
+
+func (r *rateLimiter) When(item any) time.Duration {
+	r.failuresLock.Lock()
+	defer r.failuresLock.Unlock()
+
+	failures := r.failures[item]
+	r.failures[item]++
+
+	// Retry quickly a few times using exponential backoff
+	if failures > 0 && failures < 5 {
+		return time.Duration(10*math.Pow(2, float64(failures-1))) * time.Millisecond
+	}
+
+	// Non-error batching interval
+	return r.limiter.Reserve().Delay()
+}
+
+func (r *rateLimiter) NumRequeues(item interface{}) int {
+	r.failuresLock.Lock()
+	defer r.failuresLock.Unlock()
+	return r.failures[item]
+}
+
+func (r *rateLimiter) Forget(item interface{}) {
+	r.failuresLock.Lock()
+	defer r.failuresLock.Unlock()
+	delete(r.failures, item)
 }

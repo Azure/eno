@@ -2,8 +2,11 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math/rand/v2"
 	"os"
+	"strconv"
 
 	"net/http"
 	_ "net/http/pprof"
@@ -13,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -98,6 +102,22 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 		LeaseDuration:                 &opts.ElectionLeaseDuration,
 		RenewDeadline:                 &opts.ElectionLeaseRenewDeadline,
 		LeaderElectionReleaseOnCancel: true,
+	}
+
+	if ratioStr := os.Getenv("CHAOS_RATIO"); ratioStr != "" {
+		mgrOpts.NewClient = func(config *rest.Config, options client.Options) (client.Client, error) {
+			base, err := client.New(config, options)
+			if err != nil {
+				return nil, err
+			}
+
+			ratio, err := strconv.ParseFloat(ratioStr, 64)
+			if err != nil {
+				return nil, err
+			}
+
+			return &chaosClient{Client: base, ratio: ratio}, nil
+		}
 	}
 
 	if isController {
@@ -215,4 +235,60 @@ func SingleEventHandler() handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(handler.MapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
 		return []reconcile.Request{{}}
 	}))
+}
+
+type chaosClient struct {
+	client.Client
+	ratio float64
+}
+
+func (c *chaosClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
+	if c.ratio > rand.Float64() {
+		return errors.New("chaos!")
+	}
+	return c.Client.Create(ctx, obj, opts...)
+}
+
+func (c *chaosClient) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
+	if c.ratio > rand.Float64() {
+		return errors.New("chaos!")
+	}
+	return c.Client.Delete(ctx, obj, opts...)
+}
+
+func (c *chaosClient) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
+	if c.ratio > rand.Float64() {
+		return errors.New("chaos!")
+	}
+	return c.Client.Update(ctx, obj, opts...)
+}
+
+func (c *chaosClient) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+	if c.ratio > rand.Float64() {
+		return errors.New("chaos!")
+	}
+	return c.Client.Patch(ctx, obj, patch, opts...)
+}
+
+func (c *chaosClient) Status() client.SubResourceWriter {
+	return &chaosStatusClient{SubResourceWriter: c.Client.Status(), parent: c}
+}
+
+type chaosStatusClient struct {
+	client.SubResourceWriter
+	parent *chaosClient
+}
+
+func (c *chaosStatusClient) Update(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+	if c.parent.ratio > rand.Float64() {
+		return errors.New("chaos!")
+	}
+	return c.SubResourceWriter.Update(ctx, obj, opts...)
+}
+
+func (c *chaosStatusClient) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+	if c.parent.ratio > rand.Float64() {
+		return errors.New("chaos!")
+	}
+	return c.SubResourceWriter.Patch(ctx, obj, patch, opts...)
 }
