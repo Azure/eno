@@ -44,16 +44,17 @@ type Resource struct {
 	lastSeenMeta
 	lastReconciledMeta
 
-	Ref               Ref
-	Manifest          *apiv1.Manifest
-	ManifestRef       ManifestRef
-	ReconcileInterval *metav1.Duration
-	GVK               schema.GroupVersionKind
-	SliceDeleted      bool
-	ReadinessChecks   readiness.Checks
-	Patch             jsonpatch.Patch
-	DisableUpdates    bool
-	ReadinessGroup    int
+	Ref                Ref
+	Manifest           *apiv1.Manifest
+	ManifestRef        ManifestRef
+	ReconcileInterval  *metav1.Duration
+	GVK                schema.GroupVersionKind
+	SliceDeleted       bool
+	ReadinessChecks    readiness.Checks
+	Patch              jsonpatch.Patch
+	OnlyDuringDeletion bool
+	DisableUpdates     bool
+	ReadinessGroup     int
 
 	// DefinedGroupKind is set on CRDs to represent the resource type they define.
 	DefinedGroupKind *schema.GroupKind
@@ -201,6 +202,10 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 	}
 	res.ReadinessGroup = int(rg)
 	delete(anno, readinessGroupKey)
+
+	const onlyDuringDeletionKey = "eno.azure.io/only-during-deletion"
+	res.OnlyDuringDeletion = res.Patch != nil && anno[onlyDuringDeletionKey] == "true"
+	delete(anno, onlyDuringDeletionKey)
 
 	for key, value := range anno {
 		if !strings.HasPrefix(key, "eno.azure.io/readiness") {

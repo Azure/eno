@@ -31,6 +31,7 @@ var newResourceTests = []struct {
 					"eno.azure.io/readiness-group": "250",
 					"eno.azure.io/readiness": "true",
 					"eno.azure.io/readiness-test": "false",
+					"eno.azure.io/only-during-deletion": "true",
 					"eno.azure.io/disable-updates": "true"
 				}
 			}
@@ -123,6 +124,7 @@ var newResourceTests = []struct {
 		Assert: func(t *testing.T, r *Resource) {
 			assert.Equal(t, schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, r.GVK)
 			assert.Len(t, r.Patch, 1)
+			assert.False(t, r.OnlyDuringDeletion)
 
 			cm := &unstructured.Unstructured{Object: map[string]any{
 				"apiVersion": "v1",
@@ -135,6 +137,32 @@ var newResourceTests = []struct {
 
 			cm.Object["data"] = map[string]any{"foo": "bar"}
 			assert.False(t, r.NeedsToBePatched(cm))
+		},
+	},
+	{
+		Name: "patch-only-during-deletion",
+		Manifest: `{
+			"apiVersion": "eno.azure.io/v1",
+			"kind": "Patch",
+			"metadata": {
+				"name": "foo",
+				"namespace": "bar",
+				"annotations": {
+				  "eno.azure.io/only-during-deletion": "true"
+				}
+			},
+			"patch": {
+				"apiVersion": "v1",
+				"kind": "ConfigMap",
+				"ops": [
+					{ "op": "add", "path": "/data/foo", "value": "bar" }
+				]
+			}
+		}`,
+		Assert: func(t *testing.T, r *Resource) {
+			assert.Equal(t, schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, r.GVK)
+			assert.Len(t, r.Patch, 1)
+			assert.True(t, r.OnlyDuringDeletion)
 		},
 	},
 	{

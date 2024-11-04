@@ -6,23 +6,17 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
 	"github.com/Azure/eno/internal/testutil"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // TestPatchCreation proves that a patch resource will not be created if it doesn't exist.
 func TestPatchCreation(t *testing.T) {
-	scheme := runtime.NewScheme()
-	corev1.SchemeBuilder.AddToScheme(scheme)
-	testv1.SchemeBuilder.AddToScheme(scheme)
-
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
@@ -79,10 +73,6 @@ func TestPatchCreation(t *testing.T) {
 
 // TestPatchDeletion proves that a patch resource can delete the resource it references.
 func TestPatchDeletion(t *testing.T) {
-	scheme := runtime.NewScheme()
-	corev1.SchemeBuilder.AddToScheme(scheme)
-	testv1.SchemeBuilder.AddToScheme(scheme)
-
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
@@ -132,10 +122,6 @@ func TestPatchDeletion(t *testing.T) {
 // TestPatchDeletionBeforeCreation proves that a patch resource can delete the resource it references before the resource is created.
 // Basically, this is the same behavior as Helm hook event with delete policy "before-hook-creation".
 func TestPatchDeletionBeforeCreation(t *testing.T) {
-	scheme := runtime.NewScheme()
-	corev1.SchemeBuilder.AddToScheme(scheme)
-	testv1.SchemeBuilder.AddToScheme(scheme)
-
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
@@ -211,10 +197,6 @@ func TestPatchDeletionBeforeCreation(t *testing.T) {
 // TestPatchDeletionBeforeUpgrade proves that a patch resource can delete the resource it references before the resource is upgraded.
 // Basically, this is the same behavior as Helm hook event with delete policy "before-hook-creation".
 func TestPatchDeletionBeforeUpgrade(t *testing.T) {
-	scheme := runtime.NewScheme()
-	corev1.SchemeBuilder.AddToScheme(scheme)
-	testv1.SchemeBuilder.AddToScheme(scheme)
-
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
@@ -304,10 +286,6 @@ func TestPatchDeletionBeforeUpgrade(t *testing.T) {
 // TestPatchDeletionForResourceWithReconciliationFromInput proves that a patch resource won't be triggered to
 // delete the resource with reconcile-interval it references if the patch with lower readiness group
 func TestPatchDeletionForResourceWithReconciliationFromInput(t *testing.T) {
-	scheme := runtime.NewScheme()
-	corev1.SchemeBuilder.AddToScheme(scheme)
-	testv1.SchemeBuilder.AddToScheme(scheme)
-
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
@@ -386,4 +364,57 @@ func TestPatchDeletionForResourceWithReconciliationFromInput(t *testing.T) {
 	newUID := cm.GetUID()
 	// Verify the configmap is not re-created.
 	require.Equal(t, uid, newUID)
+}
+
+// TestCleanupPatch proves that deletion patches can be used to cleanup unmanaged resources after the composition is deleted.
+func TestCleanupPatch(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		obj := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "eno.azure.io/v1",
+				"kind":       "Patch",
+				"metadata": map[string]any{
+					"name":        "test-obj",
+					"namespace":   "default",
+					"annotations": map[string]any{"eno.azure.io/only-during-deletion": "true"},
+				},
+				"patch": map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"ops": []map[string]any{
+						{"op": "add", "path": "/metadata/deletionTimestamp", "value": "2024-01-22T19:13:15Z"},
+					},
+				},
+			},
+		}
+		return &krmv1.ResourceList{Items: []*unstructured.Unstructured{obj}}, nil
+	})
+
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	require.NoError(t, downstream.Create(ctx, cm))
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	// The cm should still exist after the composition becomes ready
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+	require.NoError(t, downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm))
+
+	// The cm should be deleted when the composition is deleted
+	require.NoError(t, upstream.Delete(ctx, comp))
+	testutil.Eventually(t, func() bool {
+		return errors.IsNotFound(downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm))
+	})
 }

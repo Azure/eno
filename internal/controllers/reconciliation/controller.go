@@ -115,6 +115,12 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	logger = logger.WithValues("resourceKind", resource.Ref.Kind, "resourceName", resource.Ref.Name, "resourceNamespace", resource.Ref.Namespace)
 	ctx = logr.NewContext(ctx, logger)
 
+	// Patches can be deferred until composition deletion
+	if resource.Patch != nil && resource.OnlyDuringDeletion && comp.DeletionTimestamp == nil {
+		c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(false, ptr.To(metav1.Now())))
+		return ctrl.Result{}, nil
+	}
+
 	// Keep track of the last reconciliation time and report on it relative to the resource's reconcile interval
 	// This is useful for identifying cases where the loop can't keep up
 	if resource.ReconcileInterval != nil {
