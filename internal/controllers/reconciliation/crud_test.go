@@ -794,6 +794,9 @@ func TestResourceDefaulting(t *testing.T) {
 								map[string]any{
 									"name":  "foo",
 									"image": "bar",
+									"resources": map[string]any{
+										"memory": "1024Mi", // apiserver will return this as "1Gi"
+									},
 								},
 							},
 						},

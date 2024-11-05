@@ -305,31 +305,36 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	return true, nil
 }
 
-func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) ([]byte, types.PatchType, error) {
-	if resource.Patch != nil {
-		if !resource.NeedsToBePatched(current) {
+func (c *Controller) buildPatch(ctx context.Context, prev, next *reconstitution.Resource, current *unstructured.Unstructured) ([]byte, types.PatchType, error) {
+	if next.Patch != nil {
+		if !next.NeedsToBePatched(current) {
 			return []byte{}, types.JSONPatchType, nil
 		}
-		patch, err := json.Marshal(&resource.Patch)
+		patch, err := json.Marshal(&next.Patch)
 		return patch, types.JSONPatchType, err
 	}
 
-	var prevManifest []byte
-	if prev != nil {
-		prevManifest = []byte(prev.Manifest.Manifest)
+	prevJS, err := prev.Finalize()
+	if err != nil {
+		return nil, "", reconcile.TerminalError(fmt.Errorf("building json representation of previous state: %w", err))
+	}
+
+	nextJS, err := next.Finalize()
+	if err != nil {
+		return nil, "", reconcile.TerminalError(fmt.Errorf("building json representation of next state: %w", err))
 	}
 
 	currentJS, err := current.MarshalJSON()
 	if err != nil {
-		return nil, "", reconcile.TerminalError(fmt.Errorf("building json representation of desired state: %w", err))
+		return nil, "", reconcile.TerminalError(fmt.Errorf("building json representation of current state: %w", err))
 	}
 
-	model, err := c.discovery.Get(ctx, resource.GVK)
+	model, err := c.discovery.Get(ctx, next.GVK)
 	if err != nil {
 		return nil, "", fmt.Errorf("getting merge metadata: %w", err)
 	}
 	if model == nil {
-		patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(prevManifest, []byte(resource.Manifest.Manifest), currentJS)
+		patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(prevJS, nextJS, currentJS)
 		if err != nil {
 			return nil, "", reconcile.TerminalError(err)
 		}
@@ -337,7 +342,7 @@ func (c *Controller) buildPatch(ctx context.Context, prev, resource *reconstitut
 	}
 
 	patchmeta := strategicpatch.NewPatchMetaFromOpenAPI(model)
-	patch, err := strategicpatch.CreateThreeWayMergePatch(prevManifest, []byte(resource.Manifest.Manifest), currentJS, patchmeta, true)
+	patch, err := strategicpatch.CreateThreeWayMergePatch(prevJS, nextJS, currentJS, patchmeta, true)
 	if err != nil {
 		return nil, "", reconcile.TerminalError(err)
 	}
