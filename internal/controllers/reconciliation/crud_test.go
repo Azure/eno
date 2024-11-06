@@ -754,3 +754,67 @@ func TestOrphanedCompositionDeletion(t *testing.T) {
 		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 	})
 }
+
+// TestResourceDefaulting proves that resources which define properties equal to the field's default will eventually converge.
+func TestResourceDefaulting(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+				"spec": map[string]any{
+					"paused": false, // will fail the test if defaulting isn't handled correctly
+					"selector": map[string]any{
+						"matchLabels": map[string]any{
+							"foo": "bar",
+						},
+					},
+					"template": map[string]any{
+						"metadata": map[string]any{
+							"labels": map[string]any{
+								"foo": "bar",
+							},
+						},
+						"spec": map[string]any{
+							"containers": []any{
+								map[string]any{
+									"name":  "foo",
+									"image": "bar",
+									"resources": map[string]any{
+										"memory": "1024Mi", // apiserver will return this as "1Gi"
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	// It should be able to become ready
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == comp.Generation
+	})
+}

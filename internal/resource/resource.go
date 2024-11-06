@@ -1,6 +1,7 @@
 package resource
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/kubectl/pkg/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -66,6 +68,28 @@ func (r *Resource) Deleted() bool {
 func (r *Resource) Parse() (*unstructured.Unstructured, error) {
 	u := &unstructured.Unstructured{}
 	return u, u.UnmarshalJSON([]byte(r.Manifest.Manifest))
+}
+
+// Finalize converts the resource to its struct representation and returns that value encoded as json.
+// If the resource doesn't correspond to a built in type supported by the kubectl scheme the literal manifest is returned.
+//
+// Note that this means Eno is not completely opaque - it has some "understanding" of the built in types.
+// Hopefully we can replace this with the a different approach backed by the openapi spec at some point,
+// like github.com/kubernetes-sigs/structured-merge-diff. But I don't think it works for our purposes at the moment.
+func (r *Resource) Finalize() ([]byte, error) {
+	if r == nil {
+		return nil, nil
+	}
+
+	typed, _, err := scheme.Codecs.UniversalDeserializer().Decode([]byte(r.Manifest.Manifest), &r.GVK, nil)
+	if err != nil {
+		// fall back to unstructured
+		return []byte(r.Manifest.Manifest), nil
+	}
+
+	buf := &bytes.Buffer{}
+	err = unstructured.UnstructuredJSONScheme.Encode(typed, buf)
+	return buf.Bytes(), err
 }
 
 func (r *Resource) FindStatus(slice *apiv1.ResourceSlice) *apiv1.ResourceState {

@@ -73,7 +73,7 @@ func TestBuildPatchEmpty(t *testing.T) {
 				"apiVersion": "v1",
 				"kind":       "Pod",
 				"metadata":   map[string]any{"name": "foo", "namespace": "default"},
-				"spec":       map[string]any{"serviceAccountName": "initial"},
+				"spec":       map[string]any{"serviceAccountName": "initial", "containers": nil},
 			},
 		},
 		{
@@ -102,12 +102,14 @@ func TestBuildPatchEmpty(t *testing.T) {
 				"kind":       "Pod",
 				"metadata":   map[string]any{"name": "foo", "namespace": "default"},
 				"status":     map[string]any{"message": "initial"},
+				"spec":       map[string]any{"containers": nil},
 			},
 			Next: map[string]any{
 				"apiVersion": "v1",
 				"kind":       "Pod",
 				"metadata":   map[string]any{"name": "foo", "namespace": "default"},
 				"status":     map[string]any{"message": "updated"},
+				"spec":       map[string]any{"containers": nil},
 			},
 		},
 		{
@@ -133,13 +135,13 @@ func TestBuildPatchEmpty(t *testing.T) {
 				"apiVersion": "v1",
 				"kind":       "Pod",
 				"metadata":   map[string]any{"name": "foo", "namespace": "default"},
-				"spec":       map[string]any{"serviceAccountName": "initial", "initContainers": []any{}},
+				"spec":       map[string]any{"serviceAccountName": "initial", "initContainers": []any{}, "containers": nil},
 			},
 			Next: map[string]any{
 				"apiVersion": "v1",
 				"kind":       "Pod",
 				"metadata":   map[string]any{"name": "foo", "namespace": "default"},
-				"spec":       map[string]any{"initContainers": []any{}, "serviceAccountName": "initial"},
+				"spec":       map[string]any{"initContainers": []any{}, "serviceAccountName": "initial", "containers": nil},
 			},
 		},
 	}
@@ -158,7 +160,7 @@ func TestBuildPatchEmpty(t *testing.T) {
 
 			patch, err = mungePatch(patch, "random-rv")
 			require.NoError(t, err)
-			assert.Nil(t, patch)
+			assert.Empty(t, string(patch))
 			assert.Equal(t, test.Type, kind)
 		})
 	}
