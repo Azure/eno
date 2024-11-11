@@ -773,7 +773,7 @@ func TestResourceDefaulting(t *testing.T) {
 				"apiVersion": "apps/v1",
 				"kind":       "Deployment",
 				"metadata": map[string]any{
-					"name":      "test-obj",
+					"name":      "test-deployment",
 					"namespace": "default",
 				},
 				"spec": map[string]any{
@@ -799,6 +799,21 @@ func TestResourceDefaulting(t *testing.T) {
 									},
 								},
 							},
+						},
+					},
+				},
+			}}, {
+			Object: map[string]any{
+				"apiVersion": "policy/v1",
+				"kind":       "PodDisruptionBudget",
+				"metadata": map[string]any{
+					"name":      "test-pdb",
+					"namespace": "default",
+				},
+				"spec": map[string]any{
+					"selector": map[string]any{
+						"matchLabels": map[string]any{
+							"foo": "bar",
 						},
 					},
 				},

@@ -4,6 +4,9 @@ package discovery
 // It essentially implements the same behavior with various performance optimizations.
 
 import (
+	"encoding/json"
+	"fmt"
+
 	openapi_v2 "github.com/google/gnostic-models/openapiv2"
 	"gopkg.in/yaml.v2"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -12,6 +15,8 @@ import (
 )
 
 func buildCurrentSchemaMap(doc *openapi_v2.Document) (map[schema.GroupVersionKind]proto.Schema, error) {
+	sanitizeSchema(doc)
+
 	models, err := proto.NewOpenAPIData(doc)
 	if err != nil {
 		return nil, err
@@ -103,4 +108,26 @@ func parseGroupVersionKind(s proto.Schema) []schema.GroupVersionKind {
 	}
 
 	return gvkListResult
+}
+
+func sanitizeSchema(doc *openapi_v2.Document) {
+	for _, i := range doc.GetDefinitions().GetAdditionalProperties() {
+		if i.Name != "PodDisruptionBudgetSpec" {
+			continue
+		}
+		for _, j := range i.GetValue().GetProperties().GetAdditionalProperties() {
+			js, _ := json.Marshal(j)
+			println("TODO", string(js))
+			for _, k := range j.GetValue().GetVendorExtension() {
+				if k.Name != "x-kubernetes-patch-strategy" {
+					continue
+				}
+				val := k.GetValue().Value.GetValue()
+				if string(val) == "replace" {
+					// k.GetValue().Value = anypb.New()
+					panic(fmt.Sprintf("TODO %T", val))
+				}
+			}
+		}
+	}
 }
