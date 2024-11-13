@@ -820,13 +820,16 @@ func TestShouldSwapStates(t *testing.T) {
 		},
 	}
 
-	logger := testr.New(t)
 	for _, tc := range tests {
 		t.Run(tc.Name, func(t *testing.T) {
+			logger := testr.New(t)
 			syn := &apiv1.Synthesizer{}
 			syn.Spec.Refs = []apiv1.Ref{{Key: "foo"}}
-			logger, shouldSwap := shouldSwapStates(logger, syn, &tc.Composition)
+			reason, shouldSwap := shouldSwapStates(logger, syn, &tc.Composition)
 			assert.Equal(t, tc.Expectation, shouldSwap)
+			if shouldSwap {
+				logger = logger.WithValues("reason", reason)
+			}
 			logger.V(0).Info("logging to see the appended fields for debugging purposes")
 		})
 	}
