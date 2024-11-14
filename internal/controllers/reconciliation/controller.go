@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
@@ -333,7 +334,11 @@ func (c *Controller) buildPatch(ctx context.Context, prev, next *reconstitution.
 	if err != nil {
 		return nil, "", fmt.Errorf("getting merge metadata: %w", err)
 	}
-	if model == nil {
+
+	// FIXME: This is a very nasty hack which should not be needed once we have
+	// support for semantic equality checks.
+	pdbGVK := schema.GroupVersionKind{Group: "policy", Version: "v1", Kind: "PodDisruptionBudget"}
+	if model == nil || (next != nil && next.GVK == pdbGVK) {
 		patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(prevJS, nextJS, currentJS)
 		if err != nil {
 			return nil, "", reconcile.TerminalError(err)
