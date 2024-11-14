@@ -77,10 +77,6 @@ func (c *Cache) RangeByReadinessGroup(ctx context.Context, comp *SynthesisRef, g
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	if group == 0 && !dir {
-		return nil
-	}
-
 	resources, ok := c.resources[*comp]
 	if !ok {
 		return nil
