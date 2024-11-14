@@ -335,6 +335,8 @@ func (c *Controller) buildPatch(ctx context.Context, prev, next *reconstitution.
 		return nil, "", fmt.Errorf("getting merge metadata: %w", err)
 	}
 
+	// FIXME: This is a very nasty hack which should not be needed once we have
+	// support for semantic equality checks.
 	pdbGVK := schema.GroupVersionKind{Group: "policy", Version: "v1", Kind: "PodDisruptionBudget"}
 	if model == nil || (next != nil && next.GVK == pdbGVK) {
 		patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(prevJS, nextJS, currentJS)
