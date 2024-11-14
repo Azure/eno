@@ -189,7 +189,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 			status := dep.FindStatus(slice)
 			if status == nil || status.Ready == nil {
 				logger.V(1).Info("skipping because at least one resource in an earlier readiness group isn't ready yet")
-				return ctrl.Result{}, nil
+				return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 			}
 		}
 	}
