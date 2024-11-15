@@ -232,8 +232,15 @@ func (c *podLifecycleController) reconcileDeletedComposition(ctx context.Context
 		comp.Status.CurrentSynthesis.ObservedCompositionGeneration = comp.Generation
 		comp.Status.CurrentSynthesis.Ready = nil
 		comp.Status.CurrentSynthesis.UUID = uuid.NewString()
-		comp.Status.CurrentSynthesis.Reconciled = nil
 		now := metav1.Now()
+		if (comp.Status.PreviousSynthesis == nil || comp.Status.PreviousSynthesis.Synthesized == nil) &&
+			comp.Status.CurrentSynthesis.Synthesized == nil {
+			// In this case, the composition is not reconciling due to the synthesizer is missing and the composition finalizer should be removed.
+			// If not, the composition will stuck in waiting for reconciliation to be completed and the it can't be deleted.
+			comp.Status.CurrentSynthesis.Reconciled = &now
+		} else {
+			comp.Status.CurrentSynthesis.Reconciled = nil
+		}
 		comp.Status.CurrentSynthesis.Synthesized = &now
 		err := c.client.Status().Update(ctx, comp)
 		if err != nil {
