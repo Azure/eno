@@ -77,10 +77,6 @@ func (c *Cache) RangeByReadinessGroup(ctx context.Context, comp *SynthesisRef, g
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	if group == 0 && !dir {
-		return nil
-	}
-
 	resources, ok := c.resources[*comp]
 	if !ok {
 		return nil
@@ -91,18 +87,9 @@ func (c *Cache) RangeByReadinessGroup(ctx context.Context, comp *SynthesisRef, g
 		return nil // the given group must have a resource, otherwise we wouldn't be looking it up
 	}
 
-	// If we're adjacent...
-	if dir {
-		if node.Right != nil {
-			return node.Right.Value
-		}
-	} else {
-		if node.Left != nil {
-			return node.Left.Value
-		}
-	}
-
-	// ...otherwise we need to find it
+	// Always look up the range explicitly, can't rely on adjacency because the
+	// tree could be rebalanced such that the childern are not parent + 1 or
+	// parent - 1 even if those nodes exist.
 	if dir {
 		node, ok = resources.ByReadinessGroup.Ceiling(group + 1)
 	} else {
