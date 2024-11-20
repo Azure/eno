@@ -207,7 +207,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	deleted := current == nil ||
 		current.GetDeletionTimestamp() != nil ||
-		(resource.Deleted() && comp.Annotations["eno.azure.io/deletion-stratgy"] == "orphan") // orphaning should be reflected on the status.
+		(resource.Deleted() && comp.Annotations["eno.azure.io/deletion-strategy"] == "orphan") // orphaning should be reflected on the status.
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 	if ready == nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
