@@ -43,7 +43,6 @@ type ManifestRef struct {
 
 // Resource is the controller's internal representation of a single resource out of a ResourceSlice.
 type Resource struct {
-	lastSeenMeta
 	lastReconciledMeta
 
 	Ref               Ref
@@ -255,29 +254,6 @@ type patchMeta struct {
 	APIVersion string          `json:"apiVersion"`
 	Kind       string          `json:"kind"`
 	Ops        jsonpatch.Patch `json:"ops"`
-}
-
-type lastSeenMeta struct {
-	lock            sync.Mutex
-	resourceVersion string
-}
-
-func (l *lastSeenMeta) ObserveVersion(rv string) {
-	l.lock.Lock()
-	defer l.lock.Unlock()
-	l.resourceVersion = rv
-}
-
-func (l *lastSeenMeta) HasBeenSeen() bool {
-	l.lock.Lock()
-	defer l.lock.Unlock()
-	return l.resourceVersion != ""
-}
-
-func (l *lastSeenMeta) MatchesLastSeen(rv string) bool {
-	l.lock.Lock()
-	defer l.lock.Unlock()
-	return l.resourceVersion == rv
 }
 
 type lastReconciledMeta struct {

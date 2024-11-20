@@ -153,7 +153,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 
 	// Fetch the current resource
-	current, hasChanged, err := c.getCurrent(ctx, resource)
+	current, err := c.getCurrent(ctx, resource)
 	if client.IgnoreNotFound(err) != nil && !isErrMissingNS(err) {
 		return ctrl.Result{}, fmt.Errorf("getting current state: %w", err)
 	}
@@ -195,30 +195,19 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		}
 	}
 
-	// Nil current struct means the resource version hasn't changed since it was last observed
-	// Skip without logging since this is a very hot path
-	var modified bool
-	if hasChanged {
-		resource.ObserveVersion("") // in case reconciliation fails, invalidate the cache first to avoid skipping the next attempt
-		modified, err = c.reconcileResource(ctx, comp, prev, resource, current)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
+	modified, err := c.reconcileResource(ctx, comp, prev, resource, current)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
-
-	// We requeue to make sure the resource is in sync before updating our cache's resource version
-	// Otherwise the next sync would just hit the cache without actually diffing the resource.
+	// If we modified the resource, we should also re-evaluate readiness
+	// without waiting for the interval.
 	if modified {
 		return ctrl.Result{Requeue: true}, nil
 	}
-	if current != nil {
-		if rv := current.GetResourceVersion(); rv != "" {
-			resource.ObserveVersion(rv)
-		}
-	}
 
-	// Store the results
-	deleted := current == nil || current.GetDeletionTimestamp() != nil
+	deleted := current == nil ||
+		current.GetDeletionTimestamp() != nil ||
+		(resource.Deleted() && comp.Annotations["eno.azure.io/deletion-stratgy"] == "orphan") // orphaning should be reflected on the status.
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 	if ready == nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
@@ -354,23 +343,7 @@ func (c *Controller) buildPatch(ctx context.Context, prev, next *reconstitution.
 	return patch, types.StrategicMergePatchType, err
 }
 
-func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Resource) (*unstructured.Unstructured, bool, error) {
-	if resource.HasBeenSeen() && !resource.Deleted() {
-		meta := &metav1.PartialObjectMetadata{}
-		meta.Name = resource.Ref.Name
-		meta.Namespace = resource.Ref.Namespace
-		meta.Kind = resource.GVK.Kind
-		meta.APIVersion = resource.GVK.GroupVersion().String()
-		err := c.upstreamClient.Get(ctx, client.ObjectKeyFromObject(meta), meta)
-		if err != nil {
-			return nil, false, err
-		}
-		if resource.MatchesLastSeen(meta.ResourceVersion) {
-			return nil, false, nil
-		}
-		resourceVersionChanges.Inc()
-	}
-
+func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Resource) (*unstructured.Unstructured, error) {
 	current := &unstructured.Unstructured{}
 	current.SetName(resource.Ref.Name)
 	current.SetNamespace(resource.Ref.Namespace)
@@ -378,9 +351,9 @@ func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Re
 	current.SetAPIVersion(resource.GVK.GroupVersion().String())
 	err := c.upstreamClient.Get(ctx, client.ObjectKeyFromObject(current), current)
 	if err != nil {
-		return nil, true, err
+		return nil, err
 	}
-	return current, true, nil
+	return current, nil
 }
 
 func mungePatch(patch []byte, rv string) ([]byte, error) {
