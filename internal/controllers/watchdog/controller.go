@@ -35,11 +35,23 @@ func (c *watchdogController) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
+	var inputsMissing int
+	var notInLockstep int
+	var withoutSynthesizers int
 	var pendingInit int
 	var pending int
 	var unready int
 	var terminal int
 	for _, comp := range list.Items {
+		if c.hasNoSynthesizer(&comp, ctx) {
+			withoutSynthesizers++
+		}
+		if c.waitingOnInputs(&comp, ctx) {
+			inputsMissing++
+		}
+		if c.getNotInLockstep(&comp, ctx) {
+			notInLockstep++
+		}
 		if c.pendingInitialReconciliation(&comp) {
 			pendingInit++
 		}
@@ -54,12 +66,41 @@ func (c *watchdogController) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
+	waitingOnInputs.Set(float64(inputsMissing))
+	inputsNotInLockstep.Set(float64(notInLockstep))
+	compositionsWithoutSynthesizers.Set(float64(withoutSynthesizers))
 	pendingInitialReconciliation.Set(float64(pendingInit))
 	stuckReconciling.Set(float64(pending))
 	pendingReadiness.Set(float64(unready))
 	terminalErrors.Set(float64(terminal))
 
 	return ctrl.Result{}, nil
+}
+
+func (c *watchdogController) getSynthesizer(comp *apiv1.Composition, ctx context.Context) (*apiv1.Synthesizer, error) {
+	syn := &apiv1.Synthesizer{}
+	syn.Name = comp.Spec.Synthesizer.Name
+	err := c.client.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+	return syn, err
+}
+
+func (c *watchdogController) hasNoSynthesizer(comp *apiv1.Composition, ctx context.Context) bool {
+	_, err := c.getSynthesizer(comp, ctx)
+	return err != nil
+}
+
+func (c *watchdogController) getInputsExist(comp *apiv1.Composition, ctx context.Context) bool {
+	syn, err := c.getSynthesizer(comp, ctx)
+	return (err != nil) || comp.InputsExist(syn)
+}
+
+func (c *watchdogController) getNotInLockstep(comp *apiv1.Composition, ctx context.Context) bool {
+	syn, err := c.getSynthesizer(comp, ctx)
+	return (err != nil) || comp.InputsOutOfLockstep(syn)
+}
+
+func (c *watchdogController) waitingOnInputs(comp *apiv1.Composition, ctx context.Context) bool {
+	return !c.getInputsExist(comp, ctx) && time.Since(comp.CreationTimestamp.Time) > c.threshold
 }
 
 func (c *watchdogController) pendingInitialReconciliation(comp *apiv1.Composition) bool {
