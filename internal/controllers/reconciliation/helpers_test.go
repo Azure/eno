@@ -35,6 +35,10 @@ func registerControllers(t *testing.T, mgr *testutil.Manager) {
 }
 
 func writeGenericComposition(t *testing.T, client client.Client) (*apiv1.Synthesizer, *apiv1.Composition) {
+	return writeComposition(t, client, false)
+}
+
+func writeComposition(t *testing.T, client client.Client, orphan bool) (*apiv1.Synthesizer, *apiv1.Composition) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "create"
@@ -44,6 +48,9 @@ func writeGenericComposition(t *testing.T, client client.Client) (*apiv1.Synthes
 	comp.Name = "test-comp"
 	comp.Namespace = "default"
 	comp.Spec.Synthesizer.Name = syn.Name
+	if orphan {
+		comp.Annotations = map[string]string{"eno.azure.io/deletion-strategy": "orphan"}
+	}
 	require.NoError(t, client.Create(context.Background(), comp))
 
 	return syn, comp

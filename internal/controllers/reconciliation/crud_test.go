@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	v1 "github.com/Azure/eno/api/v1"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/execution"
@@ -753,6 +754,72 @@ func TestOrphanedCompositionDeletion(t *testing.T) {
 	testutil.Eventually(t, func() bool {
 		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 	})
+}
+
+func TestOrphanedResources(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]string{
+						"eno.azure.io/reconcile-interval": "100ms",
+					},
+				},
+				"data": map[string]string{"foo": "bar"},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeComposition(t, upstream, true)
+
+	// Wait for resource to be created.
+	obj := &corev1.ConfigMap{}
+	testutil.Eventually(t, func() bool {
+		obj.SetName("test-obj")
+		obj.SetNamespace("default")
+		err := downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+		return err == nil
+	})
+
+	// Delete the composition.
+	require.NoError(t, upstream.Delete(ctx, comp))
+	t.Logf("deleted composition")
+	testutil.Eventually(t, func() bool {
+		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	})
+
+	// Ensure that the slice was deleted before checking the actual resource.
+	testutil.Eventually(t, func() bool {
+		rll := &v1.ResourceSliceList{}
+		err := upstream.List(ctx, rll, client.InNamespace(metav1.NamespaceAll))
+		if err != nil {
+			return false
+		}
+		return len(rll.Items) == 0
+	})
+
+	// The resource should be orphaned after the composition is gone.
+	err := downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+	require.NoError(t, err)
+
 }
 
 // TestResourceDefaulting proves that resources which define properties equal to the field's default will eventually converge.
