@@ -139,7 +139,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Swap the state to prepare for resynthesis if needed
-	reason, shouldSwap := shouldSwapStates(logger, syn, comp)
+	reason, shouldSwap := shouldSwapStates(syn, comp)
 	if shouldSwap {
 		logger = logger.WithValues("reason", reason)
 		SwapStates(comp)
@@ -383,7 +383,7 @@ func SwapStates(comp *apiv1.Composition) {
 	}
 }
 
-func shouldSwapStates(logger logr.Logger, synth *apiv1.Synthesizer, comp *apiv1.Composition) (string, bool) {
+func shouldSwapStates(synth *apiv1.Synthesizer, comp *apiv1.Composition) (string, bool) {
 	// synthesize when (either):
 	// - synthesis has never occurred
 	// - the spec has changed
@@ -410,9 +410,9 @@ func shouldSwapStates(logger logr.Logger, synth *apiv1.Synthesizer, comp *apiv1.
 		reason += "CurrentSynthesisEmpty"
 	} else {
 		if isCompGenDiff {
-			reason += "CompositionGenerationDiff"
+			reason += "CompositionChanged"
 		} else if !isInputRevisionsEqual && isSynthesizedNotNil && !shouldIgnoreSideEffects {
-			reason += "InputRevisionsNotEqual && SynthesizedNotEmpty && ShouldNotIgnoreSideEffects"
+			reason += "InputsChanged"
 		}
 	}
 	if !(isSynNil || isCompGenDiff || (!isInputRevisionsEqual && isSynthesizedNotNil && !shouldIgnoreSideEffects)) {
@@ -421,9 +421,9 @@ func shouldSwapStates(logger logr.Logger, synth *apiv1.Synthesizer, comp *apiv1.
 
 	// Second condition
 	if isCompDeleted {
-		reason += ", CompositionDeleted"
+		reason += "&& CompositionDeleted"
 	} else if isCompInputsExist && !isCompInputsOutOfLockstep {
-		reason += ", CompositionInputsExist && InputsNotOutOfLockstep"
+		reason += "&& InputsInLockstep"
 	}
 
 	if !(isCompDeleted || (isCompInputsExist && !isCompInputsOutOfLockstep)) {

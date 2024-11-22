@@ -822,11 +822,12 @@ func TestShouldSwapStates(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.Name, func(t *testing.T) {
-			logger := testr.New(t)
 			syn := &apiv1.Synthesizer{}
 			syn.Spec.Refs = []apiv1.Ref{{Key: "foo"}}
-			reason, shouldSwap := shouldSwapStates(logger, syn, &tc.Composition)
+			reason, shouldSwap := shouldSwapStates(syn, &tc.Composition)
 			assert.Equal(t, tc.Expectation, shouldSwap)
+
+			logger := testr.New(t)
 			if shouldSwap {
 				logger = logger.WithValues("reason", reason)
 			}
