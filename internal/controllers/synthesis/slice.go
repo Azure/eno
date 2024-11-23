@@ -64,7 +64,7 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		"synthesisID", comp.Status.GetCurrentSynthesisUUID())
 
 	// Skip if the composition is not eligible for resynthesis, and check the synthesis result later
-	if s.notEligibleForResynthesis(comp) {
+	if notEligibleForResynthesis(comp) {
 		logger.V(1).Info("not eligible for resynthesis when checking the missing resource slice")
 		// Use default pod timeout
 		if syn.Spec.PodTimeout == nil {
@@ -106,7 +106,7 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 //
 // Composition should be resynthesized when the referenced resource slice is deleted even
 // the composition should ignore side effect.
-func (s *sliceController) notEligibleForResynthesis(comp *apiv1.Composition) bool {
+func notEligibleForResynthesis(comp *apiv1.Composition) bool {
 	return comp.Status.CurrentSynthesis == nil ||
 		comp.Status.CurrentSynthesis.Synthesized == nil ||
 		comp.DeletionTimestamp != nil ||
