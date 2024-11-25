@@ -139,7 +139,9 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Swap the state to prepare for resynthesis if needed
-	if shouldSwapStates(syn, comp) {
+	reason, shouldSwap := shouldSwapStates(syn, comp)
+	if shouldSwap {
+		logger = logger.WithValues("reason", reason)
 		SwapStates(comp)
 		if err := c.client.Status().Update(ctx, comp); err != nil {
 			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
@@ -388,7 +390,7 @@ func SwapStates(comp *apiv1.Composition) {
 	}
 }
 
-func shouldSwapStates(synth *apiv1.Synthesizer, comp *apiv1.Composition) bool {
+func shouldSwapStates(synth *apiv1.Synthesizer, comp *apiv1.Composition) (string, bool) {
 	// synthesize when (either):
 	// - synthesis has never occurred
 	// - the spec has changed
@@ -399,10 +401,43 @@ func shouldSwapStates(synth *apiv1.Synthesizer, comp *apiv1.Composition) bool {
 	// - synthesis is not already pending
 	// - all bound input resources exist and are in lockstep (or composition is being deleted)
 	syn := comp.Status.CurrentSynthesis
-	return (syn == nil ||
-		syn.ObservedCompositionGeneration != comp.Generation ||
-		(!inputRevisionsEqual(synth, comp.Status.InputRevisions, syn.InputRevisions) && syn.Synthesized != nil && !comp.ShouldIgnoreSideEffects())) &&
-		(comp.DeletionTimestamp != nil || (comp.InputsExist(synth) && !comp.InputsOutOfLockstep(synth)))
+
+	isSynNil := syn == nil
+	isCompGenDiff := syn != nil && syn.ObservedCompositionGeneration != comp.Generation
+	isInputRevisionsEqual := syn != nil && inputRevisionsEqual(synth, comp.Status.InputRevisions, syn.InputRevisions)
+	isSynthesizedNotNil := syn != nil && syn.Synthesized != nil
+	shouldIgnoreSideEffects := comp.ShouldIgnoreSideEffects()
+	isCompDeleted := comp.DeletionTimestamp != nil
+	isCompInputsExist := comp.InputsExist(synth)
+	isCompInputsOutOfLockstep := comp.InputsOutOfLockstep(synth)
+
+	reason := ""
+	// First condition
+	if isSynNil {
+		reason += "CurrentSynthesisEmpty"
+	} else {
+		if isCompGenDiff {
+			reason += "CompositionChanged"
+		} else if !isInputRevisionsEqual && isSynthesizedNotNil && !shouldIgnoreSideEffects {
+			reason += "InputsChanged"
+		}
+	}
+	if !(isSynNil || isCompGenDiff || (!isInputRevisionsEqual && isSynthesizedNotNil && !shouldIgnoreSideEffects)) {
+		return "", false
+	}
+
+	// Second condition
+	if isCompDeleted {
+		reason += " && CompositionDeleted"
+	} else if isCompInputsExist && !isCompInputsOutOfLockstep {
+		reason += " && InputsInLockstep"
+	}
+
+	if !(isCompDeleted || (isCompInputsExist && !isCompInputsOutOfLockstep)) {
+		return "", false
+	}
+
+	return reason, true
 }
 
 func shouldBackOffPodCreation(comp *apiv1.Composition) bool {

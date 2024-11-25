@@ -675,10 +675,12 @@ func TestShouldSwapStates(t *testing.T) {
 		Name        string
 		Expectation bool
 		Composition apiv1.Composition
+		Reason      string
 	}{
 		{
 			Name:        "zero value",
 			Expectation: true,
+			Reason:      "CurrentSynthesisEmpty && InputsInLockstep",
 		},
 		{
 			Name:        "missing input",
@@ -688,6 +690,7 @@ func TestShouldSwapStates(t *testing.T) {
 					Bindings: []apiv1.Binding{{Key: "foo"}},
 				},
 			},
+			Reason: "",
 		},
 		{
 			Name:        "matching input synthesis in progress",
@@ -707,6 +710,7 @@ func TestShouldSwapStates(t *testing.T) {
 					}},
 				},
 			},
+			Reason: "",
 		},
 		{
 			Name:        "non-matching composition generation",
@@ -721,6 +725,7 @@ func TestShouldSwapStates(t *testing.T) {
 					},
 				},
 			},
+			Reason: "CompositionChanged && InputsInLockstep",
 		},
 		{
 			Name:        "matching input synthesis terminal",
@@ -741,6 +746,7 @@ func TestShouldSwapStates(t *testing.T) {
 					}},
 				},
 			},
+			Reason: "",
 		},
 		{
 			Name:        "non-matching input synthesis terminal",
@@ -762,6 +768,7 @@ func TestShouldSwapStates(t *testing.T) {
 					}},
 				},
 			},
+			Reason: "InputsChanged && InputsInLockstep",
 		},
 		{
 			Name:        "non-matching input synthesis terminal ignore side effects",
@@ -788,6 +795,7 @@ func TestShouldSwapStates(t *testing.T) {
 					}},
 				},
 			},
+			Reason: "",
 		},
 		{
 			Name:        "non-matching input synthesis non-terminal",
@@ -809,6 +817,7 @@ func TestShouldSwapStates(t *testing.T) {
 					}},
 				},
 			},
+			Reason: "",
 		},
 		{
 			Name:        "non-matching input synthesis deleting",
@@ -833,6 +842,7 @@ func TestShouldSwapStates(t *testing.T) {
 					}},
 				},
 			},
+			Reason: "CompositionChanged && CompositionDeleted",
 		},
 		{
 			Name:        "missing input synthesis deleting",
@@ -847,6 +857,7 @@ func TestShouldSwapStates(t *testing.T) {
 				},
 				Status: apiv1.CompositionStatus{},
 			},
+			Reason: "CurrentSynthesisEmpty && CompositionDeleted",
 		},
 		{
 			Name:        "revision mismatch",
@@ -871,6 +882,7 @@ func TestShouldSwapStates(t *testing.T) {
 					}},
 				},
 			},
+			Reason: "",
 		},
 		{
 			Name:        "revision match",
@@ -895,13 +907,17 @@ func TestShouldSwapStates(t *testing.T) {
 					}},
 				},
 			},
+			Reason: "CompositionChanged && InputsInLockstep",
 		},
 	}
+
 	for _, tc := range tests {
 		t.Run(tc.Name, func(t *testing.T) {
 			syn := &apiv1.Synthesizer{}
 			syn.Spec.Refs = []apiv1.Ref{{Key: "foo"}}
-			assert.Equal(t, tc.Expectation, shouldSwapStates(syn, &tc.Composition))
+			reason, shouldSwap := shouldSwapStates(syn, &tc.Composition)
+			assert.Equal(t, tc.Expectation, shouldSwap)
+			assert.Equal(t, tc.Reason, reason)
 		})
 	}
 }
