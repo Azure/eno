@@ -1,4 +1,4 @@
-package synthesis
+package selfhealing
 
 import (
 	"context"
@@ -25,21 +25,21 @@ const (
 	PodTimeout = time.Minute * 2
 )
 
+// sliceController check if the resource slice is deleted but it is still present in the composition current synthesis status.
+// If yes, it will update the composition PendingResynthesis status to trigger re-synthesis process.
 type sliceController struct {
 	client client.Client
 }
 
-// sliceController check if the resource slice is deleted but it is still present in the composition status.
-// If yes, then it will update the composition status to trigger re-synthesis process.
 func NewSliceController(mgr ctrl.Manager) error {
-	c := &sliceController{
+	s := &sliceController{
 		client: mgr.GetClient(),
 	}
 	return ctrl.NewControllerManagedBy(mgr).
-		Named("synthesisSliceController").
+		Named("selfHealingSliceController").
 		Watches(&apiv1.ResourceSlice{}, newSliceHandler()).
-		WithLogConstructor(manager.NewLogConstructor(mgr, "sliceController")).
-		Complete(c)
+		WithLogConstructor(manager.NewLogConstructor(mgr, "selfHealingSliceController")).
+		Complete(s)
 }
 
 func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -73,15 +73,15 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{Requeue: true, RequeueAfter: syn.Spec.PodTimeout.Duration}, nil
 	}
 
-	// Check if any resource slice referenced by the composition is deleted
+	// Check if any resource slice referenced by the composition is deleted.
 	for _, ref := range comp.Status.CurrentSynthesis.ResourceSlices {
 		slice := &apiv1.ResourceSlice{}
 		slice.Name = ref.Name
 		slice.Namespace = comp.Namespace
 		err := s.client.Get(ctx, client.ObjectKeyFromObject(slice), slice)
 		if errors.IsNotFound(err) {
-			// The resource slice should not be deleted if it is still referenced by the composition
-			// Update the composition status to trigger re-synthesis process
+			// The resource slice should not be deleted if it is still referenced by the composition.
+			// Update the composition status to trigger re-synthesis process.
 			logger.V(1).Info("found missing resource slice and start resynthesis", "compositionName", comp.Name, "resourceSliceName", ref.Name)
 			comp.Status.PendingResynthesis = ptr.To(metav1.Now())
 			err = s.client.Status().Update(ctx, comp)

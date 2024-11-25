@@ -22,6 +22,7 @@ import (
 	"github.com/Azure/eno/internal/controllers/flowcontrol"
 	"github.com/Azure/eno/internal/controllers/replication"
 	"github.com/Azure/eno/internal/controllers/rollout"
+	"github.com/Azure/eno/internal/controllers/selfhealing"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/controllers/watch"
 	"github.com/Azure/eno/internal/controllers/watchdog"
@@ -113,14 +114,14 @@ func runController() error {
 		return fmt.Errorf("constructing rollout controller: %w", err)
 	}
 
+	err = selfhealing.NewSliceController(mgr)
+	if err != nil {
+		return fmt.Errorf("constructing self healing resource slice controller: %w", err)
+	}
+
 	err = synthesis.NewPodLifecycleController(mgr, synconf)
 	if err != nil {
 		return fmt.Errorf("constructing pod lifecycle controller: %w", err)
-	}
-
-	err = synthesis.NewSliceController(mgr)
-	if err != nil {
-		return fmt.Errorf("constructing synthesis resource slice controller: %w", err)
 	}
 
 	err = synthesis.NewSliceCleanupController(mgr)
