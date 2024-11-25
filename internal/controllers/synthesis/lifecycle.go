@@ -421,9 +421,9 @@ func shouldSwapStates(synth *apiv1.Synthesizer, comp *apiv1.Composition) (string
 
 	// Second condition
 	if isCompDeleted {
-		reason += "&& CompositionDeleted"
+		reason += " && CompositionDeleted"
 	} else if isCompInputsExist && !isCompInputsOutOfLockstep {
-		reason += "&& InputsInLockstep"
+		reason += " && InputsInLockstep"
 	}
 
 	if !(isCompDeleted || (isCompInputsExist && !isCompInputsOutOfLockstep)) {
