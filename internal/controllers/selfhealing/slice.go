@@ -86,7 +86,7 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			comp.Status.PendingResynthesis = ptr.To(metav1.Now())
 			err = s.client.Status().Update(ctx, comp)
 			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
+				return ctrl.Result{}, fmt.Errorf("updating composition pending resynthesis: %w", err)
 			}
 			return ctrl.Result{}, nil
 		}
@@ -117,10 +117,10 @@ func newSliceHandler() handler.EventHandler {
 	apply := func(rli workqueue.RateLimitingInterface, obj client.Object) {
 		owner := metav1.GetControllerOf(obj)
 		if owner == nil {
-			// no need to check the deleted resource slice which doesn't have an owner
+			// No need to check the deleted resource slice which doesn't have an owner
 			return
 		}
-		// pass the composition name to the request
+		// Pass the composition name to the request to check missing resource slice
 		rli.Add(reconcile.Request{
 			NamespacedName: types.NamespacedName{
 				Name:      owner.Name,
