@@ -36,7 +36,6 @@ func TestSliceRecreation(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	require.NoError(t, NewSliceController(mgr.Manager))
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Microsecond*10))
-	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
 	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 1, time.Microsecond*10))
 
@@ -57,15 +56,6 @@ func TestSliceRecreation(t *testing.T) {
 	})
 	mgr.Start(t)
 
-	// Create resource slice
-	readyTime := metav1.Now()
-	slice := &apiv1.ResourceSlice{}
-	slice.Name = "test-slice"
-	slice.Namespace = testNS
-	slice.Spec.Resources = []apiv1.Manifest{{Manifest: "{}"}}
-	slice.Status.Resources = []apiv1.ResourceState{{Ready: &readyTime, Reconciled: true}}
-	require.NoError(t, mgr.GetClient().Create(ctx, slice))
-
 	// Create synthesizer
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
@@ -78,6 +68,29 @@ func TestSliceRecreation(t *testing.T) {
 	comp.Namespace = testNS
 	comp.Spec.Synthesizer = apiv1.SynthesizerRef{Name: syn.Name}
 	require.NoError(t, mgr.GetClient().Create(ctx, comp))
+
+	// Get the composition for resource slice owner ref
+	testutil.Eventually(t, func() bool {
+		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil
+	})
+
+	// Create resource slice
+	readyTime := metav1.Now()
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-slice"
+	slice.Namespace = testNS
+	slice.Spec.Resources = []apiv1.Manifest{{Manifest: "{}"}}
+	slice.Status.Resources = []apiv1.ResourceState{{Ready: &readyTime, Reconciled: true}}
+	ownerRef := metav1.OwnerReference{
+		APIVersion: comp.GetObjectKind().GroupVersionKind().Version,
+		Kind:       comp.GetObjectKind().GroupVersionKind().Kind,
+		Name:       comp.GetName(),
+		UID:        comp.GetUID(),
+		Controller: ptr.To(true),
+	}
+	slice.SetOwnerReferences(append(slice.GetOwnerReferences(), ownerRef))
+	require.NoError(t, mgr.GetClient().Create(ctx, slice))
 
 	// Synthesis has completed with resource slice ref
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
@@ -96,7 +109,10 @@ func TestSliceRecreation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check resource slice is existed before deletion
-	require.NoError(t, mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(slice), slice))
+	testutil.Eventually(t, func() bool {
+		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(slice), slice)
+		return err == nil
+	})
 	// Remove the finalizer and delete the resource slice
 	slice.SetAnnotations(map[string]string{})
 	require.NoError(t, mgr.GetClient().Update(ctx, slice))
@@ -116,17 +132,11 @@ func TestSliceRecreation(t *testing.T) {
 		return false
 	})
 
-	// Reconcile the self healing resource slice controller to re-create the missing resource slice
-	s := &sliceController{client: mgr.GetClient()}
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
-	_, err = s.Reconcile(ctx, req)
-	require.NoError(t, err)
-
 	// Wait for the composition is re-synthesized
 	testutil.Eventually(t, func() bool {
 		require.NoError(t, mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp))
-		// Must have resource slice ref
-		return comp.Status.CurrentSynthesis != nil &&
+		return comp.Status.PendingResynthesis == nil &&
+			comp.Status.CurrentSynthesis != nil &&
 			comp.Status.CurrentSynthesis.Synthesized != nil &&
 			comp.Status.CurrentSynthesis.ResourceSlices != nil
 	})
@@ -134,12 +144,16 @@ func TestSliceRecreation(t *testing.T) {
 	// Check there is no resource slice referenced by composition missing
 	testutil.Eventually(t, func() bool {
 		require.NoError(t, mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp))
+		// Must have at least one resource slice ref
+		if len(comp.Status.CurrentSynthesis.ResourceSlices) == 0 {
+			return false
+		}
 		for _, ref := range comp.Status.CurrentSynthesis.ResourceSlices {
 			rs := &apiv1.ResourceSlice{}
 			rs.Name = ref.Name
 			rs.Namespace = comp.Namespace
 			err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(rs), rs)
-			if errors.IsNotFound(err) {
+			if err != nil {
 				return false
 			}
 			// The re-creation resource slice's name prefix is composition name by design.
@@ -149,6 +163,59 @@ func TestSliceRecreation(t *testing.T) {
 		}
 		return true
 	})
+}
+
+func TestRequeueForPodTimeout(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	mgr.Start(t)
+
+	testNS := "default"
+	// Create synthesizer
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "test-image"
+	syn.Spec.PodTimeout = &metav1.Duration{Duration: PodTimeout}
+	require.NoError(t, mgr.GetClient().Create(ctx, syn))
+
+	// Create composition
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = testNS
+	comp.Spec.Synthesizer = apiv1.SynthesizerRef{Name: syn.Name}
+	require.NoError(t, mgr.GetClient().Create(ctx, comp))
+
+	// Create resource slice
+	readyTime := metav1.Now()
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-slice"
+	slice.Namespace = testNS
+	slice.Spec.Resources = []apiv1.Manifest{{Manifest: "{}"}}
+	slice.Status.Resources = []apiv1.ResourceState{{Ready: &readyTime, Reconciled: true}}
+	require.NoError(t, mgr.GetClient().Create(ctx, slice))
+
+	// check the both composition and synthesizer are existed before reconciliation
+	testutil.Eventually(t, func() bool {
+		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if err != nil {
+			return false
+		}
+		err = mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(syn), syn)
+		if err != nil {
+			return false
+		}
+		return true
+	})
+
+	// Reconcile the resource slice controller to re-create the missing resource slice
+	s := &sliceController{client: mgr.GetClient()}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
+	res, err := s.Reconcile(ctx, req)
+	require.NoError(t, err)
+
+	// Request should be requeue due to composition CurrentSynthesis is emtpy and not eligible for resynthesis
+	assert.True(t, res.Requeue)
+	assert.Equal(t, syn.Spec.PodTimeout.Duration, res.RequeueAfter)
 }
 
 func TestNotEligibleForResynthesis(t *testing.T) {
