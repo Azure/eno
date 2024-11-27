@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/time/rate"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -171,7 +172,14 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN typ
 		if patch == nil {
 			continue
 		}
-
+		// NOTE: This is slow and purely for debugging.
+		u := &unstructured.Unstructured{}
+		if err := u.UnmarshalJSON([]byte(slice.Spec.Resources[update.SlicedResource.Index].Manifest)); err != nil {
+			logger = logger.WithValues("index", update.SlicedResource.Index)
+		} else {
+			logger = logger.WithValues("resource-name", u.GetName(), "resource-kind", u.GroupVersionKind().Kind)
+		}
+		logger.V(1).Info("will patch status for resource")
 		patches = append(patches, &jsonPatch{
 			Op:    "replace",
 			Path:  fmt.Sprintf("/status/resources/%d", update.SlicedResource.Index),

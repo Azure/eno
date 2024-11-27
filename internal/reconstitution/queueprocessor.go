@@ -38,6 +38,8 @@ func (q *queueProcessor) processQueueItem(ctx context.Context) bool {
 
 	logger := q.Logger.WithValues("compositionName", req.Composition.Name, "compositionNamespace", req.Composition.Namespace, "resourceKind", req.Resource.Kind, "resourceName", req.Resource.Name, "resourceNamespace", req.Resource.Namespace)
 	ctx = logr.NewContext(ctx, logger)
+	logger.Info("processing queue item")
+	defer logger.Info("done with queue item")
 
 	result, err := q.Handler.Reconcile(ctx, &req)
 	if err != nil {
@@ -60,6 +62,7 @@ func (q *queueProcessor) processQueueItem(ctx context.Context) bool {
 		return true
 	}
 
+	logger.Info("forgetting queue item")
 	q.Queue.Forget(item)
 	return true
 }
