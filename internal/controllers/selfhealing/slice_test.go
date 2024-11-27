@@ -194,7 +194,7 @@ func TestRequeueForPodTimeout(t *testing.T) {
 	slice.Status.Resources = []apiv1.ResourceState{{Ready: &readyTime, Reconciled: true}}
 	require.NoError(t, mgr.GetClient().Create(ctx, slice))
 
-	// check the both composition and synthesizer are existed before reconciliation
+	// Check the both composition and synthesizer are existed before reconciliation
 	testutil.Eventually(t, func() bool {
 		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		if err != nil {

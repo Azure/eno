@@ -28,12 +28,14 @@ const (
 // sliceController check if the resource slice is deleted but it is still present in the composition current synthesis status.
 // If yes, it will update the composition PendingResynthesis status to trigger re-synthesis process.
 type sliceController struct {
-	client client.Client
+	client        client.Client
+	noCacheReader client.Reader
 }
 
 func NewSliceController(mgr ctrl.Manager) error {
 	s := &sliceController{
-		client: mgr.GetClient(),
+		client:        mgr.GetClient(),
+		noCacheReader: mgr.GetAPIReader(),
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("selfHealingSliceController").
@@ -78,7 +80,7 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		slice := &apiv1.ResourceSlice{}
 		slice.Name = ref.Name
 		slice.Namespace = comp.Namespace
-		err := s.client.Get(ctx, client.ObjectKeyFromObject(slice), slice)
+		err := s.noCacheReader.Get(ctx, client.ObjectKeyFromObject(slice), slice)
 		if errors.IsNotFound(err) {
 			// The resource slice should not be deleted if it is still referenced by the composition.
 			// Update the composition status to trigger re-synthesis process.
@@ -91,8 +93,8 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{}, nil
 		}
 
-		if client.IgnoreNotFound(err) != nil {
-			return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting resource slice: %w", err))
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
 		}
 	}
 
