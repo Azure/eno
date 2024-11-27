@@ -34,7 +34,7 @@ var testSynthesisConfig = &synthesis.Config{
 func TestSliceRecreation(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
-	require.NoError(t, NewSliceController(mgr.Manager))
+	require.NoError(t, NewSliceController(mgr.Manager, time.Minute*5))
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Microsecond*10))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
 	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 1, time.Microsecond*10))
@@ -165,7 +165,7 @@ func TestSliceRecreation(t *testing.T) {
 	})
 }
 
-func TestRequeueForPodTimeout(t *testing.T) {
+func TestRequeueForNotEligibleResynthesis(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	mgr.Start(t)
@@ -175,7 +175,6 @@ func TestRequeueForPodTimeout(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "test-image"
-	syn.Spec.PodTimeout = &metav1.Duration{Duration: PodTimeout}
 	require.NoError(t, mgr.GetClient().Create(ctx, syn))
 
 	// Create composition
@@ -208,14 +207,28 @@ func TestRequeueForPodTimeout(t *testing.T) {
 	})
 
 	// Reconcile the resource slice controller to re-create the missing resource slice
-	s := &sliceController{client: mgr.GetClient()}
+	s := &sliceController{client: mgr.GetClient(), selfHealingGracePeriod: time.Minute * 5}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	res, err := s.Reconcile(ctx, req)
 	require.NoError(t, err)
-
 	// Request should be requeue due to composition CurrentSynthesis is emtpy and not eligible for resynthesis
 	assert.True(t, res.Requeue)
-	assert.Equal(t, syn.Spec.PodTimeout.Duration, res.RequeueAfter)
+	assert.Equal(t, s.selfHealingGracePeriod, res.RequeueAfter)
+
+	// Update composition with synthesize time and pending synthesis time for re-queue
+	synthesized, err := time.Parse(time.RFC3339, "2024-11-26T10:00:00Z")
+	require.NoError(t, err)
+	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Status.CurrentSynthesis = &apiv1.Synthesis{Synthesized: &metav1.Time{Time: synthesized}}
+		comp.Status.PendingResynthesis = &metav1.Time{Time: time.Now()}
+		return mgr.GetClient().Status().Update(ctx, comp)
+	})
+	res, err = s.Reconcile(ctx, req)
+	require.NoError(t, err)
+	// Should re-quque after since synthesized + grace period time, due to pending resynthesis
+	assert.True(t, res.Requeue)
+	assert.Equal(t, int((s.selfHealingGracePeriod - time.Since(synthesized)).Minutes()), int(res.RequeueAfter.Minutes()))
 }
 
 func TestNotEligibleForResynthesis(t *testing.T) {
@@ -347,4 +360,32 @@ func TestNotEligibleForResynthesis(t *testing.T) {
 			assert.Equal(t, tt.expected, res)
 		})
 	}
+}
+
+func TestIsSliceMissing(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	mgr.Start(t)
+
+	s := &sliceController{client: mgr.GetClient(), noCacheReader: mgr.GetClient(), selfHealingGracePeriod: time.Minute}
+
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-slice"
+	slice.Namespace = "default"
+
+	isMissing, err := s.isSliceMissing(ctx, slice)
+	require.NoError(t, err)
+	require.True(t, isMissing)
+
+	// Create resource slice
+	require.NoError(t, mgr.GetClient().Create(ctx, slice))
+	testutil.Eventually(t, func() bool {
+		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(slice), slice)
+		return err == nil
+	})
+
+	// Check resource slice is existed
+	isMissing, err = s.isSliceMissing(ctx, slice)
+	require.NoError(t, err)
+	require.False(t, isMissing)
 }
