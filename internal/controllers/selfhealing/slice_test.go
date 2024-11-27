@@ -31,13 +31,17 @@ var testSynthesisConfig = &synthesis.Config{
 	ExecutorImage:    "test-image",
 }
 
-func TestSliceRecreation(t *testing.T) {
-	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t)
+func registerControllers(t *testing.T, mgr *testutil.Manager) {
 	require.NoError(t, NewSliceController(mgr.Manager, time.Minute*5))
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Microsecond*10))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
 	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 1, time.Microsecond*10))
+}
+
+func TestDeleteSliceRecreation(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	registerControllers(t, mgr)
 
 	testNS := "default"
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
@@ -95,7 +99,7 @@ func TestSliceRecreation(t *testing.T) {
 	// Synthesis has completed with resource slice ref
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		if client.IgnoreNotFound(err) != nil {
+		if err != nil {
 			return err
 		}
 		comp.Status.CurrentSynthesis = &apiv1.Synthesis{
@@ -134,7 +138,11 @@ func TestSliceRecreation(t *testing.T) {
 
 	// Wait for the composition is re-synthesized
 	testutil.Eventually(t, func() bool {
-		require.NoError(t, mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp))
+		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if err != nil {
+			return false
+		}
+
 		return comp.Status.PendingResynthesis == nil &&
 			comp.Status.CurrentSynthesis != nil &&
 			comp.Status.CurrentSynthesis.Synthesized != nil &&
@@ -143,9 +151,12 @@ func TestSliceRecreation(t *testing.T) {
 
 	// Check there is no resource slice referenced by composition missing
 	testutil.Eventually(t, func() bool {
-		require.NoError(t, mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp))
+		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if err != nil {
+			return false
+		}
 		// Must have at least one resource slice ref
-		if len(comp.Status.CurrentSynthesis.ResourceSlices) == 0 {
+		if comp.Status.CurrentSynthesis != nil && len(comp.Status.CurrentSynthesis.ResourceSlices) == 0 {
 			return false
 		}
 		for _, ref := range comp.Status.CurrentSynthesis.ResourceSlices {
@@ -158,6 +169,93 @@ func TestSliceRecreation(t *testing.T) {
 			}
 			// The re-creation resource slice's name prefix is composition name by design.
 			if !strings.HasPrefix(rs.Name, comp.Name) {
+				return false
+			}
+		}
+		return true
+	})
+}
+
+func TestUpdateCompositionSliceRecreation(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	registerControllers(t, mgr)
+
+	testNS := "default"
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		cm := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-cm",
+					"namespace": testNS,
+				},
+			},
+		}
+		output := &krmv1.ResourceList{Items: []*unstructured.Unstructured{cm}}
+		return output, nil
+	})
+	mgr.Start(t)
+
+	// Create synthesizer
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "test-image"
+	require.NoError(t, mgr.GetClient().Create(ctx, syn))
+
+	// Create composition with resource slice ref
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = testNS
+	comp.Spec.Synthesizer = apiv1.SynthesizerRef{Name: syn.Name}
+	require.NoError(t, mgr.GetClient().Create(ctx, comp))
+
+	// Ensure both composition and synthesizer are created
+	testutil.Eventually(t, func() bool {
+		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if err != nil {
+			return false
+		}
+		err = mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(syn), syn)
+		if err != nil {
+			return false
+		}
+		return true
+	})
+
+	// Don't create resource slice, update composition status to trigger re-synthesis for missing resource slice
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if err != nil {
+			return err
+		}
+		comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+			Synthesized:                   ptr.To(metav1.Now()),
+			ObservedCompositionGeneration: comp.Generation,
+			ResourceSlices:                []*apiv1.ResourceSliceRef{{Name: "test-slice"}},
+			UUID:                          "test-uuid",
+		}
+		return mgr.GetClient().Status().Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	// Check the the resource slice referenced by composition is existed
+	testutil.Eventually(t, func() bool {
+		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if err != nil {
+			return false
+		}
+		// Must have at least one resource slice ref
+		if comp.Status.CurrentSynthesis == nil || len(comp.Status.CurrentSynthesis.ResourceSlices) == 0 {
+			return false
+		}
+		for _, ref := range comp.Status.CurrentSynthesis.ResourceSlices {
+			slice := &apiv1.ResourceSlice{}
+			slice.Name = ref.Name
+			slice.Namespace = comp.Namespace
+			err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(slice), slice)
+			if err != nil {
 				return false
 			}
 		}
@@ -219,9 +317,13 @@ func TestRequeueForNotEligibleResynthesis(t *testing.T) {
 	synthesized, err := time.Parse(time.RFC3339, "2024-11-26T10:00:00Z")
 	require.NoError(t, err)
 	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Status.CurrentSynthesis = &apiv1.Synthesis{Synthesized: &metav1.Time{Time: synthesized}}
-		comp.Status.PendingResynthesis = &metav1.Time{Time: time.Now()}
+		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if err != nil {
+			return err
+		}
+
+		comp.Status.CurrentSynthesis = &apiv1.Synthesis{Synthesized: ptr.To(metav1.NewTime(synthesized))}
+		comp.Status.PendingResynthesis = ptr.To(metav1.Now())
 		return mgr.GetClient().Status().Update(ctx, comp)
 	})
 	res, err = s.Reconcile(ctx, req)
@@ -252,7 +354,7 @@ func TestNotEligibleForResynthesis(t *testing.T) {
 		{
 			name: "PendingResynthesis is not nil",
 			comp: &apiv1.Composition{
-				Status: apiv1.CompositionStatus{PendingResynthesis: &metav1.Time{Time: time.Now()}},
+				Status: apiv1.CompositionStatus{PendingResynthesis: ptr.To(metav1.Now())},
 			},
 			expected: true,
 		},
@@ -260,7 +362,7 @@ func TestNotEligibleForResynthesis(t *testing.T) {
 			name: "composition deletion time stamp is not nil",
 			comp: &apiv1.Composition{
 				ObjectMeta: metav1.ObjectMeta{
-					DeletionTimestamp: &metav1.Time{Time: time.Now()},
+					DeletionTimestamp: ptr.To(metav1.Now()),
 				},
 			},
 			expected: true,
@@ -269,9 +371,9 @@ func TestNotEligibleForResynthesis(t *testing.T) {
 			name: "composition deletion time stamp is not nil and PendingResynthesis is not nil",
 			comp: &apiv1.Composition{
 				ObjectMeta: metav1.ObjectMeta{
-					DeletionTimestamp: &metav1.Time{Time: time.Now()},
+					DeletionTimestamp: ptr.To(metav1.Now()),
 				},
-				Status: apiv1.CompositionStatus{PendingResynthesis: &metav1.Time{Time: time.Now()}},
+				Status: apiv1.CompositionStatus{PendingResynthesis: ptr.To(metav1.Now())},
 			},
 			expected: true,
 		},
@@ -280,7 +382,7 @@ func TestNotEligibleForResynthesis(t *testing.T) {
 			comp: &apiv1.Composition{
 				Status: apiv1.CompositionStatus{
 					CurrentSynthesis:   nil,
-					PendingResynthesis: &metav1.Time{Time: time.Now()},
+					PendingResynthesis: ptr.To(metav1.Now()),
 				},
 			},
 			expected: true,
@@ -290,7 +392,7 @@ func TestNotEligibleForResynthesis(t *testing.T) {
 			comp: &apiv1.Composition{
 				Status: apiv1.CompositionStatus{
 					CurrentSynthesis:   &apiv1.Synthesis{Synthesized: nil},
-					PendingResynthesis: &metav1.Time{Time: time.Now()},
+					PendingResynthesis: ptr.To(metav1.Now()),
 				},
 			},
 			expected: true,
@@ -299,7 +401,7 @@ func TestNotEligibleForResynthesis(t *testing.T) {
 			name: "CurrentSynthesis is nil and deletion time stamp is not nil",
 			comp: &apiv1.Composition{
 				ObjectMeta: metav1.ObjectMeta{
-					DeletionTimestamp: &metav1.Time{Time: time.Now()},
+					DeletionTimestamp: ptr.To(metav1.Now()),
 				},
 				Status: apiv1.CompositionStatus{CurrentSynthesis: nil},
 			},
@@ -309,7 +411,7 @@ func TestNotEligibleForResynthesis(t *testing.T) {
 			name: "CurrentSynthesis Synthesized is nil and deletion time stamp is not nil",
 			comp: &apiv1.Composition{
 				ObjectMeta: metav1.ObjectMeta{
-					DeletionTimestamp: &metav1.Time{Time: time.Now()},
+					DeletionTimestamp: ptr.To(metav1.Now()),
 				},
 				Status: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{Synthesized: nil}},
 			},
@@ -320,7 +422,7 @@ func TestNotEligibleForResynthesis(t *testing.T) {
 			comp: &apiv1.Composition{
 				Status: apiv1.CompositionStatus{
 					CurrentSynthesis: &apiv1.Synthesis{
-						Synthesized: &metav1.Time{Time: time.Now()},
+						Synthesized: ptr.To(metav1.Now()),
 					},
 				},
 			},
@@ -331,9 +433,9 @@ func TestNotEligibleForResynthesis(t *testing.T) {
 			comp: &apiv1.Composition{
 				Status: apiv1.CompositionStatus{
 					CurrentSynthesis: &apiv1.Synthesis{
-						Synthesized: &metav1.Time{Time: time.Now()},
+						Synthesized: ptr.To(metav1.Now()),
 					},
-					PendingResynthesis: &metav1.Time{Time: time.Now()},
+					PendingResynthesis: ptr.To(metav1.Now()),
 				},
 			},
 			expected: true,
@@ -342,11 +444,11 @@ func TestNotEligibleForResynthesis(t *testing.T) {
 			name: "composition is synthesized and deletion time stamp is not nil",
 			comp: &apiv1.Composition{
 				ObjectMeta: metav1.ObjectMeta{
-					DeletionTimestamp: &metav1.Time{Time: time.Now()},
+					DeletionTimestamp: ptr.To(metav1.Now()),
 				},
 				Status: apiv1.CompositionStatus{
 					CurrentSynthesis: &apiv1.Synthesis{
-						Synthesized: &metav1.Time{Time: time.Now()},
+						Synthesized: ptr.To(metav1.Now()),
 					},
 				},
 			},
@@ -367,7 +469,7 @@ func TestIsSliceMissing(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	mgr.Start(t)
 
-	s := &sliceController{client: mgr.GetClient(), noCacheReader: mgr.GetClient(), selfHealingGracePeriod: time.Minute}
+	s := &sliceController{client: mgr.GetClient(), noCacheReader: mgr.GetAPIReader(), selfHealingGracePeriod: time.Minute}
 
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = "test-slice"
