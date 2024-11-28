@@ -68,7 +68,9 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if notEligibleForResynthesis(comp) {
 		logger.V(1).Info("not eligible for resynthesis when checking the missing resource slice")
 		// Use default grace period
-		if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil {
+		if comp.Status.CurrentSynthesis == nil ||
+			comp.Status.CurrentSynthesis.Synthesized == nil ||
+			(s.selfHealingGracePeriod-time.Since(comp.Status.CurrentSynthesis.Synthesized.Time)) <= 0 {
 			return ctrl.Result{Requeue: true, RequeueAfter: s.selfHealingGracePeriod}, nil
 		}
 		return ctrl.Result{Requeue: true, RequeueAfter: s.selfHealingGracePeriod - time.Since(comp.Status.CurrentSynthesis.Synthesized.Time)}, nil

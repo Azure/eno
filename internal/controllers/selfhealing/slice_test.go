@@ -314,23 +314,40 @@ func TestRequeueForNotEligibleResynthesis(t *testing.T) {
 	assert.Equal(t, s.selfHealingGracePeriod, res.RequeueAfter)
 
 	// Update composition with synthesize time and pending synthesis time for re-queue
-	synthesized, err := time.Parse(time.RFC3339, "2024-11-26T10:00:00Z")
-	require.NoError(t, err)
+	synthesized := time.Now().Add(-5 * time.Hour)
 	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		if err != nil {
 			return err
 		}
-
 		comp.Status.CurrentSynthesis = &apiv1.Synthesis{Synthesized: ptr.To(metav1.NewTime(synthesized))}
 		comp.Status.PendingResynthesis = ptr.To(metav1.Now())
 		return mgr.GetClient().Status().Update(ctx, comp)
 	})
 	res, err = s.Reconcile(ctx, req)
 	require.NoError(t, err)
-	// Should re-quque after since synthesized + grace period time, due to pending resynthesis
+	// Should re-quque after grace period time, due to (gracePeriod - time.Since(synthesized)) < 0
 	assert.True(t, res.Requeue)
-	assert.Equal(t, int((s.selfHealingGracePeriod - time.Since(synthesized)).Minutes()), int(res.RequeueAfter.Minutes()))
+	assert.Equal(t, s.selfHealingGracePeriod, res.RequeueAfter)
+
+	// Update composition with synthesize time for re-queue
+	synthesized = time.Now().Add(-time.Minute)
+	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if err != nil {
+			return err
+		}
+		comp.Status.CurrentSynthesis = &apiv1.Synthesis{Synthesized: ptr.To(metav1.NewTime(synthesized))}
+		comp.Status.PendingResynthesis = ptr.To(metav1.Now())
+		return mgr.GetClient().Status().Update(ctx, comp)
+	})
+	res, err = s.Reconcile(ctx, req)
+	require.NoError(t, err)
+	assert.True(t, res.Requeue)
+	assert.True(t, res.RequeueAfter.Seconds() > 0)
+	// Re-queue after (gracePeriod - time.Since(synthesized))
+	assert.True(t, s.selfHealingGracePeriod > res.RequeueAfter)
+
 }
 
 func TestNotEligibleForResynthesis(t *testing.T) {
