@@ -49,7 +49,7 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	comp := &apiv1.Composition{}
 	err := s.client.Get(ctx, req.NamespacedName, comp)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("getting composition: %w", err)
+		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("gettting composition: %w", err))
 	}
 
 	syn := &apiv1.Synthesizer{}
@@ -67,12 +67,14 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// Skip if the composition is not eligible for resynthesis, and check the synthesis result later
 	if notEligibleForResynthesis(comp) {
 		logger.V(1).Info("not eligible for resynthesis when checking the missing resource slice")
-		// Use default grace period
+		// Use default grace period if the time since last synthesized is exceeds than the grace period
 		if comp.Status.CurrentSynthesis == nil ||
 			comp.Status.CurrentSynthesis.Synthesized == nil ||
 			(s.selfHealingGracePeriod-time.Since(comp.Status.CurrentSynthesis.Synthesized.Time)) <= 0 {
 			return ctrl.Result{Requeue: true, RequeueAfter: s.selfHealingGracePeriod}, nil
 		}
+
+		// Use the remaining grace period if the time since the last synthesized is less than the grace period
 		return ctrl.Result{Requeue: true, RequeueAfter: s.selfHealingGracePeriod - time.Since(comp.Status.CurrentSynthesis.Synthesized.Time)}, nil
 	}
 
@@ -88,18 +90,19 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			if err != nil {
 				return ctrl.Result{}, err
 			}
-
-			if isMissing {
-				// The resource slice should not be deleted if it is still referenced by the composition.
-				// Update the composition status to trigger re-synthesis process.
-				logger.V(1).Info("found missing resource slice and start resynthesis", "compositionName", comp.Name, "resourceSliceName", ref.Name)
-				comp.Status.PendingResynthesis = ptr.To(metav1.Now())
-				err := s.client.Status().Update(ctx, comp)
-				if err != nil {
-					return ctrl.Result{}, fmt.Errorf("updating composition pending resynthesis: %w", err)
-				}
-				return ctrl.Result{}, nil
+			if !isMissing {
+				continue
 			}
+
+			// The resource slice should not be deleted if it is still referenced by the composition.
+			// Update the composition status to trigger re-synthesis process.
+			logger.V(1).Info("found missing resource slice and start resynthesis", "compositionName", comp.Name, "resourceSliceName", ref.Name)
+			comp.Status.PendingResynthesis = ptr.To(metav1.Now())
+			err = s.client.Status().Update(ctx, comp)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("updating composition pending resynthesis: %w", err)
+			}
+			return ctrl.Result{}, nil
 		}
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
