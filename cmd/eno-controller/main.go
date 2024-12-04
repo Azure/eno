@@ -22,6 +22,7 @@ import (
 	"github.com/Azure/eno/internal/controllers/flowcontrol"
 	"github.com/Azure/eno/internal/controllers/replication"
 	"github.com/Azure/eno/internal/controllers/rollout"
+	"github.com/Azure/eno/internal/controllers/selfhealing"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/controllers/watch"
 	"github.com/Azure/eno/internal/controllers/watchdog"
@@ -48,14 +49,15 @@ func main() {
 func runController() error {
 	ctx := ctrl.SetupSignalHandler()
 	var (
-		debugLogging     bool
-		watchdogThres    time.Duration
-		rolloutCooldown  time.Duration
-		dispatchCooldown time.Duration
-		taintToleration  string
-		nodeAffinity     string
-		concurrencyLimit int
-		synconf          = &synthesis.Config{}
+		debugLogging           bool
+		watchdogThres          time.Duration
+		rolloutCooldown        time.Duration
+		dispatchCooldown       time.Duration
+		selfHealingGracePeriod time.Duration
+		taintToleration        string
+		nodeAffinity           string
+		concurrencyLimit       int
+		synconf                = &synthesis.Config{}
 
 		mgrOpts = &manager.Options{
 			Rest: ctrl.GetConfigOrDie(),
@@ -73,6 +75,7 @@ func runController() error {
 	flag.StringVar(&taintToleration, "taint-toleration", "", "Node NoSchedule taint to be tolerated by synthesizer pods e.g. taintKey=taintValue to match on value, just taintKey to match on presence of the taint")
 	flag.StringVar(&nodeAffinity, "node-affinity", "", "Synthesizer pods will be created with this required node affinity expression e.g. labelKey=labelValue to match on value, just labelKey to match on presence of the label")
 	flag.IntVar(&concurrencyLimit, "concurrency-limit", 10, "Upper bound on active syntheses. This effectively limits the number of running synthesizer pods spawned by Eno.")
+	flag.DurationVar(&selfHealingGracePeriod, "self-healing-grace-period", time.Minute*5, "How long before the self-healing controllers are allowed to start the resynthesis process.")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 
@@ -111,6 +114,11 @@ func runController() error {
 	err = rollout.NewSynthesizerController(mgr)
 	if err != nil {
 		return fmt.Errorf("constructing rollout controller: %w", err)
+	}
+
+	err = selfhealing.NewSliceController(mgr, selfHealingGracePeriod)
+	if err != nil {
+		return fmt.Errorf("constructing self healing resource slice controller: %w", err)
 	}
 
 	err = synthesis.NewPodLifecycleController(mgr, synconf)
