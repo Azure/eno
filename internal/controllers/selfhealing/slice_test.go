@@ -324,6 +324,8 @@ func TestRequeueForNotEligibleResynthesis(t *testing.T) {
 		comp.Status.PendingResynthesis = ptr.To(metav1.Now())
 		return mgr.GetClient().Status().Update(ctx, comp)
 	})
+	require.NoError(t, err)
+
 	res, err = s.Reconcile(ctx, req)
 	require.NoError(t, err)
 	// Should re-quque after grace period time, due to (gracePeriod - time.Since(synthesized)) < 0
@@ -332,6 +334,7 @@ func TestRequeueForNotEligibleResynthesis(t *testing.T) {
 
 	// Update composition with synthesize time for re-queue
 	synthesized = time.Now().Add(-time.Minute)
+	oldResourceVersion := comp.GetResourceVersion()
 	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		if err != nil {
@@ -341,13 +344,20 @@ func TestRequeueForNotEligibleResynthesis(t *testing.T) {
 		comp.Status.PendingResynthesis = ptr.To(metav1.Now())
 		return mgr.GetClient().Status().Update(ctx, comp)
 	})
+	require.NoError(t, err)
+
+	// Ensure the composition is updated completely before reconciliation
+	testutil.Eventually(t, func() bool {
+		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.GetResourceVersion() != oldResourceVersion
+	})
+
 	res, err = s.Reconcile(ctx, req)
 	require.NoError(t, err)
 	assert.True(t, res.Requeue)
 	assert.True(t, res.RequeueAfter.Seconds() > 0)
 	// Re-queue after (gracePeriod - time.Since(synthesized))
 	assert.True(t, s.selfHealingGracePeriod > res.RequeueAfter)
-
 }
 
 func TestNotEligibleForResynthesis(t *testing.T) {
