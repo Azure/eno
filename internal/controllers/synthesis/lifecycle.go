@@ -169,7 +169,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	// Confirm that a pod doesn't already exist for this synthesis without trusting informers.
 	// This protects against cases where synthesis has recently started and something causes
 	// another tick of this loop before the pod write hits the informer.
-	err = c.noCacheReader.List(ctx, pods, client.MatchingLabels{
+	err = c.noCacheReader.List(ctx, pods, client.InNamespace(c.config.PodNamespace), client.MatchingLabels{
 		"eno.azure.io/synthesis-uuid": comp.Status.CurrentSynthesis.UUID,
 	})
 	if err != nil {
