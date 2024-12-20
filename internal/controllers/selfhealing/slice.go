@@ -144,6 +144,10 @@ func newCompositionHandler() handler.EventHandler {
 			logr.FromContextOrDiscard(ctx).V(0).Info("unexpected type given to newCompositionHandler")
 			return
 		}
+		if comp.ShouldIgnoreSideEffects() {
+			logr.FromContextOrDiscard(ctx).V(0).Info("skip missing resource slice check for composition that is ignoring side effects", "compositionName", comp.Name)
+			return
+		}
 
 		rli.Add(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}})
 	}
