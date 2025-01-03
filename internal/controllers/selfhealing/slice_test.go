@@ -36,6 +36,8 @@ func registerControllers(t *testing.T, mgr *testutil.Manager) {
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Microsecond*10))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
 	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 1, time.Microsecond*10))
+	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
+	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
 }
 
 func TestDeleteSliceRecreation(t *testing.T) {
@@ -358,6 +360,122 @@ func TestRequeueForNotEligibleResynthesis(t *testing.T) {
 	assert.True(t, res.RequeueAfter.Seconds() > 0)
 	// Re-queue after (gracePeriod - time.Since(synthesized))
 	assert.True(t, s.selfHealingGracePeriod > res.RequeueAfter)
+}
+
+func TestIgnoreSideEffect(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	registerControllers(t, mgr)
+	mgr.Start(t)
+
+	testNS := "default"
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		cm := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-cm",
+					"namespace": testNS,
+				},
+			},
+		}
+		output := &krmv1.ResourceList{Items: []*unstructured.Unstructured{cm}}
+		return output, nil
+	})
+
+	// Create synthesizer
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "test-image"
+	require.NoError(t, mgr.GetClient().Create(ctx, syn))
+
+	// Create composition with ignore side effect
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = testNS
+	comp.Annotations = map[string]string{"eno.azure.io/ignore-side-effects": "true"}
+	comp.Spec.Synthesizer = apiv1.SynthesizerRef{Name: syn.Name}
+	require.NoError(t, mgr.GetClient().Create(ctx, comp))
+
+	// Get the composition for resource slice owner ref
+	testutil.Eventually(t, func() bool {
+		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil
+	})
+
+	// Create resource slice
+	readyTime := metav1.Now()
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-slice"
+	slice.Namespace = testNS
+	slice.Spec.Resources = []apiv1.Manifest{{Manifest: "{}"}}
+	slice.Status.Resources = []apiv1.ResourceState{{Ready: &readyTime, Reconciled: true}}
+	ownerRef := metav1.OwnerReference{
+		APIVersion: comp.GetObjectKind().GroupVersionKind().Version,
+		Kind:       comp.GetObjectKind().GroupVersionKind().Kind,
+		Name:       comp.GetName(),
+		UID:        comp.GetUID(),
+		Controller: ptr.To(true),
+	}
+	slice.SetOwnerReferences(append(slice.GetOwnerReferences(), ownerRef))
+	require.NoError(t, mgr.GetClient().Create(ctx, slice))
+
+	// Ensure synthesizer, composition and resource slice are created
+	testutil.Eventually(t, func() bool {
+		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(syn), syn)
+		if err != nil {
+			return false
+		}
+		err = mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if err != nil {
+			return false
+		}
+		err = mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(slice), slice)
+		if err != nil {
+			return false
+		}
+		return true
+	})
+
+	// Update composition status to include a resource slice
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if err != nil {
+			return err
+		}
+		comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+			Synthesized:                   ptr.To(metav1.Now()),
+			ObservedCompositionGeneration: comp.Generation,
+			ResourceSlices:                []*apiv1.ResourceSliceRef{{Name: slice.Name}},
+			UUID:                          "test-uuid",
+		}
+		return mgr.GetClient().Status().Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	// Delete resource slice to trigger self healing reconcile
+	require.NoError(t, mgr.GetClient().Delete(ctx, slice))
+
+	// Ensure the pending resynthesis is cleared by rollout controller and no resource slice is re-created
+	testutil.Eventually(t, func() bool {
+		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if err != nil || comp.Status.PendingResynthesis != nil {
+			return false
+		}
+
+		for _, ref := range comp.Status.CurrentSynthesis.ResourceSlices {
+			slice := &apiv1.ResourceSlice{}
+			slice.Name = ref.Name
+			slice.Namespace = comp.Namespace
+			err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(slice), slice)
+			// Resource slice should not be re-created
+			if !errors.IsNotFound(err) {
+				return false
+			}
+		}
+		return true
+	})
 }
 
 func TestNotEligibleForResynthesis(t *testing.T) {
