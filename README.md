@@ -22,7 +22,7 @@ Next, create a minimum viable Eno configuration to make sure everything works.
 This manifest will create a configmap called "some-config" in the default namespace.
 
 ```bash
-kubectl apply -f "https://raw.githubusercontent.com/Azure/eno/main/examples/minimal.yaml"
+kubectl apply -f "https://raw.githubusercontent.com/Azure/eno/refs/heads/main/examples/minimal/example.yaml"
 
 # The configmap should be created by Eno soon after
 kubectl get cm some-config -o=yaml
