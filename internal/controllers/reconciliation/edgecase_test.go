@@ -2,9 +2,12 @@ package reconciliation
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -138,4 +141,95 @@ func TestEmptySynthesis(t *testing.T) {
 	testutil.Eventually(t, func() bool {
 		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 	})
+}
+
+func TestLargeNamespaceDeletion(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	ns := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Namespace",
+			"metadata": map[string]any{
+				"name": "test",
+			},
+		},
+	}
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{ns}
+
+		for i := 0; i < 500; i++ {
+			cm := &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      fmt.Sprintf("test-%d", i),
+						"namespace": ns.GetName(),
+					},
+				},
+			}
+			output.Items = append(output.Items, cm)
+		}
+
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	go func() {
+		for i := 0; i < 500; i++ {
+			cm := &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      fmt.Sprintf("test-%d", i),
+						"namespace": ns.GetName(),
+					},
+				},
+			}
+			t.Logf("deleting configmap %s", cm.GetName())
+			err := mgr.DownstreamClient.Delete(ctx, cm)
+			require.NoError(t, client.IgnoreNotFound(err))
+			time.Sleep(time.Millisecond * 3)
+		}
+	}()
+
+	require.NoError(t, upstream.Delete(ctx, comp))
+
+	assert.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if errors.IsNotFound(err) {
+			return true
+		}
+
+		list := &apiv1.ResourceSliceList{}
+		require.NoError(t, upstream.List(ctx, list))
+		missing := []string{}
+		for _, item := range list.Items {
+			for i, res := range item.Status.Resources {
+				if !res.Deleted {
+					missing = append(missing, fmt.Sprintf("test-%d", i))
+				}
+			}
+		}
+		t.Logf("composition deleting=%t missing=%d", comp.DeletionTimestamp != nil, len(missing))
+		if len(missing) < 100 {
+			t.Logf("the missing resources: %+s", missing)
+		}
+
+		return false
+	}, time.Minute*3, time.Second)
 }
