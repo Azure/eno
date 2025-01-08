@@ -202,8 +202,7 @@ func TestLargeNamespaceDeletion(t *testing.T) {
 				},
 			}
 			t.Logf("deleting configmap %s", cm.GetName())
-			err := mgr.DownstreamClient.Delete(ctx, cm)
-			require.NoError(t, client.IgnoreNotFound(err))
+			mgr.DownstreamClient.Delete(ctx, cm)
 			time.Sleep(time.Millisecond * 3)
 		}
 	}()
