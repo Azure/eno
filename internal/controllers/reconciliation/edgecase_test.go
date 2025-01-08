@@ -144,7 +144,6 @@ func TestEmptySynthesis(t *testing.T) {
 }
 
 func TestLargeNamespaceDeletion(t *testing.T) {
-	// TODO: We know that the patch fn is being applied, and is correct. Probably the patch isn't making it to the server.
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
