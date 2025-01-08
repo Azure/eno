@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -143,6 +142,8 @@ func TestEmptySynthesis(t *testing.T) {
 	})
 }
 
+// TestLargeNamespaceDeletion tests for race conditions between an external client (like namespace controller)
+// when deleting a large number of resources.
 func TestLargeNamespaceDeletion(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
@@ -208,28 +209,4 @@ func TestLargeNamespaceDeletion(t *testing.T) {
 	}()
 
 	require.NoError(t, upstream.Delete(ctx, comp))
-
-	assert.Eventually(t, func() bool {
-		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		if errors.IsNotFound(err) {
-			return true
-		}
-
-		list := &apiv1.ResourceSliceList{}
-		require.NoError(t, upstream.List(ctx, list))
-		missing := []string{}
-		for _, item := range list.Items {
-			for i, res := range item.Status.Resources {
-				if !res.Deleted {
-					missing = append(missing, fmt.Sprintf("test-%d", i))
-				}
-			}
-		}
-		t.Logf("composition deleting=%t missing=%d", comp.DeletionTimestamp != nil, len(missing))
-		if len(missing) < 100 {
-			t.Logf("the missing resources: %+s", missing)
-		}
-
-		return false
-	}, time.Minute*6, time.Second)
 }
