@@ -236,7 +236,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		reconciliationActions.WithLabelValues("delete").Inc()
 		err := c.upstreamClient.Delete(ctx, current)
 		if err != nil {
-			return false, client.IgnoreNotFound(fmt.Errorf("deleting resource: %w", err))
+			return true, client.IgnoreNotFound(fmt.Errorf("deleting resource: %w", err))
 		}
 		logger.V(0).Info("deleted resource")
 		return true, nil
