@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -209,8 +210,8 @@ func TestLargeNamespaceDeletion(t *testing.T) {
 
 	require.NoError(t, upstream.Delete(ctx, comp))
 
-	testutil.Eventually(t, func() bool {
+	assert.Eventually(t, func() bool {
 		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		return errors.IsNotFound(err)
-	})
+	}, time.Minute*3, time.Second)
 }
