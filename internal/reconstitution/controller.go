@@ -118,6 +118,11 @@ func (r *controller) populateCache(ctx context.Context, comp *apiv1.Composition,
 			return nil, client.IgnoreNotFound(fmt.Errorf("unable to get resource slice: %w", err))
 		}
 		slices[i] = slice
+
+		if slice.DeletionTimestamp == nil && comp.DeletionTimestamp != nil {
+			logger.Info("refusing to fill cache because composition is deleting but a resource slice is not")
+			return nil, nil
+		}
 	}
 
 	return r.Cache.fill(ctx, comp, synthesis, slices)
