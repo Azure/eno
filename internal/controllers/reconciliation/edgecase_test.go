@@ -208,4 +208,9 @@ func TestLargeNamespaceDeletion(t *testing.T) {
 	}()
 
 	require.NoError(t, upstream.Delete(ctx, comp))
+
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return errors.IsNotFound(err)
+	})
 }
