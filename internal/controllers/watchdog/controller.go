@@ -68,7 +68,7 @@ func (c *watchdogController) waitingOnInputs(comp *apiv1.Composition) bool {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = comp.Spec.Synthesizer.Name
 	err := c.client.Get(context.Background(), client.ObjectKeyFromObject(syn), syn)
-	return err == nil && (!comp.InputsExist(syn) || !comp.InputsOutOfLockstep(syn))
+	return err == nil && (!comp.InputsExist(syn) || comp.InputsOutOfLockstep(syn))
 }
 
 func (c *watchdogController) pendingReconciliation(comp *apiv1.Composition) bool {
