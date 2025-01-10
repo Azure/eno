@@ -12,12 +12,11 @@ import (
 )
 
 var controllerLogicTests = []struct {
-	Name                               string
-	Composition                        *apiv1.Composition
-	ExpectPendingInitialReconciliation bool
-	ExpectPendingReconciliation        bool
-	ExpectPendingReadiness             bool
-	ExpectTerminalError                bool
+	Name                        string
+	Composition                 *apiv1.Composition
+	ExpectPendingReconciliation bool
+	ExpectPendingReadiness      bool
+	ExpectTerminalError         bool
 }{
 	{
 		Name: "ready",
@@ -58,7 +57,6 @@ var controllerLogicTests = []struct {
 			},
 			Status: apiv1.CompositionStatus{},
 		},
-		ExpectPendingInitialReconciliation: true,
 		// readiness isn't firing yet, since we haven't finished reconciliation
 	},
 	{
@@ -71,8 +69,7 @@ var controllerLogicTests = []struct {
 				},
 			},
 		},
-		ExpectPendingInitialReconciliation: true,
-		ExpectPendingReconciliation:        true,
+		ExpectPendingReconciliation: true,
 	},
 	{
 		Name: "subsequent reconciliation outside of synthesis creation threshold",
@@ -99,6 +96,15 @@ var controllerLogicTests = []struct {
 		ExpectPendingReadiness: true,
 	},
 	{
+		Name: "readiness outside of threshold without reconciliation",
+		Composition: &apiv1.Composition{
+			Status: apiv1.CompositionStatus{
+				CurrentSynthesis: &apiv1.Synthesis{},
+			},
+		},
+		ExpectPendingReadiness: false,
+	},
+	{
 		Name: "readiness within threshold",
 		Composition: &apiv1.Composition{
 			ObjectMeta: metav1.ObjectMeta{
@@ -112,9 +118,8 @@ var controllerLogicTests = []struct {
 		},
 	},
 	{
-		Name:                               "in terminal error",
-		ExpectTerminalError:                true,
-		ExpectPendingInitialReconciliation: true,
+		Name:                "in terminal error",
+		ExpectTerminalError: true,
 		Composition: &apiv1.Composition{
 			Status: apiv1.CompositionStatus{
 				CurrentSynthesis: &apiv1.Synthesis{
@@ -131,11 +136,9 @@ func TestControllerLogic(t *testing.T) {
 	for _, tc := range controllerLogicTests {
 		t.Run(tc.Name, func(t *testing.T) {
 			c := &watchdogController{threshold: time.Minute}
-			unrecdInit := c.pendingInitialReconciliation(tc.Composition)
 			unrecd := c.pendingReconciliation(tc.Composition)
 			unready := c.pendingReadiness(tc.Composition)
 			terminal := c.inTerminalError(tc.Composition)
-			assert.Equal(t, tc.ExpectPendingInitialReconciliation, unrecdInit, "InitialReconciliation")
 			assert.Equal(t, tc.ExpectPendingReconciliation, unrecd, "Reconciliation")
 			assert.Equal(t, tc.ExpectPendingReadiness, unready, "Readiness")
 			assert.Equal(t, tc.ExpectTerminalError, terminal, "TerminalError")
