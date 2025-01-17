@@ -55,3 +55,20 @@ patch:
   ops:
     - { "op": "add", "path": "/metadata/deletionTimestamp", "value": "anything" }
 ```
+
+Used alongside the `only-during-deletion` annotation, resources can be easily cleaned up when removing the controller that created them.
+
+```yaml
+apiVersion: eno.azure.io/v1
+kind: Patch
+metadata:
+  name: resource-cleanup
+  namespace: default
+  annotations:
+    eno.azure.io/only-during-deletion: "true"
+patch:
+  apiVersion: v1
+  kind: ConfigMap
+  ops:
+    - { "op": "add", "path": "/metadata/deletionTimestamp", "value": "anything" }
+```
