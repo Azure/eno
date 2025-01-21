@@ -24,7 +24,6 @@ import (
 )
 
 type Config struct {
-	SliceCreationQPS  float64
 	ExecutorImage     string
 	PodNamespace      string
 	PodServiceAccount string

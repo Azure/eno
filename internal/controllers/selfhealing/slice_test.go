@@ -26,9 +26,8 @@ import (
 )
 
 var testSynthesisConfig = &synthesis.Config{
-	SliceCreationQPS: 15,
-	PodNamespace:     "default",
-	ExecutorImage:    "test-image",
+	PodNamespace:  "default",
+	ExecutorImage: "test-image",
 }
 
 func registerControllers(t *testing.T, mgr *testutil.Manager) {
