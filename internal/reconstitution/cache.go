@@ -175,13 +175,12 @@ func (c *Cache) fill(ctx context.Context, comp *apiv1.Composition, synthesis *ap
 	synKey := SynthesisRef{CompositionName: comp.Name, Namespace: comp.Namespace, UUID: synthesis.UUID}
 	c.resources[synKey] = resources
 
-	for _, resource := range resources.ByRef {
-		// TODO: Where do these get cleaned up?
-		c.byIndex[sliceIndex{Index: resource.ManifestRef.Index, SliceName: resource.ManifestRef.Slice.Name, Namespace: resource.ManifestRef.Slice.Namespace}] = resource
-	}
-
 	compNSN := types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
 	c.synthesisUUIDsByComposition[compNSN] = append(c.synthesisUUIDsByComposition[compNSN], synKey.UUID)
+
+	for _, resource := range resources.ByRef {
+		c.byIndex[sliceIndex{Index: resource.ManifestRef.Index, SliceName: resource.ManifestRef.Slice.Name, Namespace: resource.ManifestRef.Slice.Namespace}] = resource
+	}
 
 	logger.V(0).Info("cache filled")
 	return requests, nil
@@ -241,11 +240,16 @@ func (c *Cache) purge(compNSN types.NamespacedName, comp *apiv1.Composition) {
 			remainingSyns = append(remainingSyns, uuid)
 			continue // still referenced
 		}
-		delete(c.resources, SynthesisRef{
+		ref := SynthesisRef{
 			CompositionName: compNSN.Name,
 			Namespace:       compNSN.Namespace,
 			UUID:            uuid,
-		})
+		}
+		for _, res := range c.resources[ref].ByRef {
+			idx := sliceIndex{Index: res.ManifestRef.Index, SliceName: res.ManifestRef.Slice.Name, Namespace: res.ManifestRef.Slice.Namespace}
+			delete(c.byIndex, idx)
+		}
+		delete(c.resources, ref)
 	}
 	c.synthesisUUIDsByComposition[compNSN] = remainingSyns
 }
