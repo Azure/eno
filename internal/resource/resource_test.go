@@ -9,7 +9,6 @@ import (
 	"github.com/Azure/eno/internal/readiness"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -123,18 +122,7 @@ var newResourceTests = []struct {
 		Assert: func(t *testing.T, r *Resource) {
 			assert.Equal(t, schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, r.GVK)
 			assert.Len(t, r.Patch, 1)
-
-			cm := &unstructured.Unstructured{Object: map[string]any{
-				"apiVersion": "v1",
-				"kind":       "ConfigMap",
-				"data":       map[string]any{},
-			}}
 			assert.False(t, r.patchSetsDeletionTimestamp())
-			assert.True(t, r.NeedsToBePatched(cm))
-			assert.True(t, r.NeedsToBePatched(cm))
-
-			cm.Object["data"] = map[string]any{"foo": "bar"}
-			assert.False(t, r.NeedsToBePatched(cm))
 		},
 	},
 	{

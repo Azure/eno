@@ -2,26 +2,20 @@ package reconciliation
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
-	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/discovery"
@@ -267,80 +261,31 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	}
 
 	// Compute a merge patch
-	prevRV := current.GetResourceVersion()
-	patch, patchType, err := c.buildPatch(ctx, prev, resource, current)
+	typeref, schem, err := c.discovery.Get(ctx, resource.GVK)
 	if err != nil {
-		return false, fmt.Errorf("building patch: %w", err)
+		return false, fmt.Errorf("looking up resource schema: %w", err)
 	}
-	if patchType != types.JSONPatchType {
-		patch, err = mungePatch(patch, current.GetResourceVersion())
-		if err != nil {
-			return false, fmt.Errorf("adding resource version: %w", err)
-		}
+	updated, err := resource.Merge(prev, current, schem, typeref)
+	if err != nil {
+		return false, fmt.Errorf("performing three-way merge: %w", err)
 	}
-	if len(patch) == 0 {
-		logger.V(1).Info("skipping empty patch")
+	if updated == nil {
+		logger.V(1).Info("skipping empty update")
 		return false, nil
 	}
-	reconciliationActions.WithLabelValues("patch").Inc()
 	if insecureLogPatch {
-		logger.V(1).Info("INSECURE logging patch", "patch", string(patch))
+		js, _ := updated.MarshalJSON()
+		logger.V(1).Info("INSECURE logging patch", "update", string(js))
 	}
-	err = c.upstreamClient.Patch(ctx, current, client.RawPatch(patchType, patch))
+
+	reconciliationActions.WithLabelValues("patch").Inc()
+	err = c.upstreamClient.Update(ctx, updated)
 	if err != nil {
 		return false, fmt.Errorf("applying patch: %w", err)
 	}
-	logger.V(0).Info("patched resource", "patchType", string(patchType), "resourceVersion", current.GetResourceVersion(), "previousResourceVersion", prevRV)
+	logger.V(0).Info("patched resource", "resourceVersion", updated.GetResourceVersion(), "previousResourceVersion", current.GetResourceVersion())
 
 	return true, nil
-}
-
-func (c *Controller) buildPatch(ctx context.Context, prev, next *reconstitution.Resource, current *unstructured.Unstructured) ([]byte, types.PatchType, error) {
-	if next.Patch != nil {
-		if !next.NeedsToBePatched(current) {
-			return []byte{}, types.JSONPatchType, nil
-		}
-		patch, err := json.Marshal(&next.Patch)
-		return patch, types.JSONPatchType, err
-	}
-
-	prevJS, err := prev.Finalize()
-	if err != nil {
-		return nil, "", reconcile.TerminalError(fmt.Errorf("building json representation of previous state: %w", err))
-	}
-
-	nextJS, err := next.Finalize()
-	if err != nil {
-		return nil, "", reconcile.TerminalError(fmt.Errorf("building json representation of next state: %w", err))
-	}
-
-	currentJS, err := current.MarshalJSON()
-	if err != nil {
-		return nil, "", reconcile.TerminalError(fmt.Errorf("building json representation of current state: %w", err))
-	}
-
-	model, err := c.discovery.Get(ctx, next.GVK)
-	if err != nil {
-		return nil, "", fmt.Errorf("getting merge metadata: %w", err)
-	}
-
-	// FIXME: This is a very nasty hack which should not be needed once we have
-	// support for semantic equality checks.
-	pdbGVK := schema.GroupVersionKind{Group: "policy", Version: "v1", Kind: "PodDisruptionBudget"}
-	if model == nil || (next != nil && next.GVK == pdbGVK) {
-		patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(prevJS, nextJS, currentJS)
-		if err != nil {
-			return nil, "", reconcile.TerminalError(err)
-		}
-		return patch, types.MergePatchType, err
-	}
-
-	patchmeta := strategicpatch.NewPatchMetaFromOpenAPI(model)
-	patch, err := strategicpatch.CreateThreeWayMergePatch(prevJS, nextJS, currentJS, patchmeta, true)
-	if err != nil {
-		return nil, "", reconcile.TerminalError(err)
-	}
-	return patch, types.StrategicMergePatchType, err
 }
 
 func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Resource) (*unstructured.Unstructured, error) {
@@ -354,29 +299,6 @@ func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Re
 		return nil, err
 	}
 	return current, nil
-}
-
-func mungePatch(patch []byte, rv string) ([]byte, error) {
-	var patchMap map[string]interface{}
-	err := json.Unmarshal(patch, &patchMap)
-	if err != nil {
-		return nil, reconcile.TerminalError(err)
-	}
-	delete(patchMap, "status")
-
-	u := unstructured.Unstructured{Object: patchMap}
-	a, err := meta.Accessor(&u)
-	if err != nil {
-		return nil, reconcile.TerminalError(err)
-	}
-	a.SetResourceVersion(rv)
-	a.SetCreationTimestamp(metav1.Time{})
-
-	if len(patchMap) <= 1 {
-		return nil, nil // resource version only == empty patch
-	}
-
-	return json.Marshal(patchMap)
 }
 
 func patchResourceState(deleted bool, ready *metav1.Time) flowcontrol.StatusPatchFn {

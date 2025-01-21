@@ -15,13 +15,14 @@ import (
 	"github.com/Azure/eno/internal/readiness"
 	jsonpatch "github.com/evanphx/json-patch/v5"
 	"github.com/go-logr/logr"
-	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/kubectl/pkg/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	smdschema "sigs.k8s.io/structured-merge-diff/v4/schema"
+	"sigs.k8s.io/structured-merge-diff/v4/value"
 )
 
 var patchGVK = schema.GroupVersionKind{
@@ -58,6 +59,8 @@ type Resource struct {
 
 	// DefinedGroupKind is set on CRDs to represent the resource type they define.
 	DefinedGroupKind *schema.GroupKind
+
+	value value.Value
 }
 
 func (r *Resource) Deleted() bool {
@@ -99,30 +102,6 @@ func (r *Resource) FindStatus(slice *apiv1.ResourceSlice) *apiv1.ResourceState {
 	return &state
 }
 
-func (r *Resource) NeedsToBePatched(current *unstructured.Unstructured) bool {
-	if r.Patch == nil || current == nil {
-		return false
-	}
-
-	curjson, err := current.MarshalJSON()
-	if err != nil {
-		return false
-	}
-
-	patchedjson, err := r.Patch.Apply(curjson)
-	if err != nil {
-		return false
-	}
-
-	patched := &unstructured.Unstructured{}
-	err = patched.UnmarshalJSON(patchedjson)
-	if err != nil {
-		return false
-	}
-
-	return !equality.Semantic.DeepEqual(current, patched)
-}
-
 func (r *Resource) patchSetsDeletionTimestamp() bool {
 	if r.Patch == nil {
 		return false
@@ -143,6 +122,12 @@ func (r *Resource) patchSetsDeletionTimestamp() bool {
 
 	dt, _, _ := unstructured.NestedString(patched, "metadata", "deletionTimestamp")
 	return dt != ""
+}
+
+func (r *Resource) Merge(old *Resource, current *unstructured.Unstructured, schem *smdschema.Schema, typeref *smdschema.TypeRef) (*unstructured.Unstructured, error) {
+	// TODO: Remember to ignore status
+
+	return nil, nil
 }
 
 func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.ResourceSlice, index int) (*Resource, error) {
@@ -246,6 +231,11 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 	}
 	parsed.SetAnnotations(anno)
 	sort.Slice(res.ReadinessChecks, func(i, j int) bool { return res.ReadinessChecks[i].Name < res.ReadinessChecks[j].Name })
+
+	res.value, err = value.FromJSONFast([]byte(res.Manifest.Manifest))
+	if err != nil {
+		return nil, err
+	}
 
 	return res, nil
 }
