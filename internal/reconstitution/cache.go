@@ -175,6 +175,11 @@ func (c *Cache) fill(ctx context.Context, comp *apiv1.Composition, synthesis *ap
 	synKey := SynthesisRef{CompositionName: comp.Name, Namespace: comp.Namespace, UUID: synthesis.UUID}
 	c.resources[synKey] = resources
 
+	for _, resource := range resources.ByRef {
+		// TODO: Where do these get cleaned up?
+		c.byIndex[sliceIndex{Index: resource.ManifestRef.Index, SliceName: resource.ManifestRef.Slice.Name, Namespace: resource.ManifestRef.Slice.Namespace}] = resource
+	}
+
 	compNSN := types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
 	c.synthesisUUIDsByComposition[compNSN] = append(c.synthesisUUIDsByComposition[compNSN], synKey.UUID)
 
