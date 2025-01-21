@@ -202,7 +202,6 @@ func (c *Cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 				return nil, nil, fmt.Errorf("building resource at index %d of slice %s: %w", i, slice.Name, err)
 			}
 			resources.ByRef[res.Ref] = res
-			c.byIndex[sliceIndex{Index: i, SliceName: slice.Name, Namespace: slice.Namespace}] = res
 			resources.ByGroupKind[res.GVK.GroupKind()] = append(resources.ByGroupKind[res.GVK.GroupKind()], res)
 
 			current, _ := resources.ByReadinessGroup.Get(res.ReadinessGroup)
