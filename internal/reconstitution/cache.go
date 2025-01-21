@@ -178,6 +178,10 @@ func (c *Cache) fill(ctx context.Context, comp *apiv1.Composition, synthesis *ap
 	compNSN := types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
 	c.synthesisUUIDsByComposition[compNSN] = append(c.synthesisUUIDsByComposition[compNSN], synKey.UUID)
 
+	for _, resource := range resources.ByRef {
+		c.byIndex[sliceIndex{Index: resource.ManifestRef.Index, SliceName: resource.ManifestRef.Slice.Name, Namespace: resource.ManifestRef.Slice.Namespace}] = resource
+	}
+
 	logger.V(0).Info("cache filled")
 	return requests, nil
 }
@@ -202,7 +206,6 @@ func (c *Cache) buildResources(ctx context.Context, comp *apiv1.Composition, ite
 				return nil, nil, fmt.Errorf("building resource at index %d of slice %s: %w", i, slice.Name, err)
 			}
 			resources.ByRef[res.Ref] = res
-			c.byIndex[sliceIndex{Index: i, SliceName: slice.Name, Namespace: slice.Namespace}] = res
 			resources.ByGroupKind[res.GVK.GroupKind()] = append(resources.ByGroupKind[res.GVK.GroupKind()], res)
 
 			current, _ := resources.ByReadinessGroup.Get(res.ReadinessGroup)
@@ -237,11 +240,16 @@ func (c *Cache) purge(compNSN types.NamespacedName, comp *apiv1.Composition) {
 			remainingSyns = append(remainingSyns, uuid)
 			continue // still referenced
 		}
-		delete(c.resources, SynthesisRef{
+		ref := SynthesisRef{
 			CompositionName: compNSN.Name,
 			Namespace:       compNSN.Namespace,
 			UUID:            uuid,
-		})
+		}
+		for _, res := range c.resources[ref].ByRef {
+			idx := sliceIndex{Index: res.ManifestRef.Index, SliceName: res.ManifestRef.Slice.Name, Namespace: res.ManifestRef.Slice.Namespace}
+			delete(c.byIndex, idx)
+		}
+		delete(c.resources, ref)
 	}
 	c.synthesisUUIDsByComposition[compNSN] = remainingSyns
 }

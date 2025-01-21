@@ -38,6 +38,33 @@ func TestCacheBasics(t *testing.T) {
 
 		// negative
 		assert.False(t, c.hasSynthesis(comp, &apiv1.Synthesis{UUID: uuid.NewString()}))
+
+	})
+
+	t.Run("getByIndex", func(t *testing.T) {
+		// positive
+		res, ok := c.getByIndex(&sliceIndex{
+			Index:     1,
+			SliceName: resources[0].Name,
+			Namespace: resources[0].Namespace,
+		})
+		assert.True(t, ok)
+		assert.Equal(t, "slice-0-resource-1", res.Ref.Name)
+
+		// negative
+		_, ok = c.getByIndex(&sliceIndex{
+			Index:     1000,
+			SliceName: resources[0].Name,
+			Namespace: resources[0].Namespace,
+		})
+		assert.False(t, ok)
+
+		_, ok = c.getByIndex(&sliceIndex{
+			Index:     1,
+			SliceName: "nope",
+			Namespace: resources[0].Namespace,
+		})
+		assert.False(t, ok)
 	})
 
 	t.Run("get", func(t *testing.T) {
@@ -67,6 +94,15 @@ func TestCacheBasics(t *testing.T) {
 		assert.False(t, exists)
 
 		assert.Len(t, c.resources, 0)
+	})
+
+	t.Run("getByIndex missing", func(t *testing.T) {
+		_, ok := c.getByIndex(&sliceIndex{
+			Index:     1,
+			SliceName: resources[0].Name,
+			Namespace: resources[0].Namespace,
+		})
+		assert.False(t, ok)
 	})
 }
 
@@ -101,11 +137,13 @@ func TestCacheCleanup(t *testing.T) {
 	t.Run("partial purge", func(t *testing.T) {
 		c.purge(types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}, comp)
 		assert.Len(t, c.resources, 1)
+		assert.Len(t, c.byIndex, 6)
 	})
 
 	t.Run("purge", func(t *testing.T) {
 		c.purge(types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}, nil)
 		assert.Len(t, c.resources, 0)
+		assert.Len(t, c.byIndex, 0)
 	})
 }
 
