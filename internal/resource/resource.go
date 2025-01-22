@@ -19,7 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	k8sjsonpatch "k8s.io/apimachinery/pkg/util/jsonmergepatch"
+	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
 	"k8s.io/kubectl/pkg/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	smdschema "sigs.k8s.io/structured-merge-diff/v4/schema"
@@ -133,21 +133,26 @@ type SchemaGetter interface {
 }
 
 // Merge performs a three-way merge between the resource, it's old/previous Resource, and the current state.
-// Falls back to two-way merge if the SchemaGetter returns a nil TypeRef.
+// Falls back to a non-structured three-way merge if the SchemaGetter returns a nil TypeRef.
 func (r *Resource) Merge(ctx context.Context, old *Resource, current *unstructured.Unstructured, sg SchemaGetter) (*unstructured.Unstructured, bool /* typed */, error) {
 	typeref, schem, err := sg.Get(ctx, r.GVK)
 	if err != nil {
 		return nil, false, fmt.Errorf("looking up schema: %w", err)
 	}
 
-	// Naive two-way merge for unknown types
+	// Naive three-way merge for unknown types
 	if typeref == nil {
 		currentJS, err := current.MarshalJSON()
 		if err != nil {
 			return nil, false, fmt.Errorf("encoding current state: %w", err)
 		}
 
-		patch, err := k8sjsonpatch.CreateThreeWayJSONMergePatch(nil, []byte(r.Manifest.Manifest), currentJS)
+		var prevJS []byte
+		if old != nil {
+			prevJS = []byte(old.Manifest.Manifest)
+		}
+
+		patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(prevJS, []byte(r.Manifest.Manifest), currentJS)
 		if err != nil {
 			return nil, false, fmt.Errorf("building merge patch: %w", err)
 		}
