@@ -302,8 +302,9 @@ func TestMergeBasics(t *testing.T) {
 	}}
 
 	// Apply changes
-	merged, err := newState.Merge(ctx, oldState, current, sg)
+	merged, typed, err := newState.Merge(ctx, oldState, current, sg)
 	require.NoError(t, err)
+	assert.True(t, typed)
 	require.Equal(t, expected, merged)
 
 	expectedWithoutOldState := &unstructured.Unstructured{Object: map[string]any{
@@ -327,15 +328,125 @@ func TestMergeBasics(t *testing.T) {
 	}}
 
 	// Supports nil oldState
-	merged, err = newState.Merge(ctx, nil, current, sg)
+	merged, typed, err = newState.Merge(ctx, nil, current, sg)
 	require.NoError(t, err)
+	assert.True(t, typed)
 	require.Equal(t, expectedWithoutOldState, merged)
 
 	// Check idempotence
 	expected.SetResourceVersion("2")                                            // ignore resource version change
 	expected.Object["status"] = map[string]any{"availableReplicas": float64(2)} // ignore status change
-	merged, err = newState.Merge(ctx, oldState, expected, sg)
+	merged, typed, err = newState.Merge(ctx, oldState, expected, sg)
 	require.NoError(t, err)
+	assert.True(t, typed)
+	assert.Nil(t, merged)
+}
+
+func TestMergeBasicsNoSchema(t *testing.T) {
+	ctx := context.Background()
+
+	sg := newTestSchemaGetter(t, "")
+
+	renv, err := readiness.NewEnv()
+	require.NoError(t, err)
+
+	newSlice := &apiv1.ResourceSlice{
+		Spec: apiv1.ResourceSliceSpec{
+			Resources: []apiv1.Manifest{{
+				Manifest: `{
+				  "apiVersion": "apps/v1",
+				  "kind": "Deployment",
+				  "metadata": {
+				    "name": "foo"
+				  },
+				  "spec": {
+				    "replicas": 2,
+					"template": {
+					  "spec": {
+					    "serviceAccountName": "updated"
+					  }
+				    }
+				  }
+				}`,
+			}},
+		},
+	}
+	newState, err := NewResource(ctx, renv, newSlice, 0)
+	require.NoError(t, err)
+
+	oldSlice := &apiv1.ResourceSlice{
+		Spec: apiv1.ResourceSliceSpec{
+			Resources: []apiv1.Manifest{{
+				Manifest: `{
+				  "apiVersion": "apps/v1",
+				  "kind": "Deployment",
+				  "metadata": {
+				    "name": "foo"
+				  },
+				  "spec": {
+				    "strategy": {
+						"type": "RollingUpdate"
+				    },
+					"template": {
+					  "spec": {
+					    "serviceAccountName": "original"
+					  }
+				    }
+				  }
+				}`,
+			}},
+		},
+	}
+	oldState, err := NewResource(ctx, renv, oldSlice, 0)
+	require.NoError(t, err)
+
+	current := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "foo", "resourceVersion": "1"},
+		"spec": map[string]any{
+			"selector": map[string]any{
+				"matchLabels": map[string]any{"foo": "bar"},
+			},
+			"strategy": map[string]any{"type": "RollingUpdate"},
+			"template": map[string]any{
+				"spec": map[string]any{
+					"serviceAccountName": "original",
+				},
+			},
+		},
+	}}
+
+	expected := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "foo", "resourceVersion": "1"},
+		"spec": map[string]any{
+			"replicas": int64(2),
+			"selector": map[string]any{
+				"matchLabels": map[string]any{"foo": "bar"},
+			},
+			"strategy": map[string]any{"type": "RollingUpdate"},
+			"template": map[string]any{
+				"spec": map[string]any{
+					"serviceAccountName": "updated",
+				},
+			},
+		},
+	}}
+
+	// Apply changes
+	merged, typed, err := newState.Merge(ctx, oldState, current, sg)
+	require.NoError(t, err)
+	assert.False(t, typed)
+	require.Equal(t, expected, merged)
+
+	// Check idempotence
+	expected.SetResourceVersion("2")                                            // ignore resource version change
+	expected.Object["status"] = map[string]any{"availableReplicas": float64(2)} // ignore status change
+	merged, typed, err = newState.Merge(ctx, oldState, expected, sg)
+	require.NoError(t, err)
+	assert.False(t, typed)
 	assert.Nil(t, merged)
 }
 
@@ -345,6 +456,9 @@ type testSchemaGetter struct {
 }
 
 func (t *testSchemaGetter) Get(ctx context.Context, gvk schema.GroupVersionKind) (typeref *smdschema.TypeRef, schem *smdschema.Schema, err error) {
+	if t.name == "" {
+		return nil, nil, nil
+	}
 	return &smdschema.TypeRef{NamedType: &t.name}, t.schema, nil
 }
 

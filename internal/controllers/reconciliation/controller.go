@@ -282,7 +282,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	}
 
 	// Compute a merge patch
-	updated, err := resource.Merge(ctx, prev, current, c.discovery)
+	updated, typed, err := resource.Merge(ctx, prev, current, c.discovery)
 	if err != nil {
 		return false, fmt.Errorf("performing three-way merge: %w", err)
 	}
@@ -301,7 +301,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	}
 
 	reconciliationActions.WithLabelValues("patch").Inc()
-	logger.V(0).Info("updated resource", "resourceVersion", updated.GetResourceVersion(), "previousResourceVersion", current.GetResourceVersion())
+	logger.V(0).Info("updated resource", "resourceVersion", updated.GetResourceVersion(), "previousResourceVersion", current.GetResourceVersion(), "typedMerge", typed)
 	return true, nil
 }
 
