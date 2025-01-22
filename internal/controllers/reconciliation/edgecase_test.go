@@ -9,13 +9,16 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
 	"github.com/Azure/eno/internal/testutil"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 )
@@ -214,4 +217,48 @@ func TestLargeNamespaceDeletion(t *testing.T) {
 		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		return errors.IsNotFound(err)
 	}, time.Minute*3, time.Second)
+}
+
+// TestPatchStrategyReplace proves that resources which define a patch strategy of "replace" will eventually converge.
+func TestPatchStrategyReplace(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "policy/v1",
+				"kind":       "PodDisruptionBudget",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+				"spec": map[string]any{
+					"maxUnavailable": 1,
+					"selector": map[string]any{
+						"matchLabels": map[string]any{"app": "foobar"},
+					},
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	// It should be able to become ready
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == comp.Generation
+	})
 }
