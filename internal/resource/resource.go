@@ -1,7 +1,6 @@
 package resource
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -72,28 +71,6 @@ func (r *Resource) Deleted() bool {
 func (r *Resource) Parse() (*unstructured.Unstructured, error) {
 	u := &unstructured.Unstructured{}
 	return u, u.UnmarshalJSON([]byte(r.Manifest.Manifest))
-}
-
-// Finalize converts the resource to its struct representation and returns that value encoded as json.
-// If the resource doesn't correspond to a built in type supported by the kubectl scheme the literal manifest is returned.
-//
-// Note that this means Eno is not completely opaque - it has some "understanding" of the built in types.
-// Hopefully we can replace this with the a different approach backed by the openapi spec at some point,
-// like github.com/kubernetes-sigs/structured-merge-diff. But I don't think it works for our purposes at the moment.
-func (r *Resource) Finalize() ([]byte, error) {
-	if r == nil {
-		return nil, nil
-	}
-
-	typed, _, err := scheme.Codecs.UniversalDeserializer().Decode([]byte(r.Manifest.Manifest), &r.GVK, nil)
-	if err != nil {
-		// fall back to unstructured
-		return []byte(r.Manifest.Manifest), nil
-	}
-
-	buf := &bytes.Buffer{}
-	err = unstructured.UnstructuredJSONScheme.Encode(typed, buf)
-	return buf.Bytes(), err
 }
 
 func (r *Resource) FindStatus(slice *apiv1.ResourceSlice) *apiv1.ResourceState {
@@ -182,15 +159,41 @@ func (r *Resource) Merge(old *Resource, current *unstructured.Unstructured, sche
 		merged = merged.RemoveItems(toOld.Removed)
 	}
 
+	// Bail out if no changes are required
 	if cmp, err := merged.Compare(typedCurrent); err == nil && cmp.IsSame() {
 		return nil, nil // no changes
 	}
+	copy := &unstructured.Unstructured{Object: merged.AsValue().Unstructured().(map[string]any)}
+	if compareWithScheme(current, copy) {
+		return nil, nil
+	}
 
 	// TODO: Invalidate the schema cache once if an unknown property is found
-	// TODO: Prune unknown properties when creating (for consistency)?
+	// TODO: Verify against schema when creating (for the sake of consistency)?
 	// TODO: Fall back to addition only merge when schema is disabled
 
-	return &unstructured.Unstructured{Object: merged.AsValue().Unstructured().(map[string]any)}, nil
+	return copy, nil
+}
+
+// compareWithScheme uses logic registered with the global scheme to compare two resources.
+// This is necessary for cases in which resources have special comparison logic that isn't represented by the openapi spec.
+// For example: resource quantities.
+func compareWithScheme(a, b *unstructured.Unstructured) bool {
+	aStruct, err := scheme.Scheme.New(a.GroupVersionKind())
+	if err != nil {
+		return false // fail open
+	}
+	bStruct, _ := scheme.Scheme.New(a.GroupVersionKind())
+
+	err = scheme.Scheme.Convert(a, aStruct, nil)
+	if err != nil {
+		return false
+	}
+	err = scheme.Scheme.Convert(b, bStruct, nil)
+	if err != nil {
+		return false
+	}
+	return equality.Semantic.DeepEqual(aStruct, bStruct)
 }
 
 func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.ResourceSlice, index int) (*Resource, error) {
@@ -212,6 +215,7 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 	if err != nil {
 		return nil, fmt.Errorf("invalid json: %w", err)
 	}
+	res.value = value.NewValueInterface(parsed.Object)
 	gvk := parsed.GroupVersionKind()
 	res.GVK = gvk
 	res.Ref.Name = parsed.GetName()
@@ -219,11 +223,6 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 	res.Ref.Group = parsed.GroupVersionKind().Group
 	res.Ref.Kind = parsed.GetKind()
 	logger = logger.WithValues("resourceKind", parsed.GetKind(), "resourceName", parsed.GetName(), "resourceNamespace", parsed.GetNamespace())
-
-	res.value, err = value.FromJSONFast([]byte(res.Manifest.Manifest))
-	if err != nil {
-		return nil, err
-	}
 
 	if res.Ref.Name == "" || res.Ref.Kind == "" || parsed.GetAPIVersion() == "" {
 		return nil, fmt.Errorf("missing name, kind, or apiVersion")

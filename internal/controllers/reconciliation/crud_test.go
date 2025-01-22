@@ -822,7 +822,6 @@ func TestOrphanedResources(t *testing.T) {
 }
 
 // TestResourceDefaulting proves that resources which define properties equal to the field's default will eventually converge.
-// TODO: Fix
 func TestResourceDefaulting(t *testing.T) {
 	scheme := runtime.NewScheme()
 	corev1.SchemeBuilder.AddToScheme(scheme)

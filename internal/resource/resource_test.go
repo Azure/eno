@@ -301,7 +301,7 @@ func TestMergeBasics(t *testing.T) {
 		"kind":       "Deployment",
 		"metadata":   map[string]any{"name": "foo", "resourceVersion": "1"},
 		"spec": map[string]any{
-			"replicas": float64(2),
+			"replicas": int64(2),
 			"selector": map[string]any{
 				"matchLabels": map[string]any{"foo": "bar"},
 			},
@@ -325,7 +325,7 @@ func TestMergeBasics(t *testing.T) {
 		"kind":       "Deployment",
 		"metadata":   map[string]any{"name": "foo", "resourceVersion": "1"},
 		"spec": map[string]any{
-			"replicas": float64(2),
+			"replicas": int64(2),
 			"strategy": map[string]any{
 				"type": "RollingUpdate",
 			},
