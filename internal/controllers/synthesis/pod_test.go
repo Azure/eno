@@ -4,10 +4,12 @@ import (
 	"testing"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/manager"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var newPodTests = []struct {
@@ -120,6 +122,93 @@ var newPodTests = []struct {
 		Assert: func(t *testing.T, p *corev1.Pod) {
 			assert.Contains(t, p.Spec.Containers[0].Env, corev1.EnvVar{Name: "some_env", Value: "some-val"})
 			assert.Contains(t, p.Spec.Containers[0].Env, corev1.EnvVar{Name: "COMPOSITION_NAME", Value: "test-composition"})
+		},
+	},
+	{
+		Name: "With affinity overrides",
+		Assert: func(t *testing.T, p *corev1.Pod) {
+			// assert that node affinity is set, and node affinity has both what is hardcoded and what is in the synth
+			// basically this is just testing that the merge appends arrays as necessary
+			require.NotNil(t, p.Spec.Affinity.NodeAffinity)
+			assert.Equal(t, 2, len(p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms))
+			assert.Equal(t, corev1.NodeSelectorOpIn, p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[0].Operator)
+			assert.Equal(t, "foo", p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[0].Key)
+			assert.Equal(t, "bar", p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[0].Values[0])
+
+			assert.Equal(t, corev1.NodeSelectorOpIn, p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[1].MatchExpressions[0].Operator)
+			assert.Equal(t, []string{"testvalue"}, p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[1].MatchExpressions[0].Values)
+
+			require.NotNil(t, p.Spec.Affinity.PodAffinity)
+			assert.Equal(t, "kubernetes.io/hostname", p.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution[0].TopologyKey)
+			require.NotNil(t, p.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution[0].LabelSelector)
+			assert.Equal(t, "testpodaffinitylabelvalue", p.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution[0].LabelSelector.MatchLabels["testpodaffinitylabelkey"])
+
+			require.NotNil(t, p.Spec.Affinity.PodAntiAffinity)
+			assert.Equal(t, 2, len(p.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution))
+
+			assert.Equal(t, int32(100), p.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution[0].Weight)
+			assert.Equal(t, "kubernetes.io/hostname", p.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution[0].TopologyKey)
+			require.NotNil(t, p.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution[0].PodAffinityTerm.LabelSelector)
+			assert.Equal(t, manager.ManagerLabelValue, p.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution[0].PodAffinityTerm.LabelSelector.MatchLabels[manager.ManagerLabelKey])
+
+			assert.Equal(t, int32(100), p.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution[1].Weight)
+			assert.Equal(t, "kubernetes.io/hostname", p.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution[1].PodAffinityTerm.TopologyKey)
+			require.NotNil(t, p.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution[1].PodAffinityTerm.LabelSelector)
+			assert.Equal(t, "testpodantiaffinitylabelvalue", p.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution[1].PodAffinityTerm.LabelSelector.MatchLabels["testpodantiaffinitylabelkey"])
+		},
+		Cfg: &Config{
+			NodeAffinityKey:   "foo",
+			NodeAffinityValue: "bar",
+		},
+		Synth: &apiv1.Synthesizer{
+			Spec: apiv1.SynthesizerSpec{
+				PodOverrides: apiv1.PodOverrides{
+					Affinity: &corev1.Affinity{
+						NodeAffinity: &corev1.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+								NodeSelectorTerms: []corev1.NodeSelectorTerm{
+									{
+										MatchExpressions: []corev1.NodeSelectorRequirement{
+											{
+												Key:      "testkey",
+												Operator: corev1.NodeSelectorOpIn,
+												Values:   []string{"testvalue"},
+											},
+										},
+									},
+								},
+							},
+						},
+						PodAffinity: &corev1.PodAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
+								{
+									TopologyKey: "kubernetes.io/hostname",
+									LabelSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"testpodaffinitylabelkey": "testpodaffinitylabelvalue",
+										},
+									},
+								},
+							},
+						},
+						PodAntiAffinity: &corev1.PodAntiAffinity{
+							PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{
+								{
+									Weight: 100,
+									PodAffinityTerm: corev1.PodAffinityTerm{
+										TopologyKey: "kubernetes.io/hostname",
+										LabelSelector: &metav1.LabelSelector{
+											MatchLabels: map[string]string{
+												"testpodantiaffinitylabelkey": "testpodantiaffinitylabelvalue",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
 		},
 	},
 }

@@ -68,6 +68,7 @@ type PodOverrides struct {
 	Labels      map[string]string           `json:"labels,omitempty"`
 	Annotations map[string]string           `json:"annotations,omitempty"`
 	Resources   corev1.ResourceRequirements `json:"resources,omitempty"`
+	Affinity    *corev1.Affinity            `json:"affinity,omitempty"`
 }
 
 type SynthesizerStatus struct {
