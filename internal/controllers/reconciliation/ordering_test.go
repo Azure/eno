@@ -157,7 +157,6 @@ func TestReadinessGroups(t *testing.T) {
 	})
 }
 
-// TODO: Fix
 func TestCRDOrdering(t *testing.T) {
 	if !testutil.AtLeastVersion(t, 16) {
 		t.Skipf("test does not support the old v1beta1 crd api")
@@ -184,7 +183,11 @@ func TestCRDOrdering(t *testing.T) {
 		cr.SetName("test-obj")
 		cr.SetNamespace("default")
 		cr.SetKind("RuntimeTest")
-		cr.SetAPIVersion("enotest.azure.io/v1")
+		if s.Spec.Image == "updated" {
+			cr.SetAPIVersion("enotest.azure.io/v2")
+		} else {
+			cr.SetAPIVersion("enotest.azure.io/v1")
+		}
 		cr.Object["spec"] = map[string]any{"values": []map[string]any{{"int": 123}}}
 
 		if s.Spec.Image == "updated" {
@@ -206,7 +209,6 @@ func TestCRDOrdering(t *testing.T) {
 	})
 
 	// Update the CR and CRD to add a new property - it should exist after the next reconciliation
-	// If we didn't order the writes correctly the CR update would succeed with a warning without populating the new (not yet existing) property.
 	err := retry.RetryOnConflict(testutil.Backoff, func() error {
 		upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn)
 		syn.Spec.Image = "updated"
@@ -223,7 +225,7 @@ func TestCRDOrdering(t *testing.T) {
 	cr.SetName("test-obj")
 	cr.SetNamespace("default")
 	cr.SetKind("RuntimeTest")
-	cr.SetAPIVersion("enotest.azure.io/v1")
+	cr.SetAPIVersion("enotest.azure.io/v2")
 	err = mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cr), cr)
 	require.NoError(t, err)
 

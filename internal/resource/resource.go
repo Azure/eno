@@ -102,7 +102,6 @@ func (r *Resource) NeedsToBePatched(current *unstructured.Unstructured) bool {
 		return false
 	}
 
-	// TODO: Use SMD
 	return !equality.Semantic.DeepEqual(current, patched)
 }
 
@@ -133,6 +132,8 @@ type SchemaGetter interface {
 }
 
 func (r *Resource) Merge(ctx context.Context, old *Resource, current *unstructured.Unstructured, sg SchemaGetter) (*unstructured.Unstructured, error) {
+	// TODO: Different branch if schema getter is nil
+
 	typeref, schem, err := sg.Get(ctx, r.GVK)
 	if err != nil {
 		return nil, fmt.Errorf("looking up schema: %w", err)
@@ -142,6 +143,7 @@ func (r *Resource) Merge(ctx context.Context, old *Resource, current *unstructur
 	currentVal := value.NewValueInterface(current.Object)
 	typedNew, err := typed.AsTyped(r.value, schem, *typeref)
 	if err != nil {
+		// TODO: If this resource has not caused the schema cache to be invalidated, retry once (same for Get error)
 		return nil, fmt.Errorf("converting new version to typed: %w", err)
 	}
 	typedCurrent, err := typed.AsTyped(currentVal, schem, *typeref)
@@ -176,9 +178,6 @@ func (r *Resource) Merge(ctx context.Context, old *Resource, current *unstructur
 	if compareWithScheme(current, copy) {
 		return nil, nil
 	}
-
-	// TODO: Invalidate the schema cache once if an unknown property is found
-	// TODO: Fall back to addition only merge when schema is disabled
 
 	return copy, nil
 }
