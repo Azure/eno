@@ -282,11 +282,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	}
 
 	// Compute a merge patch
-	typeref, schem, err := c.discovery.Get(ctx, resource.GVK)
-	if err != nil {
-		return false, fmt.Errorf("looking up resource schema: %w", err)
-	}
-	updated, err := resource.Merge(prev, current, schem, typeref)
+	updated, err := resource.Merge(ctx, prev, current, c.discovery)
 	if err != nil {
 		return false, fmt.Errorf("performing three-way merge: %w", err)
 	}

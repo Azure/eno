@@ -128,7 +128,16 @@ func (r *Resource) patchSetsDeletionTimestamp() bool {
 	return dt != ""
 }
 
-func (r *Resource) Merge(old *Resource, current *unstructured.Unstructured, schem *smdschema.Schema, typeref *smdschema.TypeRef) (*unstructured.Unstructured, error) {
+type SchemaGetter interface {
+	Get(ctx context.Context, gvk schema.GroupVersionKind) (typeref *smdschema.TypeRef, schem *smdschema.Schema, err error)
+}
+
+func (r *Resource) Merge(ctx context.Context, old *Resource, current *unstructured.Unstructured, sg SchemaGetter) (*unstructured.Unstructured, error) {
+	typeref, schem, err := sg.Get(ctx, r.GVK)
+	if err != nil {
+		return nil, fmt.Errorf("looking up schema: %w", err)
+	}
+
 	// Convert to SMD values
 	currentVal := value.NewValueInterface(current.Object)
 	typedNew, err := typed.AsTyped(r.value, schem, *typeref)
@@ -169,7 +178,6 @@ func (r *Resource) Merge(old *Resource, current *unstructured.Unstructured, sche
 	}
 
 	// TODO: Invalidate the schema cache once if an unknown property is found
-	// TODO: Verify against schema when creating (for the sake of consistency)?
 	// TODO: Fall back to addition only merge when schema is disabled
 
 	return copy, nil

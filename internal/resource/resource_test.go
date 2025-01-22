@@ -16,7 +16,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/kube-openapi/pkg/schemaconv"
 	"k8s.io/kube-openapi/pkg/util/proto"
-	"k8s.io/utils/ptr"
 	smdschema "sigs.k8s.io/structured-merge-diff/v4/schema"
 )
 
@@ -213,18 +212,7 @@ func TestNewResource(t *testing.T) {
 func TestMergeBasics(t *testing.T) {
 	ctx := context.Background()
 
-	oapiJS, err := os.ReadFile("fixtures/openapi.json")
-	require.NoError(t, err)
-
-	doc := &openapi_v2.Document{}
-	err = protojson.Unmarshal(oapiJS, doc)
-	require.NoError(t, err)
-
-	models, err := proto.NewOpenAPIData(doc)
-	require.NoError(t, err)
-
-	schem, err := schemaconv.ToSchema(models)
-	require.NoError(t, err)
+	sg := newTestSchemaGetter(t, "io.k8s.api.apps.v1.Deployment")
 
 	renv, err := readiness.NewEnv()
 	require.NoError(t, err)
@@ -313,10 +301,8 @@ func TestMergeBasics(t *testing.T) {
 		},
 	}}
 
-	typeRef := &smdschema.TypeRef{NamedType: ptr.To("io.k8s.api.apps.v1.Deployment")}
-
 	// Apply changes
-	merged, err := newState.Merge(oldState, current, schem, typeRef)
+	merged, err := newState.Merge(ctx, oldState, current, sg)
 	require.NoError(t, err)
 	require.Equal(t, expected, merged)
 
@@ -341,14 +327,40 @@ func TestMergeBasics(t *testing.T) {
 	}}
 
 	// Supports nil oldState
-	merged, err = newState.Merge(nil, current, schem, typeRef)
+	merged, err = newState.Merge(ctx, nil, current, sg)
 	require.NoError(t, err)
 	require.Equal(t, expectedWithoutOldState, merged)
 
 	// Check idempotence
 	expected.SetResourceVersion("2")                                            // ignore resource version change
 	expected.Object["status"] = map[string]any{"availableReplicas": float64(2)} // ignore status change
-	merged, err = newState.Merge(oldState, expected, schem, typeRef)
+	merged, err = newState.Merge(ctx, oldState, expected, sg)
 	require.NoError(t, err)
 	assert.Nil(t, merged)
+}
+
+type testSchemaGetter struct {
+	name   string
+	schema *smdschema.Schema
+}
+
+func (t *testSchemaGetter) Get(ctx context.Context, gvk schema.GroupVersionKind) (typeref *smdschema.TypeRef, schem *smdschema.Schema, err error) {
+	return &smdschema.TypeRef{NamedType: &t.name}, t.schema, nil
+}
+
+func newTestSchemaGetter(t *testing.T, name string) *testSchemaGetter {
+	oapiJS, err := os.ReadFile("fixtures/openapi.json")
+	require.NoError(t, err)
+
+	doc := &openapi_v2.Document{}
+	err = protojson.Unmarshal(oapiJS, doc)
+	require.NoError(t, err)
+
+	models, err := proto.NewOpenAPIData(doc)
+	require.NoError(t, err)
+
+	schem, err := schemaconv.ToSchema(models)
+	require.NoError(t, err)
+
+	return &testSchemaGetter{schema: schem, name: name}
 }
