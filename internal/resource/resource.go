@@ -15,6 +15,7 @@ import (
 	"github.com/Azure/eno/internal/readiness"
 	jsonpatch "github.com/evanphx/json-patch/v5"
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -22,6 +23,7 @@ import (
 	"k8s.io/kubectl/pkg/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	smdschema "sigs.k8s.io/structured-merge-diff/v4/schema"
+	"sigs.k8s.io/structured-merge-diff/v4/typed"
 	"sigs.k8s.io/structured-merge-diff/v4/value"
 )
 
@@ -102,6 +104,31 @@ func (r *Resource) FindStatus(slice *apiv1.ResourceSlice) *apiv1.ResourceState {
 	return &state
 }
 
+func (r *Resource) NeedsToBePatched(current *unstructured.Unstructured) bool {
+	if r.Patch == nil || current == nil {
+		return false
+	}
+
+	curjson, err := current.MarshalJSON()
+	if err != nil {
+		return false
+	}
+
+	patchedjson, err := r.Patch.Apply(curjson)
+	if err != nil {
+		return false
+	}
+
+	patched := &unstructured.Unstructured{}
+	err = patched.UnmarshalJSON(patchedjson)
+	if err != nil {
+		return false
+	}
+
+	// TODO: Use SMD
+	return !equality.Semantic.DeepEqual(current, patched)
+}
+
 func (r *Resource) patchSetsDeletionTimestamp() bool {
 	if r.Patch == nil {
 		return false
@@ -125,9 +152,52 @@ func (r *Resource) patchSetsDeletionTimestamp() bool {
 }
 
 func (r *Resource) Merge(old *Resource, current *unstructured.Unstructured, schem *smdschema.Schema, typeref *smdschema.TypeRef) (*unstructured.Unstructured, error) {
-	// TODO: Remember to ignore status
+	// Convert unstructured current state to the SMD value representation
+	currentJS, err := current.MarshalJSON()
+	if err != nil {
+		return nil, fmt.Errorf("converting current state to json: %w", err)
+	}
+	currentVal, err := value.FromJSONFast(currentJS)
+	if err != nil {
+		return nil, fmt.Errorf("constructing current state from json: %w", err)
+	}
 
-	return nil, nil
+	// Convert to typed values
+	typedNew, err := typed.AsTyped(r.value, schem, *typeref)
+	if err != nil {
+		return nil, fmt.Errorf("converting new version to typed: %w", err)
+	}
+	typedCurrent, err := typed.AsTyped(currentVal, schem, *typeref)
+	if err != nil {
+		return nil, fmt.Errorf("converting current state to typed: %w", err)
+	}
+
+	// Perform the three way merge
+	merged, err := typedCurrent.Merge(typedNew)
+	if err != nil {
+		return nil, fmt.Errorf("merging new state into current: %w", err)
+	}
+
+	if old != nil {
+		typedOld, err := typed.AsTyped(old.value, schem, *typeref)
+		if err != nil {
+			return nil, fmt.Errorf("converting old version to typed: %w", err)
+		}
+		toOld, err := typedOld.Compare(typedNew)
+		if err != nil {
+			return nil, fmt.Errorf("comparing new and old states: %w", err)
+		}
+		merged = merged.RemoveItems(toOld.Removed)
+	}
+
+	if cmp, err := merged.Compare(typedCurrent); err == nil && cmp.IsSame() {
+		return nil, nil // no changes
+	}
+
+	// TODO: Prune unknown properties when creating (for consistency)?
+	// TODO: Fall back to addition only merge when schema is disabled
+
+	return &unstructured.Unstructured{Object: merged.AsValue().Unstructured().(map[string]any)}, nil
 }
 
 func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.ResourceSlice, index int) (*Resource, error) {
@@ -156,6 +226,11 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 	res.Ref.Group = parsed.GroupVersionKind().Group
 	res.Ref.Kind = parsed.GetKind()
 	logger = logger.WithValues("resourceKind", parsed.GetKind(), "resourceName", parsed.GetName(), "resourceNamespace", parsed.GetNamespace())
+
+	res.value, err = value.FromJSONFast([]byte(res.Manifest.Manifest))
+	if err != nil {
+		return nil, err
+	}
 
 	if res.Ref.Name == "" || res.Ref.Kind == "" || parsed.GetAPIVersion() == "" {
 		return nil, fmt.Errorf("missing name, kind, or apiVersion")
@@ -231,11 +306,6 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 	}
 	parsed.SetAnnotations(anno)
 	sort.Slice(res.ReadinessChecks, func(i, j int) bool { return res.ReadinessChecks[i].Name < res.ReadinessChecks[j].Name })
-
-	res.value, err = value.FromJSONFast([]byte(res.Manifest.Manifest))
-	if err != nil {
-		return nil, err
-	}
 
 	return res, nil
 }

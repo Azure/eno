@@ -2,14 +2,22 @@ package resource
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/readiness"
+	openapi_v2 "github.com/google/gnostic-models/openapiv2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protojson"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/kube-openapi/pkg/schemaconv"
+	"k8s.io/kube-openapi/pkg/util/proto"
+	"k8s.io/utils/ptr"
+	smdschema "sigs.k8s.io/structured-merge-diff/v4/schema"
 )
 
 var newResourceTests = []struct {
@@ -200,4 +208,147 @@ func TestNewResource(t *testing.T) {
 			tc.Assert(t, r)
 		})
 	}
+}
+
+func TestMergeBasics(t *testing.T) {
+	ctx := context.Background()
+
+	oapiJS, err := os.ReadFile("fixtures/openapi.json")
+	require.NoError(t, err)
+
+	doc := &openapi_v2.Document{}
+	err = protojson.Unmarshal(oapiJS, doc)
+	require.NoError(t, err)
+
+	models, err := proto.NewOpenAPIData(doc)
+	require.NoError(t, err)
+
+	schem, err := schemaconv.ToSchema(models)
+	require.NoError(t, err)
+
+	renv, err := readiness.NewEnv()
+	require.NoError(t, err)
+
+	newSlice := &apiv1.ResourceSlice{
+		Spec: apiv1.ResourceSliceSpec{
+			Resources: []apiv1.Manifest{{
+				Manifest: `{
+				  "apiVersion": "apps/v1",
+				  "kind": "Deployment",
+				  "metadata": {
+				    "name": "foo"
+				  },
+				  "spec": {
+				    "replicas": 2,
+					"template": {
+					  "spec": {
+					    "serviceAccountName": "updated"
+					  }
+				    }
+				  }
+				}`,
+			}},
+		},
+	}
+	newState, err := NewResource(ctx, renv, newSlice, 0)
+	require.NoError(t, err)
+
+	oldSlice := &apiv1.ResourceSlice{
+		Spec: apiv1.ResourceSliceSpec{
+			Resources: []apiv1.Manifest{{
+				Manifest: `{
+				  "apiVersion": "apps/v1",
+				  "kind": "Deployment",
+				  "metadata": {
+				    "name": "foo"
+				  },
+				  "spec": {
+				    "strategy": {
+						"type": "RollingUpdate"
+				    },
+					"template": {
+					  "spec": {
+					    "serviceAccountName": "original"
+					  }
+				    }
+				  }
+				}`,
+			}},
+		},
+	}
+	oldState, err := NewResource(ctx, renv, oldSlice, 0)
+	require.NoError(t, err)
+
+	current := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "foo", "resourceVersion": "1"},
+		"spec": map[string]any{
+			"selector": map[string]any{
+				"matchLabels": map[string]any{"foo": "bar"},
+			},
+			"strategy": map[string]any{"type": "RollingUpdate"},
+			"template": map[string]any{
+				"spec": map[string]any{
+					"serviceAccountName": "original",
+				},
+			},
+		},
+	}}
+
+	expected := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "foo", "resourceVersion": "1"},
+		"spec": map[string]any{
+			"replicas": float64(2),
+			"selector": map[string]any{
+				"matchLabels": map[string]any{"foo": "bar"},
+			},
+			"template": map[string]any{
+				"spec": map[string]any{
+					"serviceAccountName": "updated",
+				},
+			},
+		},
+	}}
+
+	typeRef := &smdschema.TypeRef{NamedType: ptr.To("io.k8s.api.apps.v1.Deployment")}
+
+	// Apply changes
+	merged, err := newState.Merge(oldState, current, schem, typeRef)
+	require.NoError(t, err)
+	require.Equal(t, expected, merged)
+
+	expectedWithoutOldState := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "foo", "resourceVersion": "1"},
+		"spec": map[string]any{
+			"replicas": float64(2),
+			"strategy": map[string]any{
+				"type": "RollingUpdate",
+			},
+			"selector": map[string]any{
+				"matchLabels": map[string]any{"foo": "bar"},
+			},
+			"template": map[string]any{
+				"spec": map[string]any{
+					"serviceAccountName": "updated",
+				},
+			},
+		},
+	}}
+
+	// Supports nil oldState
+	merged, err = newState.Merge(nil, current, schem, typeRef)
+	require.NoError(t, err)
+	require.Equal(t, expectedWithoutOldState, merged)
+
+	// Check idempotence
+	expected.SetResourceVersion("2")                                            // ignore resource version change
+	expected.Object["status"] = map[string]any{"availableReplicas": float64(2)} // ignore status change
+	merged, err = newState.Merge(oldState, expected, schem, typeRef)
+	require.NoError(t, err)
+	assert.Nil(t, merged)
 }

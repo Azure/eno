@@ -2,6 +2,7 @@ package reconciliation
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -260,6 +261,26 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		return false, nil
 	}
 
+	// Apply Eno patches
+	if resource.Patch != nil {
+		if !resource.NeedsToBePatched(current) {
+			return false, nil
+		}
+		patch, err := json.Marshal(&resource.Patch)
+		if err != nil {
+			return false, fmt.Errorf("encoding json patch: %w", err)
+		}
+
+		err = c.upstreamClient.Patch(ctx, current, client.RawPatch(types.JSONPatchType, patch))
+		if err != nil {
+			return false, fmt.Errorf("applying patch: %w", err)
+		}
+
+		reconciliationActions.WithLabelValues("patch").Inc()
+		logger.V(0).Info("patched resource", "resourceVersion", current.GetResourceVersion())
+		return true, nil
+	}
+
 	// Compute a merge patch
 	typeref, schem, err := c.discovery.Get(ctx, resource.GVK)
 	if err != nil {
@@ -278,13 +299,13 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		logger.V(1).Info("INSECURE logging patch", "update", string(js))
 	}
 
-	reconciliationActions.WithLabelValues("patch").Inc()
 	err = c.upstreamClient.Update(ctx, updated)
 	if err != nil {
-		return false, fmt.Errorf("applying patch: %w", err)
+		return false, fmt.Errorf("applying update: %w", err)
 	}
-	logger.V(0).Info("patched resource", "resourceVersion", updated.GetResourceVersion(), "previousResourceVersion", current.GetResourceVersion())
 
+	reconciliationActions.WithLabelValues("patch").Inc()
+	logger.V(0).Info("updated resource", "resourceVersion", updated.GetResourceVersion(), "previousResourceVersion", current.GetResourceVersion())
 	return true, nil
 }
 
