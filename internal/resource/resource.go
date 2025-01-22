@@ -71,7 +71,11 @@ func (r *Resource) Deleted() bool {
 
 func (r *Resource) Parse() (*unstructured.Unstructured, error) {
 	u := &unstructured.Unstructured{}
-	return u, u.UnmarshalJSON([]byte(r.Manifest.Manifest))
+	err := u.UnmarshalJSON([]byte(r.Manifest.Manifest))
+	if u.Object != nil {
+		delete(u.Object, "status")
+	}
+	return u, err
 }
 
 func (r *Resource) FindStatus(slice *apiv1.ResourceSlice) *apiv1.ResourceState {
