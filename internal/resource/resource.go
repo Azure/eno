@@ -74,6 +74,7 @@ func (r *Resource) Parse() (*unstructured.Unstructured, error) {
 	err := u.UnmarshalJSON([]byte(r.Manifest.Manifest))
 	if u.Object != nil {
 		delete(u.Object, "status")
+		u.SetCreationTimestamp(metav1.Time{})
 	}
 	return u, err
 }
@@ -208,7 +209,8 @@ func (r *Resource) Merge(ctx context.Context, old *Resource, current *unstructur
 	}
 
 	// Bail out if no changes are required
-	if cmp, err := merged.Compare(typedCurrent); err == nil && cmp.IsSame() {
+	cmp, err := merged.Compare(typedCurrent)
+	if err == nil && cmp.IsSame() {
 		return nil, true, nil // no changes
 	}
 	copy := &unstructured.Unstructured{Object: merged.AsValue().Unstructured().(map[string]any)}
