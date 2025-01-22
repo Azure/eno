@@ -2,15 +2,21 @@ package resource
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/readiness"
+	openapi_v2 "github.com/google/gnostic-models/openapiv2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protojson"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/kube-openapi/pkg/schemaconv"
+	"k8s.io/kube-openapi/pkg/util/proto"
+	smdschema "sigs.k8s.io/structured-merge-diff/v4/schema"
 )
 
 var newResourceTests = []struct {
@@ -123,18 +129,7 @@ var newResourceTests = []struct {
 		Assert: func(t *testing.T, r *Resource) {
 			assert.Equal(t, schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, r.GVK)
 			assert.Len(t, r.Patch, 1)
-
-			cm := &unstructured.Unstructured{Object: map[string]any{
-				"apiVersion": "v1",
-				"kind":       "ConfigMap",
-				"data":       map[string]any{},
-			}}
 			assert.False(t, r.patchSetsDeletionTimestamp())
-			assert.True(t, r.NeedsToBePatched(cm))
-			assert.True(t, r.NeedsToBePatched(cm))
-
-			cm.Object["data"] = map[string]any{"foo": "bar"}
-			assert.False(t, r.NeedsToBePatched(cm))
 		},
 	},
 	{
@@ -212,4 +207,175 @@ func TestNewResource(t *testing.T) {
 			tc.Assert(t, r)
 		})
 	}
+}
+
+func TestMergeBasics(t *testing.T) {
+	testMergeBasics(t, "io.k8s.api.apps.v1.Deployment")
+}
+
+func TestMergeBasicsNoSchema(t *testing.T) {
+	testMergeBasics(t, "")
+}
+
+func testMergeBasics(t *testing.T, schemaName string) {
+	t.Helper()
+	ctx := context.Background()
+
+	sg := newTestSchemaGetter(t, schemaName)
+
+	renv, err := readiness.NewEnv()
+	require.NoError(t, err)
+
+	newSlice := &apiv1.ResourceSlice{
+		Spec: apiv1.ResourceSliceSpec{
+			Resources: []apiv1.Manifest{{
+				Manifest: `{
+				  "apiVersion": "apps/v1",
+				  "kind": "Deployment",
+				  "metadata": {
+				    "name": "foo"
+				  },
+				  "spec": {
+				    "replicas": 2,
+					"template": {
+					  "spec": {
+					    "serviceAccountName": "updated"
+					  }
+				    }
+				  }
+				}`,
+			}},
+		},
+	}
+	newState, err := NewResource(ctx, renv, newSlice, 0)
+	require.NoError(t, err)
+
+	oldSlice := &apiv1.ResourceSlice{
+		Spec: apiv1.ResourceSliceSpec{
+			Resources: []apiv1.Manifest{{
+				Manifest: `{
+				  "apiVersion": "apps/v1",
+				  "kind": "Deployment",
+				  "metadata": {
+				    "name": "foo"
+				  },
+				  "spec": {
+				    "strategy": {
+						"type": "RollingUpdate"
+				    },
+					"template": {
+					  "spec": {
+					    "serviceAccountName": "original"
+					  }
+				    }
+				  }
+				}`,
+			}},
+		},
+	}
+	oldState, err := NewResource(ctx, renv, oldSlice, 0)
+	require.NoError(t, err)
+
+	current := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "foo", "resourceVersion": "1"},
+		"spec": map[string]any{
+			"selector": map[string]any{
+				"matchLabels": map[string]any{"foo": "bar"},
+			},
+			"strategy": map[string]any{"type": "RollingUpdate"},
+			"template": map[string]any{
+				"spec": map[string]any{
+					"serviceAccountName": "original",
+				},
+			},
+		},
+	}}
+
+	expected := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "foo", "resourceVersion": "1"},
+		"spec": map[string]any{
+			"replicas": int64(2),
+			"selector": map[string]any{
+				"matchLabels": map[string]any{"foo": "bar"},
+			},
+			"template": map[string]any{
+				"spec": map[string]any{
+					"serviceAccountName": "updated",
+				},
+			},
+		},
+	}}
+
+	// Apply changes
+	merged, typed, err := newState.Merge(ctx, oldState, current, sg)
+	require.NoError(t, err)
+	assert.Equal(t, schemaName != "", typed)
+	require.Equal(t, expected, merged)
+
+	expectedWithoutOldState := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "foo", "resourceVersion": "1"},
+		"spec": map[string]any{
+			"replicas": int64(2),
+			"strategy": map[string]any{
+				"type": "RollingUpdate",
+			},
+			"selector": map[string]any{
+				"matchLabels": map[string]any{"foo": "bar"},
+			},
+			"template": map[string]any{
+				"spec": map[string]any{
+					"serviceAccountName": "updated",
+				},
+			},
+		},
+	}}
+
+	// Supports nil oldState
+	merged, typed, err = newState.Merge(ctx, nil, current, sg)
+	require.NoError(t, err)
+	assert.Equal(t, schemaName != "", typed)
+	require.Equal(t, expectedWithoutOldState, merged)
+
+	// Check idempotence
+	expected.SetResourceVersion("2")                                            // ignore resource version change
+	expected.Object["status"] = map[string]any{"availableReplicas": float64(2)} // ignore status change
+	merged, typed, err = newState.Merge(ctx, oldState, expected, sg)
+	require.NoError(t, err)
+	assert.Equal(t, schemaName != "", typed)
+	assert.Nil(t, merged)
+}
+
+type testSchemaGetter struct {
+	name   string
+	schema *smdschema.Schema
+}
+
+func (t *testSchemaGetter) Get(ctx context.Context, gvk schema.GroupVersionKind) (typeref *smdschema.TypeRef, schem *smdschema.Schema, err error) {
+	if t.name == "" {
+		return nil, nil, nil
+	}
+	return &smdschema.TypeRef{NamedType: &t.name}, t.schema, nil
+}
+
+func newTestSchemaGetter(t *testing.T, name string) *testSchemaGetter {
+	oapiJS, err := os.ReadFile("fixtures/openapi.json")
+	require.NoError(t, err)
+
+	doc := &openapi_v2.Document{}
+	err = protojson.Unmarshal(oapiJS, doc)
+	require.NoError(t, err)
+
+	models, err := proto.NewOpenAPIData(doc)
+	require.NoError(t, err)
+
+	schem, err := schemaconv.ToSchema(models)
+	require.NoError(t, err)
+
+	return &testSchemaGetter{schema: schem, name: name}
 }

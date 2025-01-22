@@ -23,11 +23,11 @@ func TestDiscoveryCacheRefill(t *testing.T) {
 		Kind:    "TestKind1",
 	}
 
-	s, err := d.Get(ctx, gvk)
+	s, _, err := d.Get(ctx, gvk)
 	require.NoError(t, err)
 	assert.Nil(t, s)
 
-	s, err = d.Get(ctx, gvk)
+	s, _, err = d.Get(ctx, gvk)
 	require.NoError(t, err)
 	assert.Nil(t, s)
 
@@ -45,11 +45,11 @@ func TestDiscoveryCacheRefillDisabled(t *testing.T) {
 		Kind:    "TestKind1",
 	}
 
-	s, err := d.Get(ctx, gvk)
+	s, _, err := d.Get(ctx, gvk)
 	require.NoError(t, err)
 	assert.Nil(t, s)
 
-	s, err = d.Get(ctx, gvk)
+	s, _, err = d.Get(ctx, gvk)
 	require.NoError(t, err)
 	assert.Nil(t, s)
 
@@ -67,11 +67,11 @@ func TestDiscoveryCacheRefillVersionMissing(t *testing.T) {
 		Kind:    "TestKind1",
 	}
 
-	s, err := d.Get(ctx, gvk)
+	s, _, err := d.Get(ctx, gvk)
 	require.NoError(t, err)
 	assert.Nil(t, s)
 
-	s, err = d.Get(ctx, gvk)
+	s, _, err = d.Get(ctx, gvk)
 	require.NoError(t, err)
 	assert.Nil(t, s)
 
@@ -89,13 +89,13 @@ func TestDiscoveryCacheTimeout(t *testing.T) {
 		Kind:    "TestKind1",
 	}
 
-	s, err := d.Get(ctx, gvk)
+	s, _, err := d.Get(ctx, gvk)
 	require.NoError(t, err)
 	assert.Nil(t, s)
 
 	d.lastFill = d.lastFill.Add(-time.Hour * 25)
 
-	s, err = d.Get(ctx, gvk)
+	s, _, err = d.Get(ctx, gvk)
 	require.NoError(t, err)
 	assert.Nil(t, s)
 
@@ -112,7 +112,7 @@ func TestWithRealApiserver(t *testing.T) {
 		Version: "v1",
 		Kind:    "Pod",
 	}
-	s, err := cache.Get(ctx, gvk)
+	s, _, err := cache.Get(ctx, gvk)
 	require.NoError(t, err)
 	assert.NotNil(t, s)
 }

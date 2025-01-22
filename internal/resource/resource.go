@@ -1,7 +1,6 @@
 package resource
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -20,8 +19,12 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
 	"k8s.io/kubectl/pkg/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	smdschema "sigs.k8s.io/structured-merge-diff/v4/schema"
+	"sigs.k8s.io/structured-merge-diff/v4/typed"
+	"sigs.k8s.io/structured-merge-diff/v4/value"
 )
 
 var patchGVK = schema.GroupVersionKind{
@@ -58,6 +61,8 @@ type Resource struct {
 
 	// DefinedGroupKind is set on CRDs to represent the resource type they define.
 	DefinedGroupKind *schema.GroupKind
+
+	value value.Value
 }
 
 func (r *Resource) Deleted() bool {
@@ -66,29 +71,12 @@ func (r *Resource) Deleted() bool {
 
 func (r *Resource) Parse() (*unstructured.Unstructured, error) {
 	u := &unstructured.Unstructured{}
-	return u, u.UnmarshalJSON([]byte(r.Manifest.Manifest))
-}
-
-// Finalize converts the resource to its struct representation and returns that value encoded as json.
-// If the resource doesn't correspond to a built in type supported by the kubectl scheme the literal manifest is returned.
-//
-// Note that this means Eno is not completely opaque - it has some "understanding" of the built in types.
-// Hopefully we can replace this with the a different approach backed by the openapi spec at some point,
-// like github.com/kubernetes-sigs/structured-merge-diff. But I don't think it works for our purposes at the moment.
-func (r *Resource) Finalize() ([]byte, error) {
-	if r == nil {
-		return nil, nil
+	err := u.UnmarshalJSON([]byte(r.Manifest.Manifest))
+	if u.Object != nil {
+		delete(u.Object, "status")
+		u.SetCreationTimestamp(metav1.Time{})
 	}
-
-	typed, _, err := scheme.Codecs.UniversalDeserializer().Decode([]byte(r.Manifest.Manifest), &r.GVK, nil)
-	if err != nil {
-		// fall back to unstructured
-		return []byte(r.Manifest.Manifest), nil
-	}
-
-	buf := &bytes.Buffer{}
-	err = unstructured.UnstructuredJSONScheme.Encode(typed, buf)
-	return buf.Bytes(), err
+	return u, err
 }
 
 func (r *Resource) FindStatus(slice *apiv1.ResourceSlice) *apiv1.ResourceState {
@@ -145,6 +133,115 @@ func (r *Resource) patchSetsDeletionTimestamp() bool {
 	return dt != ""
 }
 
+type SchemaGetter interface {
+	Get(ctx context.Context, gvk schema.GroupVersionKind) (typeref *smdschema.TypeRef, schem *smdschema.Schema, err error)
+}
+
+// Merge performs a three-way merge between the resource, it's old/previous Resource, and the current state.
+// Falls back to a non-structured three-way merge if the SchemaGetter returns a nil TypeRef.
+func (r *Resource) Merge(ctx context.Context, old *Resource, current *unstructured.Unstructured, sg SchemaGetter) (*unstructured.Unstructured, bool /* typed */, error) {
+	typeref, schem, err := sg.Get(ctx, r.GVK)
+	if err != nil {
+		return nil, false, fmt.Errorf("looking up schema: %w", err)
+	}
+
+	// Naive three-way merge for unknown types
+	if typeref == nil {
+		currentJS, err := current.MarshalJSON()
+		if err != nil {
+			return nil, false, fmt.Errorf("encoding current state: %w", err)
+		}
+
+		var prevJS []byte
+		if old != nil {
+			prevJS = []byte(old.Manifest.Manifest)
+		}
+
+		patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(prevJS, []byte(r.Manifest.Manifest), currentJS)
+		if err != nil {
+			return nil, false, fmt.Errorf("building merge patch: %w", err)
+		}
+		patchedJSON, err := jsonpatch.MergePatch(currentJS, patch)
+		if err != nil {
+			return nil, false, fmt.Errorf("applying merge patch: %w", err)
+		}
+
+		patched := &unstructured.Unstructured{}
+		err = patched.UnmarshalJSON(patchedJSON)
+		if err != nil {
+			return nil, false, fmt.Errorf("parsing patched resource: %w", err)
+		}
+
+		if equality.Semantic.DeepEqual(current, patched) || compareWithScheme(current, patched) {
+			return nil, false, nil
+		}
+		return patched, false, nil
+	}
+
+	// Convert to SMD values
+	currentVal := value.NewValueInterface(current.Object)
+	typedNew, err := typed.AsTyped(r.value, schem, *typeref)
+	if err != nil {
+		return nil, false, fmt.Errorf("converting new version to typed: %w", err)
+	}
+	typedCurrent, err := typed.AsTyped(currentVal, schem, *typeref)
+	if err != nil {
+		return nil, false, fmt.Errorf("converting current state to typed: %w", err)
+	}
+
+	// Merge properties that are set in the new state onto the current state
+	merged, err := typedCurrent.Merge(typedNew)
+	if err != nil {
+		return nil, false, fmt.Errorf("merging new state into current: %w", err)
+	}
+
+	// Prune properties that were present in the old state but not the new
+	if old != nil {
+		typedOld, err := typed.AsTyped(old.value, schem, *typeref)
+		if err != nil {
+			return nil, false, fmt.Errorf("converting old version to typed: %w", err)
+		}
+		toOld, err := typedOld.Compare(typedNew)
+		if err != nil {
+			return nil, false, fmt.Errorf("comparing new and old states: %w", err)
+		}
+		merged = merged.RemoveItems(toOld.Removed)
+	}
+
+	// Bail out if no changes are required
+	cmp, err := merged.Compare(typedCurrent)
+	if err == nil && cmp.IsSame() {
+		return nil, true, nil // no changes
+	}
+	copy := &unstructured.Unstructured{Object: merged.AsValue().Unstructured().(map[string]any)}
+	if compareWithScheme(current, copy) {
+		return nil, true, nil
+	}
+
+	return copy, true, nil
+}
+
+// compareWithScheme uses logic registered with the global scheme to compare two resources.
+// This is necessary for cases in which resources have special comparison logic that isn't represented by the openapi spec.
+// For example: resource quantities.
+func compareWithScheme(a, b *unstructured.Unstructured) bool {
+	aStruct, err := scheme.Scheme.New(a.GroupVersionKind())
+	if err != nil {
+		return false // fail open
+	}
+	bStruct, _ := scheme.Scheme.New(a.GroupVersionKind())
+
+	err = scheme.Scheme.Convert(a, aStruct, nil)
+	if err != nil {
+		return false
+	}
+	err = scheme.Scheme.Convert(b, bStruct, nil)
+	if err != nil {
+		return false
+	}
+	return equality.Semantic.DeepEqual(aStruct, bStruct)
+}
+
 func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.ResourceSlice, index int) (*Resource, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 	resource := slice.Spec.Resources[index]
@@ -164,6 +261,7 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 	if err != nil {
 		return nil, fmt.Errorf("invalid json: %w", err)
 	}
+	res.value = value.NewValueInterface(parsed.Object)
 	gvk := parsed.GroupVersionKind()
 	res.GVK = gvk
 	res.Ref.Name = parsed.GetName()
