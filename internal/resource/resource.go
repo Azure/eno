@@ -152,17 +152,8 @@ func (r *Resource) patchSetsDeletionTimestamp() bool {
 }
 
 func (r *Resource) Merge(old *Resource, current *unstructured.Unstructured, schem *smdschema.Schema, typeref *smdschema.TypeRef) (*unstructured.Unstructured, error) {
-	// Convert unstructured current state to the SMD value representation
-	currentJS, err := current.MarshalJSON()
-	if err != nil {
-		return nil, fmt.Errorf("converting current state to json: %w", err)
-	}
-	currentVal, err := value.FromJSONFast(currentJS)
-	if err != nil {
-		return nil, fmt.Errorf("constructing current state from json: %w", err)
-	}
-
-	// Convert to typed values
+	// Convert to SMD values
+	currentVal := value.NewValueInterface(current.Object)
 	typedNew, err := typed.AsTyped(r.value, schem, *typeref)
 	if err != nil {
 		return nil, fmt.Errorf("converting new version to typed: %w", err)
@@ -172,12 +163,13 @@ func (r *Resource) Merge(old *Resource, current *unstructured.Unstructured, sche
 		return nil, fmt.Errorf("converting current state to typed: %w", err)
 	}
 
-	// Perform the three way merge
+	// Merge properties that are set in the new state onto the current state
 	merged, err := typedCurrent.Merge(typedNew)
 	if err != nil {
 		return nil, fmt.Errorf("merging new state into current: %w", err)
 	}
 
+	// Prune properties that were present in the old state but not the new
 	if old != nil {
 		typedOld, err := typed.AsTyped(old.value, schem, *typeref)
 		if err != nil {
@@ -194,6 +186,7 @@ func (r *Resource) Merge(old *Resource, current *unstructured.Unstructured, sche
 		return nil, nil // no changes
 	}
 
+	// TODO: Invalidate the schema cache once if an unknown property is found
 	// TODO: Prune unknown properties when creating (for consistency)?
 	// TODO: Fall back to addition only merge when schema is disabled
 
