@@ -156,6 +156,7 @@ _Appears in:_
 | `labels` _object (keys:string, values:string)_ |  |  |  |
 | `annotations` _object (keys:string, values:string)_ |  |  |  |
 | `resources` _[ResourceRequirements](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#resourcerequirements-v1-core)_ |  |  |  |
+| `affinity` _[Affinity](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#affinity-v1-core)_ |  |  |  |
 
 
 #### Ref

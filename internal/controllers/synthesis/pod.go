@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strconv"
 
+	"github.com/imdario/mergo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -146,6 +147,41 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 		}
 	}
 
+	// now that taints/toleration defaults have been set, time to merge in any overrides specified on the synthesizer
+	if syn.Spec.PodOverrides.Affinity != nil {
+		// do the merge
+		// easy one first
+		if syn.Spec.PodOverrides.Affinity.PodAffinity != nil {
+			pod.Spec.Affinity.PodAffinity = syn.Spec.PodOverrides.Affinity.PodAffinity
+		}
+
+		// merge in antiaffinity
+		if syn.Spec.PodOverrides.Affinity.PodAntiAffinity != nil {
+			// preferred is specified above so we want to append to that if specified
+			_ = mergo.Merge(&pod.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution,
+				syn.Spec.PodOverrides.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution,
+				mergo.WithAppendSlice,
+				mergo.WithoutDereference,
+				mergo.WithSliceDeepCopy)
+			// we can just overwrite the required one if specified
+			pod.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution = syn.Spec.PodOverrides.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+		}
+
+		if syn.Spec.PodOverrides.Affinity.NodeAffinity != nil {
+			// only need to merge the nodeaffinity terms if cfg.NodeAffinity was specified
+			// easy way to check is if it's not empty
+			if pod.Spec.Affinity.NodeAffinity != nil {
+				_ = mergo.Merge(&pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms,
+					syn.Spec.PodOverrides.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms,
+					mergo.WithAppendSlice,
+					mergo.WithoutDereference,
+					mergo.WithSliceDeepCopy)
+			}
+		} else {
+			// cfg.NodeAffinity was not specified, so we can just overwrite the nodeaffinity
+			pod.Spec.Affinity.NodeAffinity = syn.Spec.PodOverrides.Affinity.NodeAffinity
+		}
+	}
 	return pod
 }
 
