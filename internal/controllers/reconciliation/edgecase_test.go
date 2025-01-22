@@ -235,7 +235,7 @@ func TestPatchStrategyReplace(t *testing.T) {
 		output.Items = []*unstructured.Unstructured{{
 			Object: map[string]any{
 				"apiVersion": "policy/v1",
-				"kind":       "PodDisruptionBudget",
+				"kind":       "PodDisruptionBudget", // only PDBs set patch strategy == replace
 				"metadata": map[string]any{
 					"name":      "test-obj",
 					"namespace": "default",
