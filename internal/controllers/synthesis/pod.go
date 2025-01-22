@@ -167,14 +167,19 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 			pod.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution = syn.Spec.PodOverrides.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution
 		}
 
-		// only need to merge the nodeaffinity terms if cfg.NodeAffinity was specified
-		// easy way to check is if it's not empty
-		if pod.Spec.Affinity.NodeAffinity != nil && syn.Spec.PodOverrides.Affinity.NodeAffinity != nil {
-			_ = mergo.Merge(&pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms,
-				syn.Spec.PodOverrides.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms,
-				mergo.WithAppendSlice,
-				mergo.WithoutDereference,
-				mergo.WithSliceDeepCopy)
+		if syn.Spec.PodOverrides.Affinity.NodeAffinity != nil {
+			// only need to merge the nodeaffinity terms if cfg.NodeAffinity was specified
+			// easy way to check is if it's not empty
+			if pod.Spec.Affinity.NodeAffinity != nil {
+				_ = mergo.Merge(&pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms,
+					syn.Spec.PodOverrides.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms,
+					mergo.WithAppendSlice,
+					mergo.WithoutDereference,
+					mergo.WithSliceDeepCopy)
+			}
+		} else {
+			// cfg.NodeAffinity was not specified, so we can just overwrite the nodeaffinity
+			pod.Spec.Affinity.NodeAffinity = syn.Spec.PodOverrides.Affinity.NodeAffinity
 		}
 	}
 	return pod
