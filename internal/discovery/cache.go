@@ -86,7 +86,7 @@ func (c *Cache) fillUnlocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	schema, err := schemaconv.ToSchema(models)
+	schema, err := schemaconv.ToSchemaWithPreserveUnknownFields(models, true)
 	if err != nil {
 		return err
 	}
