@@ -306,7 +306,16 @@ func TestRemoveProperty(t *testing.T) {
 		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
 	})
 
-	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+	// Sanity check the current state of the CM
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"foo": "bar", "baz": "qux"}, cm.Labels)
+	assert.Equal(t, map[string]string{"foo": "bar", "baz": "qux"}, cm.Data)
+
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn)
 		syn.Spec.Image = "updated"
 		return upstream.Update(ctx, syn)
@@ -320,9 +329,6 @@ func TestRemoveProperty(t *testing.T) {
 	})
 
 	// Prove the resource was reconciled correctly
-	cm := &corev1.ConfigMap{}
-	cm.Name = "test-obj"
-	cm.Namespace = "default"
 	err = mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{"foo": "bar"}, cm.Labels)
