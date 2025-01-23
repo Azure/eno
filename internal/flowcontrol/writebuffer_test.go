@@ -49,6 +49,46 @@ func TestResourceSliceStatusUpdateBasics(t *testing.T) {
 	assert.Equal(t, 0, w.queue.Len())
 }
 
+func TestResourceSliceStatusUpdateOrdering(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+	w := NewResourceSliceWriteBuffer(cli)
+
+	// One resource slice w/ len of 3
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-slice-1"
+	slice.Spec.Resources = make([]apiv1.Manifest, 3)
+	require.NoError(t, cli.Create(ctx, slice))
+
+	// One of the resources has been reconciled twice
+	req := &resource.ManifestRef{}
+	req.Slice.Name = "test-slice-1"
+	req.Index = 1
+	w.PatchStatusAsync(ctx, req, setReconciled())
+
+	req = &resource.ManifestRef{}
+	req.Slice.Name = "test-slice-1"
+	req.Index = 1
+	w.PatchStatusAsync(ctx, req, func(rs *apiv1.ResourceState) *apiv1.ResourceState {
+		if rs != nil && !rs.Reconciled {
+			return nil
+		}
+		return &apiv1.ResourceState{Reconciled: false}
+	})
+
+	// Slice resource's status should reflect the patch
+	w.processQueueItem(ctx)
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(slice), slice))
+	require.Len(t, slice.Status.Resources, 3)
+	assert.False(t, slice.Status.Resources[0].Reconciled)
+	assert.False(t, slice.Status.Resources[1].Reconciled)
+	assert.False(t, slice.Status.Resources[2].Reconciled)
+
+	// All state has been flushed
+	assert.Len(t, w.state, 0)
+	assert.Equal(t, 0, w.queue.Len())
+}
+
 func TestResourceSliceStatusUpdateBatching(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	var updateCalls atomic.Int32
