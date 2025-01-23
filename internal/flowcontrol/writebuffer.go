@@ -102,6 +102,8 @@ func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 	delete(w.state, sliceNSN)
 	w.mut.Unlock()
 
+	// We only forget the rate limit once the update queue for this slice is empty.
+	// So the first write is fast, but a steady stream of writes will be throttled exponentially.
 	if len(updates) == 0 {
 		w.queue.Forget(item)
 		return true // nothing to do
@@ -161,28 +163,7 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN typ
 	}
 
 	// Transform the set of patch funcs into a set of jsonpatch objects
-	unsafeSlice := slice.Status.Resources
-	var patches []*jsonPatch
-	for _, update := range updates {
-		unsafeStatusPtr := &unsafeSlice[update.SlicedResource.Index]
-		patch := update.PatchFn(unsafeStatusPtr)
-		if patch == nil {
-			continue
-		}
-
-		path := fmt.Sprintf("/status/resources/%d", update.SlicedResource.Index)
-		patches = append(patches,
-			&jsonPatch{
-				Op:    "test", // make sure the current state is equal to the state we built the patch against
-				Path:  path,
-				Value: unsafeStatusPtr,
-			},
-			&jsonPatch{
-				Op:    "replace",
-				Path:  path,
-				Value: patch,
-			})
-	}
+	patches := w.buildPatch(slice, updates)
 	if len(patches) == 0 {
 		return true // nothing to do!
 	}
@@ -206,6 +187,34 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN typ
 	logger.V(0).Info(fmt.Sprintf("updated the status of %d resources in slice", len(updates)))
 	sliceStatusUpdates.Inc()
 	return true
+}
+
+func (*ResourceSliceWriteBuffer) buildPatch(slice *apiv1.ResourceSlice, updates []*resourceSliceStatusUpdate) []*jsonPatch {
+	var patches []*jsonPatch
+	unsafeSlice := slice.Status.Resources
+
+	for _, update := range updates {
+		unsafeStatusPtr := &unsafeSlice[update.SlicedResource.Index]
+		patch := update.PatchFn(unsafeStatusPtr)
+		if patch == nil {
+			continue
+		}
+
+		path := fmt.Sprintf("/status/resources/%d", update.SlicedResource.Index)
+		patches = append(patches,
+			&jsonPatch{
+				Op:    "test", // make sure the current state is equal to the state we built the patch against
+				Path:  path,
+				Value: unsafeStatusPtr,
+			},
+			&jsonPatch{
+				Op:    "replace",
+				Path:  path,
+				Value: patch,
+			})
+	}
+
+	return patches
 }
 
 type jsonPatch struct {
