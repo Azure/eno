@@ -170,11 +170,18 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN typ
 			continue
 		}
 
-		patches = append(patches, &jsonPatch{
-			Op:    "replace",
-			Path:  fmt.Sprintf("/status/resources/%d", update.SlicedResource.Index),
-			Value: patch,
-		})
+		path := fmt.Sprintf("/status/resources/%d", update.SlicedResource.Index)
+		patches = append(patches,
+			&jsonPatch{
+				Op:    "test", // make sure the current state is equal to the state we built the patch against
+				Path:  path,
+				Value: unsafeStatusPtr,
+			},
+			&jsonPatch{
+				Op:    "replace",
+				Path:  path,
+				Value: patch,
+			})
 	}
 	if len(patches) == 0 {
 		return true // nothing to do!
