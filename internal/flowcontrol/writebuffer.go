@@ -48,13 +48,14 @@ func NewResourceSliceWriteBuffer(cli client.Client) *ResourceSliceWriteBuffer {
 		client: cli,
 		state:  make(map[types.NamespacedName][]*resourceSliceStatusUpdate),
 		queue: workqueue.NewRateLimitingQueueWithConfig(
-			workqueue.NewItemExponentialFailureRateLimiter(time.Millisecond*250, 30*time.Second),
+			workqueue.NewItemExponentialFailureRateLimiter(time.Millisecond*250, 10*time.Second),
 			workqueue.RateLimitingQueueConfig{
 				Name: "writeBuffer",
 			}),
 	}
 }
 
+// PatchStatusAsync returns after enqueueing the given status update. The update will eventually be applied, or dropped only if the slice is deleted.
 func (w *ResourceSliceWriteBuffer) PatchStatusAsync(ctx context.Context, ref *resource.ManifestRef, patchFn StatusPatchFn) {
 	w.mut.Lock()
 	defer w.mut.Unlock()
@@ -168,6 +169,11 @@ func (*ResourceSliceWriteBuffer) buildPatch(slice *apiv1.ResourceSlice, updates 
 
 	// Initialize the status slice if it's empty
 	if len(unsafeSlice) == 0 {
+		resources := make([]apiv1.ResourceState, len(slice.Spec.Resources))
+		for i := range slice.Spec.Resources {
+			resources[i] = apiv1.ResourceState{}
+		}
+
 		patches = append(patches,
 			&jsonPatch{
 				Op:    "test",
@@ -177,16 +183,8 @@ func (*ResourceSliceWriteBuffer) buildPatch(slice *apiv1.ResourceSlice, updates 
 			&jsonPatch{
 				Op:    "add",
 				Path:  "/status/resources",
-				Value: []any{},
+				Value: resources,
 			})
-
-		for i := range slice.Spec.Resources {
-			patches = append(patches, &jsonPatch{
-				Op:    "add",
-				Path:  fmt.Sprintf("/status/resources/%d", i),
-				Value: map[string]any{},
-			})
-		}
 	}
 
 	for _, update := range updates {
