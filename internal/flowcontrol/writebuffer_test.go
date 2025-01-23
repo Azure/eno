@@ -300,6 +300,59 @@ func FuzzWriteBuffer(f *testing.F) {
 	})
 }
 
+func TestWriteBufferIntegration(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	cli := mgr.GetClient()
+	w := NewResourceSliceWriteBufferForManager(mgr.Manager)
+	mgr.Start(t)
+
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-slice"
+	slice.Namespace = "default"
+	slice.Spec.Resources = make([]apiv1.Manifest, 200)
+	require.NoError(t, cli.Create(ctx, slice))
+
+	for _, index := range []int{20, 31, 42, 155} {
+		req := &resource.ManifestRef{}
+		req.Slice.Name = slice.Name
+		req.Slice.Namespace = slice.Namespace
+		req.Index = index
+		w.PatchStatusAsync(ctx, req, setReconciled())
+	}
+
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, client.ObjectKeyFromObject(slice), slice)
+		return err == nil && len(slice.Status.Resources) == 200
+	})
+
+	for i, rs := range slice.Status.Resources {
+		if i == 20 || i == 31 || i == 42 || i == 155 {
+			assert.True(t, rs.Reconciled)
+		} else {
+			assert.False(t, rs.Reconciled)
+		}
+	}
+
+	for _, index := range []int{12, 12, 24} {
+		req := &resource.ManifestRef{}
+		req.Slice.Name = slice.Name
+		req.Slice.Namespace = slice.Namespace
+		req.Index = index
+		w.PatchStatusAsync(ctx, req, setReconciled())
+	}
+
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(slice), slice)
+		for i, rs := range slice.Status.Resources {
+			if !rs.Reconciled && (i == 20 || i == 31 || i == 42 || i == 155 || i == 12 || i == 24) {
+				return false
+			}
+		}
+		return true
+	})
+}
+
 func setReconciled() StatusPatchFn {
 	return func(rs *apiv1.ResourceState) *apiv1.ResourceState {
 		if rs != nil && rs.Reconciled {

@@ -168,13 +168,13 @@ func (*ResourceSliceWriteBuffer) buildPatch(slice *apiv1.ResourceSlice, updates 
 	unsafeSlice := slice.Status.Resources
 
 	// Initialize the status slice if it's empty
-	if len(unsafeSlice) == 0 {
-		resources := make([]apiv1.ResourceState, len(slice.Spec.Resources))
-		for i := range slice.Spec.Resources {
-			resources[i] = apiv1.ResourceState{}
-		}
-
+	if unsafeSlice == nil {
 		patches = append(patches,
+			&jsonPatch{
+				Op:    "add",
+				Path:  "/status",
+				Value: map[string]any{},
+			},
 			&jsonPatch{
 				Op:    "test",
 				Path:  "/status/resources",
@@ -183,7 +183,7 @@ func (*ResourceSliceWriteBuffer) buildPatch(slice *apiv1.ResourceSlice, updates 
 			&jsonPatch{
 				Op:    "add",
 				Path:  "/status/resources",
-				Value: resources,
+				Value: make([]apiv1.ResourceState, len(slice.Spec.Resources)),
 			})
 	}
 
