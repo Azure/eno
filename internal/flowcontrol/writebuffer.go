@@ -32,9 +32,10 @@ type ResourceSliceWriteBuffer struct {
 
 	// queue items are per-slice.
 	// the state map collects multiple updates per slice to be dispatched by next queue item.
-	mut   sync.Mutex
-	state map[types.NamespacedName][]*resourceSliceStatusUpdate
-	queue workqueue.RateLimitingInterface
+	mut           sync.Mutex
+	state         map[types.NamespacedName][]*resourceSliceStatusUpdate
+	insertionTime map[types.NamespacedName]time.Time
+	queue         workqueue.RateLimitingInterface
 }
 
 func NewResourceSliceWriteBufferForManager(mgr ctrl.Manager) *ResourceSliceWriteBuffer {
@@ -45,8 +46,9 @@ func NewResourceSliceWriteBufferForManager(mgr ctrl.Manager) *ResourceSliceWrite
 
 func NewResourceSliceWriteBuffer(cli client.Client) *ResourceSliceWriteBuffer {
 	return &ResourceSliceWriteBuffer{
-		client: cli,
-		state:  make(map[types.NamespacedName][]*resourceSliceStatusUpdate),
+		client:        cli,
+		state:         make(map[types.NamespacedName][]*resourceSliceStatusUpdate),
+		insertionTime: make(map[types.NamespacedName]time.Time),
 		queue: workqueue.NewRateLimitingQueueWithConfig(
 			workqueue.NewItemExponentialFailureRateLimiter(time.Millisecond*250, 10*time.Second),
 			workqueue.RateLimitingQueueConfig{
@@ -70,11 +72,13 @@ func (w *ResourceSliceWriteBuffer) PatchStatusAsync(ctx context.Context, ref *re
 		}
 	}
 
+	w.insertionTime[key] = time.Now()
 	w.state[key] = append(currentSlice, &resourceSliceStatusUpdate{
 		SlicedResource: ref,
 		PatchFn:        patchFn,
 	})
 	w.queue.Add(key)
+	w.queue.AddRateLimited(key)
 }
 
 func (w *ResourceSliceWriteBuffer) Start(ctx context.Context) error {
@@ -100,7 +104,9 @@ func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 
 	w.mut.Lock()
 	updates := w.state[sliceNSN]
+	insertionTime := w.insertionTime[sliceNSN]
 	delete(w.state, sliceNSN)
+	delete(w.insertionTime, sliceNSN)
 	w.mut.Unlock()
 
 	// We only forget the rate limit once the update queue for this slice is empty.
@@ -110,7 +116,7 @@ func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 		return true // nothing to do
 	}
 
-	if w.updateSlice(ctx, sliceNSN, updates) {
+	if w.updateSlice(ctx, insertionTime, sliceNSN, updates) {
 		w.queue.AddRateLimited(item)
 		return true
 	}
@@ -118,13 +124,14 @@ func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 	// Put the updates back in the buffer to retry on the next attempt
 	w.mut.Lock()
 	w.state[sliceNSN] = append(updates, w.state[sliceNSN]...)
+	w.insertionTime[sliceNSN] = insertionTime
 	w.mut.Unlock()
 	w.queue.AddRateLimited(item)
 
 	return true
 }
 
-func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN types.NamespacedName, updates []*resourceSliceStatusUpdate) bool {
+func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, insertionTime time.Time, sliceNSN types.NamespacedName, updates []*resourceSliceStatusUpdate) bool {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	slice := &apiv1.ResourceSlice{}
@@ -158,7 +165,7 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN typ
 		return false
 	}
 
-	logger.V(0).Info(fmt.Sprintf("updated the status of %d resources in slice", len(updates)))
+	logger.V(0).Info(fmt.Sprintf("updated the status of %d resources in slice", len(updates)), "latency", time.Since(insertionTime).Abs().Milliseconds())
 	sliceStatusUpdates.Inc()
 	return true
 }
@@ -168,7 +175,7 @@ func (*ResourceSliceWriteBuffer) buildPatch(slice *apiv1.ResourceSlice, updates 
 	unsafeSlice := slice.Status.Resources
 
 	// Initialize the status slice if it's empty
-	if unsafeSlice == nil {
+	if len(unsafeSlice) == 0 {
 		patches = append(patches,
 			&jsonPatch{
 				Op:    "add",
