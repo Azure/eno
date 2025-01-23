@@ -250,6 +250,56 @@ func TestResourceSliceStatusUpdateUpdateError(t *testing.T) {
 	assert.Equal(t, 1, w.queue.NumRequeues(key))
 }
 
+func FuzzWriteBuffer(f *testing.F) {
+	f.Add(int8(3), int8(1), true, false)
+	f.Add(int8(5), int8(2), false, false)
+	f.Add(int8(5), int8(2), false, false)
+	f.Add(int8(5), int8(2), true, true)
+
+	f.Fuzz(func(t *testing.T, numResources, updateIndex int8, reconciled, clientError bool) {
+		ctx := testutil.NewContext(t)
+		hasErrored := atomic.Bool{}
+		cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
+			SubResourcePatch: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+				if clientError && !hasErrored.Swap(true) {
+					return errors.New("could be any error")
+				}
+				return nil
+			},
+		})
+		w := NewResourceSliceWriteBuffer(cli)
+
+		slice := &apiv1.ResourceSlice{}
+		slice.Name = "test-slice"
+		slice.Spec.Resources = make([]apiv1.Manifest, max(numResources, 0))
+		require.NoError(t, cli.Create(ctx, slice))
+
+		req := &resource.ManifestRef{}
+		req.Slice.Name = slice.Name
+		req.Index = int(updateIndex)
+		w.PatchStatusAsync(ctx, req, setReconciled())
+
+		for i := 0; i < 5; i++ {
+			w.processQueueItem(ctx)
+			if len(w.state) == 0 && w.queue.Len() == 0 {
+				return
+			}
+		}
+		t.Error("failed to converge")
+
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(slice), slice))
+		require.Len(t, slice.Status.Resources, int(max(numResources, 0)))
+
+		for i, rs := range slice.Status.Resources {
+			if i == int(updateIndex) {
+				assert.True(t, rs.Reconciled)
+			} else {
+				assert.False(t, rs.Reconciled)
+			}
+		}
+	})
+}
+
 func setReconciled() StatusPatchFn {
 	return func(rs *apiv1.ResourceState) *apiv1.ResourceState {
 		if rs != nil && rs.Reconciled {

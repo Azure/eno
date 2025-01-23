@@ -188,6 +188,10 @@ func (*ResourceSliceWriteBuffer) buildPatch(slice *apiv1.ResourceSlice, updates 
 	}
 
 	for _, update := range updates {
+		if update.SlicedResource.Index > len(slice.Spec.Resources)-1 || update.SlicedResource.Index < 0 {
+			continue // impossible
+		}
+
 		var unsafeStatusPtr *apiv1.ResourceState
 		if len(unsafeSlice) <= update.SlicedResource.Index {
 			unsafeStatusPtr = &apiv1.ResourceState{}
