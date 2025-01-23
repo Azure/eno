@@ -91,11 +91,11 @@ func TestResourceSliceStatusUpdateOrdering(t *testing.T) {
 
 func TestResourceSliceStatusUpdateBatching(t *testing.T) {
 	ctx := testutil.NewContext(t)
-	var updateCalls atomic.Int32
+	var patchCalls atomic.Int32
 	cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
-		SubResourceUpdate: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
-			updateCalls.Add(1)
-			return client.SubResource(subResourceName).Update(ctx, obj, opts...)
+		SubResourcePatch: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+			patchCalls.Add(1)
+			return client.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
 		},
 	})
 	w := NewResourceSliceWriteBuffer(cli)
@@ -119,7 +119,7 @@ func TestResourceSliceStatusUpdateBatching(t *testing.T) {
 
 	// Slice resource's status should be correct after a single update
 	w.processQueueItem(ctx)
-	assert.Equal(t, int32(1), updateCalls.Load())
+	assert.Equal(t, int32(1), patchCalls.Load())
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(slice), slice))
 	require.Len(t, slice.Status.Resources, 3)
 	assert.False(t, slice.Status.Resources[0].Reconciled)
@@ -225,7 +225,7 @@ func TestResourceSliceStatusUpdateNoChange(t *testing.T) {
 func TestResourceSliceStatusUpdateUpdateError(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
-		SubResourceUpdate: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+		SubResourcePatch: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
 			return errors.New("could be any error")
 		},
 	})

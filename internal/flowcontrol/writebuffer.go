@@ -135,33 +135,6 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN typ
 		return false
 	}
 
-	// Sending an empty resource version in update requests never returns 404 or 409.
-	// Instead, input validation will fail for every request regardless of the resource's actual state.
-	// So we need to set an incorrect but valid resource version in order for the 404 checks below to work.
-	//
-	// This is necessary because we can't trust that the informer's 404 means the resource is actually deleted - its cache may just be stale.
-	// So we defer the 404 check to the update.
-	if errors.IsNotFound(err) {
-		slice.ResourceVersion = "1"
-	}
-
-	// It's easier to pre-allocate the entire status slice before sending patches
-	// since the "replace" op requires an existing item.
-	if len(slice.Status.Resources) == 0 {
-		copy := slice.DeepCopy()
-		copy.Status.Resources = make([]apiv1.ResourceState, len(slice.Spec.Resources))
-		err = w.client.Status().Update(ctx, copy)
-		if errors.IsNotFound(err) {
-			logger.V(1).Info("resource slice has been deleted - dropping enqueued status update")
-			return true
-		}
-		if err != nil {
-			logger.Error(err, "unable to update resource slice")
-			return false
-		}
-		slice = copy
-	}
-
 	// Transform the set of patch funcs into a set of jsonpatch objects
 	patches := w.buildPatch(slice, updates)
 	if len(patches) == 0 {
@@ -193,8 +166,37 @@ func (*ResourceSliceWriteBuffer) buildPatch(slice *apiv1.ResourceSlice, updates 
 	var patches []*jsonPatch
 	unsafeSlice := slice.Status.Resources
 
+	// Initialize the status slice if it's empty
+	if len(unsafeSlice) == 0 {
+		patches = append(patches,
+			&jsonPatch{
+				Op:    "test",
+				Path:  "/status/resources",
+				Value: nil,
+			},
+			&jsonPatch{
+				Op:    "add",
+				Path:  "/status/resources",
+				Value: []any{},
+			})
+
+		for i := range slice.Spec.Resources {
+			patches = append(patches, &jsonPatch{
+				Op:    "add",
+				Path:  fmt.Sprintf("/status/resources/%d", i),
+				Value: map[string]any{},
+			})
+		}
+	}
+
 	for _, update := range updates {
-		unsafeStatusPtr := &unsafeSlice[update.SlicedResource.Index]
+		var unsafeStatusPtr *apiv1.ResourceState
+		if len(unsafeSlice) <= update.SlicedResource.Index {
+			unsafeStatusPtr = &apiv1.ResourceState{}
+		} else {
+			unsafeStatusPtr = &unsafeSlice[update.SlicedResource.Index]
+		}
+
 		patch := update.PatchFn(unsafeStatusPtr)
 		if patch == nil {
 			continue
