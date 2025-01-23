@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
-	"golang.org/x/time/rate"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
@@ -39,18 +37,18 @@ type ResourceSliceWriteBuffer struct {
 	queue workqueue.RateLimitingInterface
 }
 
-func NewResourceSliceWriteBufferForManager(mgr ctrl.Manager, batchInterval time.Duration, burst int) *ResourceSliceWriteBuffer {
-	r := NewResourceSliceWriteBuffer(mgr.GetClient(), batchInterval, burst)
+func NewResourceSliceWriteBufferForManager(mgr ctrl.Manager) *ResourceSliceWriteBuffer {
+	r := NewResourceSliceWriteBuffer(mgr.GetClient())
 	mgr.Add(r)
 	return r
 }
 
-func NewResourceSliceWriteBuffer(cli client.Client, batchInterval time.Duration, burst int) *ResourceSliceWriteBuffer {
+func NewResourceSliceWriteBuffer(cli client.Client) *ResourceSliceWriteBuffer {
 	return &ResourceSliceWriteBuffer{
 		client: cli,
 		state:  make(map[types.NamespacedName][]*resourceSliceStatusUpdate),
 		queue: workqueue.NewRateLimitingQueueWithConfig(
-			newRateLimiter(batchInterval, burst),
+			workqueue.NewItemExponentialFailureRateLimiter(time.Millisecond*250, 30*time.Second),
 			workqueue.RateLimitingQueueConfig{
 				Name: "writeBuffer",
 			}),
@@ -65,6 +63,7 @@ func (w *ResourceSliceWriteBuffer) PatchStatusAsync(ctx context.Context, ref *re
 	currentSlice := w.state[key]
 	for i, item := range currentSlice {
 		if *item.SlicedResource == *ref {
+			// last write wins
 			currentSlice[i].PatchFn = patchFn
 			return
 		}
@@ -109,7 +108,6 @@ func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 	}
 
 	if w.updateSlice(ctx, sliceNSN, updates) {
-		w.queue.Forget(item)
 		w.queue.AddRateLimited(item)
 		return true
 	}
@@ -207,45 +205,4 @@ type jsonPatch struct {
 	Op    string `json:"op"`
 	Path  string `json:"path"`
 	Value any    `json:"value"`
-}
-
-type rateLimiter struct {
-	failuresLock sync.Mutex
-	failures     map[interface{}]int
-	limiter      *rate.Limiter
-}
-
-func newRateLimiter(batchInterval time.Duration, burst int) workqueue.RateLimiter {
-	return &rateLimiter{
-		failures: map[interface{}]int{},
-		limiter:  rate.NewLimiter(rate.Every(batchInterval), burst),
-	}
-}
-
-func (r *rateLimiter) When(item any) time.Duration {
-	r.failuresLock.Lock()
-	defer r.failuresLock.Unlock()
-
-	failures := r.failures[item]
-	r.failures[item]++
-
-	// Retry quickly a few times using exponential backoff
-	if failures > 0 && failures < 5 {
-		return time.Duration(10*math.Pow(2, float64(failures-1))) * time.Millisecond
-	}
-
-	// Non-error batching interval
-	return r.limiter.Reserve().Delay()
-}
-
-func (r *rateLimiter) NumRequeues(item interface{}) int {
-	r.failuresLock.Lock()
-	defer r.failuresLock.Unlock()
-	return r.failures[item]
-}
-
-func (r *rateLimiter) Forget(item interface{}) {
-	r.failuresLock.Lock()
-	defer r.failuresLock.Unlock()
-	delete(r.failures, item)
 }

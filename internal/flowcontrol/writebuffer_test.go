@@ -5,7 +5,6 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,7 +22,7 @@ import (
 func TestResourceSliceStatusUpdateBasics(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
-	w := NewResourceSliceWriteBuffer(cli, 0, 1)
+	w := NewResourceSliceWriteBuffer(cli)
 
 	// One resource slice w/ len of 3
 	slice := &apiv1.ResourceSlice{}
@@ -47,7 +46,6 @@ func TestResourceSliceStatusUpdateBasics(t *testing.T) {
 
 	// All state has been flushed
 	assert.Len(t, w.state, 0)
-	w.processQueueItem(ctx)
 	assert.Equal(t, 0, w.queue.Len())
 }
 
@@ -60,7 +58,7 @@ func TestResourceSliceStatusUpdateBatching(t *testing.T) {
 			return client.SubResource(subResourceName).Update(ctx, obj, opts...)
 		},
 	})
-	w := NewResourceSliceWriteBuffer(cli, time.Millisecond*2, 1)
+	w := NewResourceSliceWriteBuffer(cli)
 
 	// One resource slice w/ len of 3
 	slice := &apiv1.ResourceSlice{}
@@ -92,7 +90,7 @@ func TestResourceSliceStatusUpdateBatching(t *testing.T) {
 func TestResourceSliceStatusUpdateNoUpdates(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
-	w := NewResourceSliceWriteBuffer(cli, 0, 1)
+	w := NewResourceSliceWriteBuffer(cli)
 
 	// One resource slice w/ len of 3
 	slice := &apiv1.ResourceSlice{}
@@ -118,7 +116,7 @@ func TestResourceSliceStatusUpdateNoUpdates(t *testing.T) {
 func TestResourceSliceStatusUpdateMissingSlice(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
-	w := NewResourceSliceWriteBuffer(cli, 0, 1)
+	w := NewResourceSliceWriteBuffer(cli)
 
 	req := &resource.ManifestRef{}
 	req.Slice.Name = "test-slice-1" // this doesn't exist
@@ -138,7 +136,7 @@ func TestResourceSliceStatusUpdateDeletingSlice(t *testing.T) {
 	cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{SubResourcePatch: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
 		return k8serrors.NewNotFound(schema.GroupResource{}, "anything")
 	}})
-	w := NewResourceSliceWriteBuffer(cli, 0, 1)
+	w := NewResourceSliceWriteBuffer(cli)
 
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = "test-slice-1"
@@ -165,7 +163,7 @@ func TestResourceSliceStatusUpdateNoChange(t *testing.T) {
 			return nil
 		},
 	})
-	w := NewResourceSliceWriteBuffer(cli, 0, 1)
+	w := NewResourceSliceWriteBuffer(cli)
 
 	// One resource slice
 	slice := &apiv1.ResourceSlice{}
@@ -191,7 +189,7 @@ func TestResourceSliceStatusUpdateUpdateError(t *testing.T) {
 			return errors.New("could be any error")
 		},
 	})
-	w := NewResourceSliceWriteBuffer(cli, 0, 1)
+	w := NewResourceSliceWriteBuffer(cli)
 
 	// One resource slice w/ len of 3
 	slice := &apiv1.ResourceSlice{}
@@ -209,7 +207,7 @@ func TestResourceSliceStatusUpdateUpdateError(t *testing.T) {
 	w.processQueueItem(ctx)
 	key := types.NamespacedName{Name: slice.Name}
 	assert.Len(t, w.state[key], 1)
-	assert.Equal(t, 1, w.queue.Len())
+	assert.Equal(t, 1, w.queue.NumRequeues(key))
 }
 
 func setReconciled() StatusPatchFn {
@@ -219,27 +217,4 @@ func setReconciled() StatusPatchFn {
 		}
 		return &apiv1.ResourceState{Reconciled: true}
 	}
-}
-
-func TestRateLimiter(t *testing.T) {
-	r := newRateLimiter(time.Second, 1)
-
-	r.When(234) // purge the first token
-
-	// The first attempt of this item should wait for roughly the batching interval
-	wait := r.When(123)
-	assert.Less(t, wait, 2*time.Second)
-	assert.Greater(t, wait, 600*time.Millisecond)
-
-	// A few retries use exponential backoff
-	for i := 0; i < 4; i++ {
-		wait = r.When(123)
-		assert.Less(t, wait, 100*time.Millisecond, "attempt %d", i)
-		assert.Greater(t, wait, 5*time.Millisecond, "attempt %d", i)
-	}
-
-	// Eventually we fall back to the batching interval
-	wait = r.When(123)
-	assert.Less(t, wait, 2*time.Second)
-	assert.Greater(t, wait, 600*time.Millisecond)
 }
