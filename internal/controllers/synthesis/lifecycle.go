@@ -317,10 +317,9 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 		}
 
 		// Synthesis is done
-		if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.PodCreation != nil {
-			logger = logger.WithValues("latency", time.Since(comp.Status.CurrentSynthesis.PodCreation.Time).Abs().Milliseconds())
-		}
 		if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil {
+			syn := comp.Status.CurrentSynthesis
+			logger = logger.WithValues("latency", syn.Synthesized.Sub(syn.Initialized.Time).Abs().Milliseconds())
 			logger = logger.WithValues("reason", "Success")
 			return logger, &pod, true
 		}
