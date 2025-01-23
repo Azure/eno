@@ -50,7 +50,7 @@ func NewResourceSliceWriteBuffer(cli client.Client) *ResourceSliceWriteBuffer {
 		state:         make(map[types.NamespacedName][]*resourceSliceStatusUpdate),
 		insertionTime: make(map[types.NamespacedName]time.Time),
 		queue: workqueue.NewRateLimitingQueueWithConfig(
-			workqueue.NewItemExponentialFailureRateLimiter(time.Millisecond*250, 10*time.Second),
+			workqueue.NewItemExponentialFailureRateLimiter(time.Millisecond*15, 4*time.Second),
 			workqueue.RateLimitingQueueConfig{
 				Name: "writeBuffer",
 			}),
@@ -77,7 +77,6 @@ func (w *ResourceSliceWriteBuffer) PatchStatusAsync(ctx context.Context, ref *re
 		SlicedResource: ref,
 		PatchFn:        patchFn,
 	})
-	w.queue.Add(key)
 	w.queue.AddRateLimited(key)
 }
 
