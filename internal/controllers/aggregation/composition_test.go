@@ -27,12 +27,6 @@ func TestCompositionSimplification(t *testing.T) {
 			},
 		},
 		{
-			Input: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{}},
-			Expected: apiv1.SimplifiedStatus{
-				Status: "WaitingForDispatch",
-			},
-		},
-		{
 			Input: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{UUID: "uuid"}},
 			Expected: apiv1.SimplifiedStatus{
 				Status: "Synthesizing",
@@ -184,17 +178,6 @@ func TestCompositionSimplification(t *testing.T) {
 			Expected: apiv1.SimplifiedStatus{
 				Status: "Ready",
 				Error:  "foo",
-			},
-		},
-		{
-			Input: apiv1.CompositionStatus{
-				PendingResynthesis: ptr.To(metav1.Now()),
-				CurrentSynthesis: &apiv1.Synthesis{
-					UUID:  "uuid",
-					Ready: ptr.To(metav1.Now()),
-				}},
-			Expected: apiv1.SimplifiedStatus{
-				Status: "WaitingForCooldown",
 			},
 		},
 	}

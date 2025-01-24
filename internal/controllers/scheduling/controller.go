@@ -17,6 +17,8 @@ import (
 	"github.com/Azure/eno/internal/manager"
 )
 
+// TODO: Bring back dispatch-cooldown?
+
 // TODO: Ignore inputs that shouldn't exist?
 
 // TODO: Where to add/remove composition finalizer? Use more than one?
@@ -148,7 +150,7 @@ func (c *controller) dispatchOps(ctx context.Context, queue []*op, inFlight int)
 			logger.Error(err, "unable to dispatch synthesis", "compositionName", op.Composition.Name, "compositionNamespace", op.Composition.Namespace)
 			continue // this is safe - one bad op shouldn't block the entire loop
 		}
-		logger.V(0).Info("dispatched synthesis", "compositionName", op.Composition.Name, "compositionNamespace", op.Composition.Namespace, "deferred", op.Deferred())
+		logger.V(0).Info("dispatched synthesis", "compositionName", op.Composition.Name, "compositionNamespace", op.Composition.Namespace, "reason", op.Reason)
 
 		if !op.Composition.Synthesizing() {
 			inFlight++

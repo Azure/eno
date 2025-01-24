@@ -48,11 +48,13 @@ type CompositionSpec struct {
 }
 
 type CompositionStatus struct {
-	Simplified         *SimplifiedStatus `json:"simplified,omitempty"`
-	CurrentSynthesis   *Synthesis        `json:"currentSynthesis,omitempty"`
-	PreviousSynthesis  *Synthesis        `json:"previousSynthesis,omitempty"`
-	PendingResynthesis *metav1.Time      `json:"pendingResynthesis,omitempty"`
-	InputRevisions     []InputRevisions  `json:"inputRevisions,omitempty"`
+	Simplified        *SimplifiedStatus `json:"simplified,omitempty"`
+	CurrentSynthesis  *Synthesis        `json:"currentSynthesis,omitempty"`
+	PreviousSynthesis *Synthesis        `json:"previousSynthesis,omitempty"`
+	InputRevisions    []InputRevisions  `json:"inputRevisions,omitempty"`
+
+	// deprecated: will be removed soon
+	PendingResynthesis *metav1.Time `json:"pendingResynthesis,omitempty"`
 }
 
 type SimplifiedStatus struct {

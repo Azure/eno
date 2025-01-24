@@ -84,6 +84,17 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
+	// The force resynthesis annotation doesn't mean anything if it doesn't match the current synthesis UUID
+	if anno := comp.GetAnnotations()["eno.azure.io/force-resynthesis"]; anno != "" && anno != comp.Status.GetCurrentSynthesisUUID() {
+		delete(comp.Annotations, "eno.azure.io/force-resynthesis")
+		err = c.client.Update(ctx, comp)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("removing force resynthesis annotation from composition: %w", err)
+		}
+		logger.V(1).Info("removed force resynthesis annotation from composition")
+		return ctrl.Result{}, nil
+	}
+
 	// Delete any unnecessary pods
 	pods := &corev1.PodList{}
 	err = c.client.List(ctx, pods, client.InNamespace(c.config.PodNamespace), client.MatchingFields{

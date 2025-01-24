@@ -9,7 +9,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -22,7 +21,7 @@ import (
 )
 
 // sliceController check if the resource slice is deleted but it is still present in the composition current synthesis status.
-// If yes, it will update the composition PendingResynthesis status to trigger re-synthesis process.
+// If yes, it will update the composition's force resynthesis annotation to trigger re-synthesis process.
 type sliceController struct {
 	client                 client.Client
 	noCacheReader          client.Reader
@@ -97,8 +96,11 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			// The resource slice should not be deleted if it is still referenced by the composition.
 			// Update the composition status to trigger re-synthesis process.
 			logger.V(1).Info("found missing resource slice and start resynthesis", "compositionName", comp.Name, "resourceSliceName", ref.Name)
-			comp.Status.PendingResynthesis = ptr.To(metav1.Now())
-			err = s.client.Status().Update(ctx, comp)
+			if comp.Annotations == nil {
+				comp.Annotations = map[string]string{}
+			}
+			comp.Annotations["eno.azure.io/force-resynthesis"] = comp.Status.CurrentSynthesis.UUID
+			err = s.client.Update(ctx, comp)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("updating composition pending resynthesis: %w", err)
 			}
@@ -134,7 +136,7 @@ func notEligibleForResynthesis(comp *apiv1.Composition) bool {
 	return comp.Status.CurrentSynthesis == nil ||
 		comp.Status.CurrentSynthesis.Synthesized == nil ||
 		comp.DeletionTimestamp != nil ||
-		comp.Status.PendingResynthesis != nil
+		comp.GetAnnotations()["eno.azure.io/force-resynthesis"] != ""
 }
 
 func newCompositionHandler() handler.EventHandler {

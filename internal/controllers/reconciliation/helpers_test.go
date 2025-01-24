@@ -9,7 +9,6 @@ import (
 	"github.com/Azure/eno/internal/controllers/aggregation"
 	"github.com/Azure/eno/internal/controllers/liveness"
 	"github.com/Azure/eno/internal/controllers/replication"
-	"github.com/Azure/eno/internal/controllers/rollout"
 	"github.com/Azure/eno/internal/controllers/scheduling"
 	"github.com/Azure/eno/internal/controllers/selfhealing"
 	"github.com/Azure/eno/internal/controllers/synthesis"
@@ -28,7 +27,6 @@ func registerControllers(t *testing.T, mgr *testutil.Manager) {
 	require.NoError(t, replication.NewSymphonyController(mgr.Manager))
 	require.NoError(t, aggregation.NewSymphonyController(mgr.Manager))
 	require.NoError(t, aggregation.NewCompositionController(mgr.Manager))
-	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
 	require.NoError(t, scheduling.NewController(mgr.Manager, 10))
 	require.NoError(t, liveness.NewNamespaceController(mgr.Manager, 3, time.Second))
 	require.NoError(t, watch.NewController(mgr.Manager))

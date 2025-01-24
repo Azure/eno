@@ -223,3 +223,43 @@ func TestDeferredInput(t *testing.T) {
 	})
 	assert.Greater(t, time.Since(start), time.Millisecond*500, "chilled deferral period")
 }
+
+func TestForcedResynth(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	require.NoError(t, NewController(mgr.Manager, 100))
+	mgr.Start(t)
+	cli := mgr.GetClient()
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	synth.Namespace = "default"
+	require.NoError(t, cli.Create(ctx, synth))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = synth.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	// Initial synthesis
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.UUID != ""
+	})
+	initialUUID := comp.Status.CurrentSynthesis.UUID
+
+	// Set the forced resynthesis annotation
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Annotations = map[string]string{"eno.azure.io/force-resynthesis": initialUUID}
+		return cli.Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	// It should eventually resynthesize
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis.UUID != initialUUID
+	})
+}

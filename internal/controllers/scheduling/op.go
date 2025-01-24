@@ -35,6 +35,11 @@ func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition, cooldown time.Dura
 		return o
 	}
 
+	if uuid := comp.GetAnnotations()["eno.azure.io/force-resynthesis"]; uuid != "" && uuid == syn.UUID {
+		o.Reason = "ForcedResynthesis"
+		return o
+	}
+
 	if syn.ObservedCompositionGeneration != comp.Generation {
 		o.Reason = "CompositionModified"
 		return o
