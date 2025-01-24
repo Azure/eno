@@ -84,6 +84,55 @@ func TestBasics(t *testing.T) {
 	})
 }
 
+func TestSynthRolloutBasics(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	require.NoError(t, NewController(mgr.Manager, 100))
+	mgr.Start(t)
+	cli := mgr.GetClient()
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	synth.Namespace = "default"
+	require.NoError(t, cli.Create(ctx, synth))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = synth.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	// Initial synthesis
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.UUID != ""
+	})
+	initialUUID := comp.Status.CurrentSynthesis.UUID
+
+	// Mark this synthesis as complete for the current synth version
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Status.CurrentSynthesis.Synthesized = ptr.To(metav1.Now())
+		comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration = synth.Generation
+		return cli.Status().Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	// Modify the synth
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(synth), synth)
+		synth.Spec.Command = []string{"new", "value"}
+		return cli.Update(ctx, synth)
+	})
+	require.NoError(t, err)
+
+	// It should eventually resynthesize
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis.UUID != initialUUID
+	})
+}
+
 func TestDeferredInput(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)

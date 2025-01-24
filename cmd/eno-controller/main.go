@@ -110,11 +110,6 @@ func runController() error {
 		return fmt.Errorf("constructing rollout controller: %w", err)
 	}
 
-	err = rollout.NewSynthesizerController(mgr)
-	if err != nil {
-		return fmt.Errorf("constructing rollout controller: %w", err)
-	}
-
 	err = selfhealing.NewSliceController(mgr, selfHealingGracePeriod)
 	if err != nil {
 		return fmt.Errorf("constructing self healing resource slice controller: %w", err)

@@ -19,6 +19,8 @@ import (
 	"github.com/Azure/eno/internal/manager"
 )
 
+// TODO: Ignore inputs that shouldn't exist?
+
 // TODO: Where to add/remove composition finalizer? Use more than one?
 
 var debug = os.Getenv("ENO_SCHEDULING_DEBUG") == "true"
@@ -87,7 +89,7 @@ func (c *controller) buildOps(ctx context.Context, comps *apiv1.CompositionList)
 		if syn == nil || syn.Deferred {
 			continue
 		}
-		if ts := lastDeferredBySynth[comp.Spec.Synthesizer.Name]; syn.Initialized.Time.After(ts) {
+		if ts := lastDeferredBySynth[comp.Spec.Synthesizer.Name]; syn.Initialized != nil && syn.Initialized.Time.After(ts) {
 			lastDeferredBySynth[comp.Spec.Synthesizer.Name] = syn.Initialized.Time
 		}
 	}
@@ -131,6 +133,8 @@ func (c *controller) buildOp(synth *apiv1.Synthesizer, comp *apiv1.Composition, 
 		return nil // wait for inputs
 	}
 
+	// TODO: Skip if deleting?
+
 	syn := comp.Status.CurrentSynthesis
 	o := &op{Composition: comp}
 	if syn == nil {
@@ -155,7 +159,12 @@ func (c *controller) buildOp(synth *apiv1.Synthesizer, comp *apiv1.Composition, 
 		return o
 	}
 
-	// TODO: Check the synthesizer generation, and maybe annotation for self healing
+	if syn.ObservedSynthesizerGeneration > 0 && syn.ObservedSynthesizerGeneration < synth.Generation && !comp.ShouldIgnoreSideEffects() {
+		until := lastDeferredSynth.Add(c.cooldownPeriod)
+		o.DeferredUntil = &until
+		o.Reason = "SynthesizerModified"
+		return o
+	}
 
 	return nil
 }
