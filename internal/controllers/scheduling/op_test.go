@@ -257,7 +257,7 @@ func TestNewOp(t *testing.T) {
 			syn := &apiv1.Synthesizer{}
 			syn.Spec.Refs = []apiv1.Ref{{Key: "foo"}}
 
-			op := newOp(syn, &tc.Composition, 0, time.Time{})
+			op := newOp(syn, &tc.Composition, time.Time{})
 			assert.Equal(t, tc.Expectation, op != nil)
 
 			if tc.Reason != "" {

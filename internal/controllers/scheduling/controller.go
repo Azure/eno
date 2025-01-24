@@ -83,14 +83,11 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 func (c *controller) buildOps(ctx context.Context, comps *apiv1.CompositionList) ([]*op, int) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	lastDeferredBySynth := map[string]time.Time{}
+	var lastDeferral time.Time
 	for _, comp := range comps.Items {
 		syn := comp.Status.CurrentSynthesis
-		if syn == nil || !syn.Deferred {
-			continue
-		}
-		if ts := lastDeferredBySynth[comp.Spec.Synthesizer.Name]; syn.Initialized != nil && syn.Initialized.Time.After(ts) {
-			lastDeferredBySynth[comp.Spec.Synthesizer.Name] = syn.Initialized.Time
+		if syn != nil && syn.Deferred && syn.Initialized != nil && syn.Initialized.Time.After(lastDeferral) {
+			lastDeferral = syn.Initialized.Time
 		}
 	}
 
@@ -117,8 +114,12 @@ func (c *controller) buildOps(ctx context.Context, comps *apiv1.CompositionList)
 			continue
 		}
 
-		// TODO: should there be separate deferrals for synth/input changes?
-		op := newOp(synth, &comp, c.cooldownPeriod, lastDeferredBySynth[comp.Spec.Synthesizer.Name])
+		nextSafeDeferral := lastDeferral.Add(c.cooldownPeriod)
+		if now := time.Now(); nextSafeDeferral.Before(now) {
+			nextSafeDeferral = now
+		}
+
+		op := newOp(synth, &comp, nextSafeDeferral)
 		if op != nil {
 			queue = append(queue, op)
 		}

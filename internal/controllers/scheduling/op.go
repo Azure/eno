@@ -7,7 +7,6 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/google/uuid"
-	"k8s.io/utils/ptr"
 )
 
 func prioritizeOps(queue []*op) {
@@ -20,8 +19,7 @@ type op struct {
 	Reason      string
 }
 
-// TODO: passing both cooldown and lastDeferred is a bit awkward
-func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition, cooldown time.Duration, lastDeferred time.Time) *op {
+func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition, nextSafeDeferral time.Time) *op {
 	if (!comp.InputsExist(synth) || comp.InputsOutOfLockstep(synth)) && comp.DeletionTimestamp == nil {
 		return nil // wait for inputs
 	}
@@ -52,31 +50,21 @@ func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition, cooldown time.Dura
 	}
 	if !deferredEq && syn.Synthesized != nil && !comp.ShouldIgnoreSideEffects() {
 		o.Reason = "DeferredInputModified"
-		o.OnlyAfter = ptr.To(calculateCooldown(cooldown, lastDeferred))
+		o.OnlyAfter = &nextSafeDeferral
 		return o
 	}
 
 	if syn.ObservedSynthesizerGeneration > 0 && syn.ObservedSynthesizerGeneration < synth.Generation && !comp.ShouldIgnoreSideEffects() {
 		o.Reason = "SynthesizerModified"
-		o.OnlyAfter = ptr.To(calculateCooldown(cooldown, lastDeferred))
+		o.OnlyAfter = &nextSafeDeferral
 		return o
 	}
 
 	return nil
 }
 
-func calculateCooldown(period time.Duration, last time.Time) time.Time {
-	t := last.Add(period)
-
-	now := time.Now()
-	if t.Before(now) {
-		return now
-	}
-	return t
-}
-
 func (o *op) LowerPriority(other *op) bool {
-	// TODO: Remember to shuffle items within the same priority to distribute deferred rollouts
+	// TODO: Remember to shuffle items within the same priority
 	return false
 }
 
