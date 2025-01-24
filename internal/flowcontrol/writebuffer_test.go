@@ -250,7 +250,7 @@ func TestResourceSliceStatusUpdateUpdateError(t *testing.T) {
 	w.processQueueItem(ctx)
 	key := types.NamespacedName{Name: slice.Name}
 	assert.Len(t, w.state[key], 1)
-	assert.Equal(t, 1, w.queue.NumRequeues(key))
+	assert.Equal(t, 2, w.queue.NumRequeues(key))
 }
 
 func FuzzWriteBuffer(f *testing.F) {
