@@ -204,11 +204,19 @@ func (c *Composition) InputsOutOfLockstep(synth *Synthesizer) bool {
 	return false
 }
 
+func (c *Composition) Synthesizing() bool {
+	return c.Status.CurrentSynthesis != nil && c.Status.CurrentSynthesis.Synthesized == nil
+}
+
 func (s *CompositionStatus) GetCurrentSynthesisUUID() string {
 	if s.CurrentSynthesis == nil {
 		return ""
 	}
 	return s.CurrentSynthesis.UUID
+}
+
+func (c *CompositionStatus) Zero() bool {
+	return c.Simplified == nil && c.CurrentSynthesis == nil && c.PreviousSynthesis == nil && c.PendingResynthesis == nil
 }
 
 func (c *Composition) ShouldIgnoreSideEffects() bool {

@@ -57,6 +57,8 @@ func (c *synthController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// randomize list to avoid always rolling out changes in the same order
 	rand.Shuffle(len(compList.Items), func(i, j int) { compList.Items[i], compList.Items[j] = compList.Items[j], compList.Items[i] })
 
+	// TODO: do we need pendingresynthesis? How would we set deferred?
+
 	for _, comp := range compList.Items {
 		comp := comp
 		logger := logger.WithValues("compositionName", comp.Name,

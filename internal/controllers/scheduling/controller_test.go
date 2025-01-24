@@ -1,0 +1,425 @@
+package scheduling
+
+import (
+	"testing"
+
+	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/testutil"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+func init() {
+	debug = true
+}
+
+func TestBasics(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	require.NoError(t, NewController(mgr.Manager, 100))
+	mgr.Start(t)
+	cli := mgr.GetClient()
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	synth.Namespace = "default"
+	require.NoError(t, cli.Create(ctx, synth))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = synth.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.UUID != ""
+	})
+	initialUUID := comp.Status.CurrentSynthesis.UUID
+
+	// Mark this synthesis as complete
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Status.CurrentSynthesis.Synthesized = ptr.To(metav1.Now())
+		return cli.Status().Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	// Update the composition
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Spec.SynthesisEnv = []apiv1.EnvVar{{Name: "foo", Value: "bar"}}
+		return cli.Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil &&
+			comp.Status.CurrentSynthesis.UUID != initialUUID &&
+			comp.Status.PreviousSynthesis != nil && comp.Status.PreviousSynthesis.UUID == initialUUID
+	})
+
+	// Remove the current synthesis, things should eventually converge
+	updatedUUID := comp.Status.CurrentSynthesis.UUID
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Status.CurrentSynthesis = nil
+		return cli.Status().Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil &&
+			comp.Status.CurrentSynthesis != nil &&
+			comp.Status.CurrentSynthesis.UUID != initialUUID &&
+			comp.Status.CurrentSynthesis.UUID != updatedUUID &&
+			comp.Status.PreviousSynthesis != nil && comp.Status.PreviousSynthesis.UUID == initialUUID
+	})
+}
+
+func TestBuildOp(t *testing.T) {
+	tests := []struct {
+		Name        string
+		Expectation bool
+		Composition apiv1.Composition
+		Reason      string
+	}{
+		{
+			Name:        "zero value",
+			Expectation: true,
+			Reason:      "InitialSynthesis",
+		},
+		{
+			Name:        "missing input",
+			Expectation: false,
+			Composition: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}},
+				},
+			},
+			Reason: "",
+		},
+		{
+			Name:        "matching input synthesis in progress",
+			Expectation: false,
+			Composition: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						InputRevisions: []apiv1.InputRevisions{{
+							Key: "foo",
+						}},
+					},
+					InputRevisions: []apiv1.InputRevisions{{
+						Key: "foo",
+					}},
+				},
+			},
+			Reason: "",
+		},
+		{
+			Name:        "non-matching composition generation",
+			Expectation: true,
+			Composition: apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Generation: 234,
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						ObservedCompositionGeneration: 123,
+					},
+				},
+			},
+			Reason: "CompositionModified",
+		},
+		{
+			Name:        "matching input synthesis terminal",
+			Expectation: false,
+			Composition: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						InputRevisions: []apiv1.InputRevisions{{
+							Key: "foo",
+						}},
+						Synthesized: ptr.To(metav1.Now()),
+					},
+					InputRevisions: []apiv1.InputRevisions{{
+						Key: "foo",
+					}},
+				},
+			},
+			Reason: "",
+		},
+		{
+			Name:        "non-matching input synthesis terminal",
+			Expectation: true,
+			Composition: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						InputRevisions: []apiv1.InputRevisions{{
+							Key: "foo",
+						}},
+						Synthesized: ptr.To(metav1.Now()),
+					},
+					InputRevisions: []apiv1.InputRevisions{{
+						Key:             "foo",
+						ResourceVersion: "new",
+					}},
+				},
+			},
+			Reason: "InputModified",
+		},
+		{
+			Name:        "non-matching input synthesis terminal ignore side effects",
+			Expectation: false,
+			Composition: apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"eno.azure.io/ignore-side-effects": "true",
+					},
+				},
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						InputRevisions: []apiv1.InputRevisions{{
+							Key: "foo",
+						}},
+						Synthesized: ptr.To(metav1.Now()),
+					},
+					InputRevisions: []apiv1.InputRevisions{{
+						Key:             "foo",
+						ResourceVersion: "new",
+					}},
+				},
+			},
+			Reason: "",
+		},
+		{
+			Name:        "non-matching input synthesis non-terminal",
+			Expectation: false,
+			Composition: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						InputRevisions: []apiv1.InputRevisions{{
+							Key: "foo",
+						}},
+						// Synthesized: ptr.To(metav1.Now()),
+					},
+					InputRevisions: []apiv1.InputRevisions{{
+						Key:             "foo",
+						ResourceVersion: "new",
+					}},
+				},
+			},
+			Reason: "",
+		},
+		{
+			Name:        "non-matching input synthesis deleting",
+			Expectation: true,
+			Composition: apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					DeletionTimestamp: ptr.To(metav1.Now()),
+					Generation:        2,
+				},
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						InputRevisions: []apiv1.InputRevisions{{
+							Key: "foo",
+						}},
+					},
+					InputRevisions: []apiv1.InputRevisions{{
+						Key:             "foo",
+						ResourceVersion: "new",
+					}},
+				},
+			},
+			Reason: "CompositionModified",
+		},
+		{
+			Name:        "missing input synthesis deleting",
+			Expectation: true,
+			Composition: apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					DeletionTimestamp: ptr.To(metav1.Now()),
+					Generation:        2,
+				},
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}},
+				},
+			},
+			Reason: "InitialSynthesis",
+		},
+		{
+			Name:        "revision mismatch",
+			Expectation: false,
+			Composition: apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Generation: 1,
+				},
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}, {Key: "bar"}},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{},
+					InputRevisions: []apiv1.InputRevisions{{
+						Key:             "foo",
+						ResourceVersion: "new",
+						Revision:        ptr.To(123),
+					}, {
+						Key:             "bar",
+						ResourceVersion: "another",
+						Revision:        ptr.To(234),
+					}},
+				},
+			},
+			Reason: "",
+		},
+		{
+			Name:        "revision match",
+			Expectation: true,
+			Composition: apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Generation: 1,
+				},
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{{Key: "foo"}, {Key: "bar"}},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{},
+					InputRevisions: []apiv1.InputRevisions{{
+						Key:             "foo",
+						ResourceVersion: "new",
+						Revision:        ptr.To(123),
+					}, {
+						Key:             "bar",
+						ResourceVersion: "another",
+						Revision:        ptr.To(123),
+					}},
+				},
+			},
+			Reason: "CompositionModified",
+		},
+	}
+
+	c := &controller{}
+	for _, tc := range tests {
+		t.Run(tc.Name, func(t *testing.T) {
+			syn := &apiv1.Synthesizer{}
+			syn.Spec.Refs = []apiv1.Ref{{Key: "foo"}}
+
+			op := c.buildOp(syn, &tc.Composition)
+			assert.Equal(t, tc.Expectation, op != nil)
+
+			if tc.Reason != "" {
+				require.NotNil(t, op)
+				assert.Equal(t, tc.Reason, op.Reason)
+			}
+		})
+	}
+}
+
+func TestInputRevisionsEqual(t *testing.T) {
+	synth := &apiv1.Synthesizer{}
+	synth.Spec.Refs = []apiv1.Ref{{Key: "foo"}, {Key: "bar", Defer: true}, {Key: "baz"}}
+
+	tcs := []struct {
+		name  string
+		a, b  []apiv1.InputRevisions
+		equal bool
+	}{
+		{
+			name:  "just keys",
+			a:     []apiv1.InputRevisions{{Key: "foo"}, {Key: "baz"}},
+			b:     []apiv1.InputRevisions{{Key: "foo"}, {Key: "baz"}},
+			equal: true,
+		},
+		{
+			name:  "resource version mismatch",
+			a:     []apiv1.InputRevisions{{Key: "foo"}, {Key: "baz"}},
+			b:     []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "not-zero"}, {Key: "baz"}},
+			equal: false,
+		},
+		{
+			name:  "revision missong",
+			a:     []apiv1.InputRevisions{{Key: "foo"}, {Key: "baz"}},
+			b:     []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(123)}, {Key: "baz"}},
+			equal: false,
+		},
+		{
+			name:  "revision mismatch",
+			a:     []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(234)}, {Key: "baz"}},
+			b:     []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(123)}, {Key: "baz"}},
+			equal: false,
+		},
+		{
+			name:  "revision match",
+			a:     []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(123)}, {Key: "baz"}},
+			b:     []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(123)}, {Key: "baz"}},
+			equal: true,
+		},
+		{
+			name:  "resource version match",
+			a:     []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "not-zero"}, {Key: "baz"}},
+			b:     []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "not-zero"}, {Key: "baz"}},
+			equal: true,
+		},
+		{
+			name:  "mixed resource version and revision",
+			a:     []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "not-zero"}, {Key: "baz"}},
+			b:     []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(123)}, {Key: "baz"}},
+			equal: false,
+		},
+		{
+			name:  "ignore deferred",
+			a:     []apiv1.InputRevisions{{Key: "foo"}, {Key: "bar"}, {Key: "baz"}},
+			b:     []apiv1.InputRevisions{{Key: "foo"}, {Key: "bar", ResourceVersion: "not-zero"}, {Key: "baz"}},
+			equal: true,
+		},
+		{
+			name:  "mismatched items with deferred",
+			a:     []apiv1.InputRevisions{{Key: "foo"}, {Key: "baz"}},
+			b:     []apiv1.InputRevisions{{Key: "bar"}, {Key: "baz"}},
+			equal: false,
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.equal, inputRevisionsEqual(synth, tc.a, tc.b))
+		})
+	}
+
+}
+
+func TestInputRevisionsEqualOrdering(t *testing.T) {
+	synth := &apiv1.Synthesizer{}
+	synth.Spec.Refs = []apiv1.Ref{{Key: "foo"}, {Key: "bar"}}
+
+	assert.True(t, inputRevisionsEqual(synth, []apiv1.InputRevisions{
+		{Key: "bar"}, {Key: "foo"},
+	}, []apiv1.InputRevisions{
+		{Key: "foo"}, {Key: "bar"},
+	}))
+}

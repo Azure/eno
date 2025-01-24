@@ -18,8 +18,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/controllers/flowcontrol"
 	"github.com/Azure/eno/internal/controllers/rollout"
+	"github.com/Azure/eno/internal/controllers/scheduling"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/testutil"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
@@ -34,7 +34,7 @@ func registerControllers(t *testing.T, mgr *testutil.Manager) {
 	require.NoError(t, NewSliceController(mgr.Manager, time.Minute*5))
 	require.NoError(t, rollout.NewController(mgr.Manager, time.Microsecond*10))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
-	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 1, time.Microsecond*10))
+	require.NoError(t, scheduling.NewController(mgr.Manager, 1))
 	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
 }

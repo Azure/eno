@@ -19,9 +19,9 @@ import (
 
 	v1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/controllers/aggregation"
-	"github.com/Azure/eno/internal/controllers/flowcontrol"
 	"github.com/Azure/eno/internal/controllers/replication"
 	"github.com/Azure/eno/internal/controllers/rollout"
+	"github.com/Azure/eno/internal/controllers/scheduling"
 	"github.com/Azure/eno/internal/controllers/selfhealing"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/controllers/watch"
@@ -160,9 +160,9 @@ func runController() error {
 		return fmt.Errorf("constructing watch controller: %w", err)
 	}
 
-	err = flowcontrol.NewSynthesisConcurrencyLimiter(mgr, concurrencyLimit, dispatchCooldown)
+	err = scheduling.NewController(mgr, concurrencyLimit)
 	if err != nil {
-		return fmt.Errorf("constructing synthesis concurrency limiter : %w", err)
+		return fmt.Errorf("constructing synthesis scheduling controller: %w", err)
 	}
 
 	return mgr.Start(ctx)
