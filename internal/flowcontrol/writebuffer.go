@@ -109,7 +109,7 @@ func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 	delete(w.state, sliceNSN)
 
 	// Limit the number of operations per patch request
-	const max = 1000
+	const max = (10000 / 2) - 2 // 2 ops to initialize status + 2 ops per resource
 	if len(updates) > max {
 		w.state[sliceNSN] = updates[max:]
 		updates = updates[:max]

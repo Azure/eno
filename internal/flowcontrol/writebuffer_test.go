@@ -352,7 +352,40 @@ func TestWriteBufferIntegration(t *testing.T) {
 				return false
 			}
 		}
-		return true
+		return len(slice.Status.Resources) > 0
+	})
+}
+
+func TestWriteBufferIntegrationOpLimit(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	cli := mgr.GetClient()
+	w := NewResourceSliceWriteBufferForManager(mgr.Manager)
+	mgr.Start(t)
+
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-slice-1"
+	slice.Namespace = "default"
+	slice.Spec.Resources = make([]apiv1.Manifest, (10000/2)+1) // two ops per resource (test/replace), one over apiserver limit
+	require.NoError(t, cli.Create(ctx, slice))
+
+	for i := range slice.Spec.Resources {
+		req := &resource.ManifestRef{}
+		req.Slice.Name = "test-slice-1"
+		req.Slice.Namespace = slice.Namespace
+		req.Index = i
+		w.PatchStatusAsync(ctx, req, setReconciled())
+	}
+
+	// It eventually converges even though there are more items than apiserver allows to be patched in a single request
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(slice), slice)
+		for _, rs := range slice.Status.Resources {
+			if !rs.Reconciled {
+				return false
+			}
+		}
+		return len(slice.Status.Resources) > 0
 	})
 }
 
