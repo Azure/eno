@@ -50,7 +50,7 @@ func NewResourceSliceWriteBuffer(cli client.Client) *ResourceSliceWriteBuffer {
 		state:         make(map[types.NamespacedName][]*resourceSliceStatusUpdate),
 		insertionTime: make(map[types.NamespacedName]time.Time),
 		queue: workqueue.NewRateLimitingQueueWithConfig(
-			workqueue.NewItemExponentialFailureRateLimiter(time.Millisecond*15, 4*time.Second),
+			workqueue.NewItemExponentialFailureRateLimiter(time.Millisecond*100, 8*time.Second),
 			workqueue.RateLimitingQueueConfig{
 				Name: "writeBuffer",
 			}),
@@ -77,7 +77,9 @@ func (w *ResourceSliceWriteBuffer) PatchStatusAsync(ctx context.Context, ref *re
 		SlicedResource: ref,
 		PatchFn:        patchFn,
 	})
-	w.queue.AddRateLimited(key)
+	if w.queue.NumRequeues(key) == 0 {
+		w.queue.AddRateLimited(key)
+	}
 }
 
 func (w *ResourceSliceWriteBuffer) Start(ctx context.Context) error {
@@ -102,10 +104,18 @@ func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 	ctx = logr.NewContext(ctx, logger)
 
 	w.mut.Lock()
-	updates := w.state[sliceNSN]
 	insertionTime := w.insertionTime[sliceNSN]
+	updates := w.state[sliceNSN]
 	delete(w.state, sliceNSN)
-	delete(w.insertionTime, sliceNSN)
+
+	// Limit the number of operations per patch request
+	const max = 1000
+	if len(updates) > max {
+		w.state[sliceNSN] = updates[max:]
+		updates = updates[:max]
+	} else {
+		delete(w.insertionTime, sliceNSN)
+	}
 	w.mut.Unlock()
 
 	// We only forget the rate limit once the update queue for this slice is empty.
@@ -142,13 +152,11 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, insertionTim
 		return false
 	}
 
-	// Transform the set of patch funcs into a set of jsonpatch objects
 	patches := w.buildPatch(slice, updates)
 	if len(patches) == 0 {
 		return true // nothing to do!
 	}
 
-	// Encode/apply the patch(es)
 	patchJson, err := json.Marshal(&patches)
 	if err != nil {
 		logger.Error(err, "unable to encode patch")
@@ -173,7 +181,6 @@ func (*ResourceSliceWriteBuffer) buildPatch(slice *apiv1.ResourceSlice, updates 
 	var patches []*jsonPatch
 	unsafeSlice := slice.Status.Resources
 
-	// Initialize the status slice if it's empty
 	if len(unsafeSlice) == 0 {
 		patches = append(patches,
 			&jsonPatch{

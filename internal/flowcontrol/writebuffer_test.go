@@ -3,8 +3,11 @@ package flowcontrol
 import (
 	"context"
 	"errors"
+	"math/rand/v2"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -346,6 +349,71 @@ func TestWriteBufferIntegration(t *testing.T) {
 		cli.Get(ctx, client.ObjectKeyFromObject(slice), slice)
 		for i, rs := range slice.Status.Resources {
 			if !rs.Reconciled && (i == 20 || i == 31 || i == 42 || i == 155 || i == 12 || i == 24) {
+				return false
+			}
+		}
+		return true
+	})
+}
+
+func TestWriteBufferChaos(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	cli := mgr.GetClient()
+	w := NewResourceSliceWriteBufferForManager(mgr.Manager)
+	mgr.Start(t)
+
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-slice"
+	slice.Namespace = "default"
+	slice.Spec.Resources = make([]apiv1.Manifest, 5000)
+	require.NoError(t, cli.Create(ctx, slice))
+
+	lock := sync.Mutex{}
+	expectation := map[int]bool{}
+
+	var wg sync.WaitGroup
+	for j := 0; j < 64; j++ { // concurrent PatchStatusAsync callers
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for k := 0; k < rand.IntN(len(slice.Spec.Resources)/2); k++ {
+				if ctx.Err() != nil {
+					return
+				}
+
+				req := &resource.ManifestRef{}
+				req.Slice.Name = slice.Name
+				req.Slice.Namespace = slice.Namespace
+				req.Index = rand.IntN(len(slice.Spec.Resources) - 1)
+
+				reconciled := rand.IntN(2) == 0
+				w.PatchStatusAsync(ctx, req, func(rs *apiv1.ResourceState) *apiv1.ResourceState {
+					return &apiv1.ResourceState{Reconciled: reconciled}
+				})
+
+				lock.Lock()
+				expectation[int(req.Index)] = reconciled
+				lock.Unlock()
+
+				time.Sleep(time.Millisecond * time.Duration(rand.IntN(30)))
+			}
+		}()
+	}
+	wg.Wait()
+
+	// Wait for buffers to be flushed
+	testutil.Eventually(t, func() bool {
+		w.mut.Lock()
+		defer w.mut.Unlock()
+		return len(w.state) == 0 && w.queue.Len() == 0
+	})
+
+	// Verify the state of the slice
+	testutil.Eventually(t, func() bool {
+		mgr.GetAPIReader().Get(ctx, client.ObjectKeyFromObject(slice), slice)
+		for i, rs := range slice.Status.Resources {
+			if expectation[i] != rs.Reconciled {
 				return false
 			}
 		}
