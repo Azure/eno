@@ -117,7 +117,7 @@ func TestDeferredBasics(t *testing.T) {
 	}}
 	require.NoError(t, cli.Create(ctx, comp))
 
-	// The initial status is populated and pending
+	// The initial status is populated
 	var initialResourceVersion string
 	testutil.Eventually(t, func() bool {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
@@ -127,7 +127,7 @@ func TestDeferredBasics(t *testing.T) {
 
 		rv := comp.Status.InputRevisions[0].ResourceVersion
 		initialResourceVersion = rv
-		return rv != "" && comp.Status.PendingResynthesis != nil
+		return rv != ""
 	})
 
 	// Update the input
@@ -187,7 +187,7 @@ func TestDeferredWithIgnoreSideEffects(t *testing.T) {
 	}}
 	require.NoError(t, cli.Create(ctx, comp))
 
-	// The initial status is populated, but it is not set to pending.
+	// The initial status is populated
 	testutil.Eventually(t, func() bool {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		if len(comp.Status.InputRevisions) != 1 {
@@ -195,7 +195,7 @@ func TestDeferredWithIgnoreSideEffects(t *testing.T) {
 		}
 
 		rv := comp.Status.InputRevisions[0].ResourceVersion
-		return rv != "" && comp.Status.PendingResynthesis == nil
+		return rv != ""
 	})
 }
 func TestCompositionChange(t *testing.T) {

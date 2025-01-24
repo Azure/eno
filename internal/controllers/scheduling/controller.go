@@ -19,19 +19,25 @@ import (
 	"github.com/Azure/eno/internal/manager"
 )
 
-// TODO: Rework pod timeouts / retries to re-enter the scheduler
+// TODO: Where to add/remove composition finalizer? Use more than one?
 
 var debug = os.Getenv("ENO_SCHEDULING_DEBUG") == "true"
 
 type controller struct {
 	client           client.Client
 	concurrencyLimit int
+	cooldownPeriod   time.Duration
 }
 
 func NewController(mgr ctrl.Manager, concurrencyLimit int) error {
+	return NewControllerWithCooldown(mgr, concurrencyLimit, time.Millisecond*500)
+}
+
+func NewControllerWithCooldown(mgr ctrl.Manager, concurrencyLimit int, cooldown time.Duration) error {
 	c := &controller{
 		client:           mgr.GetClient(),
 		concurrencyLimit: concurrencyLimit,
+		cooldownPeriod:   cooldown,
 	}
 	// TODO: Event filter
 	return ctrl.NewControllerManagedBy(mgr).
@@ -55,7 +61,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if debug {
 		logger.V(1).Info("scheduling queue state", "queue", fmt.Sprintf("%+s", queue))
 	}
-	inFlight = c.dispatchOps(ctx, queue, inFlight)
+	more, deferredUntil := c.dispatchOps(ctx, queue, inFlight)
 
 	// TODO: metrics
 	// - Active operation count
@@ -65,13 +71,26 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// - Can we guarantee that every write will hit this controller, and use a counter?
 	// - It might be tricky to juggle the finalizer
 
-	return ctrl.Result{
-		Requeue: len(queue) > 0 && inFlight < c.concurrencyLimit,
-	}, nil
+	res := ctrl.Result{Requeue: more}
+	if deferredUntil != nil {
+		res.RequeueAfter = time.Until(*deferredUntil)
+	}
+	return res, nil
 }
 
 func (c *controller) buildOps(ctx context.Context, comps *apiv1.CompositionList) ([]*op, int) {
 	logger := logr.FromContextOrDiscard(ctx)
+
+	lastDeferredBySynth := map[string]time.Time{}
+	for _, comp := range comps.Items {
+		syn := comp.Status.CurrentSynthesis
+		if syn == nil || syn.Deferred {
+			continue
+		}
+		if ts := lastDeferredBySynth[comp.Spec.Synthesizer.Name]; syn.Initialized.Time.After(ts) {
+			lastDeferredBySynth[comp.Spec.Synthesizer.Name] = syn.Initialized.Time
+		}
+	}
 
 	var inFlight int
 	var queue []*op
@@ -96,7 +115,8 @@ func (c *controller) buildOps(ctx context.Context, comps *apiv1.CompositionList)
 			continue
 		}
 
-		op := c.buildOp(synth, &comp)
+		// TODO: should there be separate deferrals for synth/input changes?
+		op := c.buildOp(synth, &comp, lastDeferredBySynth[comp.Spec.Synthesizer.Name])
 		if op != nil {
 			queue = append(queue, op)
 		}
@@ -106,7 +126,7 @@ func (c *controller) buildOps(ctx context.Context, comps *apiv1.CompositionList)
 	return queue, inFlight
 }
 
-func (c *controller) buildOp(synth *apiv1.Synthesizer, comp *apiv1.Composition) *op {
+func (c *controller) buildOp(synth *apiv1.Synthesizer, comp *apiv1.Composition, lastDeferredSynth time.Time) *op {
 	if (!comp.InputsExist(synth) || comp.InputsOutOfLockstep(synth)) && comp.DeletionTimestamp == nil {
 		return nil // wait for inputs
 	}
@@ -123,22 +143,39 @@ func (c *controller) buildOp(synth *apiv1.Synthesizer, comp *apiv1.Composition) 
 		return o
 	}
 
-	if !inputRevisionsEqual(synth, comp.Status.InputRevisions, syn.InputRevisions) && syn.Synthesized != nil && !comp.ShouldIgnoreSideEffects() {
+	eq, deferredEq := inputRevisionsEqual(synth, comp.Status.InputRevisions, syn.InputRevisions)
+	if !eq && syn.Synthesized != nil && !comp.ShouldIgnoreSideEffects() {
 		o.Reason = "InputModified"
 		return o
 	}
+	if !deferredEq && syn.Synthesized != nil && !comp.ShouldIgnoreSideEffects() {
+		until := lastDeferredSynth.Add(c.cooldownPeriod)
+		o.DeferredUntil = &until
+		o.Reason = "DeferredInputModified"
+		return o
+	}
 
-	// TODO: Check the deferred inputs, synthesizer generation, and maybe annotation for self healing
+	// TODO: Check the synthesizer generation, and maybe annotation for self healing
 
 	return nil
 }
 
-func (c *controller) dispatchOps(ctx context.Context, queue []*op, inFlight int) int {
+func (c *controller) dispatchOps(ctx context.Context, queue []*op, inFlight int) (bool, *time.Time) {
 	logger := logr.FromContextOrDiscard(ctx)
 
+	var nextDeferredOp *time.Time
+	var deferred int
 	for _, op := range queue {
 		if inFlight >= c.concurrencyLimit {
-			return inFlight
+			return false, nil
+		}
+
+		if op.Deferred() {
+			deferred++
+			if nextDeferredOp == nil || op.DeferredUntil.Before(*nextDeferredOp) {
+				nextDeferredOp = op.DeferredUntil
+			}
+			continue
 		}
 
 		if err := c.dispatchOp(ctx, op); err != nil {
@@ -151,7 +188,7 @@ func (c *controller) dispatchOps(ctx context.Context, queue []*op, inFlight int)
 			inFlight++
 		}
 	}
-	return inFlight
+	return len(queue) > 0 && len(queue) > deferred, nextDeferredOp
 }
 
 func (c *controller) dispatchOp(ctx context.Context, op *op) error {
@@ -166,11 +203,12 @@ func prioritizeOps(queue []*op) {
 	sort.Slice(queue, func(i, j int) bool { return queue[i].LowerPriority(queue[j]) })
 }
 
-// inputRevisionsEqual compares two sets of input revisions while ignoring deferred values.
-// TODO: Rename
-func inputRevisionsEqual(synth *apiv1.Synthesizer, a, b []apiv1.InputRevisions) bool {
+// inputRevisionsEqual compares two sets of input revisions and returns two bools:
+// - equal: true when all non-deferred input revisions are equal
+// - deferred: true when all deferred inputs are equal
+func inputRevisionsEqual(synth *apiv1.Synthesizer, a, b []apiv1.InputRevisions) (bool /*equal*/, bool /*deferred*/) {
 	if len(a) != len(b) {
-		return false
+		return false, false
 	}
 
 	refsByKey := map[string]apiv1.Ref{}
@@ -179,18 +217,20 @@ func inputRevisionsEqual(synth *apiv1.Synthesizer, a, b []apiv1.InputRevisions) 
 		refsByKey[ref.Key] = ref
 	}
 
-	// It's important that ordering isn't strict since input revisions may
-	// either be ordered by the corresponding refs, or appended to the slice
-	// as they are discovered by the watch controller
 	sort.Slice(a, func(i, j int) bool { return a[i].Key < a[j].Key })
 	sort.Slice(b, func(i, j int) bool { return b[i].Key < b[j].Key })
 
 	var equal int
+	var deferred int
 	for i, ar := range a {
 		br := b[i]
 		if ref, exists := refsByKey[ar.Key]; exists && ref.Defer {
+			if !ar.Equal(br) {
+				deferred++
+			}
+
 			equal++
-			continue // ignore deferred inputs
+			continue
 		}
 
 		if ar.Equal(br) {
@@ -198,21 +238,30 @@ func inputRevisionsEqual(synth *apiv1.Synthesizer, a, b []apiv1.InputRevisions) 
 		}
 	}
 
-	return equal == len(a)
+	return equal == len(a), deferred == 0
 }
 
 type op struct {
-	Composition *apiv1.Composition
-	Reason      string
+	Composition   *apiv1.Composition
+	DeferredUntil *time.Time
+	Reason        string
 }
 
 func (o *op) LowerPriority(other *op) bool {
-	// TODO: Use some random jitter to ensure that pending rollouts eventually happen?
+	// TODO: Remember to shuffle items within the same priority to distribute deferred rollouts
 	return false
 }
 
+func (o *op) Deferred() bool {
+	return o.DeferredUntil != nil && o.DeferredUntil.After(time.Now())
+}
+
 func (o *op) String() string {
-	return fmt.Sprintf("op{composition=%s/%s, reason=%s}", o.Composition.Namespace, o.Composition.Name, o.Reason)
+	deferredFor := 0
+	if o.DeferredUntil != nil {
+		deferredFor = int(time.Until(*o.DeferredUntil).Abs().Milliseconds())
+	}
+	return fmt.Sprintf("op{composition=%s/%s, reason=%s, deferredFor=%dms}", o.Composition.Namespace, o.Composition.Name, o.Reason, deferredFor)
 }
 
 func (o *op) Patch() any {

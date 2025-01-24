@@ -2,6 +2,7 @@ package scheduling
 
 import (
 	"testing"
+	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/testutil"
@@ -83,7 +84,54 @@ func TestBasics(t *testing.T) {
 	})
 }
 
+func TestDeferredInput(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	require.NoError(t, NewController(mgr.Manager, 100))
+	mgr.Start(t)
+	cli := mgr.GetClient()
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	synth.Namespace = "default"
+	synth.Spec.Refs = []apiv1.Ref{{Key: "foo", Defer: true}}
+	require.NoError(t, cli.Create(ctx, synth))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = synth.Name
+	comp.Spec.Bindings = []apiv1.Binding{{Key: "foo", Resource: apiv1.ResourceBinding{Name: "test-input"}}}
+	require.NoError(t, cli.Create(ctx, comp))
+
+	comp.Status.InputRevisions = []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "bar"}}
+	require.NoError(t, cli.Status().Update(ctx, comp))
+
+	// Initial synthesis
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.UUID != ""
+	})
+	initialUUID := comp.Status.CurrentSynthesis.UUID
+
+	// Mark this synthesis as complete but for the wrong input revision
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Status.CurrentSynthesis.Synthesized = ptr.To(metav1.Now())
+		comp.Status.CurrentSynthesis.InputRevisions = []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "NOT bar"}}
+		return cli.Status().Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	// It should eventually resynthesize
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis.UUID != initialUUID
+	})
+}
+
 func TestBuildOp(t *testing.T) {
+	// TODO: Maybe cover deferred inputs here?
 	tests := []struct {
 		Name        string
 		Expectation bool
@@ -329,7 +377,7 @@ func TestBuildOp(t *testing.T) {
 			syn := &apiv1.Synthesizer{}
 			syn.Spec.Refs = []apiv1.Ref{{Key: "foo"}}
 
-			op := c.buildOp(syn, &tc.Composition)
+			op := c.buildOp(syn, &tc.Composition, time.Time{})
 			assert.Equal(t, tc.Expectation, op != nil)
 
 			if tc.Reason != "" {
@@ -345,69 +393,82 @@ func TestInputRevisionsEqual(t *testing.T) {
 	synth.Spec.Refs = []apiv1.Ref{{Key: "foo"}, {Key: "bar", Defer: true}, {Key: "baz"}}
 
 	tcs := []struct {
-		name  string
-		a, b  []apiv1.InputRevisions
-		equal bool
+		name                 string
+		a, b                 []apiv1.InputRevisions
+		equal, deferredEqual bool
 	}{
 		{
-			name:  "just keys",
-			a:     []apiv1.InputRevisions{{Key: "foo"}, {Key: "baz"}},
-			b:     []apiv1.InputRevisions{{Key: "foo"}, {Key: "baz"}},
-			equal: true,
+			name:          "just keys",
+			a:             []apiv1.InputRevisions{{Key: "foo"}, {Key: "baz"}},
+			b:             []apiv1.InputRevisions{{Key: "foo"}, {Key: "baz"}},
+			equal:         true,
+			deferredEqual: true,
 		},
 		{
-			name:  "resource version mismatch",
-			a:     []apiv1.InputRevisions{{Key: "foo"}, {Key: "baz"}},
-			b:     []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "not-zero"}, {Key: "baz"}},
-			equal: false,
+			name:          "resource version mismatch",
+			a:             []apiv1.InputRevisions{{Key: "foo"}, {Key: "baz"}},
+			b:             []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "not-zero"}, {Key: "baz"}},
+			deferredEqual: true,
 		},
 		{
-			name:  "revision missong",
-			a:     []apiv1.InputRevisions{{Key: "foo"}, {Key: "baz"}},
-			b:     []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(123)}, {Key: "baz"}},
-			equal: false,
+			name:          "revision missong",
+			a:             []apiv1.InputRevisions{{Key: "foo"}, {Key: "baz"}},
+			b:             []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(123)}, {Key: "baz"}},
+			deferredEqual: true,
 		},
 		{
-			name:  "revision mismatch",
-			a:     []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(234)}, {Key: "baz"}},
-			b:     []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(123)}, {Key: "baz"}},
-			equal: false,
+			name:          "revision mismatch",
+			a:             []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(234)}, {Key: "baz"}},
+			b:             []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(123)}, {Key: "baz"}},
+			deferredEqual: true,
 		},
 		{
-			name:  "revision match",
-			a:     []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(123)}, {Key: "baz"}},
-			b:     []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(123)}, {Key: "baz"}},
-			equal: true,
+			name:          "revision match",
+			a:             []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(123)}, {Key: "baz"}},
+			b:             []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(123)}, {Key: "baz"}},
+			equal:         true,
+			deferredEqual: true,
 		},
 		{
-			name:  "resource version match",
-			a:     []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "not-zero"}, {Key: "baz"}},
-			b:     []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "not-zero"}, {Key: "baz"}},
-			equal: true,
+			name:          "resource version match",
+			a:             []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "not-zero"}, {Key: "baz"}},
+			b:             []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "not-zero"}, {Key: "baz"}},
+			equal:         true,
+			deferredEqual: true,
 		},
 		{
-			name:  "mixed resource version and revision",
-			a:     []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "not-zero"}, {Key: "baz"}},
-			b:     []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(123)}, {Key: "baz"}},
-			equal: false,
+			name:          "mixed resource version and revision",
+			a:             []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "not-zero"}, {Key: "baz"}},
+			b:             []apiv1.InputRevisions{{Key: "foo", Revision: ptr.To(123)}, {Key: "baz"}},
+			deferredEqual: true,
 		},
 		{
-			name:  "ignore deferred",
-			a:     []apiv1.InputRevisions{{Key: "foo"}, {Key: "bar"}, {Key: "baz"}},
-			b:     []apiv1.InputRevisions{{Key: "foo"}, {Key: "bar", ResourceVersion: "not-zero"}, {Key: "baz"}},
-			equal: true,
+			name:          "deferred",
+			a:             []apiv1.InputRevisions{{Key: "foo"}, {Key: "bar"}, {Key: "baz"}},
+			b:             []apiv1.InputRevisions{{Key: "foo"}, {Key: "bar", ResourceVersion: "not-zero"}, {Key: "baz"}},
+			equal:         true,
+			deferredEqual: false,
 		},
 		{
-			name:  "mismatched items with deferred",
-			a:     []apiv1.InputRevisions{{Key: "foo"}, {Key: "baz"}},
-			b:     []apiv1.InputRevisions{{Key: "bar"}, {Key: "baz"}},
-			equal: false,
+			name:          "deferred equal",
+			a:             []apiv1.InputRevisions{{Key: "foo"}, {Key: "bar", ResourceVersion: "not-zero"}, {Key: "baz"}},
+			b:             []apiv1.InputRevisions{{Key: "foo"}, {Key: "bar", ResourceVersion: "not-zero"}, {Key: "baz"}},
+			equal:         true,
+			deferredEqual: true,
+		},
+		{
+			name:          "mismatched items with deferred",
+			a:             []apiv1.InputRevisions{{Key: "foo"}, {Key: "baz"}},
+			b:             []apiv1.InputRevisions{{Key: "bar"}, {Key: "baz"}},
+			deferredEqual: true,
 		},
 	}
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.equal, inputRevisionsEqual(synth, tc.a, tc.b))
+			eq, deferred := inputRevisionsEqual(synth, tc.a, tc.b)
+			assert.Equal(t, tc.equal, eq)
+			assert.Equal(t, tc.deferredEqual, deferred)
 		})
 	}
 
@@ -417,9 +478,11 @@ func TestInputRevisionsEqualOrdering(t *testing.T) {
 	synth := &apiv1.Synthesizer{}
 	synth.Spec.Refs = []apiv1.Ref{{Key: "foo"}, {Key: "bar"}}
 
-	assert.True(t, inputRevisionsEqual(synth, []apiv1.InputRevisions{
+	eq, _ := inputRevisionsEqual(synth, []apiv1.InputRevisions{
 		{Key: "bar"}, {Key: "foo"},
 	}, []apiv1.InputRevisions{
 		{Key: "foo"}, {Key: "bar"},
-	}))
+	})
+
+	assert.True(t, eq)
 }

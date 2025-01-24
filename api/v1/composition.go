@@ -216,7 +216,7 @@ func (s *CompositionStatus) GetCurrentSynthesisUUID() string {
 }
 
 func (c *CompositionStatus) Zero() bool {
-	return c.Simplified == nil && c.CurrentSynthesis == nil && c.PreviousSynthesis == nil && c.PendingResynthesis == nil
+	return c.Simplified == nil && c.CurrentSynthesis == nil && c.PreviousSynthesis == nil && c.PendingResynthesis == nil && c.InputRevisions == nil
 }
 
 func (c *Composition) ShouldIgnoreSideEffects() bool {
