@@ -25,7 +25,7 @@ func mapToResource(t *testing.T, res map[string]any) (*unstructured.Unstructured
 }
 
 func setupTestSubject(t *testing.T, mgr *testutil.Manager) *Controller {
-	rswb := flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager, time.Millisecond*10, 1)
+	rswb := flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager)
 	cache := reconstitution.NewCache(mgr.GetClient())
 	rc, err := New(Options{
 		Manager:               mgr.Manager,

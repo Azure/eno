@@ -31,7 +31,6 @@ func main() {
 func run() error {
 	ctx := ctrl.SetupSignalHandler()
 	var (
-		writeBatchInterval           time.Duration
 		debugLogging                 bool
 		remoteKubeconfigFile         string
 		remoteQPS                    float64
@@ -48,7 +47,6 @@ func run() error {
 			DiscoveryRPS: 2,
 		}
 	)
-	flag.DurationVar(&writeBatchInterval, "write-batch-interval", time.Second*5, "The max throughput of composition status updates")
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.StringVar(&remoteKubeconfigFile, "remote-kubeconfig", "", "Path to the kubeconfig of the apiserver where the resources will be reconciled. The config from the environment is used if this is not provided")
 	flag.Float64Var(&remoteQPS, "remote-qps", 50, "Max requests per second to the remote apiserver")
@@ -107,7 +105,7 @@ func run() error {
 
 	// Burst of 1 allows the first write to happen immediately, while subsequent writes are debounced/batched at writeBatchInterval.
 	// This provides quick feedback in cases where only a few resources have changed.
-	writeBuffer := flowcontrol.NewResourceSliceWriteBufferForManager(mgr, writeBatchInterval, 1)
+	writeBuffer := flowcontrol.NewResourceSliceWriteBufferForManager(mgr)
 
 	rCache := reconstitution.NewCache(mgr.GetClient())
 	recOpts.Manager = mgr
