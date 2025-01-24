@@ -30,7 +30,7 @@ type controller struct {
 }
 
 func NewController(mgr ctrl.Manager, concurrencyLimit int) error {
-	return NewControllerWithCooldown(mgr, concurrencyLimit, time.Millisecond*500)
+	return NewControllerWithCooldown(mgr, concurrencyLimit, time.Second*2)
 }
 
 func NewControllerWithCooldown(mgr ctrl.Manager, concurrencyLimit int, cooldown time.Duration) error {
@@ -84,7 +84,7 @@ func (c *controller) buildOps(ctx context.Context, comps *apiv1.CompositionList)
 	lastDeferredBySynth := map[string]time.Time{}
 	for _, comp := range comps.Items {
 		syn := comp.Status.CurrentSynthesis
-		if syn == nil || syn.Deferred {
+		if syn == nil || !syn.Deferred {
 			continue
 		}
 		if ts := lastDeferredBySynth[comp.Spec.Synthesizer.Name]; syn.Initialized != nil && syn.Initialized.Time.After(ts) {
@@ -138,8 +138,8 @@ func (c *controller) dispatchOps(ctx context.Context, queue []*op, inFlight int)
 
 		if op.Deferred() {
 			deferred++
-			if nextDeferredOp == nil || op.DeferredUntil.Before(*nextDeferredOp) {
-				nextDeferredOp = op.DeferredUntil
+			if nextDeferredOp == nil || op.OnlyAfter.Before(*nextDeferredOp) {
+				nextDeferredOp = op.OnlyAfter
 			}
 			continue
 		}
@@ -148,7 +148,7 @@ func (c *controller) dispatchOps(ctx context.Context, queue []*op, inFlight int)
 			logger.Error(err, "unable to dispatch synthesis", "compositionName", op.Composition.Name, "compositionNamespace", op.Composition.Namespace)
 			continue // this is safe - one bad op shouldn't block the entire loop
 		}
-		logger.V(0).Info("dispatched synthesis", "compositionName", op.Composition.Name, "compositionNamespace", op.Composition.Namespace)
+		logger.V(0).Info("dispatched synthesis", "compositionName", op.Composition.Name, "compositionNamespace", op.Composition.Namespace, "deferred", op.Deferred())
 
 		if !op.Composition.Synthesizing() {
 			inFlight++

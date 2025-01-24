@@ -2,9 +2,11 @@ package scheduling
 
 import (
 	"testing"
+	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/testutil"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
@@ -105,9 +107,10 @@ func TestSynthRolloutBasics(t *testing.T) {
 		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.UUID != ""
 	})
-	initialUUID := comp.Status.CurrentSynthesis.UUID
+	lastUUID := comp.Status.CurrentSynthesis.UUID
 
 	// Mark this synthesis as complete for the current synth version
+	start := time.Now()
 	err := retry.RetryOnConflict(testutil.Backoff, func() error {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		comp.Status.CurrentSynthesis.Synthesized = ptr.To(metav1.Now())
@@ -127,8 +130,34 @@ func TestSynthRolloutBasics(t *testing.T) {
 	// It should eventually resynthesize
 	testutil.Eventually(t, func() bool {
 		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentSynthesis.UUID != initialUUID
+		return err == nil && comp.Status.CurrentSynthesis.UUID != lastUUID
 	})
+	assert.Less(t, time.Since(start), time.Millisecond*500, "initial deferral period")
+	lastUUID = comp.Status.CurrentSynthesis.UUID
+
+	// Mark this synthesis as complete for the current synth version
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Status.CurrentSynthesis.Synthesized = ptr.To(metav1.Now())
+		comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration = synth.Generation
+		return cli.Status().Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	// Modify the synth again
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(synth), synth)
+		synth.Spec.Command = []string{"newer", "value"}
+		return cli.Update(ctx, synth)
+	})
+	require.NoError(t, err)
+
+	// It should eventually resynthesize but this time with a cooldown
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis.UUID != lastUUID
+	})
+	assert.Greater(t, time.Since(start), time.Millisecond*500, "chilled deferral period")
 }
 
 func TestDeferredInput(t *testing.T) {
@@ -159,9 +188,10 @@ func TestDeferredInput(t *testing.T) {
 		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.UUID != ""
 	})
-	initialUUID := comp.Status.CurrentSynthesis.UUID
+	lastUUID := comp.Status.CurrentSynthesis.UUID
 
 	// Mark this synthesis as complete but for the wrong input revision
+	start := time.Now()
 	err := retry.RetryOnConflict(testutil.Backoff, func() error {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		comp.Status.CurrentSynthesis.Synthesized = ptr.To(metav1.Now())
@@ -173,6 +203,23 @@ func TestDeferredInput(t *testing.T) {
 	// It should eventually resynthesize
 	testutil.Eventually(t, func() bool {
 		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentSynthesis.UUID != initialUUID
+		return err == nil && comp.Status.CurrentSynthesis.UUID != lastUUID
 	})
+	assert.Less(t, time.Since(start), time.Millisecond*500, "initial deferral period")
+	lastUUID = comp.Status.CurrentSynthesis.UUID
+
+	// One more time
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Status.CurrentSynthesis.Synthesized = ptr.To(metav1.Now())
+		comp.Status.CurrentSynthesis.InputRevisions = []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "NOT bar"}}
+		return cli.Status().Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis.UUID != lastUUID
+	})
+	assert.Greater(t, time.Since(start), time.Millisecond*500, "chilled deferral period")
 }

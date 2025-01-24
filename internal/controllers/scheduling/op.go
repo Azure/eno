@@ -7,6 +7,7 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/google/uuid"
+	"k8s.io/utils/ptr"
 )
 
 func prioritizeOps(queue []*op) {
@@ -14,9 +15,9 @@ func prioritizeOps(queue []*op) {
 }
 
 type op struct {
-	Composition   *apiv1.Composition
-	DeferredUntil *time.Time
-	Reason        string
+	Composition *apiv1.Composition
+	OnlyAfter   *time.Time
+	Reason      string
 }
 
 // TODO: passing both cooldown and lastDeferred is a bit awkward
@@ -45,20 +46,28 @@ func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition, cooldown time.Dura
 		return o
 	}
 	if !deferredEq && syn.Synthesized != nil && !comp.ShouldIgnoreSideEffects() {
-		until := lastDeferred.Add(cooldown)
-		o.DeferredUntil = &until
 		o.Reason = "DeferredInputModified"
+		o.OnlyAfter = ptr.To(calculateCooldown(cooldown, lastDeferred))
 		return o
 	}
 
 	if syn.ObservedSynthesizerGeneration > 0 && syn.ObservedSynthesizerGeneration < synth.Generation && !comp.ShouldIgnoreSideEffects() {
-		until := lastDeferred.Add(cooldown)
-		o.DeferredUntil = &until
 		o.Reason = "SynthesizerModified"
+		o.OnlyAfter = ptr.To(calculateCooldown(cooldown, lastDeferred))
 		return o
 	}
 
 	return nil
+}
+
+func calculateCooldown(period time.Duration, last time.Time) time.Time {
+	t := last.Add(period)
+
+	now := time.Now()
+	if t.Before(now) {
+		return now
+	}
+	return t
 }
 
 func (o *op) LowerPriority(other *op) bool {
@@ -67,15 +76,15 @@ func (o *op) LowerPriority(other *op) bool {
 }
 
 func (o *op) Deferred() bool {
-	return o.DeferredUntil != nil && o.DeferredUntil.After(time.Now())
+	return o.OnlyAfter != nil && o.OnlyAfter.After(time.Now())
 }
 
 func (o *op) String() string {
 	deferredFor := 0
-	if o.DeferredUntil != nil {
-		deferredFor = int(time.Until(*o.DeferredUntil).Abs().Milliseconds())
+	if o.OnlyAfter != nil {
+		deferredFor = max(0, int(time.Until(*o.OnlyAfter).Milliseconds()))
 	}
-	return fmt.Sprintf("op{composition=%s/%s, reason=%s, deferredFor=%dms}", o.Composition.Namespace, o.Composition.Name, o.Reason, deferredFor)
+	return fmt.Sprintf("op{composition=%s/%s, reason=%s, deferred=%t, wait=%dms}", o.Composition.Namespace, o.Composition.Name, o.Reason, o.Deferred(), deferredFor)
 }
 
 func (o *op) Patch() any {
@@ -111,6 +120,7 @@ func (o *op) Patch() any {
 		}
 	}
 
+	deferred := o.OnlyAfter != nil
 	ops = append(ops, map[string]any{
 		"op":   "replace",
 		"path": "/status/currentSynthesis",
@@ -118,6 +128,7 @@ func (o *op) Patch() any {
 			"observedCompositionGeneration": o.Composition.Generation,
 			"initialized":                   time.Now().Format(time.RFC3339),
 			"uuid":                          uuid.NewString(),
+			"deferred":                      deferred,
 		},
 	})
 
