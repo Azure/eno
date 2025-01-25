@@ -132,36 +132,38 @@ func (o *op) Patch() any {
 // - equal: true when all non-deferred input revisions are equal
 // - deferred: true when all deferred inputs are equal
 func inputRevisionsEqual(synth *apiv1.Synthesizer, a, b []apiv1.InputRevisions) (bool /*equal*/, bool /*deferred*/) {
-	if len(a) != len(b) {
-		return false, false
-	}
-
 	refsByKey := map[string]apiv1.Ref{}
 	for _, ref := range synth.Spec.Refs {
 		ref := ref
 		refsByKey[ref.Key] = ref
 	}
 
-	sort.Slice(a, func(i, j int) bool { return a[i].Key < a[j].Key })
-	sort.Slice(b, func(i, j int) bool { return b[i].Key < b[j].Key })
+	bByKey := map[string]apiv1.InputRevisions{}
+	for _, br := range b {
+		bByKey[br.Key] = br
+	}
 
-	var equal int
+	var nonDeferred int
 	var deferred int
-	for i, ar := range a {
-		br := b[i]
-		if ref, exists := refsByKey[ar.Key]; exists && ref.Defer {
-			if !ar.Equal(br) {
-				deferred++
-			}
-
-			equal++
+	for _, ar := range a {
+		ref, exists := refsByKey[ar.Key]
+		if !exists {
 			continue
 		}
 
-		if ar.Equal(br) {
-			equal++
+		br, exists := bByKey[ar.Key]
+		if !exists {
+			continue
+		}
+
+		if !ar.Equal(br) {
+			if ref.Defer {
+				deferred++
+			} else {
+				nonDeferred++
+			}
 		}
 	}
 
-	return equal == len(a), deferred == 0
+	return nonDeferred == 0, deferred == 0
 }

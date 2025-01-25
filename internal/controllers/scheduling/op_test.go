@@ -341,6 +341,28 @@ func TestInputRevisionsEqual(t *testing.T) {
 			a:             []apiv1.InputRevisions{{Key: "foo"}, {Key: "baz"}},
 			b:             []apiv1.InputRevisions{{Key: "bar"}, {Key: "baz"}},
 			deferredEqual: true,
+			equal:         true,
+		},
+		{
+			name:          "extra revision in b",
+			a:             []apiv1.InputRevisions{{Key: "foo"}, {Key: "bar"}, {Key: "baz"}},
+			b:             []apiv1.InputRevisions{{Key: "foo"}, {Key: "bar"}, {Key: "baz"}, {Key: "extra"}},
+			equal:         true,
+			deferredEqual: true,
+		},
+		{
+			name:          "extra revision in a",
+			a:             []apiv1.InputRevisions{{Key: "foo"}, {Key: "bar"}, {Key: "baz"}, {Key: "extra"}},
+			b:             []apiv1.InputRevisions{{Key: "foo"}, {Key: "bar"}, {Key: "baz"}},
+			equal:         true,
+			deferredEqual: true,
+		},
+		{
+			name:          "extra revision matching",
+			a:             []apiv1.InputRevisions{{Key: "foo"}, {Key: "bar"}, {Key: "baz"}, {Key: "extra"}},
+			b:             []apiv1.InputRevisions{{Key: "foo"}, {Key: "bar"}, {Key: "baz"}, {Key: "extra"}},
+			equal:         true,
+			deferredEqual: true,
 		},
 	}
 

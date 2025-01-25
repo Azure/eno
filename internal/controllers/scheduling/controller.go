@@ -17,11 +17,7 @@ import (
 	"github.com/Azure/eno/internal/manager"
 )
 
-// TODO: Bring back dispatch-cooldown?
-
-// TODO: Ignore inputs that shouldn't exist?
-
-// TODO: Where to add/remove composition finalizer? Use more than one?
+// TODO: Where to add/remove composition finalizer? Use more than one? Make sure we check finalizer here if needed
 
 var debug = os.Getenv("ENO_SCHEDULING_DEBUG") == "true"
 
