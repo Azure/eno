@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
-	"golang.org/x/time/rate"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
@@ -34,29 +32,32 @@ type ResourceSliceWriteBuffer struct {
 
 	// queue items are per-slice.
 	// the state map collects multiple updates per slice to be dispatched by next queue item.
-	mut   sync.Mutex
-	state map[types.NamespacedName][]*resourceSliceStatusUpdate
-	queue workqueue.RateLimitingInterface
+	mut           sync.Mutex
+	state         map[types.NamespacedName][]*resourceSliceStatusUpdate
+	insertionTime map[types.NamespacedName]time.Time
+	queue         workqueue.RateLimitingInterface
 }
 
-func NewResourceSliceWriteBufferForManager(mgr ctrl.Manager, batchInterval time.Duration, burst int) *ResourceSliceWriteBuffer {
-	r := NewResourceSliceWriteBuffer(mgr.GetClient(), batchInterval, burst)
+func NewResourceSliceWriteBufferForManager(mgr ctrl.Manager) *ResourceSliceWriteBuffer {
+	r := NewResourceSliceWriteBuffer(mgr.GetClient())
 	mgr.Add(r)
 	return r
 }
 
-func NewResourceSliceWriteBuffer(cli client.Client, batchInterval time.Duration, burst int) *ResourceSliceWriteBuffer {
+func NewResourceSliceWriteBuffer(cli client.Client) *ResourceSliceWriteBuffer {
 	return &ResourceSliceWriteBuffer{
-		client: cli,
-		state:  make(map[types.NamespacedName][]*resourceSliceStatusUpdate),
+		client:        cli,
+		state:         make(map[types.NamespacedName][]*resourceSliceStatusUpdate),
+		insertionTime: make(map[types.NamespacedName]time.Time),
 		queue: workqueue.NewRateLimitingQueueWithConfig(
-			newRateLimiter(batchInterval, burst),
+			workqueue.NewItemExponentialFailureRateLimiter(time.Millisecond*100, 8*time.Second),
 			workqueue.RateLimitingQueueConfig{
 				Name: "writeBuffer",
 			}),
 	}
 }
 
+// PatchStatusAsync returns after enqueueing the given status update. The update will eventually be applied, or dropped only if the slice is deleted.
 func (w *ResourceSliceWriteBuffer) PatchStatusAsync(ctx context.Context, ref *resource.ManifestRef, patchFn StatusPatchFn) {
 	w.mut.Lock()
 	defer w.mut.Unlock()
@@ -65,16 +66,20 @@ func (w *ResourceSliceWriteBuffer) PatchStatusAsync(ctx context.Context, ref *re
 	currentSlice := w.state[key]
 	for i, item := range currentSlice {
 		if *item.SlicedResource == *ref {
+			// last write wins
 			currentSlice[i].PatchFn = patchFn
 			return
 		}
 	}
 
+	w.insertionTime[key] = time.Now()
 	w.state[key] = append(currentSlice, &resourceSliceStatusUpdate{
 		SlicedResource: ref,
 		PatchFn:        patchFn,
 	})
-	w.queue.Add(key)
+	if w.queue.NumRequeues(key) == 0 {
+		w.queue.AddRateLimited(key)
+	}
 }
 
 func (w *ResourceSliceWriteBuffer) Start(ctx context.Context) error {
@@ -99,17 +104,28 @@ func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 	ctx = logr.NewContext(ctx, logger)
 
 	w.mut.Lock()
+	insertionTime := w.insertionTime[sliceNSN]
 	updates := w.state[sliceNSN]
 	delete(w.state, sliceNSN)
+
+	// Limit the number of operations per patch request
+	const max = (10000 / 2) - 2 // 2 ops to initialize status + 2 ops per resource
+	if len(updates) > max {
+		w.state[sliceNSN] = updates[max:]
+		updates = updates[:max]
+	} else {
+		delete(w.insertionTime, sliceNSN)
+	}
 	w.mut.Unlock()
 
+	// We only forget the rate limit once the update queue for this slice is empty.
+	// So the first write is fast, but a steady stream of writes will be throttled exponentially.
 	if len(updates) == 0 {
 		w.queue.Forget(item)
 		return true // nothing to do
 	}
 
-	if w.updateSlice(ctx, sliceNSN, updates) {
-		w.queue.Forget(item)
+	if w.updateSlice(ctx, insertionTime, sliceNSN, updates) {
 		w.queue.AddRateLimited(item)
 		return true
 	}
@@ -117,13 +133,14 @@ func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 	// Put the updates back in the buffer to retry on the next attempt
 	w.mut.Lock()
 	w.state[sliceNSN] = append(updates, w.state[sliceNSN]...)
+	w.insertionTime[sliceNSN] = insertionTime
 	w.mut.Unlock()
 	w.queue.AddRateLimited(item)
 
 	return true
 }
 
-func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN types.NamespacedName, updates []*resourceSliceStatusUpdate) bool {
+func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, insertionTime time.Time, sliceNSN types.NamespacedName, updates []*resourceSliceStatusUpdate) (success bool) {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	slice := &apiv1.ResourceSlice{}
@@ -135,54 +152,11 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN typ
 		return false
 	}
 
-	// Sending an empty resource version in update requests never returns 404 or 409.
-	// Instead, input validation will fail for every request regardless of the resource's actual state.
-	// So we need to set an incorrect but valid resource version in order for the 404 checks below to work.
-	//
-	// This is necessary because we can't trust that the informer's 404 means the resource is actually deleted - its cache may just be stale.
-	// So we defer the 404 check to the update.
-	if errors.IsNotFound(err) {
-		slice.ResourceVersion = "1"
-	}
-
-	// It's easier to pre-allocate the entire status slice before sending patches
-	// since the "replace" op requires an existing item.
-	if len(slice.Status.Resources) == 0 {
-		copy := slice.DeepCopy()
-		copy.Status.Resources = make([]apiv1.ResourceState, len(slice.Spec.Resources))
-		err = w.client.Status().Update(ctx, copy)
-		if errors.IsNotFound(err) {
-			logger.V(1).Info("resource slice has been deleted - dropping enqueued status update")
-			return true
-		}
-		if err != nil {
-			logger.Error(err, "unable to update resource slice")
-			return false
-		}
-		slice = copy
-	}
-
-	// Transform the set of patch funcs into a set of jsonpatch objects
-	unsafeSlice := slice.Status.Resources
-	var patches []*jsonPatch
-	for _, update := range updates {
-		unsafeStatusPtr := &unsafeSlice[update.SlicedResource.Index]
-		patch := update.PatchFn(unsafeStatusPtr)
-		if patch == nil {
-			continue
-		}
-
-		patches = append(patches, &jsonPatch{
-			Op:    "replace",
-			Path:  fmt.Sprintf("/status/resources/%d", update.SlicedResource.Index),
-			Value: patch,
-		})
-	}
+	patches := w.buildPatch(slice, updates)
 	if len(patches) == 0 {
 		return true // nothing to do!
 	}
 
-	// Encode/apply the patch(es)
 	patchJson, err := json.Marshal(&patches)
 	if err != nil {
 		logger.Error(err, "unable to encode patch")
@@ -198,54 +172,70 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, sliceNSN typ
 		return false
 	}
 
-	logger.V(0).Info(fmt.Sprintf("updated the status of %d resources in slice", len(updates)))
+	logger.V(0).Info(fmt.Sprintf("updated the status of %d resources in slice", len(updates)), "latency", time.Since(insertionTime).Abs().Milliseconds())
 	sliceStatusUpdates.Inc()
 	return true
+}
+
+func (*ResourceSliceWriteBuffer) buildPatch(slice *apiv1.ResourceSlice, updates []*resourceSliceStatusUpdate) []*jsonPatch {
+	var patches []*jsonPatch
+	unsafeSlice := slice.Status.Resources
+
+	if len(unsafeSlice) == 0 {
+		patches = append(patches,
+			&jsonPatch{
+				Op:    "add",
+				Path:  "/status",
+				Value: map[string]any{},
+			},
+			&jsonPatch{
+				Op:    "test",
+				Path:  "/status/resources",
+				Value: nil,
+			},
+			&jsonPatch{
+				Op:    "add",
+				Path:  "/status/resources",
+				Value: make([]apiv1.ResourceState, len(slice.Spec.Resources)),
+			})
+	}
+
+	for _, update := range updates {
+		if update.SlicedResource.Index > len(slice.Spec.Resources)-1 || update.SlicedResource.Index < 0 {
+			continue // impossible
+		}
+
+		var unsafeStatusPtr *apiv1.ResourceState
+		if len(unsafeSlice) <= update.SlicedResource.Index {
+			unsafeStatusPtr = &apiv1.ResourceState{}
+		} else {
+			unsafeStatusPtr = &unsafeSlice[update.SlicedResource.Index]
+		}
+
+		patch := update.PatchFn(unsafeStatusPtr)
+		if patch == nil {
+			continue
+		}
+
+		path := fmt.Sprintf("/status/resources/%d", update.SlicedResource.Index)
+		patches = append(patches,
+			&jsonPatch{
+				Op:    "test", // make sure the current state is equal to the state we built the patch against
+				Path:  path,
+				Value: unsafeStatusPtr,
+			},
+			&jsonPatch{
+				Op:    "replace",
+				Path:  path,
+				Value: patch,
+			})
+	}
+
+	return patches
 }
 
 type jsonPatch struct {
 	Op    string `json:"op"`
 	Path  string `json:"path"`
 	Value any    `json:"value"`
-}
-
-type rateLimiter struct {
-	failuresLock sync.Mutex
-	failures     map[interface{}]int
-	limiter      *rate.Limiter
-}
-
-func newRateLimiter(batchInterval time.Duration, burst int) workqueue.RateLimiter {
-	return &rateLimiter{
-		failures: map[interface{}]int{},
-		limiter:  rate.NewLimiter(rate.Every(batchInterval), burst),
-	}
-}
-
-func (r *rateLimiter) When(item any) time.Duration {
-	r.failuresLock.Lock()
-	defer r.failuresLock.Unlock()
-
-	failures := r.failures[item]
-	r.failures[item]++
-
-	// Retry quickly a few times using exponential backoff
-	if failures > 0 && failures < 5 {
-		return time.Duration(10*math.Pow(2, float64(failures-1))) * time.Millisecond
-	}
-
-	// Non-error batching interval
-	return r.limiter.Reserve().Delay()
-}
-
-func (r *rateLimiter) NumRequeues(item interface{}) int {
-	r.failuresLock.Lock()
-	defer r.failuresLock.Unlock()
-	return r.failures[item]
-}
-
-func (r *rateLimiter) Forget(item interface{}) {
-	r.failuresLock.Lock()
-	defer r.failuresLock.Unlock()
-	delete(r.failures, item)
 }
