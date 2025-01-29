@@ -19,9 +19,8 @@ import (
 
 	v1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/controllers/aggregation"
-	"github.com/Azure/eno/internal/controllers/flowcontrol"
 	"github.com/Azure/eno/internal/controllers/replication"
-	"github.com/Azure/eno/internal/controllers/rollout"
+	"github.com/Azure/eno/internal/controllers/scheduling"
 	"github.com/Azure/eno/internal/controllers/selfhealing"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/controllers/watch"
@@ -52,7 +51,6 @@ func runController() error {
 		debugLogging           bool
 		watchdogThres          time.Duration
 		rolloutCooldown        time.Duration
-		dispatchCooldown       time.Duration
 		selfHealingGracePeriod time.Duration
 		taintToleration        string
 		nodeAffinity           string
@@ -70,7 +68,6 @@ func runController() error {
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.DurationVar(&watchdogThres, "watchdog-threshold", time.Minute*3, "How long before the watchdog considers a mid-transition resource to be stuck")
 	flag.DurationVar(&rolloutCooldown, "rollout-cooldown", time.Minute, "How long before an update to a related resource (synthesizer, bindings, etc.) will trigger a second composition's re-synthesis")
-	flag.DurationVar(&dispatchCooldown, "dispatch-cooldown", time.Millisecond*100, "Min period between the dispatch of two syntheses. Effectively limits the rate of pod creation.")
 	flag.StringVar(&taintToleration, "taint-toleration", "", "Node NoSchedule taint to be tolerated by synthesizer pods e.g. taintKey=taintValue to match on value, just taintKey to match on presence of the taint")
 	flag.StringVar(&nodeAffinity, "node-affinity", "", "Synthesizer pods will be created with this required node affinity expression e.g. labelKey=labelValue to match on value, just labelKey to match on presence of the label")
 	flag.IntVar(&concurrencyLimit, "concurrency-limit", 10, "Upper bound on active syntheses. This effectively limits the number of running synthesizer pods spawned by Eno.")
@@ -103,16 +100,6 @@ func runController() error {
 	mgr, err := manager.New(logger, mgrOpts)
 	if err != nil {
 		return fmt.Errorf("constructing manager: %w", err)
-	}
-
-	err = rollout.NewController(mgr, rolloutCooldown)
-	if err != nil {
-		return fmt.Errorf("constructing rollout controller: %w", err)
-	}
-
-	err = rollout.NewSynthesizerController(mgr)
-	if err != nil {
-		return fmt.Errorf("constructing rollout controller: %w", err)
 	}
 
 	err = selfhealing.NewSliceController(mgr, selfHealingGracePeriod)
@@ -160,9 +147,9 @@ func runController() error {
 		return fmt.Errorf("constructing watch controller: %w", err)
 	}
 
-	err = flowcontrol.NewSynthesisConcurrencyLimiter(mgr, concurrencyLimit, dispatchCooldown)
+	err = scheduling.NewController(mgr, concurrencyLimit, rolloutCooldown)
 	if err != nil {
-		return fmt.Errorf("constructing synthesis concurrency limiter : %w", err)
+		return fmt.Errorf("constructing synthesis scheduling controller: %w", err)
 	}
 
 	return mgr.Start(ctx)

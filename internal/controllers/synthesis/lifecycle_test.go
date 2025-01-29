@@ -17,7 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/controllers/flowcontrol"
+	"github.com/Azure/eno/internal/controllers/scheduling"
 	"github.com/Azure/eno/internal/testutil"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 )
@@ -46,7 +46,7 @@ func TestCompositionDeletion(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewSliceCleanupController(mgr.Manager))
-	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10, 0))
+	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -125,7 +125,7 @@ func TestDeleteCompositionWhenSynthesizerMissing(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewSliceCleanupController(mgr.Manager))
-	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10, 0))
+	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -666,258 +666,6 @@ func TestShouldDeletePod(t *testing.T) {
 			assert.Equal(t, tc.PodShouldExist, exists)
 			assert.Equal(t, tc.PodShouldBeDeleted, pod != nil)
 			logger.V(0).Info("logging to see the appended fields for debugging purposes")
-		})
-	}
-}
-
-func TestShouldSwapStates(t *testing.T) {
-	tests := []struct {
-		Name        string
-		Expectation bool
-		Composition apiv1.Composition
-		Reason      string
-	}{
-		{
-			Name:        "zero value",
-			Expectation: true,
-			Reason:      "CurrentSynthesisEmpty && InputsInLockstep",
-		},
-		{
-			Name:        "missing input",
-			Expectation: false,
-			Composition: apiv1.Composition{
-				Spec: apiv1.CompositionSpec{
-					Bindings: []apiv1.Binding{{Key: "foo"}},
-				},
-			},
-			Reason: "",
-		},
-		{
-			Name:        "matching input synthesis in progress",
-			Expectation: false,
-			Composition: apiv1.Composition{
-				Spec: apiv1.CompositionSpec{
-					Bindings: []apiv1.Binding{{Key: "foo"}},
-				},
-				Status: apiv1.CompositionStatus{
-					CurrentSynthesis: &apiv1.Synthesis{
-						InputRevisions: []apiv1.InputRevisions{{
-							Key: "foo",
-						}},
-					},
-					InputRevisions: []apiv1.InputRevisions{{
-						Key: "foo",
-					}},
-				},
-			},
-			Reason: "",
-		},
-		{
-			Name:        "non-matching composition generation",
-			Expectation: true,
-			Composition: apiv1.Composition{
-				ObjectMeta: metav1.ObjectMeta{
-					Generation: 234,
-				},
-				Status: apiv1.CompositionStatus{
-					CurrentSynthesis: &apiv1.Synthesis{
-						ObservedCompositionGeneration: 123,
-					},
-				},
-			},
-			Reason: "CompositionChanged && InputsInLockstep",
-		},
-		{
-			Name:        "matching input synthesis terminal",
-			Expectation: false,
-			Composition: apiv1.Composition{
-				Spec: apiv1.CompositionSpec{
-					Bindings: []apiv1.Binding{{Key: "foo"}},
-				},
-				Status: apiv1.CompositionStatus{
-					CurrentSynthesis: &apiv1.Synthesis{
-						InputRevisions: []apiv1.InputRevisions{{
-							Key: "foo",
-						}},
-						Synthesized: ptr.To(metav1.Now()),
-					},
-					InputRevisions: []apiv1.InputRevisions{{
-						Key: "foo",
-					}},
-				},
-			},
-			Reason: "",
-		},
-		{
-			Name:        "non-matching input synthesis terminal",
-			Expectation: true,
-			Composition: apiv1.Composition{
-				Spec: apiv1.CompositionSpec{
-					Bindings: []apiv1.Binding{{Key: "foo"}},
-				},
-				Status: apiv1.CompositionStatus{
-					CurrentSynthesis: &apiv1.Synthesis{
-						InputRevisions: []apiv1.InputRevisions{{
-							Key: "foo",
-						}},
-						Synthesized: ptr.To(metav1.Now()),
-					},
-					InputRevisions: []apiv1.InputRevisions{{
-						Key:             "foo",
-						ResourceVersion: "new",
-					}},
-				},
-			},
-			Reason: "InputsChanged && InputsInLockstep",
-		},
-		{
-			Name:        "non-matching input synthesis terminal ignore side effects",
-			Expectation: false,
-			Composition: apiv1.Composition{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						"eno.azure.io/ignore-side-effects": "true",
-					},
-				},
-				Spec: apiv1.CompositionSpec{
-					Bindings: []apiv1.Binding{{Key: "foo"}},
-				},
-				Status: apiv1.CompositionStatus{
-					CurrentSynthesis: &apiv1.Synthesis{
-						InputRevisions: []apiv1.InputRevisions{{
-							Key: "foo",
-						}},
-						Synthesized: ptr.To(metav1.Now()),
-					},
-					InputRevisions: []apiv1.InputRevisions{{
-						Key:             "foo",
-						ResourceVersion: "new",
-					}},
-				},
-			},
-			Reason: "",
-		},
-		{
-			Name:        "non-matching input synthesis non-terminal",
-			Expectation: false,
-			Composition: apiv1.Composition{
-				Spec: apiv1.CompositionSpec{
-					Bindings: []apiv1.Binding{{Key: "foo"}},
-				},
-				Status: apiv1.CompositionStatus{
-					CurrentSynthesis: &apiv1.Synthesis{
-						InputRevisions: []apiv1.InputRevisions{{
-							Key: "foo",
-						}},
-						// Synthesized: ptr.To(metav1.Now()),
-					},
-					InputRevisions: []apiv1.InputRevisions{{
-						Key:             "foo",
-						ResourceVersion: "new",
-					}},
-				},
-			},
-			Reason: "",
-		},
-		{
-			Name:        "non-matching input synthesis deleting",
-			Expectation: true,
-			Composition: apiv1.Composition{
-				ObjectMeta: metav1.ObjectMeta{
-					DeletionTimestamp: ptr.To(metav1.Now()),
-					Generation:        2,
-				},
-				Spec: apiv1.CompositionSpec{
-					Bindings: []apiv1.Binding{{Key: "foo"}},
-				},
-				Status: apiv1.CompositionStatus{
-					CurrentSynthesis: &apiv1.Synthesis{
-						InputRevisions: []apiv1.InputRevisions{{
-							Key: "foo",
-						}},
-					},
-					InputRevisions: []apiv1.InputRevisions{{
-						Key:             "foo",
-						ResourceVersion: "new",
-					}},
-				},
-			},
-			Reason: "CompositionChanged && CompositionDeleted",
-		},
-		{
-			Name:        "missing input synthesis deleting",
-			Expectation: true,
-			Composition: apiv1.Composition{
-				ObjectMeta: metav1.ObjectMeta{
-					DeletionTimestamp: ptr.To(metav1.Now()),
-					Generation:        2,
-				},
-				Spec: apiv1.CompositionSpec{
-					Bindings: []apiv1.Binding{{Key: "foo"}},
-				},
-				Status: apiv1.CompositionStatus{},
-			},
-			Reason: "CurrentSynthesisEmpty && CompositionDeleted",
-		},
-		{
-			Name:        "revision mismatch",
-			Expectation: false,
-			Composition: apiv1.Composition{
-				ObjectMeta: metav1.ObjectMeta{
-					Generation: 1,
-				},
-				Spec: apiv1.CompositionSpec{
-					Bindings: []apiv1.Binding{{Key: "foo"}, {Key: "bar"}},
-				},
-				Status: apiv1.CompositionStatus{
-					CurrentSynthesis: &apiv1.Synthesis{},
-					InputRevisions: []apiv1.InputRevisions{{
-						Key:             "foo",
-						ResourceVersion: "new",
-						Revision:        ptr.To(123),
-					}, {
-						Key:             "bar",
-						ResourceVersion: "another",
-						Revision:        ptr.To(234),
-					}},
-				},
-			},
-			Reason: "",
-		},
-		{
-			Name:        "revision match",
-			Expectation: true,
-			Composition: apiv1.Composition{
-				ObjectMeta: metav1.ObjectMeta{
-					Generation: 1,
-				},
-				Spec: apiv1.CompositionSpec{
-					Bindings: []apiv1.Binding{{Key: "foo"}, {Key: "bar"}},
-				},
-				Status: apiv1.CompositionStatus{
-					CurrentSynthesis: &apiv1.Synthesis{},
-					InputRevisions: []apiv1.InputRevisions{{
-						Key:             "foo",
-						ResourceVersion: "new",
-						Revision:        ptr.To(123),
-					}, {
-						Key:             "bar",
-						ResourceVersion: "another",
-						Revision:        ptr.To(123),
-					}},
-				},
-			},
-			Reason: "CompositionChanged && InputsInLockstep",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.Name, func(t *testing.T) {
-			syn := &apiv1.Synthesizer{}
-			syn.Spec.Refs = []apiv1.Ref{{Key: "foo"}}
-			reason, shouldSwap := shouldSwapStates(syn, &tc.Composition)
-			assert.Equal(t, tc.Expectation, shouldSwap)
-			assert.Equal(t, tc.Reason, reason)
 		})
 	}
 }

@@ -334,3 +334,49 @@ func TestRemoveProperty(t *testing.T) {
 	assert.Equal(t, map[string]string{"foo": "bar"}, cm.Labels)
 	assert.Equal(t, map[string]string{"baz": "qux"}, cm.Data)
 }
+
+// TestForceResynthesis proves that a composition can be forced to resynthesize.
+func TestForceResynthesis(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	syn, comp := writeGenericComposition(t, upstream)
+
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
+	initialUUID := comp.Status.GetCurrentSynthesisUUID()
+
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.ForceResynthesis()
+		return upstream.Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return comp.Status.GetCurrentSynthesisUUID() != initialUUID && !comp.ShouldForceResynthesis()
+	})
+}

@@ -18,8 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/controllers/flowcontrol"
-	"github.com/Azure/eno/internal/controllers/rollout"
+	"github.com/Azure/eno/internal/controllers/scheduling"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/testutil"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
@@ -32,10 +31,8 @@ var testSynthesisConfig = &synthesis.Config{
 
 func registerControllers(t *testing.T, mgr *testutil.Manager) {
 	require.NoError(t, NewSliceController(mgr.Manager, time.Minute*5))
-	require.NoError(t, rollout.NewController(mgr.Manager, time.Microsecond*10))
+	require.NoError(t, scheduling.NewController(mgr.Manager, 10, time.Microsecond*10))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
-	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 1, time.Microsecond*10))
-	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
 }
 
@@ -144,7 +141,7 @@ func TestDeleteSliceRecreation(t *testing.T) {
 			return false
 		}
 
-		return comp.Status.PendingResynthesis == nil &&
+		return !comp.ShouldForceResynthesis() &&
 			comp.Status.CurrentSynthesis != nil &&
 			comp.Status.CurrentSynthesis.Synthesized != nil &&
 			comp.Status.CurrentSynthesis.ResourceSlices != nil
@@ -266,22 +263,21 @@ func TestUpdateCompositionSliceRecreation(t *testing.T) {
 
 func TestRequeueForNotEligibleResynthesis(t *testing.T) {
 	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t)
-	mgr.Start(t)
+	cli := testutil.NewClient(t)
 
 	testNS := "default"
 	// Create synthesizer
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "test-image"
-	require.NoError(t, mgr.GetClient().Create(ctx, syn))
+	require.NoError(t, cli.Create(ctx, syn))
 
 	// Create composition
 	comp := &apiv1.Composition{}
 	comp.Name = "test-comp"
 	comp.Namespace = testNS
 	comp.Spec.Synthesizer = apiv1.SynthesizerRef{Name: syn.Name}
-	require.NoError(t, mgr.GetClient().Create(ctx, comp))
+	require.NoError(t, cli.Create(ctx, comp))
 
 	// Create resource slice
 	readyTime := metav1.Now()
@@ -290,23 +286,10 @@ func TestRequeueForNotEligibleResynthesis(t *testing.T) {
 	slice.Namespace = testNS
 	slice.Spec.Resources = []apiv1.Manifest{{Manifest: "{}"}}
 	slice.Status.Resources = []apiv1.ResourceState{{Ready: &readyTime, Reconciled: true}}
-	require.NoError(t, mgr.GetClient().Create(ctx, slice))
-
-	// Check the both composition and synthesizer are existed before reconciliation
-	testutil.Eventually(t, func() bool {
-		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		if err != nil {
-			return false
-		}
-		err = mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(syn), syn)
-		if err != nil {
-			return false
-		}
-		return true
-	})
+	require.NoError(t, cli.Create(ctx, slice))
 
 	// Reconcile the resource slice controller to re-create the missing resource slice
-	s := &sliceController{client: mgr.GetClient(), selfHealingGracePeriod: time.Minute * 5}
+	s := &sliceController{client: cli, selfHealingGracePeriod: time.Minute * 5}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	res, err := s.Reconcile(ctx, req)
 	require.NoError(t, err)
@@ -317,13 +300,16 @@ func TestRequeueForNotEligibleResynthesis(t *testing.T) {
 	// Update composition with synthesize time and pending synthesis time for re-queue
 	synthesized := time.Now().Add(-5 * time.Hour)
 	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		if err != nil {
 			return err
 		}
-		comp.Status.CurrentSynthesis = &apiv1.Synthesis{Synthesized: ptr.To(metav1.NewTime(synthesized))}
-		comp.Status.PendingResynthesis = ptr.To(metav1.Now())
-		return mgr.GetClient().Status().Update(ctx, comp)
+		comp.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: "update-1", Synthesized: ptr.To(metav1.NewTime(synthesized))}
+		if err := cli.Status().Update(ctx, comp); err != nil {
+			return err
+		}
+		comp.ForceResynthesis()
+		return cli.Update(ctx, comp)
 	})
 	require.NoError(t, err)
 
@@ -337,19 +323,22 @@ func TestRequeueForNotEligibleResynthesis(t *testing.T) {
 	synthesized = time.Now().Add(-time.Minute)
 	oldResourceVersion := comp.GetResourceVersion()
 	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		if err != nil {
 			return err
 		}
-		comp.Status.CurrentSynthesis = &apiv1.Synthesis{Synthesized: ptr.To(metav1.NewTime(synthesized))}
-		comp.Status.PendingResynthesis = ptr.To(metav1.Now())
-		return mgr.GetClient().Status().Update(ctx, comp)
+		comp.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: "update-2", Synthesized: ptr.To(metav1.NewTime(synthesized))}
+		if err := cli.Status().Update(ctx, comp); err != nil {
+			return err
+		}
+		comp.ForceResynthesis()
+		return cli.Update(ctx, comp)
 	})
 	require.NoError(t, err)
 
 	// Ensure the composition is updated completely before reconciliation
 	testutil.Eventually(t, func() bool {
-		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		return err == nil && comp.GetResourceVersion() != oldResourceVersion
 	})
 
@@ -459,7 +448,7 @@ func TestIgnoreSideEffect(t *testing.T) {
 	// Ensure the pending resynthesis is cleared by rollout controller and no resource slice is re-created
 	testutil.Eventually(t, func() bool {
 		err := mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		if err != nil || comp.Status.PendingResynthesis != nil {
+		if err != nil || comp.ShouldForceResynthesis() {
 			return false
 		}
 
@@ -496,10 +485,10 @@ func TestNotEligibleForResynthesis(t *testing.T) {
 			expected: true,
 		},
 		{
-			name: "PendingResynthesis is not nil",
-			comp: &apiv1.Composition{
-				Status: apiv1.CompositionStatus{PendingResynthesis: ptr.To(metav1.Now())},
-			},
+			name: "force-resynthesis is not nil",
+			comp: withForceResynthesis(&apiv1.Composition{
+				Status: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{}},
+			}),
 			expected: true,
 		},
 		{
@@ -512,33 +501,26 @@ func TestNotEligibleForResynthesis(t *testing.T) {
 			expected: true,
 		},
 		{
-			name: "composition deletion time stamp is not nil and PendingResynthesis is not nil",
-			comp: &apiv1.Composition{
+			name: "composition deletion time stamp is not nil and force-resynthesis is set",
+			comp: withForceResynthesis(&apiv1.Composition{
 				ObjectMeta: metav1.ObjectMeta{
 					DeletionTimestamp: ptr.To(metav1.Now()),
 				},
-				Status: apiv1.CompositionStatus{PendingResynthesis: ptr.To(metav1.Now())},
-			},
+			}),
 			expected: true,
 		},
 		{
-			name: "CurrentSynthesis is nil and PendingResynthesis is not nil",
-			comp: &apiv1.Composition{
-				Status: apiv1.CompositionStatus{
-					CurrentSynthesis:   nil,
-					PendingResynthesis: ptr.To(metav1.Now()),
-				},
-			},
+			name:     "CurrentSynthesis is nil and force-resynthesis is not nil",
+			comp:     withForceResynthesis(&apiv1.Composition{}),
 			expected: true,
 		},
 		{
-			name: "CurrentSynthesis Synthesized is nil and PendingResynthesis is not nil",
-			comp: &apiv1.Composition{
+			name: "CurrentSynthesis Synthesized is nil and force-resynthesis is not nil",
+			comp: withForceResynthesis(&apiv1.Composition{
 				Status: apiv1.CompositionStatus{
-					CurrentSynthesis:   &apiv1.Synthesis{Synthesized: nil},
-					PendingResynthesis: ptr.To(metav1.Now()),
+					CurrentSynthesis: &apiv1.Synthesis{Synthesized: nil},
 				},
-			},
+			}),
 			expected: true,
 		},
 		{
@@ -573,15 +555,15 @@ func TestNotEligibleForResynthesis(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "composition is synthesized and PendingResynthesis is not nil",
-			comp: &apiv1.Composition{
+			name: "composition is synthesized and force-resynthesis is not nil",
+			comp: withForceResynthesis(&apiv1.Composition{
 				Status: apiv1.CompositionStatus{
 					CurrentSynthesis: &apiv1.Synthesis{
 						Synthesized: ptr.To(metav1.Now()),
 					},
 					PendingResynthesis: ptr.To(metav1.Now()),
 				},
-			},
+			}),
 			expected: true,
 		},
 		{
@@ -606,6 +588,12 @@ func TestNotEligibleForResynthesis(t *testing.T) {
 			assert.Equal(t, tt.expected, res)
 		})
 	}
+}
+
+func withForceResynthesis(comp *apiv1.Composition) *apiv1.Composition {
+	copy := comp.DeepCopy()
+	copy.ForceResynthesis()
+	return copy
 }
 
 func TestIsSliceMissing(t *testing.T) {
