@@ -65,8 +65,18 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		c.lastApplied = nil
 	}
 
+	synths := &apiv1.SynthesizerList{}
+	err := c.client.List(ctx, synths)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("listing synthesizers: %w", err)
+	}
+	synthsByName := map[string]apiv1.Synthesizer{}
+	for _, synth := range synths.Items {
+		synthsByName[synth.Name] = synth
+	}
+
 	comps := &apiv1.CompositionList{}
-	err := c.client.List(ctx, comps)
+	err = c.client.List(ctx, comps)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 	}
@@ -80,17 +90,12 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			inFlight++
 		}
 
-		synth := &apiv1.Synthesizer{}
-		err := c.client.Get(ctx, client.ObjectKey{Name: comp.Spec.Synthesizer.Name, Namespace: comp.Namespace}, synth)
-		if errors.IsNotFound(err) {
-			continue
-		}
-		if err != nil {
-			logger.Error(err, "unable to get synthesizer for composition", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", comp.Spec.Synthesizer.Name)
+		synth, ok := synthsByName[comp.Spec.Synthesizer.Name]
+		if !ok {
 			continue
 		}
 
-		next := newOp(synth, &comp)
+		next := newOp(&synth, &comp)
 		if next != nil && (op == nil || op.Less(next)) {
 			op = next
 		}
