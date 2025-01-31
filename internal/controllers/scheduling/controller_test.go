@@ -509,3 +509,68 @@ func TestDispatchOrder(t *testing.T) {
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp2), comp2))
 	assert.True(t, comp2.Synthesizing())
 }
+
+// TestSynthOrdering proves strict ordering - stale composition informers should not
+// result in deferred syntheses jumping the line. Without special accommodation this
+// would not be the case since ordering isn't guaranteed across multiple informers.
+func TestSynthOrdering(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+	c := &controller{client: cli, concurrencyLimit: 1}
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	synth.Generation = 2
+	require.NoError(t, cli.Create(ctx, synth))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Generation = 2
+	comp.Finalizers = []string{"eno.azure.io/cleanup"}
+	comp.Spec.Synthesizer.Name = synth.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: "foo", ObservedCompositionGeneration: comp.Generation, ObservedSynthesizerGeneration: synth.Generation - 1, Synthesized: ptr.To(metav1.Now())}
+	require.NoError(t, cli.Status().Update(ctx, comp))
+
+	// The synthesizer has changed but should not be rolled out (yet)
+	c.Reconcile(ctx, ctrl.Request{})
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	assert.False(t, comp.Synthesizing())
+
+	// The composition is updated
+	comp.Generation++ // fake client will let us do this
+	require.NoError(t, cli.Update(ctx, comp))
+
+	// The next tick will dispatch the composition change, not the synthesizer
+	c.Reconcile(ctx, ctrl.Request{})
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	require.True(t, comp.Synthesizing())
+	assert.NotEqual(t, comp.Status.CurrentSynthesis.ObservedCompositionGeneration, comp.Status.PreviousSynthesis.ObservedCompositionGeneration)
+}
+
+func TestIndexSynthesizersEpoch(t *testing.T) {
+	synths := []apiv1.Synthesizer{
+		{ObjectMeta: metav1.ObjectMeta{Name: "a", Generation: 0}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "b", Generation: 1}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "c", Generation: 2}},
+	}
+	_, a := indexSynthesizers(synths)
+	_, b := indexSynthesizers(synths)
+	assert.Equal(t, a, b)
+
+	synths[1].Generation++
+	_, c := indexSynthesizers(synths)
+	assert.NotEqual(t, a, c)
+
+	swap := synths[0]
+	synths[0] = synths[1]
+	synths[1] = swap
+	_, d := indexSynthesizers(synths)
+	assert.Equal(t, c, d)
+
+	synths = synths[:2]
+	_, e := indexSynthesizers(synths)
+	assert.NotEqual(t, d, e)
+}

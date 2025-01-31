@@ -2,8 +2,11 @@ package scheduling
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
+	"sort"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -16,12 +19,28 @@ import (
 	"github.com/Azure/eno/internal/manager"
 )
 
-// controller schedules compositions for synthesis based on a global view of all compositions and synthesizers.
+const (
+	synthEpochAnnotationKey = "eno.azure.io/global-synthesizer-epoch"
+)
+
+// controller is responsible for carefully dispatching synthesis operations.
 //
-// - Initializes and manages synthesis state (uuid, initialized timestamp, etc.)
-// - Rolls out synthesizer and deferred input changes while honoring a cluster-wide cooldown period
-// - Enforces a global synthesis concurrency limit
-// - Prioritizes operations
+// Dispatching synthesis consists of swapping any existing synthesis state to the previous slot,
+// which signals to other controllers that a new synthesis is needed. This controller will swap
+// the states when the resulting synthesis operation will not cause the cluster-wide concurrency
+// limit to be exceeded.
+//
+// Synthesis is dispatched when the composition spec is modified or when the inputs or synthesizer
+// have changed. Deferred inputs and synthesizer changes are subject to a cluster-wide "cooldown period"
+// to hedge against bad changes.
+//
+// The implementation is completely deterministic i.e. given a set of compositions and synthesizers,
+// it will always produce the same synthesis order, even if two controllers think they are the current
+// leader AND one of them has a newer composition or synthesizer in its informer cache.
+//
+// Rollout order for synthesizer changes is unique to the generation of the synthesizer.
+// Compositions will not receive the new synthesizer in the same order for every generation, but
+// the same generation will always roll out in the same order.
 type controller struct {
 	client           client.Client
 	concurrencyLimit int
@@ -53,6 +72,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		schedulingLatency.Observe(time.Since(start).Seconds())
 	}()
 
+	// Avoid conflict errors by waiting until we see the last dispatched synthesis (or timeout)
 	if c.lastApplied != nil {
 		ok, wait, err := c.lastApplied.HasBeenPatched(ctx, c.client, c.cacheGracePeriod)
 		if err != nil {
@@ -70,10 +90,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("listing synthesizers: %w", err)
 	}
-	synthsByName := map[string]apiv1.Synthesizer{}
-	for _, synth := range synths.Items {
-		synthsByName[synth.Name] = synth
-	}
+	synthsByName, synthEpoch := indexSynthesizers(synths.Items)
 
 	comps := &apiv1.CompositionList{}
 	err = c.client.List(ctx, comps)
@@ -105,12 +122,19 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if op == nil || inFlight >= c.concurrencyLimit {
 		return ctrl.Result{}, nil
 	}
-
 	if wait := time.Until(nextSlot); op.Reason.Deferred() && wait > 0 {
 		return ctrl.Result{RequeueAfter: wait}, nil
 	}
+	logger = logger.WithValues("compositionName", op.Composition.Name, "compositionNamespace", op.Composition.Namespace, "reason", op.Reason, "synthEpoch", synthEpoch)
 
-	logger = logger.WithValues("compositionName", op.Composition.Name, "compositionNamespace", op.Composition.Namespace, "reason", op.Reason)
+	// Maintain ordering across synth/composition informers by doing a 2PC on the composition
+	if op.Reason == synthesizerModifiedOp && setSynthEpochAnnotation(op.Composition, synthEpoch) {
+		if err := c.client.Update(ctx, op.Composition); err != nil {
+			return ctrl.Result{}, fmt.Errorf("updating synthesizer epoch: %w", err)
+		}
+		logger.V(1).Info("updated global synthesizer epoch")
+		return ctrl.Result{}, nil
+	}
 
 	if err := c.dispatchOp(ctx, op); err != nil {
 		if errors.IsInvalid(err) {
@@ -145,4 +169,27 @@ func (c *controller) dispatchOp(ctx context.Context, op *op) error {
 		return err
 	}
 	return c.client.Status().Patch(ctx, op.Composition.DeepCopy(), client.RawPatch(types.JSONPatchType, patch))
+}
+
+func indexSynthesizers(synths []apiv1.Synthesizer) (byName map[string]apiv1.Synthesizer, epoch string) {
+	sort.Slice(synths, func(i, j int) bool { return synths[i].Name < synths[j].Name })
+	byName = map[string]apiv1.Synthesizer{}
+	h := fnv.New64()
+	for _, synth := range synths {
+		byName[synth.Name] = synth
+		fmt.Fprintf(h, "%s:%d", synth.UID, synth.Generation)
+	}
+	return byName, hex.EncodeToString(h.Sum(nil))
+}
+
+func setSynthEpochAnnotation(comp *apiv1.Composition, value string) bool {
+	anno := comp.GetAnnotations()
+	if anno == nil {
+		anno = map[string]string{}
+	}
+
+	ok := anno[synthEpochAnnotationKey] != value
+	anno[synthEpochAnnotationKey] = value
+	comp.SetAnnotations(anno)
+	return ok
 }
