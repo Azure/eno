@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -379,40 +378,6 @@ func shouldUpdateDeletedCompositionStatus(comp *apiv1.Composition) bool {
 
 func isReconciling(comp *apiv1.Composition) bool {
 	return comp.Status.CurrentSynthesis != nil && (comp.Status.CurrentSynthesis.Reconciled == nil || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation)
-}
-
-// inputRevisionsEqual compares two sets of input revisions while ignoring deferred values.
-func inputRevisionsEqual(synth *apiv1.Synthesizer, a, b []apiv1.InputRevisions) bool {
-	if len(a) != len(b) {
-		return false
-	}
-
-	refsByKey := map[string]apiv1.Ref{}
-	for _, ref := range synth.Spec.Refs {
-		ref := ref
-		refsByKey[ref.Key] = ref
-	}
-
-	// It's important that ordering isn't strict since input revisions may
-	// either be ordered by the corresponding refs, or appended to the slice
-	// as they are discovered by the watch controller
-	sort.Slice(a, func(i, j int) bool { return a[i].Key < a[j].Key })
-	sort.Slice(b, func(i, j int) bool { return b[i].Key < b[j].Key })
-
-	var equal int
-	for i, ar := range a {
-		br := b[i]
-		if ref, exists := refsByKey[ar.Key]; exists && ref.Defer {
-			equal++
-			continue // ignore deferred inputs
-		}
-
-		if ar.Equal(br) {
-			equal++
-		}
-	}
-
-	return equal == len(a)
 }
 
 func getPodScheduledTime(pod *corev1.Pod) *time.Time {
