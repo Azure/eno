@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -13,7 +12,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -135,18 +133,6 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	// Synthesis isn't possible without a synth
 	if syn == nil {
 		return ctrl.Result{}, nil
-	}
-
-	// Swap the state to prepare for resynthesis if needed
-	reason, shouldSwap := shouldSwapStates(syn, comp)
-	if shouldSwap {
-		logger = logger.WithValues("reason", reason)
-		SwapStates(comp)
-		if err := c.client.Status().Update(ctx, comp); err != nil {
-			return ctrl.Result{}, fmt.Errorf("swapping compisition state: %w", err)
-		}
-		logger.V(0).Info("start to synthesize")
-		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Bail if it isn't time to synthesize yet, or synthesis is already complete
@@ -377,68 +363,6 @@ func (c *podLifecycleController) deletePod(ctx context.Context, comp types.Names
 	return nil
 }
 
-func SwapStates(comp *apiv1.Composition) {
-	current := comp.Status.CurrentSynthesis
-	if current != nil && current.Synthesized != nil && !current.Failed() {
-		comp.Status.PreviousSynthesis = current
-	}
-
-	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
-		ObservedCompositionGeneration: comp.Generation,
-		Initialized:                   ptr.To(metav1.Now()),
-	}
-}
-
-func shouldSwapStates(synth *apiv1.Synthesizer, comp *apiv1.Composition) (string, bool) {
-	// synthesize when (either):
-	// - synthesis has never occurred
-	// - the spec has changed
-	// - a side effect that has not observed a synthesis has occurred
-	//		The side effects observed by this controller are:
-	//			- changes to non-defferred inputs.
-	// AND
-	// - synthesis is not already pending
-	// - all bound input resources exist and are in lockstep (or composition is being deleted)
-	syn := comp.Status.CurrentSynthesis
-
-	isSynNil := syn == nil
-	isCompGenDiff := syn != nil && syn.ObservedCompositionGeneration != comp.Generation
-	isInputRevisionsEqual := syn != nil && inputRevisionsEqual(synth, comp.Status.InputRevisions, syn.InputRevisions)
-	isSynthesizedNotNil := syn != nil && syn.Synthesized != nil
-	shouldIgnoreSideEffects := comp.ShouldIgnoreSideEffects()
-	isCompDeleted := comp.DeletionTimestamp != nil
-	isCompInputsExist := comp.InputsExist(synth)
-	isCompInputsOutOfLockstep := comp.InputsOutOfLockstep(synth)
-
-	reason := ""
-	// First condition
-	if isSynNil {
-		reason += "CurrentSynthesisEmpty"
-	} else {
-		if isCompGenDiff {
-			reason += "CompositionChanged"
-		} else if !isInputRevisionsEqual && isSynthesizedNotNil && !shouldIgnoreSideEffects {
-			reason += "InputsChanged"
-		}
-	}
-	if !(isSynNil || isCompGenDiff || (!isInputRevisionsEqual && isSynthesizedNotNil && !shouldIgnoreSideEffects)) {
-		return "", false
-	}
-
-	// Second condition
-	if isCompDeleted {
-		reason += " && CompositionDeleted"
-	} else if isCompInputsExist && !isCompInputsOutOfLockstep {
-		reason += " && InputsInLockstep"
-	}
-
-	if !(isCompDeleted || (isCompInputsExist && !isCompInputsOutOfLockstep)) {
-		return "", false
-	}
-
-	return reason, true
-}
-
 func shouldBackOffPodCreation(comp *apiv1.Composition) bool {
 	current := comp.Status.CurrentSynthesis
 	return current != nil && current.Attempts > 0 && current.PodCreation != nil
@@ -454,40 +378,6 @@ func shouldUpdateDeletedCompositionStatus(comp *apiv1.Composition) bool {
 
 func isReconciling(comp *apiv1.Composition) bool {
 	return comp.Status.CurrentSynthesis != nil && (comp.Status.CurrentSynthesis.Reconciled == nil || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation)
-}
-
-// inputRevisionsEqual compares two sets of input revisions while ignoring deferred values.
-func inputRevisionsEqual(synth *apiv1.Synthesizer, a, b []apiv1.InputRevisions) bool {
-	if len(a) != len(b) {
-		return false
-	}
-
-	refsByKey := map[string]apiv1.Ref{}
-	for _, ref := range synth.Spec.Refs {
-		ref := ref
-		refsByKey[ref.Key] = ref
-	}
-
-	// It's important that ordering isn't strict since input revisions may
-	// either be ordered by the corresponding refs, or appended to the slice
-	// as they are discovered by the watch controller
-	sort.Slice(a, func(i, j int) bool { return a[i].Key < a[j].Key })
-	sort.Slice(b, func(i, j int) bool { return b[i].Key < b[j].Key })
-
-	var equal int
-	for i, ar := range a {
-		br := b[i]
-		if ref, exists := refsByKey[ar.Key]; exists && ref.Defer {
-			equal++
-			continue // ignore deferred inputs
-		}
-
-		if ar.Equal(br) {
-			equal++
-		}
-	}
-
-	return equal == len(a)
 }
 
 func getPodScheduledTime(pod *corev1.Pod) *time.Time {

@@ -5,7 +5,7 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/controllers/flowcontrol"
+	"github.com/Azure/eno/internal/controllers/scheduling"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,7 +19,7 @@ func TestControllerBackoff(t *testing.T) {
 	cli := mgr.GetClient()
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
-	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10, 0))
+	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}

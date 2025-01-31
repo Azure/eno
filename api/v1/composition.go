@@ -51,8 +51,8 @@ type CompositionStatus struct {
 	Simplified         *SimplifiedStatus `json:"simplified,omitempty"`
 	CurrentSynthesis   *Synthesis        `json:"currentSynthesis,omitempty"`
 	PreviousSynthesis  *Synthesis        `json:"previousSynthesis,omitempty"`
-	PendingResynthesis *metav1.Time      `json:"pendingResynthesis,omitempty"`
 	InputRevisions     []InputRevisions  `json:"inputRevisions,omitempty"`
+	PendingResynthesis *metav1.Time      `json:"pendingResynthesis,omitempty"` // deprecated: will be removed soon
 }
 
 type SimplifiedStatus struct {
@@ -213,4 +213,33 @@ func (s *CompositionStatus) GetCurrentSynthesisUUID() string {
 
 func (c *Composition) ShouldIgnoreSideEffects() bool {
 	return c.Annotations["eno.azure.io/ignore-side-effects"] == "true"
+}
+
+func (c *Composition) Synthesizing() bool {
+	return c.Status.CurrentSynthesis != nil && c.Status.CurrentSynthesis.Synthesized == nil
+}
+
+func (c *Composition) EnableIgnoreSideEffects() {
+	anno := c.GetAnnotations()
+	if anno == nil {
+		anno = map[string]string{}
+	}
+	anno["eno.azure.io/ignore-side-effects"] = "true"
+	c.SetAnnotations(anno)
+}
+
+const forceResynthesisAnnotation = "eno.azure.io/force-resynthesis"
+
+func (c *Composition) ForceResynthesis() {
+	anno := c.GetAnnotations()
+	if anno == nil {
+		anno = map[string]string{}
+	}
+	anno[forceResynthesisAnnotation] = c.Status.GetCurrentSynthesisUUID()
+	c.SetAnnotations(anno)
+}
+
+func (c *Composition) ShouldForceResynthesis() bool {
+	val, ok := c.GetAnnotations()[forceResynthesisAnnotation]
+	return ok && val == c.Status.GetCurrentSynthesisUUID()
 }

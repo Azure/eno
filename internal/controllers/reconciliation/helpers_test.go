@@ -7,10 +7,9 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/controllers/aggregation"
-	"github.com/Azure/eno/internal/controllers/flowcontrol"
 	"github.com/Azure/eno/internal/controllers/liveness"
 	"github.com/Azure/eno/internal/controllers/replication"
-	"github.com/Azure/eno/internal/controllers/rollout"
+	"github.com/Azure/eno/internal/controllers/scheduling"
 	"github.com/Azure/eno/internal/controllers/selfhealing"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/controllers/watch"
@@ -28,9 +27,7 @@ func registerControllers(t *testing.T, mgr *testutil.Manager) {
 	require.NoError(t, replication.NewSymphonyController(mgr.Manager))
 	require.NoError(t, aggregation.NewSymphonyController(mgr.Manager))
 	require.NoError(t, aggregation.NewCompositionController(mgr.Manager))
-	require.NoError(t, rollout.NewController(mgr.Manager, time.Millisecond))
-	require.NoError(t, rollout.NewSynthesizerController(mgr.Manager))
-	require.NoError(t, flowcontrol.NewSynthesisConcurrencyLimiter(mgr.Manager, 10, 0))
+	require.NoError(t, scheduling.NewController(mgr.Manager, 10, time.Millisecond))
 	require.NoError(t, liveness.NewNamespaceController(mgr.Manager, 3, time.Second))
 	require.NoError(t, watch.NewController(mgr.Manager))
 	require.NoError(t, selfhealing.NewSliceController(mgr.Manager, time.Minute*5))

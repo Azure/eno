@@ -407,3 +407,19 @@ func TestInputsInLockstep(t *testing.T) {
 		})
 	}
 }
+
+func TestForceSynthesisAnnotation(t *testing.T) {
+	comp := &Composition{}
+	comp.Status.CurrentSynthesis = &Synthesis{UUID: "123"}
+
+	// Initially false
+	assert.False(t, comp.ShouldForceResynthesis())
+
+	// Forcing resynthesis is reflected by ShouldForceResynthesis
+	comp.ForceResynthesis()
+	assert.True(t, comp.ShouldForceResynthesis())
+
+	// Update the synthesis UUID
+	comp.Status.CurrentSynthesis.UUID = "234"
+	assert.False(t, comp.ShouldForceResynthesis())
+}

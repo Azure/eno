@@ -127,7 +127,7 @@ func TestDeferredBasics(t *testing.T) {
 
 		rv := comp.Status.InputRevisions[0].ResourceVersion
 		initialResourceVersion = rv
-		return rv != "" && comp.Status.PendingResynthesis != nil
+		return rv != ""
 	})
 
 	// Update the input
@@ -195,7 +195,7 @@ func TestDeferredWithIgnoreSideEffects(t *testing.T) {
 		}
 
 		rv := comp.Status.InputRevisions[0].ResourceVersion
-		return rv != "" && comp.Status.PendingResynthesis == nil
+		return rv != ""
 	})
 }
 func TestCompositionChange(t *testing.T) {
