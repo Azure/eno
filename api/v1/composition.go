@@ -243,3 +243,15 @@ func (c *Composition) ShouldForceResynthesis() bool {
 	val, ok := c.GetAnnotations()[forceResynthesisAnnotation]
 	return ok && val == c.Status.GetCurrentSynthesisUUID()
 }
+
+func (s *Synthesis) ReferencesSlice(slice *ResourceSlice) bool {
+	if s == nil {
+		return false
+	}
+	for _, ref := range s.ResourceSlices {
+		if ref.Name == slice.Name {
+			return true
+		}
+	}
+	return false
+}

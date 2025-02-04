@@ -15,14 +15,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -201,33 +198,6 @@ func NewLogConstructor(mgr ctrl.Manager, controllerName string) func(*reconcile.
 			l.WithValues("requestName", req.Name, "requestNamespace", req.Namespace)
 		}
 		return l
-	}
-}
-
-func NewCompositionToResourceSliceHandler(cli client.Client) handler.EventHandler {
-	apply := func(ctx context.Context, rli workqueue.RateLimitingInterface, obj client.Object) {
-		list := &apiv1.ResourceSliceList{}
-		err := cli.List(ctx, list, client.InNamespace(obj.GetNamespace()), client.MatchingFields{
-			IdxResourceSlicesByComposition: obj.GetName(),
-		})
-		if err != nil {
-			logr.FromContextOrDiscard(ctx).Error(err, "listing resource slices by composition")
-			return
-		}
-		for _, item := range list.Items {
-			rli.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: item.Name, Namespace: item.Namespace}})
-		}
-	}
-	return &handler.Funcs{
-		CreateFunc: func(ctx context.Context, ce event.CreateEvent, rli workqueue.RateLimitingInterface) {
-			apply(ctx, rli, ce.Object)
-		},
-		UpdateFunc: func(ctx context.Context, ue event.UpdateEvent, rli workqueue.RateLimitingInterface) {
-			apply(ctx, rli, ue.ObjectNew)
-		},
-		DeleteFunc: func(ctx context.Context, de event.DeleteEvent, rli workqueue.RateLimitingInterface) {
-			apply(ctx, rli, de.Object)
-		},
 	}
 }
 

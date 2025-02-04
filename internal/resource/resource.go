@@ -46,14 +46,13 @@ type ManifestRef struct {
 
 // Resource is the controller's internal representation of a single resource out of a ResourceSlice.
 type Resource struct {
-	lastReconciledMeta
+	resourceStatus
 
 	Ref               Ref
 	Manifest          *apiv1.Manifest
 	ManifestRef       ManifestRef
 	ReconcileInterval *metav1.Duration
 	GVK               schema.GroupVersionKind
-	SliceDeleted      bool
 	ReadinessChecks   readiness.Checks
 	Patch             jsonpatch.Patch
 	DisableUpdates    bool
@@ -65,8 +64,8 @@ type Resource struct {
 	value value.Value
 }
 
-func (r *Resource) Deleted() bool {
-	return r.SliceDeleted || r.Manifest.Deleted || (r.Patch != nil && r.patchSetsDeletionTimestamp())
+func (r *Resource) Deleted(comp *apiv1.Composition) bool {
+	return comp.DeletionTimestamp != nil || r.Manifest.Deleted || (r.Patch != nil && r.patchSetsDeletionTimestamp())
 }
 
 func (r *Resource) Parse() (*unstructured.Unstructured, error) {
@@ -246,8 +245,7 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 	logger := logr.FromContextOrDiscard(ctx)
 	resource := slice.Spec.Resources[index]
 	res := &Resource{
-		Manifest:     &resource,
-		SliceDeleted: slice.DeletionTimestamp != nil,
+		Manifest: &resource,
 		ManifestRef: ManifestRef{
 			Slice: types.NamespacedName{
 				Namespace: slice.Namespace,
@@ -354,24 +352,39 @@ type patchMeta struct {
 	Ops        jsonpatch.Patch `json:"ops"`
 }
 
-type lastReconciledMeta struct {
+type resourceStatus struct {
 	lock           sync.Mutex
 	lastReconciled *time.Time
+	lastState      *apiv1.ResourceState
 }
 
-func (l *lastReconciledMeta) ObserveReconciliation() time.Duration {
+func (r *resourceStatus) ObserveReconciliation() time.Duration {
 	now := time.Now()
 
-	l.lock.Lock()
-	defer l.lock.Unlock()
+	r.lock.Lock()
+	defer r.lock.Unlock()
 
 	var latency time.Duration
-	if l.lastReconciled != nil {
-		latency = now.Sub(*l.lastReconciled)
+	if r.lastReconciled != nil {
+		latency = now.Sub(*r.lastReconciled)
 	}
 
-	l.lastReconciled = &now
+	r.lastReconciled = &now
 	return time.Duration(latency.Abs().Milliseconds())
+}
+
+func (r *resourceStatus) VisitState(current *apiv1.ResourceState) bool {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
+	lastKnown := r.lastState
+	if lastKnown == nil {
+		return true
+	}
+
+	modified := current.Equal(lastKnown)
+	r.lastState = current
+	return modified
 }
 
 func NewInputRevisions(obj client.Object, refKey string) *apiv1.InputRevisions {
