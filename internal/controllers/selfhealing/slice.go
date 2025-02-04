@@ -138,7 +138,7 @@ func notEligibleForResynthesis(comp *apiv1.Composition) bool {
 }
 
 func newCompositionHandler() handler.EventHandler {
-	apply := func(ctx context.Context, rli workqueue.RateLimitingInterface, obj client.Object) {
+	apply := func(ctx context.Context, rli workqueue.TypedRateLimitingInterface[reconcile.Request], obj client.Object) {
 		comp, ok := obj.(*apiv1.Composition)
 		if !ok {
 			logr.FromContextOrDiscard(ctx).V(0).Info("unexpected type given to newCompositionHandler")
@@ -152,21 +152,21 @@ func newCompositionHandler() handler.EventHandler {
 		rli.Add(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}})
 	}
 	return &handler.Funcs{
-		CreateFunc: func(ctx context.Context, ce event.CreateEvent, rli workqueue.RateLimitingInterface) {
+		CreateFunc: func(ctx context.Context, ce event.TypedCreateEvent[client.Object], rli workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			// No need to handle composition creation event for now
 		},
-		UpdateFunc: func(ctx context.Context, ue event.UpdateEvent, rli workqueue.RateLimitingInterface) {
+		UpdateFunc: func(ctx context.Context, ue event.TypedUpdateEvent[client.Object], rli workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			// Check the updated composition only
 			apply(ctx, rli, ue.ObjectNew)
 		},
-		DeleteFunc: func(ctx context.Context, de event.DeleteEvent, rli workqueue.RateLimitingInterface) {
+		DeleteFunc: func(ctx context.Context, de event.TypedDeleteEvent[client.Object], rli workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			// No need to handle composition deletion event for now
 		},
 	}
 }
 
 func newSliceHandler() handler.EventHandler {
-	apply := func(rli workqueue.RateLimitingInterface, obj client.Object) {
+	apply := func(rli workqueue.TypedRateLimitingInterface[reconcile.Request], obj client.Object) {
 		owner := metav1.GetControllerOf(obj)
 		if owner == nil {
 			// No need to check the deleted resource slice which doesn't have an owner
@@ -182,13 +182,13 @@ func newSliceHandler() handler.EventHandler {
 	}
 
 	return &handler.Funcs{
-		CreateFunc: func(ctx context.Context, ce event.CreateEvent, rli workqueue.RateLimitingInterface) {
+		CreateFunc: func(ctx context.Context, ce event.TypedCreateEvent[client.Object], rli workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			// No need to hanlde creation event for now
 		},
-		UpdateFunc: func(ctx context.Context, ue event.UpdateEvent, rli workqueue.RateLimitingInterface) {
+		UpdateFunc: func(ctx context.Context, ue event.TypedUpdateEvent[client.Object], rli workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			// No need to handle update event for now
 		},
-		DeleteFunc: func(ctx context.Context, de event.DeleteEvent, rli workqueue.RateLimitingInterface) {
+		DeleteFunc: func(ctx context.Context, de event.TypedDeleteEvent[client.Object], rli workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			apply(rli, de.Object)
 		},
 	}
