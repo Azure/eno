@@ -66,7 +66,7 @@ func NewKindWatchController(ctx context.Context, parent *WatchController, resour
 func (k *KindWatchController) newResourceWatchController(parent *WatchController, ref *metav1.PartialObjectMetadata) (controller.Controller, error) {
 	rrc, err := controller.NewUnmanaged("kindWatchController", parent.mgr, controller.Options{
 		LogConstructor: manager.NewLogConstructor(parent.mgr, "kindWatchController"),
-		RateLimiter: &workqueue.BucketRateLimiter{
+		RateLimiter: &workqueue.TypedBucketRateLimiter[reconcile.Request]{
 			// Be careful about feedback loops - low, hardcoded rate limits make sense here.
 			// Maybe expose as a flag in the future.
 			Limiter: rate.NewLimiter(rate.Every(time.Second), 2),
@@ -85,7 +85,7 @@ func (k *KindWatchController) newResourceWatchController(parent *WatchController
 
 	// Watch inputs declared by refs/bindings in synthesizers/compositions
 	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), &apiv1.Composition{},
-		handler.TypedEnqueueRequestsFromMapFunc(handler.TypedMapFunc[*apiv1.Composition](func(ctx context.Context, comp *apiv1.Composition) []reconcile.Request {
+		handler.TypedEnqueueRequestsFromMapFunc(handler.TypedMapFunc[*apiv1.Composition, reconcile.Request](func(ctx context.Context, comp *apiv1.Composition) []reconcile.Request {
 			if comp.Spec.Synthesizer.Name == "" {
 				return nil
 			}
@@ -103,7 +103,7 @@ func (k *KindWatchController) newResourceWatchController(parent *WatchController
 		return nil, err
 	}
 	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), &apiv1.Synthesizer{},
-		handler.TypedEnqueueRequestsFromMapFunc(handler.TypedMapFunc[*apiv1.Synthesizer](func(ctx context.Context, synth *apiv1.Synthesizer) []reconcile.Request {
+		handler.TypedEnqueueRequestsFromMapFunc(handler.TypedMapFunc[*apiv1.Synthesizer, reconcile.Request](func(ctx context.Context, synth *apiv1.Synthesizer) []reconcile.Request {
 			compList := &apiv1.CompositionList{}
 			err = parent.client.List(ctx, compList, client.MatchingFields{
 				manager.IdxCompositionsBySynthesizer: synth.Name,
