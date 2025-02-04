@@ -72,11 +72,6 @@ func (c *compositionController) aggregate(synth *apiv1.Synthesizer, comp *apiv1.
 		return copy
 	}
 
-	if comp.Status.CurrentSynthesis.UUID == "" {
-		copy.Status = "WaitingForDispatch"
-		return copy
-	}
-
 	for _, result := range comp.Status.CurrentSynthesis.Results {
 		if result.Severity == krmv1.ResultSeverityError {
 			copy.Error = result.Message
@@ -107,9 +102,6 @@ func (c *compositionController) aggregate(synth *apiv1.Synthesizer, comp *apiv1.
 	}
 	if comp.Status.CurrentSynthesis.Ready != nil {
 		copy.Status = "Ready"
-	}
-	if comp.Status.PendingResynthesis != nil {
-		copy.Status = "WaitingForCooldown"
 	}
 	if comp.InputsOutOfLockstep(synth) {
 		copy.Status = "MismatchedInputs"

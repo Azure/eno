@@ -17,7 +17,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -190,7 +189,7 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 
 		for _, comp := range list.Items {
-			key, deferred := findRefKey(&comp, &synth, meta)
+			key := findRefKey(&comp, &synth, meta)
 			if key == "" {
 				logger.V(1).Info("no matching input key found for resource")
 				continue
@@ -201,16 +200,12 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 				continue
 			}
 
-			if deferred && comp.Status.PendingResynthesis == nil && !comp.ShouldIgnoreSideEffects() {
-				comp.Status.PendingResynthesis = ptr.To(metav1.Now())
-			}
-
 			// TODO: Reduce risk of conflict errors here
 			err = k.client.Status().Update(ctx, &comp)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("updating input revisions: %w", err)
 			}
-			logger.V(0).Info("noticed input resource change", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key, "deferred", deferred)
+			logger.V(0).Info("noticed input resource change", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key)
 			return ctrl.Result{}, nil // wait for requeue
 		}
 	}
@@ -218,7 +213,7 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 	return ctrl.Result{}, nil
 }
 
-func findRefKey(comp *apiv1.Composition, synth *apiv1.Synthesizer, meta *metav1.PartialObjectMetadata) (string, bool) {
+func findRefKey(comp *apiv1.Composition, synth *apiv1.Synthesizer, meta *metav1.PartialObjectMetadata) string {
 	var bindingKey string
 	for _, binding := range comp.Spec.Bindings {
 		if binding.Resource.Name == meta.GetName() && binding.Resource.Namespace == meta.GetNamespace() {
@@ -230,11 +225,11 @@ func findRefKey(comp *apiv1.Composition, synth *apiv1.Synthesizer, meta *metav1.
 	for _, ref := range synth.Spec.Refs {
 		gvk := meta.GetObjectKind().GroupVersionKind()
 		if bindingKey == ref.Key && ref.Resource.Group == gvk.Group && ref.Resource.Version == gvk.Version && ref.Resource.Kind == gvk.Kind {
-			return ref.Key, ref.Defer
+			return ref.Key
 		}
 	}
 
-	return "", false
+	return ""
 }
 
 func setInputRevisions(comp *apiv1.Composition, revs *apiv1.InputRevisions) bool {
