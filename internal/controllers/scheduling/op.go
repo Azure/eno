@@ -123,14 +123,17 @@ func (o *op) BuildPatch() any {
 		o.id = uuid.Must(uuid.NewRandom())
 	}
 
+	// Initialize the status if it's nil (zero value struct on the client == nil on the server side)
 	if reflect.DeepEqual(o.Composition.Status, apiv1.CompositionStatus{}) {
 		ops = append(ops,
 			jsonPatch{Op: "test", Path: "/status", Value: nil},
 			jsonPatch{Op: "add", Path: "/status", Value: map[string]any{}})
 	}
 
+	// The input watch controller might have concurrently modified the input revisions
 	ops = append(ops, jsonPatch{Op: "test", Path: "/status/inputRevisions", Value: o.Composition.Status.InputRevisions})
 
+	// Protect against zombie leaders running this controller
 	if syn := o.Composition.Status.CurrentSynthesis; syn == nil {
 		ops = append(ops, jsonPatch{Op: "test", Path: "/status/currentSynthesis", Value: nil})
 	} else {
