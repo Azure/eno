@@ -22,6 +22,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -102,6 +103,7 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 		LeaseDuration:                 &opts.ElectionLeaseDuration,
 		RenewDeadline:                 &opts.ElectionLeaseRenewDeadline,
 		LeaderElectionReleaseOnCancel: true,
+		Controller:                    config.Controller{SkipNameValidation: ptr.To(true)},
 	}
 
 	if ratioStr := os.Getenv("CHAOS_RATIO"); ratioStr != "" {
