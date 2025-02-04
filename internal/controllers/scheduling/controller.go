@@ -153,14 +153,14 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 // getNextCooldownSlot returns the next time at which a deferred synthesis can be dispatched while honoring the configured cooldown period.
 func (c *controller) getNextCooldownSlot(comps *apiv1.CompositionList) time.Time {
-	var last time.Time
+	var next time.Time
 	for _, comp := range comps.Items {
 		syn := comp.Status.CurrentSynthesis
-		if syn != nil && syn.Deferred && syn.Initialized != nil && syn.Initialized.Time.After(last) {
-			last = syn.Initialized.Time
+		if syn != nil && syn.Deferred && syn.Initialized != nil && syn.Initialized.Time.After(next) {
+			next = syn.Initialized.Time
 		}
 	}
-	return last.Add(c.cooldownPeriod)
+	return next.Add(c.cooldownPeriod)
 }
 
 func (c *controller) dispatchOp(ctx context.Context, op *op) error {
