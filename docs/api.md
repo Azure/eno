@@ -94,8 +94,8 @@ _Appears in:_
 | `simplified` _[SimplifiedStatus](#simplifiedstatus)_ |  |  |  |
 | `currentSynthesis` _[Synthesis](#synthesis)_ |  |  |  |
 | `previousSynthesis` _[Synthesis](#synthesis)_ |  |  |  |
-| `pendingResynthesis` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ |  |  |  |
 | `inputRevisions` _[InputRevisions](#inputrevisions) array_ |  |  |  |
+| `pendingResynthesis` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ |  |  |  |
 
 
 #### EnvVar
@@ -338,6 +338,7 @@ _Appears in:_
 | `observedSynthesizerGeneration` _integer_ | The value of the synthesizer's metadata.generation at the time the synthesis began.<br />This is a min i.e. a newer composition may have been used. |  |  |
 | `initialized` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ | Initialized is set when the synthesis process is initiated. |  |  |
 | `podCreation` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ | Time at which the most recent synthesizer pod was created. |  |  |
+| `deadlineExceeded` _boolean_ |  |  |  |
 | `synthesized` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ | Time at which the synthesis completed i.e. resourceSlices was written |  |  |
 | `reconciled` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ | Time at which the synthesis's resources were reconciled into real Kubernetes resources. |  |  |
 | `ready` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ | Time at which the synthesis's reconciled resources became ready. |  |  |

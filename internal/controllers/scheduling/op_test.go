@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"testing"
+	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/testutil"
@@ -24,10 +25,11 @@ func TestFuzzNewOp(t *testing.T) {
 	ctx := testutil.NewContext(t)
 
 	// Generate all possible test cases
-	var testCases [][13]bool
-	for i := 0; i < 1<<13; i++ {
-		var args [13]bool
-		for j := 0; j < 13; j++ {
+	// TODO: Helper for generating tables like this one
+	var testCases [][14]bool
+	for i := 0; i < 1<<14; i++ {
+		var args [14]bool
+		for j := 0; j < 14; j++ {
 			args[j] = (i>>j)&1 == 1
 		}
 		testCases = append(testCases, args)
@@ -48,10 +50,11 @@ func TestFuzzNewOp(t *testing.T) {
 			compDeleting          = args[10]
 			compModified          = args[11]
 			nilSynthesis          = args[12]
+			isRetry               = args[13]
 		)
 
 		// We purposefully do not log every set of args because doing so would generate copious amounts of log output
-		args := fmt.Sprintf("inputModified=%t,deferredInputModified=%t,inputsMissing=%t,inputsOutOfLockstep=%t,ignoreSideEffects=%t,missingFinalizer=%t,synthModified=%t,synthGenZero=%t,forceResynth=%t,synthesizing=%t,compDeleting=%t,compModified=%t,nilSynthesis=%t", inputModified, deferredInputModified, inputsMissing, inputsOutOfLockstep, ignoreSideEffects, missingFinalizer, synthModified, synthGenZero, forceResynth, synthesizing, compDeleting, compModified, nilSynthesis)
+		args := fmt.Sprintf("inputModified=%t,deferredInputModified=%t,inputsMissing=%t,inputsOutOfLockstep=%t,ignoreSideEffects=%t,missingFinalizer=%t,synthModified=%t,synthGenZero=%t,forceResynth=%t,synthesizing=%t,compDeleting=%t,compModified=%t,nilSynthesis=%t,isRetry=%t", inputModified, deferredInputModified, inputsMissing, inputsOutOfLockstep, ignoreSideEffects, missingFinalizer, synthModified, synthGenZero, forceResynth, synthesizing, compDeleting, compModified, nilSynthesis, isRetry)
 
 		synth := &apiv1.Synthesizer{
 			ObjectMeta: metav1.ObjectMeta{Name: "test-synth", Generation: 11},
@@ -63,6 +66,7 @@ func TestFuzzNewOp(t *testing.T) {
 			},
 		}
 
+		initTS := time.Date(8000, 0, 0, 0, 0, 0, 0, time.UTC)
 		comp := &apiv1.Composition{
 			ObjectMeta: metav1.ObjectMeta{Name: "test-comp", Finalizers: []string{"eno.azure.io/cleanup"}},
 			Spec: apiv1.CompositionSpec{
@@ -75,6 +79,7 @@ func TestFuzzNewOp(t *testing.T) {
 				CurrentSynthesis: &apiv1.Synthesis{
 					ObservedSynthesizerGeneration: 11,
 					Synthesized:                   ptr.To(metav1.Now()),
+					Initialized:                   ptr.To(metav1.NewTime(initTS)),
 					UUID:                          "initial-uuid",
 					InputRevisions: []apiv1.InputRevisions{
 						{Key: "foo", ResourceVersion: "1"},
@@ -127,11 +132,16 @@ func TestFuzzNewOp(t *testing.T) {
 		if compModified {
 			comp.Status.CurrentSynthesis.ObservedCompositionGeneration = 123
 		}
+		if isRetry {
+			comp.Status.CurrentSynthesis.DeadlineExceeded = true
+			comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
+		}
 		if nilSynthesis {
 			comp.Status.CurrentSynthesis = nil
 		}
 
-		op := newOp(synth, comp)
+		nextSlot := initTS.Add(time.Minute)
+		op := newOp(synth, comp, nextSlot)
 
 		// Prove out the invariants
 		switch {
@@ -178,11 +188,18 @@ func TestFuzzNewOp(t *testing.T) {
 			assert.True(t, op.Reason.Deferred(), args)
 		}
 
-		// Patches against the original, non-mutated test composition should always fail.
-		// This proves that the patch contains a `test` op for each field considered by newOp.
 		if op == nil {
 			continue
 		}
+
+		if op.Reason.Deferred() {
+			assert.False(t, op.OnlyAfter.Before(nextSlot), args)
+		} else if isRetry && !synthModified && !nilSynthesis {
+			assert.False(t, op.OnlyAfter.Before(initTS.Add(time.Second)), args)
+		}
+
+		// Patches against the original, non-mutated test composition should always fail.
+		// This proves that the patch contains a `test` op for each field considered by newOp.
 		cli := testutil.NewClient(t)
 		require.NoError(t, cli.Create(ctx, original))
 		require.NoError(t, cli.Status().Update(ctx, original))
@@ -299,6 +316,64 @@ func TestOpPriorityBasics(t *testing.T) {
 	}
 }
 
+func TestOpPriorityOnlyAfter(t *testing.T) {
+	ts := time.Date(8000, 0, 0, 0, 0, 0, 0, time.UTC)
+	ops := []*op{
+		{
+			Composition: &apiv1.Composition{ObjectMeta: metav1.ObjectMeta{UID: "deferred-third"}},
+			Synthesizer: &apiv1.Synthesizer{ObjectMeta: metav1.ObjectMeta{UID: "synth", Generation: 1}},
+			Reason:      deferredInputModifiedOp,
+			OnlyAfter:   ts.Add(3 * time.Second),
+		},
+		{
+			Composition: &apiv1.Composition{ObjectMeta: metav1.ObjectMeta{UID: "deferred-first"}},
+			Synthesizer: &apiv1.Synthesizer{ObjectMeta: metav1.ObjectMeta{UID: "synth", Generation: 1}},
+			Reason:      deferredInputModifiedOp,
+			OnlyAfter:   ts.Add(time.Second),
+		},
+		{
+			Composition: &apiv1.Composition{ObjectMeta: metav1.ObjectMeta{UID: "deferred-second"}},
+			Synthesizer: &apiv1.Synthesizer{ObjectMeta: metav1.ObjectMeta{UID: "synth", Generation: 1}},
+			Reason:      deferredInputModifiedOp,
+			OnlyAfter:   ts.Add(2 * time.Second),
+		},
+		{
+			Composition: &apiv1.Composition{ObjectMeta: metav1.ObjectMeta{UID: "initial-fourth"}},
+			Synthesizer: &apiv1.Synthesizer{ObjectMeta: metav1.ObjectMeta{UID: "synth", Generation: 1}},
+			Reason:      initialSynthesisOp,
+			OnlyAfter:   ts.Add(4 * time.Second),
+		},
+		{
+			Composition: &apiv1.Composition{ObjectMeta: metav1.ObjectMeta{UID: "initial-first"}},
+			Synthesizer: &apiv1.Synthesizer{ObjectMeta: metav1.ObjectMeta{UID: "synth", Generation: 1}},
+			Reason:      initialSynthesisOp,
+			OnlyAfter:   ts.Add(time.Second),
+		},
+		{
+			Composition: &apiv1.Composition{ObjectMeta: metav1.ObjectMeta{UID: "deferred-no-backoff"}},
+			Synthesizer: &apiv1.Synthesizer{ObjectMeta: metav1.ObjectMeta{UID: "synth", Generation: 1}},
+			Reason:      deferredInputModifiedOp,
+		},
+		{
+			Composition: &apiv1.Composition{ObjectMeta: metav1.ObjectMeta{UID: "initial-no-backoff"}},
+			Synthesizer: &apiv1.Synthesizer{ObjectMeta: metav1.ObjectMeta{UID: "synth", Generation: 1}},
+			Reason:      initialSynthesisOp,
+		},
+	}
+
+	for i := 0; i < 100; i++ {
+		rand.Shuffle(len(ops), func(i, j int) { ops[i], ops[j] = ops[j], ops[i] })
+		sort.Slice(ops, func(i, j int) bool { return ops[i].Less(ops[j]) })
+
+		var names []string
+		for _, op := range ops {
+			names = append(names, string(op.Composition.UID))
+		}
+
+		assert.Equal(t, []string{"initial-no-backoff", "deferred-no-backoff", "initial-first", "deferred-first", "deferred-second", "deferred-third", "initial-fourth"}, names, "pass: %d", i)
+	}
+}
+
 func TestOpPrioritySynthRollout(t *testing.T) {
 	synth := &apiv1.Synthesizer{ObjectMeta: metav1.ObjectMeta{UID: types.UID(uuid.New().String()), Generation: 1}}
 
@@ -348,6 +423,9 @@ func TestOpPriorityTies(t *testing.T) {
 		o.Composition.UID = types.UID(uuid.New().String())
 		o.Synthesizer = synths[rand.Intn(len(synths))]
 		o.Reason = allReasons[rand.Intn(len(allReasons))]
+		if rand.Intn(4) == 0 {
+			o.OnlyAfter = time.Now().Add(time.Millisecond * time.Duration(rand.Intn(100)))
+		}
 		ops = append(ops, o)
 	}
 
@@ -357,8 +435,12 @@ func TestOpPriorityTies(t *testing.T) {
 		sort.Slice(ops, func(i, j int) bool { return ops[i].Less(ops[j]) })
 
 		var names []string
-		for _, op := range ops {
+		for i, op := range ops {
 			names = append(names, string(op.Composition.UID))
+
+			if i > 0 {
+				assert.False(t, ops[i-1].OnlyAfter.After(op.OnlyAfter))
+			}
 		}
 
 		if firstOrder == nil {

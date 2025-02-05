@@ -19,6 +19,7 @@ type op struct {
 	Synthesizer *apiv1.Synthesizer
 	Composition *apiv1.Composition
 	Reason      opReason
+	OnlyAfter   time.Time
 
 	Dispatched time.Time
 
@@ -26,9 +27,15 @@ type op struct {
 	synthRolloutHash []byte    // memoized
 }
 
-func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition) *op {
-	syn := comp.Status.CurrentSynthesis
+func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition, nextSlot time.Time) *op {
 	o := &op{Synthesizer: synth, Composition: comp}
+	syn := comp.Status.CurrentSynthesis
+
+	// Retry syntheses that have timed out using exponential backoff, but only if the synthesizer hasn't changed
+	if syn != nil && syn.DeadlineExceeded && syn.Initialized != nil && syn.ObservedSynthesizerGeneration >= synth.Generation {
+		o.OnlyAfter = syn.Initialized.Time.Add(time.Duration(1<<syn.Attempts) * time.Second)
+		syn = comp.Status.PreviousSynthesis
+	}
 
 	switch {
 	case comp.DeletionTimestamp != nil || !comp.InputsExist(synth) || comp.InputsOutOfLockstep(synth) || !controllerutil.ContainsFinalizer(comp, "eno.azure.io/cleanup"):
@@ -58,6 +65,12 @@ func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition) *op {
 		o.Reason = inputModifiedOp
 		return o
 	}
+
+	// Anything after this point is a deferred operation
+	if o.OnlyAfter.Before(nextSlot) {
+		o.OnlyAfter = nextSlot
+	}
+
 	if deferredInputChanges > 0 && syn.Synthesized != nil {
 		o.Reason = deferredInputModifiedOp
 		return o
@@ -72,6 +85,10 @@ func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition) *op {
 }
 
 func (o *op) Less(than *op) bool {
+	if o.OnlyAfter != than.OnlyAfter {
+		return o.OnlyAfter.Before(than.OnlyAfter)
+	}
+
 	if o.Reason == synthesizerModifiedOp && than.Reason == synthesizerModifiedOp {
 		cmp := bytes.Compare(o.SynthRolloutOrderHash(), than.SynthRolloutOrderHash())
 		if cmp != 0 {
