@@ -158,15 +158,15 @@ func TestFuzzNewOp(t *testing.T) {
 			assert.Equal(t, forcedResynthesisOp, op.Reason, args)
 			assert.False(t, op.Reason.Deferred(), args)
 
-		case synthesizing:
-			require.Nil(t, op, args)
-
 		case compModified:
 			require.NotNil(t, op, args)
 			assert.Equal(t, compositionModifiedOp, op.Reason, args)
 			assert.False(t, op.Reason.Deferred(), args)
 
 		case ignoreSideEffects:
+			require.Nil(t, op, args)
+
+		case synthesizing:
 			require.Nil(t, op, args)
 
 		case inputModified:
@@ -186,6 +186,9 @@ func TestFuzzNewOp(t *testing.T) {
 			require.NotNil(t, op, args)
 			assert.Equal(t, synthesizerModifiedOp, op.Reason, args)
 			assert.True(t, op.Reason.Deferred(), args)
+
+		default:
+			require.Nil(t, op, args)
 		}
 
 		if op == nil {
@@ -439,7 +442,7 @@ func TestOpPriorityTies(t *testing.T) {
 			names = append(names, string(op.Composition.UID))
 
 			if i > 0 {
-				assert.False(t, ops[i-1].OnlyAfter.After(op.OnlyAfter))
+				require.False(t, ops[i-1].OnlyAfter.Before(op.OnlyAfter))
 			}
 		}
 

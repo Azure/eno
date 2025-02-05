@@ -23,6 +23,8 @@ const (
 	synthEpochAnnotationKey = "eno.azure.io/global-synthesizer-epoch"
 )
 
+// TODO: Update docs to reflect behavior change
+
 // controller is responsible for carefully dispatching synthesis operations.
 //
 // Dispatching synthesis consists of swapping any existing synthesis state to the previous slot,
@@ -122,10 +124,10 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if op == nil || inFlight >= c.concurrencyLimit {
 		return ctrl.Result{}, nil
 	}
-	if wait := time.Until(op.OnlyAfter); op.Reason.Deferred() && wait > 0 {
+	if wait := time.Until(op.OnlyAfter); wait > 0 {
 		return ctrl.Result{RequeueAfter: wait}, nil
 	}
-	logger = logger.WithValues("compositionName", op.Composition.Name, "compositionNamespace", op.Composition.Namespace, "reason", op.Reason, "synthEpoch", synthEpoch)
+	logger = logger.WithValues("compositionName", op.Composition.Name, "compositionNamespace", op.Composition.Namespace, "reason", op.Reason, "synthEpoch", synthEpoch, "attempt", op.GetSynthesisAttempt())
 
 	// Maintain ordering across synth/composition informers by doing a 2PC on the composition
 	if op.Reason == synthesizerModifiedOp && setSynthEpochAnnotation(op.Composition, synthEpoch) {

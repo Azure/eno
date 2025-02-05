@@ -218,7 +218,7 @@ func (c *Composition) ShouldIgnoreSideEffects() bool {
 }
 
 func (c *Composition) Synthesizing() bool {
-	return c.Status.CurrentSynthesis != nil && c.Status.CurrentSynthesis.Synthesized == nil
+	return c.Status.CurrentSynthesis != nil && c.Status.CurrentSynthesis.Synthesized == nil && !c.Status.CurrentSynthesis.DeadlineExceeded
 }
 
 func (c *Composition) EnableIgnoreSideEffects() {

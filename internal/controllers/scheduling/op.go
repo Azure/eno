@@ -49,19 +49,19 @@ func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition, nextSlot time.Time
 		o.Reason = forcedResynthesisOp
 		return o
 
-	case comp.Synthesizing():
-		return nil
-
 	case syn.ObservedCompositionGeneration != comp.Generation:
 		o.Reason = compositionModifiedOp
 		return o
 
 	case comp.ShouldIgnoreSideEffects():
 		return nil
+
+	case syn.Synthesized == nil:
+		return nil
 	}
 
 	nonDeferredInputChanges, deferredInputChanges := inputChangeCount(synth, comp.Status.InputRevisions, syn.InputRevisions)
-	if nonDeferredInputChanges > 0 && syn.Synthesized != nil {
+	if nonDeferredInputChanges > 0 {
 		o.Reason = inputModifiedOp
 		return o
 	}
@@ -71,7 +71,7 @@ func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition, nextSlot time.Time
 		o.OnlyAfter = nextSlot
 	}
 
-	if deferredInputChanges > 0 && syn.Synthesized != nil {
+	if deferredInputChanges > 0 {
 		o.Reason = deferredInputModifiedOp
 		return o
 	}
@@ -86,7 +86,7 @@ func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition, nextSlot time.Time
 
 func (o *op) Less(than *op) bool {
 	if o.OnlyAfter != than.OnlyAfter {
-		return o.OnlyAfter.Before(than.OnlyAfter)
+		return than.OnlyAfter.After(o.OnlyAfter)
 	}
 
 	if o.Reason == synthesizerModifiedOp && than.Reason == synthesizerModifiedOp {
@@ -172,10 +172,18 @@ func (o *op) BuildPatch() any {
 			"initialized":                   time.Now().Format(time.RFC3339),
 			"uuid":                          o.id.String(),
 			"deferred":                      o.Reason.Deferred(),
+			"attempts":                      o.GetSynthesisAttempt(),
 		},
 	})
 
 	return ops
+}
+
+func (o *op) GetSynthesisAttempt() int {
+	if o.Composition.Status.CurrentSynthesis == nil {
+		return 1
+	}
+	return o.Composition.Status.CurrentSynthesis.Attempts + 1
 }
 
 type jsonPatch struct {
