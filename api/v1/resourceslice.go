@@ -27,7 +27,6 @@ type ResourceSliceSpec struct {
 }
 
 type Manifest struct {
-	// +required
 	Manifest string `json:"manifest,omitempty"`
 
 	// Deleted is true when this manifest represents a "tombstone" - a resource that should no longer exist.

@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.15.0
+    controller-gen.kubebuilder.io/version: v0.17.1
   name: symphonies.eno.azure.io
 spec:
   group: eno.azure.io
@@ -20,7 +20,6 @@ spec:
         description: |-
           Symphony is a set of variations on a composition.
           Useful for creating several compositions that use a common set of bindings but different synthesizers.
-
 
           This pattern is highly opinionated for use-cases in which a single "unit of management"
           includes multiple distinct components. For example: deploying many instances of an application that

@@ -129,16 +129,16 @@ func (in *CompositionStatus) DeepCopyInto(out *CompositionStatus) {
 		*out = new(Synthesis)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.PendingResynthesis != nil {
-		in, out := &in.PendingResynthesis, &out.PendingResynthesis
-		*out = (*in).DeepCopy()
-	}
 	if in.InputRevisions != nil {
 		in, out := &in.InputRevisions, &out.InputRevisions
 		*out = make([]InputRevisions, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
+	}
+	if in.PendingResynthesis != nil {
+		in, out := &in.PendingResynthesis, &out.PendingResynthesis
+		*out = (*in).DeepCopy()
 	}
 }
 
