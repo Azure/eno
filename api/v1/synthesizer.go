@@ -32,8 +32,6 @@ type Synthesizer struct {
 // +kubebuilder:validation:XValidation:rule="duration(self.execTimeout) <= duration(self.podTimeout)",message="podTimeout must be greater than execTimeout"
 type SynthesizerSpec struct {
 	// Copied opaquely into the container's image property.
-	//
-	// +required
 	Image string `json:"image,omitempty"`
 
 	// Copied opaquely into the container's command property.
@@ -75,6 +73,5 @@ type SynthesizerStatus struct {
 }
 
 type SynthesizerRef struct {
-	// +required
 	Name string `json:"name,omitempty"`
 }

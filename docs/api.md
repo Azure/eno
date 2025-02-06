@@ -94,8 +94,8 @@ _Appears in:_
 | `simplified` _[SimplifiedStatus](#simplifiedstatus)_ |  |  |  |
 | `currentSynthesis` _[Synthesis](#synthesis)_ |  |  |  |
 | `previousSynthesis` _[Synthesis](#synthesis)_ |  |  |  |
-| `pendingResynthesis` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ |  |  |  |
 | `inputRevisions` _[InputRevisions](#inputrevisions) array_ |  |  |  |
+| `pendingResynthesis` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ |  |  |  |
 
 
 #### EnvVar

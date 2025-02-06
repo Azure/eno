@@ -19,36 +19,28 @@ func NewInput(key string, res InputResource) Input {
 // Input is passed to Synthesis Pods at runtime and represents a bound ref.
 type Input struct {
 	metav1.TypeMeta `json:",inline"`
-	// +required
-	Key string `json:"key"`
-	// +required
-	Resource InputResource `json:"resource"`
+	Key             string        `json:"key"`
+	Resource        InputResource `json:"resource"`
 }
 
 type InputResource struct {
-	// +required
 	Name      string `json:"name"`
 	Namespace string `json:"namespace,omitempty"`
-	// +required
-	Kind  string `json:"kind"`
-	Group string `json:"group"`
+	Kind      string `json:"kind"`
+	Group     string `json:"group"`
 }
 
 // Bindings map a specific Kubernetes resource to a ref exposed by a synthesizer.
 // Compositions use bindings to populate inputs supported by their synthesizer.
 type Binding struct {
 	// Key determines which ref this binding binds to. Opaque.
-	//
-	// +required
 	Key string `json:"key"`
 
-	// +required
 	Resource ResourceBinding `json:"resource"`
 }
 
 // A reference to a specific resource name and optionally namespace.
 type ResourceBinding struct {
-	// +required
 	Name      string `json:"name"`
 	Namespace string `json:"namespace,omitempty"`
 }
@@ -62,11 +54,8 @@ type ResourceBinding struct {
 // Re-synthesis happens automatically while honoring the globally configured cooldown period.
 type Ref struct {
 	// Key corresponds to bindings to this ref.
-	//
-	// +required
 	Key string `json:"key"`
 
-	// +required
 	Resource ResourceRef `json:"resource"`
 
 	// Allows control over re-synthesis when inputs changed.
@@ -77,12 +66,7 @@ type Ref struct {
 
 // A reference to a resource kind/group.
 type ResourceRef struct {
-	// +required
-	Group string `json:"group,omitempty"`
-
-	// +required
+	Group   string `json:"group,omitempty"`
 	Version string `json:"version,omitempty"`
-
-	// +required
-	Kind string `json:"kind"`
+	Kind    string `json:"kind"`
 }

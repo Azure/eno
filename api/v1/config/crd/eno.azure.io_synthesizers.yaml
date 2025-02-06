@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.15.0
+    controller-gen.kubebuilder.io/version: v0.17.1
   name: synthesizers.eno.azure.io
 spec:
   group: eno.azure.io
@@ -23,7 +23,6 @@ spec:
       openAPIV3Schema:
         description: |-
           Synthesizers are any process that can run in a Kubernetes container that implements the [KRM Functions Specification](https://github.com/kubernetes-sigs/kustomize/blob/master/cmd/config/docs/api-conventions/functions-spec.md).
-
 
           Synthesizer processes are given some metadata about the composition they are synthesizing, and are expected
           to return a set of Kubernetes resources. Essentially they generate the desired state for a set of Kubernetes resources.
@@ -1009,10 +1008,8 @@ spec:
                           Claims lists the names of resources, defined in spec.resourceClaims,
                           that are used by this container.
 
-
                           This is an alpha field and requires enabling the
                           DynamicResourceAllocation feature gate.
-
 
                           This field is immutable. It can only be set for containers.
                         items:
@@ -1078,7 +1075,6 @@ spec:
                     Inputs are typed using the Kubernetes API - they are just normal Kubernetes resources.
                     The consumer (synthesizer) specifies the resource's kind/group,
                     while the producer (composition) specifies a specific resource name/namespace.
-
 
                     Compositions that use the synthesizer will be re-synthesized when the resource bound to this ref changes.
                     Re-synthesis happens automatically while honoring the globally configured cooldown period.
