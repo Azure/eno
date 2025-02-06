@@ -93,6 +93,8 @@ type Synthesis struct {
 	// Counter used internally to calculate back off when retrying failed syntheses.
 	Attempts int `json:"attempts,omitempty"`
 
+	DeadlineExceeded bool `json:"deadlineExceeded,omitempty"`
+
 	// References to every resource slice that contains the resources comprising this synthesis.
 	// Immutable.
 	ResourceSlices []*ResourceSliceRef `json:"resourceSlices,omitempty"`
@@ -216,7 +218,7 @@ func (c *Composition) ShouldIgnoreSideEffects() bool {
 }
 
 func (c *Composition) Synthesizing() bool {
-	return c.Status.CurrentSynthesis != nil && c.Status.CurrentSynthesis.Synthesized == nil
+	return c.Status.CurrentSynthesis != nil && c.Status.CurrentSynthesis.Synthesized == nil && !c.Status.CurrentSynthesis.DeadlineExceeded
 }
 
 func (c *Composition) EnableIgnoreSideEffects() {

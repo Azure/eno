@@ -249,6 +249,152 @@ func TestDeferredInput(t *testing.T) {
 	assert.Greater(t, time.Since(start), time.Millisecond*500, "chilled deferral period")
 }
 
+// TestTimeoutBackoff proves that the controller will retry syntheses that have timed out.
+func TestTimeoutBackoff(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	require.NoError(t, NewController(mgr.Manager, 100, 2*time.Second))
+	mgr.Start(t)
+	cli := mgr.GetClient()
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	synth.Namespace = "default"
+	require.NoError(t, cli.Create(ctx, synth))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Finalizers = []string{"eno.azure.io/cleanup"}
+	comp.Spec.Synthesizer.Name = synth.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	ctrl.NewControllerManagedBy(mgr.Manager).
+		Named("timeoutController").
+		For(&apiv1.Composition{}).
+		Complete(reconcile.Func(func(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+			comp := &apiv1.Composition{}
+			if err := cli.Get(ctx, req.NamespacedName, comp); err != nil {
+				return reconcile.Result{}, err
+			}
+
+			if !comp.Synthesizing() || comp.Generation > 1 {
+				return reconcile.Result{}, nil
+			}
+
+			time.Sleep(time.Duration(rand.IntN(100)) * time.Millisecond)
+
+			t.Logf("marking synthesis as timed out at generation=%d", comp.Generation)
+			comp.Status.CurrentSynthesis.DeadlineExceeded = true
+			comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration = synth.Generation
+			return reconcile.Result{}, cli.Status().Update(ctx, comp)
+		}))
+
+	// It should synthesize a few times
+	var timings []time.Duration
+	var syntheses []apiv1.Synthesis
+	var lastUUID string
+	for i := 0; i < 3; i++ {
+		start := time.Now()
+		testutil.Eventually(t, func() bool {
+			err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+			return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.UUID != lastUUID
+		})
+		timings = append(timings, time.Since(start))
+		syntheses = append(syntheses, *comp.Status.CurrentSynthesis)
+		lastUUID = comp.Status.CurrentSynthesis.UUID
+	}
+
+	// Prove that each duration is increasing
+	for i := 1; i < len(timings); i++ {
+		assert.Greater(t, timings[i], timings[i-1], "each duration should be greater than the previous one")
+	}
+
+	// Prove that the synthesis UUID changes every time, and that the attempt counter is incremented
+	for i := 1; i < len(syntheses); i++ {
+		assert.NotEqual(t, syntheses[i].UUID, syntheses[i-1].UUID, "synthesis UUID should change every time")
+		assert.Greater(t, syntheses[i].Attempts, syntheses[i-1].Attempts, "attempt counter should be incremented")
+	}
+
+	// Modifying the composition should trigger resyntheses without contributing to the backoff
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Spec.SynthesisEnv = []apiv1.EnvVar{{Name: "foo", Value: "bar"}}
+		return cli.Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	start := time.Now()
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.UUID != lastUUID
+	})
+	assert.Less(t, time.Since(start), timings[len(timings)-1])
+}
+
+// TestRetryConcurrencyLimit proves that syntheses waiting to be retried do not count against the concurrency limit.
+func TestRetryConcurrencyLimit(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	require.NoError(t, NewController(mgr.Manager, 1, 2*time.Second))
+	mgr.Start(t)
+	cli := mgr.GetClient()
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	synth.Namespace = "default"
+	require.NoError(t, cli.Create(ctx, synth))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Finalizers = []string{"eno.azure.io/cleanup"}
+	comp.Spec.Synthesizer.Name = synth.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	ctrl.NewControllerManagedBy(mgr.Manager).
+		Named("timeoutController").
+		For(&apiv1.Composition{}).
+		Complete(reconcile.Func(func(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+			if req.Name != "test-comp" {
+				return reconcile.Result{}, nil
+			}
+
+			comp := &apiv1.Composition{}
+			if err := cli.Get(ctx, req.NamespacedName, comp); err != nil {
+				return reconcile.Result{}, err
+			}
+
+			if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.DeadlineExceeded {
+				return reconcile.Result{}, nil
+			}
+
+			t.Logf("marking synthesis as timed out")
+			comp.Status.CurrentSynthesis.DeadlineExceeded = true
+			comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration = synth.Generation
+			return reconcile.Result{}, cli.Status().Update(ctx, comp)
+		}))
+
+	// Wait for synthesis to start
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil
+	})
+
+	// Create a new composition that should not be blocked by the timeout
+	comp = &apiv1.Composition{}
+	comp.Name = "test-new-comp"
+	comp.Namespace = "default"
+	comp.Finalizers = []string{"eno.azure.io/cleanup"}
+	comp.Spec.Synthesizer.Name = synth.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil
+	})
+}
+
 // TestForcedResynth proves that the controller will resynthesize a composition when the forced resynthesis annotation is set.
 func TestForcedResynth(t *testing.T) {
 	ctx := testutil.NewContext(t)
@@ -413,7 +559,7 @@ func TestSerializationGracePeriod(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
 
-	c := &controller{client: cli, concurrencyLimit: 1, cacheGracePeriod: time.Millisecond * 100}
+	c := &controller{client: cli, concurrencyLimit: 2, cacheGracePeriod: time.Millisecond * 100}
 
 	synth := &apiv1.Synthesizer{}
 	synth.Name = "test-synth"
@@ -469,32 +615,50 @@ func TestDispatchOrder(t *testing.T) {
 	synth := &apiv1.Synthesizer{}
 	synth.Name = "test-synth"
 	synth.Namespace = "default"
+	synth.Generation = 2
 	require.NoError(t, cli.Create(ctx, synth))
 
 	// Waiting for the new synth
 	comp := &apiv1.Composition{}
-	comp.Name = "test-comp-1"
 	comp.Namespace = "default"
 	comp.Finalizers = []string{"eno.azure.io/cleanup"}
 	comp.Generation = 2
 	comp.Spec.Synthesizer.Name = synth.Name
-	comp.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: "foo", ObservedCompositionGeneration: 1, Synthesized: ptr.To(metav1.Now())}
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		UUID:                          "foo",
+		ObservedCompositionGeneration: comp.Generation,
+		ObservedSynthesizerGeneration: synth.Generation,
+		Synthesized:                   ptr.To(metav1.Now()),
+	}
+
+	comp1 := comp.DeepCopy()
+	comp1.Name = "test-comp-1"
+	comp1.Status.CurrentSynthesis.ObservedCompositionGeneration--
+	require.NoError(t, cli.Create(ctx, comp1))
+	require.NoError(t, cli.Status().Update(ctx, comp1))
 
 	comp2 := comp.DeepCopy()
 	comp2.Name = "test-comp-2"
-	comp2.Status.CurrentSynthesis.ObservedSynthesizerGeneration = synth.Generation
-	require.NoError(t, cli.Create(ctx, comp))
+	comp2.Status.CurrentSynthesis.ObservedSynthesizerGeneration--
 	require.NoError(t, cli.Create(ctx, comp2))
-
-	require.NoError(t, cli.Status().Update(ctx, comp))
 	require.NoError(t, cli.Status().Update(ctx, comp2))
 
 	// Dispatch one of the syntheses
 	_, err := c.Reconcile(ctx, ctrl.Request{})
 	require.NoError(t, err)
 
-	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-	assert.True(t, comp.Synthesizing())
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp1), comp1))
+	assert.True(t, comp1.Synthesizing())
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp2), comp2))
+	assert.False(t, comp2.Synthesizing())
+
+	// Serialize the synthesizer rollout into "composition time"
+	_, err = c.Reconcile(ctx, ctrl.Request{})
+	require.NoError(t, err)
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp1), comp1))
+	assert.True(t, comp1.Synthesizing())
 
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp2), comp2))
 	assert.False(t, comp2.Synthesizing())
@@ -503,8 +667,8 @@ func TestDispatchOrder(t *testing.T) {
 	_, err = c.Reconcile(ctx, ctrl.Request{})
 	require.NoError(t, err)
 
-	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-	assert.True(t, comp.Synthesizing())
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp1), comp1))
+	assert.True(t, comp1.Synthesizing())
 
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp2), comp2))
 	assert.True(t, comp2.Synthesizing())

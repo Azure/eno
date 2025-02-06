@@ -112,8 +112,8 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			continue
 		}
 
-		next := newOp(&synth, &comp)
-		if next != nil && (op == nil || op.Less(next)) {
+		next := newOp(&synth, &comp, nextSlot)
+		if next != nil && (op == nil || next.Less(op)) {
 			op = next
 		}
 	}
@@ -122,10 +122,10 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if op == nil || inFlight >= c.concurrencyLimit {
 		return ctrl.Result{}, nil
 	}
-	if wait := time.Until(nextSlot); op.Reason.Deferred() && wait > 0 {
+	if wait := time.Until(op.OnlyAfter); wait > 0 {
 		return ctrl.Result{RequeueAfter: wait}, nil
 	}
-	logger = logger.WithValues("compositionName", op.Composition.Name, "compositionNamespace", op.Composition.Namespace, "reason", op.Reason, "synthEpoch", synthEpoch)
+	logger = logger.WithValues("compositionName", op.Composition.Name, "compositionNamespace", op.Composition.Namespace, "reason", op.Reason, "synthEpoch", synthEpoch, "attempt", op.GetSynthesisAttempt())
 
 	// Maintain ordering across synth/composition informers by doing a 2PC on the composition
 	if op.Reason == synthesizerModifiedOp && setSynthEpochAnnotation(op.Composition, synthEpoch) {
@@ -146,7 +146,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	op.Dispatched = time.Now()
 	c.lastApplied = op
-	logger.V(0).Info("dispatched synthesis")
+	logger.V(0).Info("dispatched synthesis", "synthesisUUID", op.id)
 
 	return ctrl.Result{}, nil
 }

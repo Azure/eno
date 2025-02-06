@@ -342,6 +342,7 @@ _Appears in:_
 | `reconciled` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ | Time at which the synthesis's resources were reconciled into real Kubernetes resources. |  |  |
 | `ready` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ | Time at which the synthesis's reconciled resources became ready. |  |  |
 | `attempts` _integer_ | Counter used internally to calculate back off when retrying failed syntheses. |  |  |
+| `deadlineExceeded` _boolean_ |  |  |  |
 | `results` _[Result](#result) array_ | Results are passed through opaquely from the synthesizer's KRM function. |  |  |
 | `inputRevisions` _[InputRevisions](#inputrevisions) array_ | InputRevisions contains the versions of the input resources that were used for this synthesis. |  |  |
 | `deferred` _boolean_ | Deferred is true when this synthesis was caused by a change to either the synthesizer<br />or an input with a ref that sets `Defer == true`. |  |  |

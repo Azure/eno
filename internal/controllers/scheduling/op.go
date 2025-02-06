@@ -19,6 +19,7 @@ type op struct {
 	Synthesizer *apiv1.Synthesizer
 	Composition *apiv1.Composition
 	Reason      opReason
+	OnlyAfter   time.Time
 
 	Dispatched time.Time
 
@@ -26,52 +27,74 @@ type op struct {
 	synthRolloutHash []byte    // memoized
 }
 
-func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition) *op {
-	syn := comp.Status.CurrentSynthesis
+func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition, nextSlot time.Time) *op {
 	o := &op{Synthesizer: synth, Composition: comp}
 
+	syn := comp.Status.CurrentSynthesis
+	if syn != nil && syn.DeadlineExceeded && syn.Initialized != nil && (syn.ObservedSynthesizerGeneration == 0 || syn.ObservedSynthesizerGeneration >= synth.Generation) {
+		o.OnlyAfter = syn.Initialized.Time.Add(time.Duration(1<<syn.Attempts) * time.Second)
+		syn = comp.Status.PreviousSynthesis
+	}
+
+	var ok bool
+	o.Reason, ok = classifyOp(synth, comp, syn)
+	if !ok {
+		return nil
+	}
+
+	// Deferred ops have a special property: they won't replace an in-flight synthesis
+	// This protects frequent synth/input changes from effectively blocking synthesis
+	if o.Reason.Deferred() && comp.Synthesizing() {
+		return nil
+	}
+
+	// Take the max of the next retry time and (for deferred ops) the next available slot
+	if o.Reason.Deferred() && o.OnlyAfter.Before(nextSlot) {
+		o.OnlyAfter = nextSlot
+	}
+
+	return o
+}
+
+func classifyOp(synth *apiv1.Synthesizer, comp *apiv1.Composition, syn *apiv1.Synthesis) (opReason, bool) {
 	switch {
 	case comp.DeletionTimestamp != nil || !comp.InputsExist(synth) || comp.InputsOutOfLockstep(synth) || !controllerutil.ContainsFinalizer(comp, "eno.azure.io/cleanup"):
-		return nil
+		return 0, false
 
 	case syn == nil:
-		o.Reason = initialSynthesisOp
-		return o
+		return initialSynthesisOp, true
 
 	case comp.ShouldForceResynthesis():
-		o.Reason = forcedResynthesisOp
-		return o
-
-	case comp.Synthesizing():
-		return nil
+		return forcedResynthesisOp, true
 
 	case syn.ObservedCompositionGeneration != comp.Generation:
-		o.Reason = compositionModifiedOp
-		return o
+		return compositionModifiedOp, true
 
 	case comp.ShouldIgnoreSideEffects():
-		return nil
+		return 0, false
 	}
 
 	nonDeferredInputChanges, deferredInputChanges := inputChangeCount(synth, comp.Status.InputRevisions, syn.InputRevisions)
-	if nonDeferredInputChanges > 0 && syn.Synthesized != nil {
-		o.Reason = inputModifiedOp
-		return o
+	if nonDeferredInputChanges > 0 {
+		return inputModifiedOp, true
 	}
-	if deferredInputChanges > 0 && syn.Synthesized != nil {
-		o.Reason = deferredInputModifiedOp
-		return o
+
+	if deferredInputChanges > 0 {
+		return deferredInputModifiedOp, true
 	}
 
 	if syn.ObservedSynthesizerGeneration > 0 && syn.ObservedSynthesizerGeneration < synth.Generation {
-		o.Reason = synthesizerModifiedOp
-		return o
+		return synthesizerModifiedOp, true
 	}
 
-	return nil
+	return initialSynthesisOp, syn.DeadlineExceeded
 }
 
 func (o *op) Less(than *op) bool {
+	if !o.OnlyAfter.Equal(than.OnlyAfter) {
+		return than.OnlyAfter.After(o.OnlyAfter)
+	}
+
 	if o.Reason == synthesizerModifiedOp && than.Reason == synthesizerModifiedOp {
 		cmp := bytes.Compare(o.SynthRolloutOrderHash(), than.SynthRolloutOrderHash())
 		if cmp != 0 {
@@ -139,6 +162,7 @@ func (o *op) BuildPatch() any {
 	} else {
 		ops = append(ops,
 			jsonPatch{Op: "test", Path: "/status/currentSynthesis/uuid", Value: syn.UUID},
+			jsonPatch{Op: "test", Path: "/status/currentSynthesis/deadlineExceeded", Value: syn.DeadlineExceeded},
 			jsonPatch{Op: "test", Path: "/status/currentSynthesis/observedCompositionGeneration", Value: syn.ObservedCompositionGeneration},
 			jsonPatch{Op: "test", Path: "/status/currentSynthesis/synthesized", Value: syn.Synthesized})
 
@@ -155,10 +179,18 @@ func (o *op) BuildPatch() any {
 			"initialized":                   time.Now().Format(time.RFC3339),
 			"uuid":                          o.id.String(),
 			"deferred":                      o.Reason.Deferred(),
+			"attempts":                      o.GetSynthesisAttempt(),
 		},
 	})
 
 	return ops
+}
+
+func (o *op) GetSynthesisAttempt() int {
+	if o.Composition.Status.CurrentSynthesis == nil || !o.Composition.Status.CurrentSynthesis.DeadlineExceeded {
+		return 1
+	}
+	return o.Composition.Status.CurrentSynthesis.Attempts + 1
 }
 
 type jsonPatch struct {

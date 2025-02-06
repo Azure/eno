@@ -125,6 +125,8 @@ spec:
                     description: Counter used internally to calculate back off when
                       retrying failed syntheses.
                     type: integer
+                  deadlineExceeded:
+                    type: boolean
                   deferred:
                     description: |-
                       Deferred is true when this synthesis was caused by a change to either the synthesizer
@@ -240,6 +242,8 @@ spec:
                     description: Counter used internally to calculate back off when
                       retrying failed syntheses.
                     type: integer
+                  deadlineExceeded:
+                    type: boolean
                   deferred:
                     description: |-
                       Deferred is true when this synthesis was caused by a change to either the synthesizer
