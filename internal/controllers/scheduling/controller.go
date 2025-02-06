@@ -115,7 +115,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 
 		next := newOp(&synth, &comp, nextSlot)
-		if next != nil && (op == nil || op.Less(next)) {
+		if next != nil && (op == nil || !op.Less(next)) {
 			op = next
 		}
 	}

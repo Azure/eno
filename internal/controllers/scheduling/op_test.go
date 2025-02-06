@@ -442,7 +442,7 @@ func TestOpPriorityTies(t *testing.T) {
 			names = append(names, string(op.Composition.UID))
 
 			if i > 0 {
-				require.False(t, ops[i-1].OnlyAfter.Before(op.OnlyAfter))
+				require.False(t, ops[i-1].OnlyAfter.After(op.OnlyAfter))
 			}
 		}
 

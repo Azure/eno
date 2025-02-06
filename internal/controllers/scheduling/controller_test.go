@@ -357,12 +357,11 @@ func TestRetryConcurrencyLimit(t *testing.T) {
 				return reconcile.Result{}, err
 			}
 
-			if !comp.Synthesizing() {
+			if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.DeadlineExceeded {
 				return reconcile.Result{}, nil
 			}
 
-			time.Sleep(time.Duration(rand.IntN(500)) * time.Millisecond) // maybe the new composition lands first, maybe not
-
+			t.Logf("marking synthesis as timed out")
 			comp.Status.CurrentSynthesis.DeadlineExceeded = true
 			comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration = synth.Generation
 			return reconcile.Result{}, cli.Status().Update(ctx, comp)
@@ -552,7 +551,7 @@ func TestSerializationGracePeriod(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
 
-	c := &controller{client: cli, concurrencyLimit: 1, cacheGracePeriod: time.Millisecond * 100}
+	c := &controller{client: cli, concurrencyLimit: 2, cacheGracePeriod: time.Millisecond * 100}
 
 	synth := &apiv1.Synthesizer{}
 	synth.Name = "test-synth"
@@ -582,7 +581,7 @@ func TestSerializationGracePeriod(t *testing.T) {
 	assert.False(t, res.Requeue)
 
 	// Modify its synthesis uuid such that it no longer matches the controller's last known op
-	require.NoError(t, cli.Status().Patch(ctx, comp, client.RawPatch(types.JSONPatchType, []byte(`[{ "op": "replace", "path": "/status/currentSynthesis/uuid", "value": "bar" }]`))))
+	require.NoError(t, cli.Status().Patch(ctx, comp2, client.RawPatch(types.JSONPatchType, []byte(`[{ "op": "replace", "path": "/status/currentSynthesis/uuid", "value": "bar" }]`))))
 
 	// The controller hasn't seen its latest update, so it won't dispatch another synthesis
 	res, err = c.Reconcile(ctx, ctrl.Request{})
@@ -608,32 +607,50 @@ func TestDispatchOrder(t *testing.T) {
 	synth := &apiv1.Synthesizer{}
 	synth.Name = "test-synth"
 	synth.Namespace = "default"
+	synth.Generation = 2
 	require.NoError(t, cli.Create(ctx, synth))
 
 	// Waiting for the new synth
 	comp := &apiv1.Composition{}
-	comp.Name = "test-comp-1"
 	comp.Namespace = "default"
 	comp.Finalizers = []string{"eno.azure.io/cleanup"}
 	comp.Generation = 2
 	comp.Spec.Synthesizer.Name = synth.Name
-	comp.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: "foo", ObservedCompositionGeneration: 1, Synthesized: ptr.To(metav1.Now())}
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		UUID:                          "foo",
+		ObservedCompositionGeneration: comp.Generation,
+		ObservedSynthesizerGeneration: synth.Generation,
+		Synthesized:                   ptr.To(metav1.Now()),
+	}
+
+	comp1 := comp.DeepCopy()
+	comp1.Name = "test-comp-1"
+	comp1.Status.CurrentSynthesis.ObservedCompositionGeneration--
+	require.NoError(t, cli.Create(ctx, comp1))
+	require.NoError(t, cli.Status().Update(ctx, comp1))
 
 	comp2 := comp.DeepCopy()
 	comp2.Name = "test-comp-2"
-	comp2.Status.CurrentSynthesis.ObservedSynthesizerGeneration = synth.Generation
-	require.NoError(t, cli.Create(ctx, comp))
+	comp2.Status.CurrentSynthesis.ObservedSynthesizerGeneration--
 	require.NoError(t, cli.Create(ctx, comp2))
-
-	require.NoError(t, cli.Status().Update(ctx, comp))
 	require.NoError(t, cli.Status().Update(ctx, comp2))
 
 	// Dispatch one of the syntheses
 	_, err := c.Reconcile(ctx, ctrl.Request{})
 	require.NoError(t, err)
 
-	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-	assert.True(t, comp.Synthesizing())
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp1), comp1))
+	assert.True(t, comp1.Synthesizing())
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp2), comp2))
+	assert.False(t, comp2.Synthesizing())
+
+	// Serialize the synthesizer rollout into "composition time"
+	_, err = c.Reconcile(ctx, ctrl.Request{})
+	require.NoError(t, err)
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp1), comp1))
+	assert.True(t, comp1.Synthesizing())
 
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp2), comp2))
 	assert.False(t, comp2.Synthesizing())
@@ -642,8 +659,8 @@ func TestDispatchOrder(t *testing.T) {
 	_, err = c.Reconcile(ctx, ctrl.Request{})
 	require.NoError(t, err)
 
-	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-	assert.True(t, comp.Synthesizing())
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp1), comp1))
+	assert.True(t, comp1.Synthesizing())
 
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp2), comp2))
 	assert.True(t, comp2.Synthesizing())

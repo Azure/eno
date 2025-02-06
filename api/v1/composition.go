@@ -217,7 +217,7 @@ func (c *Composition) ShouldIgnoreSideEffects() bool {
 	return c.Annotations["eno.azure.io/ignore-side-effects"] == "true"
 }
 
-func (c *Composition) Synthesizing() bool {
+func (c *Composition) Synthesizing() bool { // TODO: Where should use this?
 	return c.Status.CurrentSynthesis != nil && c.Status.CurrentSynthesis.Synthesized == nil && !c.Status.CurrentSynthesis.DeadlineExceeded
 }
 

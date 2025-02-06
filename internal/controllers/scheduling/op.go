@@ -85,7 +85,7 @@ func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition, nextSlot time.Time
 }
 
 func (o *op) Less(than *op) bool {
-	if o.OnlyAfter != than.OnlyAfter {
+	if !o.OnlyAfter.Equal(than.OnlyAfter) {
 		return than.OnlyAfter.After(o.OnlyAfter)
 	}
 
