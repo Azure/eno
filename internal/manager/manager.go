@@ -22,6 +22,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -102,6 +103,7 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 		LeaseDuration:                 &opts.ElectionLeaseDuration,
 		RenewDeadline:                 &opts.ElectionLeaseRenewDeadline,
 		LeaderElectionReleaseOnCancel: true,
+		Controller:                    config.Controller{SkipNameValidation: ptr.To(true)},
 	}
 
 	if ratioStr := os.Getenv("CHAOS_RATIO"); ratioStr != "" {
@@ -205,7 +207,7 @@ func NewLogConstructor(mgr ctrl.Manager, controllerName string) func(*reconcile.
 }
 
 func NewCompositionToResourceSliceHandler(cli client.Client) handler.EventHandler {
-	apply := func(ctx context.Context, rli workqueue.RateLimitingInterface, obj client.Object) {
+	apply := func(ctx context.Context, rli workqueue.TypedRateLimitingInterface[reconcile.Request], obj client.Object) {
 		list := &apiv1.ResourceSliceList{}
 		err := cli.List(ctx, list, client.InNamespace(obj.GetNamespace()), client.MatchingFields{
 			IdxResourceSlicesByComposition: obj.GetName(),
@@ -219,13 +221,13 @@ func NewCompositionToResourceSliceHandler(cli client.Client) handler.EventHandle
 		}
 	}
 	return &handler.Funcs{
-		CreateFunc: func(ctx context.Context, ce event.CreateEvent, rli workqueue.RateLimitingInterface) {
+		CreateFunc: func(ctx context.Context, ce event.TypedCreateEvent[client.Object], rli workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			apply(ctx, rli, ce.Object)
 		},
-		UpdateFunc: func(ctx context.Context, ue event.UpdateEvent, rli workqueue.RateLimitingInterface) {
+		UpdateFunc: func(ctx context.Context, ue event.TypedUpdateEvent[client.Object], rli workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			apply(ctx, rli, ue.ObjectNew)
 		},
-		DeleteFunc: func(ctx context.Context, de event.DeleteEvent, rli workqueue.RateLimitingInterface) {
+		DeleteFunc: func(ctx context.Context, de event.TypedDeleteEvent[client.Object], rli workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			apply(ctx, rli, de.Object)
 		},
 	}
