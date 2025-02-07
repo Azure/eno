@@ -27,48 +27,55 @@ type op struct {
 }
 
 func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition) *op {
-	syn := comp.Status.CurrentSynthesis
 	o := &op{Synthesizer: synth, Composition: comp}
 
+	var ok bool
+	o.Reason, ok = classifyOp(synth, comp, comp.Status.CurrentSynthesis)
+	if !ok {
+		return nil
+	}
+
+	// Deferred ops have a special property: they won't replace an in-flight synthesis
+	// This protects frequent synth/input changes from effectively blocking synthesis
+	if o.Reason.Deferred() && comp.Synthesizing() {
+		return nil
+	}
+
+	return o
+}
+
+func classifyOp(synth *apiv1.Synthesizer, comp *apiv1.Composition, syn *apiv1.Synthesis) (opReason, bool) {
 	switch {
 	case comp.DeletionTimestamp != nil || !comp.InputsExist(synth) || comp.InputsOutOfLockstep(synth) || !controllerutil.ContainsFinalizer(comp, "eno.azure.io/cleanup"):
-		return nil
+		return 0, false
 
 	case syn == nil:
-		o.Reason = initialSynthesisOp
-		return o
+		return initialSynthesisOp, true
 
 	case comp.ShouldForceResynthesis():
-		o.Reason = forcedResynthesisOp
-		return o
-
-	case comp.Synthesizing():
-		return nil
+		return forcedResynthesisOp, true
 
 	case syn.ObservedCompositionGeneration != comp.Generation:
-		o.Reason = compositionModifiedOp
-		return o
+		return compositionModifiedOp, true
 
 	case comp.ShouldIgnoreSideEffects():
-		return nil
+		return 0, false
 	}
 
 	nonDeferredInputChanges, deferredInputChanges := inputChangeCount(synth, comp.Status.InputRevisions, syn.InputRevisions)
-	if nonDeferredInputChanges > 0 && syn.Synthesized != nil {
-		o.Reason = inputModifiedOp
-		return o
+	if nonDeferredInputChanges > 0 {
+		return inputModifiedOp, true
 	}
-	if deferredInputChanges > 0 && syn.Synthesized != nil {
-		o.Reason = deferredInputModifiedOp
-		return o
+
+	if deferredInputChanges > 0 {
+		return deferredInputModifiedOp, true
 	}
 
 	if syn.ObservedSynthesizerGeneration > 0 && syn.ObservedSynthesizerGeneration < synth.Generation {
-		o.Reason = synthesizerModifiedOp
-		return o
+		return synthesizerModifiedOp, true
 	}
 
-	return nil
+	return 0, false
 }
 
 func (o *op) Less(than *op) bool {

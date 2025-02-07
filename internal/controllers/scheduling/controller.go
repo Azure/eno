@@ -113,7 +113,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 
 		next := newOp(&synth, &comp)
-		if next != nil && (op == nil || op.Less(next)) {
+		if next != nil && (op == nil || next.Less(op)) {
 			op = next
 		}
 	}
@@ -138,15 +138,14 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	if err := c.dispatchOp(ctx, op); err != nil {
 		if errors.IsInvalid(err) {
-			logger.V(0).Info("conflict while dispatching synthesis")
-			return ctrl.Result{}, nil
+			return ctrl.Result{}, fmt.Errorf("conflict while dispatching synthesis")
 		}
 		return ctrl.Result{}, fmt.Errorf("dispatching synthesis operation: %w", err)
 	}
 
 	op.Dispatched = time.Now()
 	c.lastApplied = op
-	logger.V(0).Info("dispatched synthesis")
+	logger.V(0).Info("dispatched synthesis", "synthesisUUID", op.id)
 
 	return ctrl.Result{}, nil
 }

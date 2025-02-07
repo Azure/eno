@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"testing"
+	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/testutil"
@@ -63,8 +64,9 @@ func TestFuzzNewOp(t *testing.T) {
 			},
 		}
 
+		initTS := time.Date(8000, 0, 0, 0, 0, 0, 0, time.UTC)
 		comp := &apiv1.Composition{
-			ObjectMeta: metav1.ObjectMeta{Name: "test-comp", Finalizers: []string{"eno.azure.io/cleanup"}},
+			ObjectMeta: metav1.ObjectMeta{Name: "test-comp", Finalizers: []string{"eno.azure.io/cleanup"}, Generation: 1},
 			Spec: apiv1.CompositionSpec{
 				Bindings: []apiv1.Binding{
 					{Key: "foo", Resource: apiv1.ResourceBinding{Name: "foo"}},
@@ -73,8 +75,10 @@ func TestFuzzNewOp(t *testing.T) {
 			},
 			Status: apiv1.CompositionStatus{
 				CurrentSynthesis: &apiv1.Synthesis{
+					ObservedCompositionGeneration: 1,
 					ObservedSynthesizerGeneration: 11,
 					Synthesized:                   ptr.To(metav1.Now()),
+					Initialized:                   ptr.To(metav1.NewTime(initTS)),
 					UUID:                          "initial-uuid",
 					InputRevisions: []apiv1.InputRevisions{
 						{Key: "foo", ResourceVersion: "1"},
@@ -148,9 +152,6 @@ func TestFuzzNewOp(t *testing.T) {
 			assert.Equal(t, forcedResynthesisOp, op.Reason, args)
 			assert.False(t, op.Reason.Deferred(), args)
 
-		case synthesizing:
-			require.Nil(t, op, args)
-
 		case compModified:
 			require.NotNil(t, op, args)
 			assert.Equal(t, compositionModifiedOp, op.Reason, args)
@@ -165,32 +166,60 @@ func TestFuzzNewOp(t *testing.T) {
 			assert.False(t, op.Reason.Deferred(), args)
 
 		case deferredInputModified:
-			require.NotNil(t, op, args)
-			assert.Equal(t, deferredInputModifiedOp, op.Reason, args)
-			assert.True(t, op.Reason.Deferred(), args)
+			if synthesizing {
+				require.Nil(t, op, args)
+			} else {
+				require.NotNil(t, op, args)
+				assert.Equal(t, deferredInputModifiedOp, op.Reason, args)
+				assert.True(t, op.Reason.Deferred(), args)
+			}
 
 		case synthGenZero:
 			require.Nil(t, op, args)
 
 		case synthModified:
-			require.NotNil(t, op, args)
-			assert.Equal(t, synthesizerModifiedOp, op.Reason, args)
-			assert.True(t, op.Reason.Deferred(), args)
+			if synthesizing {
+				require.Nil(t, op, args)
+			} else {
+				require.NotNil(t, op, args)
+				assert.Equal(t, synthesizerModifiedOp, op.Reason, args)
+				assert.True(t, op.Reason.Deferred(), args)
+			}
+		}
+
+		if op == nil {
+			continue
+		}
+
+		// newOp always returns nil when given the same composition immediately after the op patch has been applied
+		// (proves synthesis cannot get stuck in a positive feedback loop)
+		{
+			cli := testutil.NewClient(t)
+			comp.ResourceVersion = ""
+			require.NoError(t, cli.Create(ctx, comp))
+			require.NoError(t, cli.Status().Update(ctx, comp))
+
+			patchJS, err := json.Marshal(op.BuildPatch())
+			require.NoError(t, err)
+			err = cli.Status().Patch(ctx, comp, client.RawPatch(types.JSONPatchType, patchJS))
+			require.NoError(t, err)
+
+			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+			assert.Nil(t, newOp(synth, comp), args)
 		}
 
 		// Patches against the original, non-mutated test composition should always fail.
 		// This proves that the patch contains a `test` op for each field considered by newOp.
-		if op == nil {
-			continue
-		}
-		cli := testutil.NewClient(t)
-		require.NoError(t, cli.Create(ctx, original))
-		require.NoError(t, cli.Status().Update(ctx, original))
+		{
+			cli := testutil.NewClient(t)
+			require.NoError(t, cli.Create(ctx, original))
+			require.NoError(t, cli.Status().Update(ctx, original))
 
-		patchJS, err := json.Marshal(op.BuildPatch())
-		require.NoError(t, err)
-		err = cli.Status().Patch(ctx, original, client.RawPatch(types.JSONPatchType, patchJS))
-		assert.Error(t, err, args)
+			patchJS, err := json.Marshal(op.BuildPatch())
+			require.NoError(t, err)
+			err = cli.Status().Patch(ctx, original, client.RawPatch(types.JSONPatchType, patchJS))
+			assert.Error(t, err, args)
+		}
 	}
 }
 

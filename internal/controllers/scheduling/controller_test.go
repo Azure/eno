@@ -413,7 +413,7 @@ func TestSerializationGracePeriod(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
 
-	c := &controller{client: cli, concurrencyLimit: 1, cacheGracePeriod: time.Millisecond * 100}
+	c := &controller{client: cli, concurrencyLimit: 2, cacheGracePeriod: time.Millisecond * 100}
 
 	synth := &apiv1.Synthesizer{}
 	synth.Name = "test-synth"
@@ -469,42 +469,62 @@ func TestDispatchOrder(t *testing.T) {
 	synth := &apiv1.Synthesizer{}
 	synth.Name = "test-synth"
 	synth.Namespace = "default"
+	synth.Generation = 2
 	require.NoError(t, cli.Create(ctx, synth))
 
 	// Waiting for the new synth
 	comp := &apiv1.Composition{}
-	comp.Name = "test-comp-1"
 	comp.Namespace = "default"
 	comp.Finalizers = []string{"eno.azure.io/cleanup"}
 	comp.Generation = 2
 	comp.Spec.Synthesizer.Name = synth.Name
-	comp.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: "foo", ObservedCompositionGeneration: 1, Synthesized: ptr.To(metav1.Now())}
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		UUID:                          "foo",
+		ObservedCompositionGeneration: comp.Generation,
+		ObservedSynthesizerGeneration: synth.Generation,
+		Synthesized:                   ptr.To(metav1.Now()),
+	}
 
+	// comp1 is ready for resynthesis because its spec has changed since its last synthesis
+	comp1 := comp.DeepCopy()
+	comp1.Name = "test-comp-1"
+	comp1.Status.CurrentSynthesis.ObservedCompositionGeneration--
+	require.NoError(t, cli.Create(ctx, comp1))
+	require.NoError(t, cli.Status().Update(ctx, comp1))
+
+	// comp2 is ready for synthesis because its synthesizer has changed since its last synthesis
 	comp2 := comp.DeepCopy()
 	comp2.Name = "test-comp-2"
-	comp2.Status.CurrentSynthesis.ObservedSynthesizerGeneration = synth.Generation
-	require.NoError(t, cli.Create(ctx, comp))
+	comp2.Status.CurrentSynthesis.ObservedSynthesizerGeneration--
 	require.NoError(t, cli.Create(ctx, comp2))
-
-	require.NoError(t, cli.Status().Update(ctx, comp))
 	require.NoError(t, cli.Status().Update(ctx, comp2))
 
-	// Dispatch one of the syntheses
+	// Dispatch a synthesis - it should be comp1 because composition changes have a higher priority than synthesizer changes
 	_, err := c.Reconcile(ctx, ctrl.Request{})
 	require.NoError(t, err)
 
-	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-	assert.True(t, comp.Synthesizing())
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp1), comp1))
+	assert.True(t, comp1.Synthesizing())
 
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp2), comp2))
 	assert.False(t, comp2.Synthesizing())
 
-	// Dispatch the other
+	// Prep comp2 for dispatch - serialize the synthesizer rollout into "composition time"
 	_, err = c.Reconcile(ctx, ctrl.Request{})
 	require.NoError(t, err)
 
-	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-	assert.True(t, comp.Synthesizing())
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp1), comp1))
+	assert.True(t, comp1.Synthesizing())
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp2), comp2))
+	assert.False(t, comp2.Synthesizing())
+
+	// Dispatch another synthesis - it should be comp2
+	_, err = c.Reconcile(ctx, ctrl.Request{})
+	require.NoError(t, err)
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp1), comp1))
+	assert.True(t, comp1.Synthesizing())
 
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp2), comp2))
 	assert.True(t, comp2.Synthesizing())
