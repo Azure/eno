@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/Azure/eno/internal/controllers/liveness"
@@ -18,7 +19,9 @@ import (
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/k8s"
 	"github.com/Azure/eno/internal/manager"
+	"github.com/Azure/eno/internal/readiness"
 	"github.com/Azure/eno/internal/reconstitution"
+	"github.com/Azure/eno/internal/resource"
 )
 
 func main() {
@@ -103,20 +106,26 @@ func run() error {
 		}
 	}
 
+	renv, err := readiness.NewEnv()
+	if err != nil {
+		return fmt.Errorf("constructing readiness check environment: %w", err)
+	}
+
 	// Burst of 1 allows the first write to happen immediately, while subsequent writes are debounced/batched at writeBatchInterval.
 	// This provides quick feedback in cases where only a few resources have changed.
 	writeBuffer := flowcontrol.NewResourceSliceWriteBufferForManager(mgr)
 
-	rCache := reconstitution.NewCache(mgr.GetClient())
+	queue := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedItemBasedRateLimiter[resource.Request]())
+	cache := resource.NewCache(renv, queue)
 	recOpts.Manager = mgr
-	recOpts.Cache = rCache
+	recOpts.Cache = cache
 	recOpts.WriteBuffer = writeBuffer
 	recOpts.Downstream = remoteConfig
 	reconciler, err := reconciliation.New(recOpts)
 	if err != nil {
 		return fmt.Errorf("constructing reconciliation controller: %w", err)
 	}
-	err = reconstitution.New(mgr, rCache, reconciler)
+	err = reconstitution.New(mgr, cache, reconciler)
 	if err != nil {
 		return fmt.Errorf("constructing reconstitution manager: %w", err)
 	}

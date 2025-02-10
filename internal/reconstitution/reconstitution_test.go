@@ -8,11 +8,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/resource"
 	"github.com/Azure/eno/internal/testutil"
 )
 
@@ -21,7 +23,8 @@ func TestManagerBasics(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	client := mgr.GetClient()
 
-	cache := NewCache(client)
+	queue := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedItemBasedRateLimiter[resource.Request]())
+	cache := resource.NewCache(nil, queue)
 	tr := &testReconciler{cache: cache}
 	err := New(mgr.Manager, cache, tr)
 	require.NoError(t, err)
@@ -40,7 +43,7 @@ func TestManagerBasics(t *testing.T) {
 		Synthesized:    ptr.To(metav1.Now()),
 	}
 	require.NoError(t, client.Status().Update(ctx, comp))
-	tr.comp = NewSynthesisRef(comp)
+	tr.syn = NewSynthesisRef(comp)
 
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = "test-slice"
@@ -59,16 +62,17 @@ func TestManagerBasics(t *testing.T) {
 }
 
 type testReconciler struct {
-	cache        *Cache
-	comp         *SynthesisRef
-	lastResource atomic.Pointer[Resource]
+	cache        *resource.Cache
+	syn          *SynthesisRef
+	lastResource atomic.Pointer[resource.Resource]
 }
 
-func (t *testReconciler) Reconcile(ctx context.Context, req *Request) (ctrl.Result, error) {
-	resource, exists := t.cache.Get(ctx, t.comp, &req.Resource)
+func (t *testReconciler) Reconcile(ctx context.Context, req *resource.Request) (ctrl.Result, error) {
+	resource, exists := t.cache.Get(t.syn.UUID, &req.Resource)
 	if !exists {
 		panic("resource should exist in cache")
 	}
+
 	t.lastResource.Store(resource)
 	return ctrl.Result{}, nil
 }
