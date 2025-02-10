@@ -4,29 +4,22 @@ import (
 	"testing"
 	"time"
 
-	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/flowcontrol"
+	"github.com/Azure/eno/internal/readiness"
 	"github.com/Azure/eno/internal/reconstitution"
+	"github.com/Azure/eno/internal/resource"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/require"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/util/workqueue"
 )
-
-func mapToResource(t *testing.T, res map[string]any) (*unstructured.Unstructured, *reconstitution.Resource) {
-	obj := &unstructured.Unstructured{Object: res}
-	js, err := obj.MarshalJSON()
-	require.NoError(t, err)
-
-	rr := &reconstitution.Resource{
-		Manifest: &apiv1.Manifest{Manifest: string(js)},
-		GVK:      obj.GroupVersionKind(),
-	}
-	return obj, rr
-}
 
 func setupTestSubject(t *testing.T, mgr *testutil.Manager) *Controller {
 	rswb := flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager)
-	cache := reconstitution.NewCache(mgr.GetClient())
+	queue := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedItemBasedRateLimiter[resource.Request]())
+	renv, err := readiness.NewEnv()
+	require.NoError(t, err)
+	cache := resource.NewCache(renv, queue)
+
 	rc, err := New(Options{
 		Manager:               mgr.Manager,
 		Cache:                 cache,

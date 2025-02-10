@@ -21,7 +21,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	v1 "github.com/Azure/eno/api/v1"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/execution"
@@ -807,7 +806,7 @@ func TestOrphanedResources(t *testing.T) {
 
 	// Ensure that the slice was deleted before checking the actual resource.
 	testutil.Eventually(t, func() bool {
-		rll := &v1.ResourceSliceList{}
+		rll := &apiv1.ResourceSliceList{}
 		err := upstream.List(ctx, rll, client.InNamespace(metav1.NamespaceAll))
 		if err != nil {
 			return false

@@ -5,20 +5,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Azure/eno/internal/resource"
 	"github.com/go-logr/logr/testr"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 func TestQueueProcessorRequeueLogic(t *testing.T) {
-	rateLimiter := workqueue.DefaultItemBasedRateLimiter()
-	queue := workqueue.NewRateLimitingQueueWithConfig(rateLimiter, workqueue.RateLimitingQueueConfig{})
+	queue := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedItemBasedRateLimiter[resource.Request]())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	lastCall := time.Now()
-	reconciler := reconcilerFunc(func(ctx context.Context, req *Request) (ctrl.Result, error) {
+	reconciler := reconcilerFunc(func(ctx context.Context, req *resource.Request) (ctrl.Result, error) {
 		delta := time.Since(lastCall)
 		t.Logf("delta: %s", delta)
 		if delta > time.Millisecond*30 {
@@ -31,12 +31,12 @@ func TestQueueProcessorRequeueLogic(t *testing.T) {
 		Handler: reconciler,
 		Logger:  testr.New(t),
 	}
-	q.Queue.Add(&Request{}) // single queue item
+	q.Queue.Add(resource.Request{}) // single queue item
 	q.Start(ctx)
 }
 
-type reconcilerFunc func(ctx context.Context, req *Request) (ctrl.Result, error)
+type reconcilerFunc func(ctx context.Context, req *resource.Request) (ctrl.Result, error)
 
-func (r reconcilerFunc) Reconcile(ctx context.Context, req *Request) (ctrl.Result, error) {
+func (r reconcilerFunc) Reconcile(ctx context.Context, req *resource.Request) (ctrl.Result, error) {
 	return r(ctx, req)
 }

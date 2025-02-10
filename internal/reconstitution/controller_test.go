@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -20,7 +21,8 @@ func TestControllerIntegration(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	client := mgr.GetClient()
 
-	cache := NewCache(client)
+	queue := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedItemBasedRateLimiter[resource.Request]())
+	cache := resource.NewCache(nil, queue)
 	r, err := newController(mgr.Manager, cache)
 	require.NoError(t, err)
 	mgr.Start(t)
@@ -37,7 +39,6 @@ func TestControllerIntegration(t *testing.T) {
 		Synthesized:    ptr.To(metav1.Now()),
 	}
 	require.NoError(t, client.Status().Update(ctx, comp))
-	compRef := NewSynthesisRef(comp)
 
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = "test-slice"
@@ -55,17 +56,17 @@ func TestControllerIntegration(t *testing.T) {
 		Kind:      "baz",
 	}
 	testutil.Eventually(t, func() bool {
-		_, exists := r.Get(ctx, compRef, ref)
-		return exists
+		res, exists := r.cache.Get(comp.Status.CurrentSynthesis.UUID, ref)
+		return exists && res.Manifest.Manifest == slice.Spec.Resources[0].Manifest
 	})
 
 	// Remove the composition and confirm cache is purged
 	require.NoError(t, client.Delete(ctx, comp))
 	testutil.Eventually(t, func() bool {
-		_, exists := r.Get(ctx, compRef, ref)
+		_, exists := r.cache.Get(comp.Status.CurrentSynthesis.UUID, ref)
 		return !exists
 	})
 
 	// The queue should have been populated
-	assert.Equal(t, 1, r.queue.Len())
+	assert.Equal(t, 1, queue.Len())
 }

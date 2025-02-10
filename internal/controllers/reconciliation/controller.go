@@ -22,14 +22,17 @@ import (
 	"github.com/Azure/eno/internal/discovery"
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/reconstitution"
+	"github.com/Azure/eno/internal/resource"
 	"github.com/go-logr/logr"
 )
+
+// TODO: Remember to remove requeue and just wait for status change
 
 var insecureLogPatch = os.Getenv("INSECURE_LOG_PATCH") == "true"
 
 type Options struct {
 	Manager     ctrl.Manager
-	Cache       *reconstitution.Cache
+	Cache       *resource.Cache
 	WriteBuffer *flowcontrol.ResourceSliceWriteBuffer
 	Downstream  *rest.Config
 
@@ -42,7 +45,7 @@ type Options struct {
 type Controller struct {
 	client                client.Client
 	writeBuffer           *flowcontrol.ResourceSliceWriteBuffer
-	resourceClient        reconstitution.Client
+	cache                 *resource.Cache
 	timeout               time.Duration
 	readinessPollInterval time.Duration
 	upstreamClient        client.Client
@@ -65,7 +68,7 @@ func New(opts Options) (*Controller, error) {
 	return &Controller{
 		client:                opts.Manager.GetClient(),
 		writeBuffer:           opts.WriteBuffer,
-		resourceClient:        opts.Cache,
+		cache:                 opts.Cache,
 		timeout:               opts.Timeout,
 		readinessPollInterval: opts.ReadinessPollInterval,
 		upstreamClient:        upstreamClient,
@@ -73,7 +76,7 @@ func New(opts Options) (*Controller, error) {
 	}, nil
 }
 
-func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request) (ctrl.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, req *resource.Request) (ctrl.Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
@@ -93,62 +96,33 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	ctx = logr.NewContext(ctx, logger)
 
 	// Find the current and (optionally) previous desired states in the cache
+	// TODO: Also pass comp name instead of just UUID?
 	synRef := reconstitution.NewSynthesisRef(comp)
-	resource, exists := c.resourceClient.Get(ctx, synRef, &req.Resource)
+	res, exists := c.cache.Get(synRef.UUID, &req.Resource)
 	if !exists {
-		// It's possible for the cache to be empty because a manifest for this resource no longer exists at the requested composition generation.
-		// Dropping the work item is safe since filling the new version will generate a new queue message.
 		logger.V(1).Info("dropping work item because the corresponding synthesis no longer exists in the cache")
 		return ctrl.Result{}, nil
 	}
 
-	var prev *reconstitution.Resource
+	var prev *resource.Resource
 	if comp.Status.PreviousSynthesis != nil {
-		prevSynRef := reconstitution.NewSynthesisRef(comp)
-		prevSynRef.UUID = comp.Status.PreviousSynthesis.UUID
-		prev, _ = c.resourceClient.Get(ctx, prevSynRef, &req.Resource)
+		prev, _ = c.cache.Get(comp.Status.PreviousSynthesis.UUID, &req.Resource)
 	}
-	logger = logger.WithValues("resourceKind", resource.Ref.Kind, "resourceName", resource.Ref.Name, "resourceNamespace", resource.Ref.Namespace)
+	logger = logger.WithValues("resourceKind", res.Ref.Kind, "resourceName", res.Ref.Name, "resourceNamespace", res.Ref.Namespace)
 	ctx = logr.NewContext(ctx, logger)
 
 	// Keep track of the last reconciliation time and report on it relative to the resource's reconcile interval
 	// This is useful for identifying cases where the loop can't keep up
-	if resource.ReconcileInterval != nil {
-		observation := resource.ObserveReconciliation()
+	if res.ReconcileInterval != nil {
+		observation := res.ObserveReconciliation()
 		if observation > 0 {
-			delta := observation - resource.ReconcileInterval.Duration
+			delta := observation - res.ReconcileInterval.Duration
 			reconciliationScheduleDelta.Observe(delta.Seconds())
 		}
 	}
 
-	// CRDs must be reconciled before any CRs that use the type they define.
-	// For initial creation just failing and retrying will eventually converge but updates are tricky
-	// since unknown properties sent from clients are ignored by apiserver.
-	// i.e. ordering is necessary to handle adding a new property and populating it in the same synthesis.
-	crdResource, ok := c.resourceClient.GetDefiningCRD(ctx, synRef, resource.GVK.GroupKind())
-	if ok {
-		slice := &apiv1.ResourceSlice{}
-		err = c.client.Get(ctx, crdResource.ManifestRef.Slice, slice)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
-		}
-		status := crdResource.FindStatus(slice)
-		if status == nil || status.Ready == nil {
-			logger.V(1).Info("skipping because the CRD that defines this resource type isn't ready")
-			return ctrl.Result{}, nil
-		}
-
-		// apiserver doesn't "close the loop" on CRD loading, so there is no way to know
-		// when CRDs are actually ready. This normally only takes a couple of milliseconds
-		// but we round up to a full second here to be safe.
-		if delta := time.Second - time.Since(status.Ready.Time); delta > 0 {
-			logger.V(1).Info("deferring until the defining CRD has been ready for 1 second")
-			return ctrl.Result{RequeueAfter: delta}, nil
-		}
-	}
-
 	// Fetch the current resource
-	current, err := c.getCurrent(ctx, resource)
+	current, err := c.getCurrent(ctx, res)
 	if client.IgnoreNotFound(err) != nil && !isErrMissingNS(err) {
 		return ctrl.Result{}, fmt.Errorf("getting current state: %w", err)
 	}
@@ -157,15 +131,16 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	// - Readiness checks are skipped when this version of the resource's desired state has already become ready
 	// - Readiness checks are skipped when the resource hasn't changed since the last check
 	// - Readiness defaults to true if no checks are given
+	// TODO: Shouldn't need to get slice here
 	slice := &apiv1.ResourceSlice{}
-	err = c.client.Get(ctx, resource.ManifestRef.Slice, slice)
+	err = c.client.Get(ctx, res.ManifestRef.Slice, slice)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
 	}
 	var ready *metav1.Time
-	status := resource.FindStatus(slice)
+	status := res.FindStatus(slice)
 	if status == nil || status.Ready == nil {
-		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, current)
+		readiness, ok := res.ReadinessChecks.EvalOptionally(ctx, current)
 		if ok {
 			ready = &readiness.ReadyTime
 		}
@@ -173,24 +148,13 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 		ready = status.Ready
 	}
 
-	// Evaluate the readiness of resources in the previous readiness group
-	if (status == nil || !status.Reconciled) && !resource.Deleted() {
-		dependencies := c.resourceClient.RangeByReadinessGroup(ctx, synRef, resource.ReadinessGroup, reconstitution.RangeDesc)
-		for _, dep := range dependencies {
-			slice := &apiv1.ResourceSlice{}
-			err = c.client.Get(ctx, dep.ManifestRef.Slice, slice)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
-			}
-			status := dep.FindStatus(slice)
-			if status == nil || status.Ready == nil {
-				logger.V(1).Info("skipping because at least one resource in an earlier readiness group isn't ready yet")
-				return ctrl.Result{}, nil
-			}
-		}
+	// Bail out if the resource isn't ready to be reconciled
+	if (status == nil || !status.Reconciled) && !res.Deleted(comp) && !c.cache.Visible(synRef.UUID, &res.Ref) {
+		logger.V(1).Info("resource is not visible yet")
+		return ctrl.Result{}, nil
 	}
 
-	modified, err := c.reconcileResource(ctx, comp, prev, resource, current)
+	modified, err := c.reconcileResource(ctx, comp, prev, res, current)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -202,25 +166,25 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	deleted := current == nil ||
 		current.GetDeletionTimestamp() != nil ||
-		(resource.Deleted() && comp.Annotations["eno.azure.io/deletion-strategy"] == "orphan") // orphaning should be reflected on the status.
-	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
+		(res.Deleted(comp) && comp.Annotations["eno.azure.io/deletion-strategy"] == "orphan") // orphaning should be reflected on the status.
+	c.writeBuffer.PatchStatusAsync(ctx, &res.ManifestRef, patchResourceState(deleted, ready))
 	if ready == nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}
-	if resource != nil && !resource.Deleted() && resource.ReconcileInterval != nil {
-		return ctrl.Result{RequeueAfter: wait.Jitter(resource.ReconcileInterval.Duration, 0.1)}, nil
+	if res != nil && !res.Deleted(comp) && res.ReconcileInterval != nil {
+		return ctrl.Result{RequeueAfter: wait.Jitter(res.ReconcileInterval.Duration, 0.1)}, nil
 	}
 	return ctrl.Result{}, nil
 }
 
-func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composition, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) (bool, error) {
+func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composition, prev, resource *resource.Resource, current *unstructured.Unstructured) (bool, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 	start := time.Now()
 	defer func() {
 		reconciliationLatency.Observe(float64(time.Since(start).Milliseconds()))
 	}()
 
-	if resource.Deleted() {
+	if resource.Deleted(comp) {
 		if current == nil || current.GetDeletionTimestamp() != nil {
 			return false, nil // already deleted - nothing to do
 		}
@@ -305,7 +269,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	return true, nil
 }
 
-func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Resource) (*unstructured.Unstructured, error) {
+func (c *Controller) getCurrent(ctx context.Context, resource *resource.Resource) (*unstructured.Unstructured, error) {
 	current := &unstructured.Unstructured{}
 	current.SetName(resource.Ref.Name)
 	current.SetNamespace(resource.Ref.Namespace)
