@@ -50,32 +50,37 @@ func (r *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	logger := logr.FromContextOrDiscard(ctx).WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
 	ctx = logr.NewContext(ctx, logger)
 
-	// TODO: Requeue after filling
-	err = r.populateCache(ctx, comp, comp.Status.PreviousSynthesis)
+	filled, err := r.populateCache(ctx, comp, comp.Status.PreviousSynthesis)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("processing previous state: %w", err)
 	}
+	if filled {
+		return ctrl.Result{Requeue: true}, nil
+	}
 
-	err = r.populateCache(ctx, comp, comp.Status.CurrentSynthesis)
+	filled, err = r.populateCache(ctx, comp, comp.Status.CurrentSynthesis)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("processing current state: %w", err)
+	}
+	if filled {
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	r.cache.GC(ctx, req.NamespacedName, comp)
 	return ctrl.Result{}, nil
 }
 
-func (r *controller) populateCache(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis) error {
+func (r *controller) populateCache(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis) (bool, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	if synthesis == nil || synthesis.Synthesized == nil {
 		// synthesis is still in progress
-		return nil
+		return false, nil
 	}
 
 	if synthesis.UUID == "" {
 		logger.V(1).Info("refusing to fill cache because synthesis doesn't have a UUID")
-		return nil
+		return false, nil
 	}
 
 	slices := make([]apiv1.ResourceSlice, len(synthesis.ResourceSlices))
@@ -83,9 +88,9 @@ func (r *controller) populateCache(ctx context.Context, comp *apiv1.Composition,
 		slice := apiv1.ResourceSlice{}
 		slice.Name = ref.Name
 		slice.Namespace = comp.Namespace
-		err := r.nonCachedReader.Get(ctx, client.ObjectKeyFromObject(&slice), &slice)
+		err := r.client.Get(ctx, client.ObjectKeyFromObject(&slice), &slice)
 		if err != nil {
-			return fmt.Errorf("unable to get resource slice: %w", err)
+			return false, fmt.Errorf("unable to get resource slice: %w", err)
 		}
 		slices[i] = slice
 	}
@@ -93,7 +98,7 @@ func (r *controller) populateCache(ctx context.Context, comp *apiv1.Composition,
 	logger = logger.WithValues("synthesisCompositionGeneration", synthesis.ObservedCompositionGeneration)
 	ctx = logr.NewContext(ctx, logger)
 	if r.cache.Visit(ctx, comp, synthesis.UUID, slices) {
-		return nil
+		return false, nil
 	}
 
 	for i, ref := range synthesis.ResourceSlices {
@@ -104,11 +109,11 @@ func (r *controller) populateCache(ctx context.Context, comp *apiv1.Composition,
 		slice.Namespace = comp.Namespace
 		err := r.nonCachedReader.Get(ctx, client.ObjectKeyFromObject(&slice), &slice)
 		if err != nil {
-			return fmt.Errorf("unable to get resource slice: %w", err)
+			return false, fmt.Errorf("unable to get resource slice: %w", err)
 		}
 		slices[i] = slice
 	}
 
 	r.cache.Fill(ctx, comp, synthesis.UUID, slices)
-	return nil
+	return true, nil
 }

@@ -150,7 +150,6 @@ func (c *Controller) Reconcile(ctx context.Context, req *resource.Request) (ctrl
 
 	// Bail out if the resource isn't ready to be reconciled
 	if (status == nil || !status.Reconciled) && !res.Deleted(comp) && !c.cache.Visible(synRef.UUID, &res.Ref) {
-		logger.V(1).Info("resource is not visible yet")
 		return ctrl.Result{}, nil
 	}
 

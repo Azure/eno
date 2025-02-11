@@ -13,8 +13,6 @@ import (
 	"k8s.io/client-go/util/workqueue"
 )
 
-// TODO: Better log levels
-
 type Request struct {
 	Resource    Ref
 	Composition types.NamespacedName
@@ -51,6 +49,7 @@ func (c *Cache) Get(synthesisUUID string, ref *Ref) (*Resource, bool) {
 	return res, ok
 }
 
+// Visible returns true if the referenced resource is able to be reconciled.
 func (c *Cache) Visible(synthesisUUID string, ref *Ref) bool {
 	c.mut.Lock()
 	defer c.mut.Unlock()
@@ -78,6 +77,7 @@ func (c *Cache) Visible(synthesisUUID string, ref *Ref) bool {
 }
 
 // Visit processes resource status transitions and returns true if the synthesis is known by the cache.
+// Assumes the resource slices are from the informer cache i.e. they need not contain the full manifest strings.
 func (c *Cache) Visit(ctx context.Context, comp *apiv1.Composition, synUUID string, items []apiv1.ResourceSlice) bool {
 	logger := logr.FromContextOrDiscard(ctx)
 	c.mut.Lock()
@@ -113,6 +113,7 @@ func (c *Cache) Visit(ctx context.Context, comp *apiv1.Composition, synUUID stri
 			}
 
 			if res.VisitState(&state) {
+				// TODO: Guard resources that aren't visible to avoid overhead?
 				c.Queue.Add(Request{Resource: res.Ref, Composition: compNSN})
 
 				if res.DefinedGroupKind != nil {
@@ -140,7 +141,7 @@ func (c *Cache) Visit(ctx context.Context, comp *apiv1.Composition, synUUID stri
 	oldCursor := snap.readinessCursor
 	snap.readinessCursor = cursor
 	if cursor > oldCursor {
-		logger.V(1).Info("readiness cursor advanced", "synthesisUUID", synUUID, "oldCursor", oldCursor, "newCursor", cursor)
+		logger.V(0).Info("readiness cursor advanced", "synthesisUUID", synUUID, "oldCursor", oldCursor, "newCursor", cursor)
 	} else {
 		return true
 	}
@@ -170,7 +171,8 @@ func (c *Cache) Visit(ctx context.Context, comp *apiv1.Composition, synUUID stri
 	return true
 }
 
-// Fill fills the cache and workqueue. Call Visit first and only call Fill if it returns false.
+// Fill fills the cache. Call Visit first and only call Fill if it returns false.
+// Assumes the given resource slices have fully populated manifests i.e. are not from the informers (which prune out the manifest strings to save memory).
 func (c *Cache) Fill(ctx context.Context, comp *apiv1.Composition, synUUID string, items []apiv1.ResourceSlice) {
 	logger := logr.FromContextOrDiscard(ctx)
 	compNSN := types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
