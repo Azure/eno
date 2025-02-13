@@ -83,7 +83,7 @@ func (b *treeBuilder) Build() *tree {
 				idx.PendingDependencies[dep.Resource.Ref] = struct{}{}
 			}
 		}
-		i.Next() //rewind
+		i.Next() // Prev always moves the cursor, even if it returns false
 
 		// Any resources in the next readiness group depend on us
 		if i.Next() && i.Key() > idx.Resource.ReadinessGroup {
