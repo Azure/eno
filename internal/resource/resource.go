@@ -39,7 +39,7 @@ type Ref struct {
 }
 
 func (r *Ref) String() string {
-	return fmt.Sprintf("(%s.%s)/%s/%s", r.Kind, r.Group, r.Namespace, r.Name)
+	return fmt.Sprintf("(%s.%s)/%s/%s", r.Group, r.Kind, r.Namespace, r.Name)
 }
 
 // ManifestRef references a particular resource manifest within a resource slice.
