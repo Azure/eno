@@ -1,0 +1,8 @@
+{
+  "(TestKind.test.group)/default/test-resource": {
+    "dependencies": [],
+    "dependents": [],
+    "ready": false,
+    "reconciled": false
+  }
+}
