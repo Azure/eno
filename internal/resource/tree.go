@@ -25,8 +25,7 @@ type treeBuilder struct {
 	byGK         map[schema.GroupKind]*indexedResource
 }
 
-func (b *treeBuilder) Add(resource *Resource) {
-	// Initialize the builder
+func (b *treeBuilder) init() {
 	if b.byRef == nil {
 		b.byRef = map[Ref]*indexedResource{}
 	}
@@ -39,6 +38,10 @@ func (b *treeBuilder) Add(resource *Resource) {
 	if b.byGK == nil {
 		b.byGK = map[schema.GroupKind]*indexedResource{}
 	}
+}
+
+func (b *treeBuilder) Add(resource *Resource) {
+	b.init()
 
 	// Handle conflicting refs deterministically
 	if existing, ok := b.byRef[resource.Ref]; ok && resource.Less(existing.Resource) {
