@@ -60,12 +60,16 @@ func (s *stateTreeBuilder) Add(resource *Resource) {
 }
 
 func (s *stateTreeBuilder) Build() *stateTree {
-	t := &stateTree{byRef: s.byRef}
+	t := &stateTree{
+		byRef:     s.byRef,
+		byManiRef: map[ManifestRef]*indexedResource{},
+	}
 
 	for _, idx := range s.byRef {
-		i := s.byGroup.IteratorAt(s.byGroup.GetNode(idx.Resource.ReadinessGroup))
+		t.byManiRef[idx.Resource.ManifestRef] = idx
 
 		// CRs are dependent on their CRDs
+		i := s.byGroup.IteratorAt(s.byGroup.GetNode(idx.Resource.ReadinessGroup))
 		crd, ok := s.byDefiningGK[idx.Resource.GVK.GroupKind()]
 		if ok {
 			idx.PendingDependencies[crd.Resource.Ref] = struct{}{}
@@ -94,7 +98,8 @@ func (s *stateTreeBuilder) Build() *stateTree {
 // stateTree is an optimized, indexed representation of a set of resources.
 // NOT CONCURRENCY SAFE.
 type stateTree struct {
-	byRef map[Ref]*indexedResource
+	byRef     map[Ref]*indexedResource
+	byManiRef map[ManifestRef]*indexedResource
 }
 
 // Get returns the resource and determines if it's visible based on the state of its dependencies.
@@ -107,8 +112,8 @@ func (s *stateTree) Get(key Ref) (res *Resource, visible bool, found bool) {
 }
 
 // UpdateState updates the state of a resource and requeues dependents if necessary.
-func (s *stateTree) UpdateState(ref Ref, state *apiv1.ResourceState, enqueue func(Ref)) {
-	idx, ok := s.byRef[ref]
+func (s *stateTree) UpdateState(ref ManifestRef, state *apiv1.ResourceState, enqueue func(Ref)) {
+	idx, ok := s.byManiRef[ref]
 	if !ok {
 		return
 	}
@@ -116,13 +121,13 @@ func (s *stateTree) UpdateState(ref Ref, state *apiv1.ResourceState, enqueue fun
 	// Requeue self when the state has changed
 	lastKnown := idx.State
 	if lastKnown == nil || !lastKnown.Equal(state) {
-		enqueue(ref)
+		enqueue(idx.Resource.Ref)
 	}
 
 	// Dependents should no longer be blocked by this resource
 	if state.Ready != nil && (lastKnown == nil || lastKnown.Ready == nil) {
 		for _, dep := range idx.Dependents {
-			delete(dep.PendingDependencies, ref)
+			delete(dep.PendingDependencies, idx.Resource.Ref)
 			enqueue(dep.Resource.Ref)
 		}
 	}

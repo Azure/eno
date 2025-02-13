@@ -154,18 +154,22 @@ func TestStateTreeVisibility(t *testing.T) {
 	b.Add(&Resource{
 		Ref:            newTestRef("test-resource-4"),
 		ReadinessGroup: 4,
+		ManifestRef:    ManifestRef{Index: 4},
 	})
 	b.Add(&Resource{
 		Ref:            newTestRef("test-resource-1"),
 		ReadinessGroup: 1,
+		ManifestRef:    ManifestRef{Index: 1},
 	})
 	b.Add(&Resource{
 		Ref:            newTestRef("test-resource-3"),
 		ReadinessGroup: 3,
+		ManifestRef:    ManifestRef{Index: 3},
 	})
 	b.Add(&Resource{
 		Ref:            newTestRef("test-resource-2"),
 		ReadinessGroup: 2,
+		ManifestRef:    ManifestRef{Index: 2},
 	})
 	names := []string{"test-resource-1", "test-resource-2", "test-resource-3", "test-resource-4"}
 
@@ -176,7 +180,7 @@ func TestStateTreeVisibility(t *testing.T) {
 	assert.False(t, visible)
 	assert.Nil(t, res)
 
-	tree.UpdateState(newTestRef("foobar"), &apiv1.ResourceState{Ready: &metav1.Time{}}, func(r Ref) {}) // it doesn't panic
+	tree.UpdateState(ManifestRef{Index: 100}, &apiv1.ResourceState{Ready: &metav1.Time{}}, func(r Ref) {}) // it doesn't panic
 
 	// Default readiness
 	expectedVisibility := map[string]bool{"test-resource-1": true}
@@ -192,7 +196,7 @@ func TestStateTreeVisibility(t *testing.T) {
 
 	// First resource becomes ready
 	var enqueued []string
-	tree.UpdateState(newTestRef("test-resource-1"), &apiv1.ResourceState{Ready: &metav1.Time{}}, func(r Ref) {
+	tree.UpdateState(ManifestRef{Index: 1}, &apiv1.ResourceState{Ready: &metav1.Time{}}, func(r Ref) {
 		enqueued = append(enqueued, r.Name)
 	})
 	assert.ElementsMatch(t, []string{"test-resource-1", "test-resource-2"}, enqueued)
@@ -206,7 +210,7 @@ func TestStateTreeVisibility(t *testing.T) {
 	// This shouldn't actually be possible in real life.
 	// The test exists only to avoid undefined behavior.
 	enqueued = nil
-	tree.UpdateState(newTestRef("test-resource-3"), &apiv1.ResourceState{Ready: &metav1.Time{}}, func(r Ref) {
+	tree.UpdateState(ManifestRef{Index: 3}, &apiv1.ResourceState{Ready: &metav1.Time{}}, func(r Ref) {
 		enqueued = append(enqueued, r.Name)
 	})
 	assert.ElementsMatch(t, []string{"test-resource-3", "test-resource-4"}, enqueued)
@@ -216,14 +220,14 @@ func TestStateTreeVisibility(t *testing.T) {
 
 	// Nothing is enqueued because the resource is already ready
 	enqueued = nil
-	tree.UpdateState(newTestRef("test-resource-3"), &apiv1.ResourceState{Ready: &metav1.Time{}}, func(r Ref) {
+	tree.UpdateState(ManifestRef{Index: 3}, &apiv1.ResourceState{Ready: &metav1.Time{}}, func(r Ref) {
 		enqueued = append(enqueued, r.Name)
 	})
 	assert.Nil(t, enqueued)
 
 	// It is enqueued again when the status changes
 	enqueued = nil
-	tree.UpdateState(newTestRef("test-resource-3"), &apiv1.ResourceState{Ready: &metav1.Time{}, Reconciled: true}, func(r Ref) {
+	tree.UpdateState(ManifestRef{Index: 3}, &apiv1.ResourceState{Ready: &metav1.Time{}, Reconciled: true}, func(r Ref) {
 		enqueued = append(enqueued, r.Name)
 	})
 	assert.ElementsMatch(t, []string{"test-resource-3"}, enqueued)
