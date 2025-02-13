@@ -1,20 +1,20 @@
 {
-  "(TestKind.test.group)/default/test-cr": {
+  "(test.group.TestKind)/default/test-cr": {
     "dependencies": [
-      "(TestKind.test.group)/default/test-crd"
+      "(test.group.TestKind)/default/test-crd"
     ],
     "dependents": [
-      "(TestKind.test.group)/default/test-crd"
+      "(test.group.TestKind)/default/test-crd"
     ],
     "ready": false,
     "reconciled": false
   },
-  "(TestKind.test.group)/default/test-crd": {
+  "(test.group.TestKind)/default/test-crd": {
     "dependencies": [
-      "(TestKind.test.group)/default/test-cr"
+      "(test.group.TestKind)/default/test-cr"
     ],
     "dependents": [
-      "(TestKind.test.group)/default/test-cr"
+      "(test.group.TestKind)/default/test-cr"
     ],
     "ready": false,
     "reconciled": false

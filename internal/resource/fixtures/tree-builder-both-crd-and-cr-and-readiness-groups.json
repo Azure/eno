@@ -1,36 +1,36 @@
 {
-  "(TestKind.test.group)/default/also-not-a-crd": {
+  "(test.group.TestKind)/default/also-not-a-crd": {
     "dependencies": [
-      "(TestKind.test.group)/default/test-cr"
+      "(test.group.TestKind)/default/test-cr"
     ],
     "dependents": [],
     "ready": false,
     "reconciled": false
   },
-  "(TestKind.test.group)/default/not-a-crd": {
+  "(test.group.TestKind)/default/not-a-crd": {
     "dependencies": [],
     "dependents": [
-      "(TestKind.test.group)/default/test-crd"
+      "(test.group.TestKind)/default/test-crd"
     ],
     "ready": false,
     "reconciled": false
   },
-  "(TestKind.test.group)/default/test-cr": {
+  "(test.group.TestKind)/default/test-cr": {
     "dependencies": [
-      "(TestKind.test.group)/default/test-crd"
+      "(test.group.TestKind)/default/test-crd"
     ],
     "dependents": [
-      "(TestKind.test.group)/default/also-not-a-crd"
+      "(test.group.TestKind)/default/also-not-a-crd"
     ],
     "ready": false,
     "reconciled": false
   },
-  "(TestKind.test.group)/default/test-crd": {
+  "(test.group.TestKind)/default/test-crd": {
     "dependencies": [
-      "(TestKind.test.group)/default/not-a-crd"
+      "(test.group.TestKind)/default/not-a-crd"
     ],
     "dependents": [
-      "(TestKind.test.group)/default/test-cr"
+      "(test.group.TestKind)/default/test-cr"
     ],
     "ready": false,
     "reconciled": false

@@ -1,5 +1,5 @@
 {
-  "(TestKind.test.group)/default/test-resource": {
+  "(test.group.TestKind)/default/test-resource": {
     "dependencies": [],
     "dependents": [],
     "ready": false,
