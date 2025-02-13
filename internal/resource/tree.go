@@ -19,10 +19,10 @@ type indexedResource struct {
 
 // treeBuilder is used to index a set of resources into a stateTree.
 type treeBuilder struct {
-	byRef        map[Ref]*indexedResource
-	byGroup      *redblacktree.Tree[int, []*indexedResource]
-	byDefiningGK map[schema.GroupKind]*indexedResource
-	byGK         map[schema.GroupKind]*indexedResource
+	byRef        map[Ref]*indexedResource                    // fast key/value lookup by group/kind/ns/name
+	byGroup      *redblacktree.Tree[int, []*indexedResource] // fast search for sparse readiness groups
+	byDefiningGK map[schema.GroupKind]*indexedResource       // index CRDs by the GK they define
+	byGK         map[schema.GroupKind]*indexedResource       // index all resources by their GK
 }
 
 func (b *treeBuilder) init() {
