@@ -1,0 +1,27 @@
+{
+  "(TestKind.test.group)/default/test-1": {
+    "dependencies": [],
+    "dependents": [
+      "(TestKind.test.group)/default/test-2-a",
+      "(TestKind.test.group)/default/test-2-b"
+    ],
+    "ready": false,
+    "reconciled": false
+  },
+  "(TestKind.test.group)/default/test-2-a": {
+    "dependencies": [
+      "(TestKind.test.group)/default/test-1"
+    ],
+    "dependents": [],
+    "ready": false,
+    "reconciled": false
+  },
+  "(TestKind.test.group)/default/test-2-b": {
+    "dependencies": [
+      "(TestKind.test.group)/default/test-1"
+    ],
+    "dependents": [],
+    "ready": false,
+    "reconciled": false
+  }
+}

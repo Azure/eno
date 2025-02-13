@@ -1,0 +1,38 @@
+{
+  "(TestKind.test.group)/default/test-0": {
+    "dependencies": [
+      "(TestKind.test.group)/default/test-negative-2"
+    ],
+    "dependents": [
+      "(TestKind.test.group)/default/test-1"
+    ],
+    "ready": false,
+    "reconciled": false
+  },
+  "(TestKind.test.group)/default/test-1": {
+    "dependencies": [
+      "(TestKind.test.group)/default/test-0"
+    ],
+    "dependents": [
+      "(TestKind.test.group)/default/test-4"
+    ],
+    "ready": false,
+    "reconciled": false
+  },
+  "(TestKind.test.group)/default/test-4": {
+    "dependencies": [
+      "(TestKind.test.group)/default/test-1"
+    ],
+    "dependents": [],
+    "ready": false,
+    "reconciled": false
+  },
+  "(TestKind.test.group)/default/test-negative-2": {
+    "dependencies": [],
+    "dependents": [
+      "(TestKind.test.group)/default/test-0"
+    ],
+    "ready": false,
+    "reconciled": false
+  }
+}

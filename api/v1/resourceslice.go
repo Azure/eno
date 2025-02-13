@@ -44,6 +44,25 @@ type ResourceState struct {
 	Deleted    bool         `json:"deleted,omitempty"`
 }
 
+func (r *ResourceState) Equal(rr *ResourceState) bool {
+	if r == nil {
+		return rr == nil
+	}
+	if rr == nil {
+		return false
+	}
+	if r.Reconciled != rr.Reconciled || r.Deleted != rr.Deleted {
+		return false
+	}
+	if r.Ready == nil {
+		return rr.Ready == nil
+	}
+	if rr.Ready == nil {
+		return r.Ready == nil
+	}
+	return r.Ready.Equal(rr.Ready)
+}
+
 type ResourceSliceRef struct {
 	Name string `json:"name,omitempty"`
 }
