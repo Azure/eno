@@ -3,6 +3,7 @@ package resource
 import (
 	"context"
 	"os"
+	"sort"
 	"testing"
 	"time"
 
@@ -349,6 +350,27 @@ func testMergeBasics(t *testing.T, schemaName string) {
 	require.NoError(t, err)
 	assert.Equal(t, schemaName != "", typed)
 	assert.Nil(t, merged)
+}
+
+func TestResourceOrdering(t *testing.T) {
+	resources := []*Resource{
+		{Manifest: &apiv1.Manifest{Manifest: "a"}},
+		{},
+		{Manifest: &apiv1.Manifest{Manifest: "b"}},
+		{},
+		{Manifest: &apiv1.Manifest{Manifest: "c"}},
+	}
+	sort.Slice(resources, func(i, j int) bool {
+		return resources[i].Less(resources[j])
+	})
+
+	assert.Equal(t, []*Resource{
+		{},
+		{},
+		{Manifest: &apiv1.Manifest{Manifest: "a"}},
+		{Manifest: &apiv1.Manifest{Manifest: "b"}},
+		{Manifest: &apiv1.Manifest{Manifest: "c"}},
+	}, resources)
 }
 
 type testSchemaGetter struct {

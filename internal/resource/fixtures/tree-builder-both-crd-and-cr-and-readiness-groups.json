@@ -1,0 +1,38 @@
+{
+  "(test.group.TestKind)/default/also-not-a-crd": {
+    "dependencies": [
+      "(test.group.TestKind)/default/test-cr"
+    ],
+    "dependents": [],
+    "ready": false,
+    "reconciled": false
+  },
+  "(test.group.TestKind)/default/not-a-crd": {
+    "dependencies": [],
+    "dependents": [
+      "(test.group.TestKind)/default/test-crd"
+    ],
+    "ready": false,
+    "reconciled": false
+  },
+  "(test.group.TestKind)/default/test-cr": {
+    "dependencies": [
+      "(test.group.TestKind)/default/test-crd"
+    ],
+    "dependents": [
+      "(test.group.TestKind)/default/also-not-a-crd"
+    ],
+    "ready": false,
+    "reconciled": false
+  },
+  "(test.group.TestKind)/default/test-crd": {
+    "dependencies": [
+      "(test.group.TestKind)/default/not-a-crd"
+    ],
+    "dependents": [
+      "(test.group.TestKind)/default/test-cr"
+    ],
+    "ready": false,
+    "reconciled": false
+  }
+}

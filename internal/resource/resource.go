@@ -38,6 +38,10 @@ type Ref struct {
 	Name, Namespace, Group, Kind string
 }
 
+func (r *Ref) String() string {
+	return fmt.Sprintf("(%s.%s)/%s/%s", r.Group, r.Kind, r.Namespace, r.Name)
+}
+
 // ManifestRef references a particular resource manifest within a resource slice.
 type ManifestRef struct {
 	Slice types.NamespacedName
@@ -346,6 +350,15 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 	sort.Slice(res.ReadinessChecks, func(i, j int) bool { return res.ReadinessChecks[i].Name < res.ReadinessChecks[j].Name })
 
 	return res, nil
+}
+
+// Less returns true when r < than.
+// Used to establish determinstic ordering for conflicting resources.
+func (r *Resource) Less(than *Resource) bool {
+	if r.Manifest == nil || than.Manifest == nil {
+		return true
+	}
+	return r.Manifest.Manifest < than.Manifest.Manifest
 }
 
 type patchMeta struct {

@@ -1,0 +1,22 @@
+{
+  "(test.group.TestKind)/default/test-cr": {
+    "dependencies": [
+      "(test.group.TestKind)/default/test-crd"
+    ],
+    "dependents": [
+      "(test.group.TestKind)/default/test-crd"
+    ],
+    "ready": false,
+    "reconciled": false
+  },
+  "(test.group.TestKind)/default/test-crd": {
+    "dependencies": [
+      "(test.group.TestKind)/default/test-cr"
+    ],
+    "dependents": [
+      "(test.group.TestKind)/default/test-cr"
+    ],
+    "ready": false,
+    "reconciled": false
+  }
+}
