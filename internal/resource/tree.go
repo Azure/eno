@@ -12,6 +12,7 @@ import (
 type indexedResource struct {
 	Resource            *Resource
 	State               *apiv1.ResourceState
+	Seen                bool
 	PendingDependencies map[Ref]struct{}
 	Dependents          map[Ref]*indexedResource
 }
@@ -120,7 +121,7 @@ func (t *tree) UpdateState(ref ManifestRef, state *apiv1.ResourceState, enqueue 
 
 	// Requeue self when the state has changed
 	lastKnown := idx.State
-	if lastKnown == nil || !lastKnown.Equal(state) {
+	if (!idx.Seen && lastKnown == nil) || !lastKnown.Equal(state) {
 		enqueue(idx.Resource.Ref)
 	}
 
@@ -133,6 +134,7 @@ func (t *tree) UpdateState(ref ManifestRef, state *apiv1.ResourceState, enqueue 
 	}
 
 	idx.State = state
+	idx.Seen = true
 }
 
 // MarshalJSON allows the current tree to be serialized to JSON for testing/debugging purposes.
