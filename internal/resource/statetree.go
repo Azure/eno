@@ -16,31 +16,31 @@ type indexedResource struct {
 	Dependents          map[Ref]*indexedResource
 }
 
-// stateTreeBuilder is used to index a set of resources into a stateTree.
-type stateTreeBuilder struct {
+// treeBuilder is used to index a set of resources into a stateTree.
+type treeBuilder struct {
 	byRef        map[Ref]*indexedResource
 	byGroup      *redblacktree.Tree[int, []*indexedResource]
 	byDefiningGK map[schema.GroupKind]*indexedResource
 	byGK         map[schema.GroupKind]*indexedResource
 }
 
-func (s *stateTreeBuilder) Add(resource *Resource) {
+func (b *treeBuilder) Add(resource *Resource) {
 	// Initialize the builder
-	if s.byRef == nil {
-		s.byRef = map[Ref]*indexedResource{}
+	if b.byRef == nil {
+		b.byRef = map[Ref]*indexedResource{}
 	}
-	if s.byGroup == nil {
-		s.byGroup = redblacktree.New[int, []*indexedResource]()
+	if b.byGroup == nil {
+		b.byGroup = redblacktree.New[int, []*indexedResource]()
 	}
-	if s.byDefiningGK == nil {
-		s.byDefiningGK = map[schema.GroupKind]*indexedResource{}
+	if b.byDefiningGK == nil {
+		b.byDefiningGK = map[schema.GroupKind]*indexedResource{}
 	}
-	if s.byGK == nil {
-		s.byGK = map[schema.GroupKind]*indexedResource{}
+	if b.byGK == nil {
+		b.byGK = map[schema.GroupKind]*indexedResource{}
 	}
 
 	// Handle conflicting refs deterministically
-	if existing, ok := s.byRef[resource.Ref]; ok && resource.Less(existing.Resource) {
+	if existing, ok := b.byRef[resource.Ref]; ok && resource.Less(existing.Resource) {
 		return
 	}
 
@@ -50,27 +50,27 @@ func (s *stateTreeBuilder) Add(resource *Resource) {
 		PendingDependencies: map[Ref]struct{}{},
 		Dependents:          map[Ref]*indexedResource{},
 	}
-	s.byRef[resource.Ref] = idx
-	current, _ := s.byGroup.Get(resource.ReadinessGroup)
-	s.byGroup.Put(resource.ReadinessGroup, append(current, idx))
-	s.byGK[resource.GVK.GroupKind()] = idx
+	b.byRef[resource.Ref] = idx
+	current, _ := b.byGroup.Get(resource.ReadinessGroup)
+	b.byGroup.Put(resource.ReadinessGroup, append(current, idx))
+	b.byGK[resource.GVK.GroupKind()] = idx
 	if resource.DefinedGroupKind != nil {
-		s.byDefiningGK[*resource.DefinedGroupKind] = idx
+		b.byDefiningGK[*resource.DefinedGroupKind] = idx
 	}
 }
 
-func (s *stateTreeBuilder) Build() *stateTree {
-	t := &stateTree{
-		byRef:     s.byRef,
+func (b *treeBuilder) Build() *tree {
+	t := &tree{
+		byRef:     b.byRef,
 		byManiRef: map[ManifestRef]*indexedResource{},
 	}
 
-	for _, idx := range s.byRef {
+	for _, idx := range b.byRef {
 		t.byManiRef[idx.Resource.ManifestRef] = idx
 
 		// CRs are dependent on their CRDs
-		i := s.byGroup.IteratorAt(s.byGroup.GetNode(idx.Resource.ReadinessGroup))
-		crd, ok := s.byDefiningGK[idx.Resource.GVK.GroupKind()]
+		i := b.byGroup.IteratorAt(b.byGroup.GetNode(idx.Resource.ReadinessGroup))
+		crd, ok := b.byDefiningGK[idx.Resource.GVK.GroupKind()]
 		if ok {
 			idx.PendingDependencies[crd.Resource.Ref] = struct{}{}
 			crd.Dependents[idx.Resource.Ref] = idx
@@ -95,16 +95,16 @@ func (s *stateTreeBuilder) Build() *stateTree {
 	return t
 }
 
-// stateTree is an optimized, indexed representation of a set of resources.
+// tree is an optimized, indexed representation of a set of resources.
 // NOT CONCURRENCY SAFE.
-type stateTree struct {
+type tree struct {
 	byRef     map[Ref]*indexedResource
 	byManiRef map[ManifestRef]*indexedResource
 }
 
 // Get returns the resource and determines if it's visible based on the state of its dependencies.
-func (s *stateTree) Get(key Ref) (res *Resource, visible bool, found bool) {
-	idx, ok := s.byRef[key]
+func (t *tree) Get(key Ref) (res *Resource, visible bool, found bool) {
+	idx, ok := t.byRef[key]
 	if !ok {
 		return nil, false, false
 	}
@@ -112,8 +112,8 @@ func (s *stateTree) Get(key Ref) (res *Resource, visible bool, found bool) {
 }
 
 // UpdateState updates the state of a resource and requeues dependents if necessary.
-func (s *stateTree) UpdateState(ref ManifestRef, state *apiv1.ResourceState, enqueue func(Ref)) {
-	idx, ok := s.byManiRef[ref]
+func (t *tree) UpdateState(ref ManifestRef, state *apiv1.ResourceState, enqueue func(Ref)) {
+	idx, ok := t.byManiRef[ref]
 	if !ok {
 		return
 	}
@@ -137,9 +137,9 @@ func (s *stateTree) UpdateState(ref ManifestRef, state *apiv1.ResourceState, enq
 
 // MarshalJSON allows the current tree to be serialized to JSON for testing/debugging purposes.
 // This should not be expected to provide a stable schema.
-func (s *stateTree) MarshalJSON() ([]byte, error) {
+func (t *tree) MarshalJSON() ([]byte, error) {
 	tree := map[string]any{}
-	for key, value := range s.byRef {
+	for key, value := range t.byRef {
 		dependencies := []string{}
 		for ref := range value.PendingDependencies {
 			dependencies = append(dependencies, ref.String())

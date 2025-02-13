@@ -13,7 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-func TestStateTreeBuilderSanity(t *testing.T) {
+func TestTreeBuilderSanity(t *testing.T) {
 	var tests = []struct {
 		Name      string
 		Resources []*Resource
@@ -119,7 +119,7 @@ func TestStateTreeBuilderSanity(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.Name, func(t *testing.T) {
-			var b stateTreeBuilder
+			var b treeBuilder
 			for _, r := range tc.Resources {
 				b.Add(r)
 			}
@@ -149,8 +149,8 @@ func newTestRef(name string) Ref {
 	}
 }
 
-func TestStateTreeVisibility(t *testing.T) {
-	var b stateTreeBuilder
+func TestTreeVisibility(t *testing.T) {
+	var b treeBuilder
 	b.Add(&Resource{
 		Ref:            newTestRef("test-resource-4"),
 		ReadinessGroup: 4,
@@ -233,8 +233,8 @@ func TestStateTreeVisibility(t *testing.T) {
 	assert.ElementsMatch(t, []string{"test-resource-3"}, enqueued)
 }
 
-func TestStateTreeRefConflicts(t *testing.T) {
-	var b stateTreeBuilder
+func TestTreeRefConflicts(t *testing.T) {
+	var b treeBuilder
 	b.Add(&Resource{
 		Ref:      newTestRef("test-resource"),
 		Manifest: &apiv1.Manifest{Manifest: "b"},
