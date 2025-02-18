@@ -38,5 +38,5 @@ func init() {
 
 func missedReconciliation(comp *apiv1.Composition, threshold time.Duration) bool {
 	syn := comp.Status.CurrentSynthesis
-	return syn != nil && syn.Reconciled == nil && time.Since(syn.Initialized.Time) > threshold
+	return syn != nil && syn.Reconciled == nil && syn.Initialized != nil && time.Since(syn.Initialized.Time) > threshold
 }
