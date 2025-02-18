@@ -13,7 +13,6 @@ import (
 	"github.com/Azure/eno/internal/controllers/selfhealing"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/controllers/watch"
-	"github.com/Azure/eno/internal/controllers/watchdog"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -23,11 +22,10 @@ func registerControllers(t *testing.T, mgr *testutil.Manager) {
 	require.NoError(t, aggregation.NewSliceController(mgr.Manager))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
-	require.NoError(t, watchdog.NewController(mgr.Manager, time.Second*10))
 	require.NoError(t, replication.NewSymphonyController(mgr.Manager))
 	require.NoError(t, aggregation.NewSymphonyController(mgr.Manager))
 	require.NoError(t, aggregation.NewCompositionController(mgr.Manager))
-	require.NoError(t, scheduling.NewController(mgr.Manager, 10, time.Millisecond))
+	require.NoError(t, scheduling.NewController(mgr.Manager, 10, time.Millisecond, time.Second))
 	require.NoError(t, liveness.NewNamespaceController(mgr.Manager, 3, time.Second))
 	require.NoError(t, watch.NewController(mgr.Manager))
 	require.NoError(t, selfhealing.NewSliceController(mgr.Manager, time.Minute*5))

@@ -24,7 +24,6 @@ import (
 	"github.com/Azure/eno/internal/controllers/selfhealing"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/controllers/watch"
-	"github.com/Azure/eno/internal/controllers/watchdog"
 	"github.com/Azure/eno/internal/execution"
 	"github.com/Azure/eno/internal/manager"
 )
@@ -117,11 +116,6 @@ func runController() error {
 		return fmt.Errorf("constructing resource slice cleanup controller: %w", err)
 	}
 
-	err = watchdog.NewController(mgr, watchdogThres)
-	if err != nil {
-		return fmt.Errorf("constructing watchdog controller: %w", err)
-	}
-
 	err = replication.NewSymphonyController(mgr)
 	if err != nil {
 		return fmt.Errorf("constructing symphony replication controller: %w", err)
@@ -147,7 +141,7 @@ func runController() error {
 		return fmt.Errorf("constructing watch controller: %w", err)
 	}
 
-	err = scheduling.NewController(mgr, concurrencyLimit, rolloutCooldown)
+	err = scheduling.NewController(mgr, concurrencyLimit, rolloutCooldown, watchdogThres)
 	if err != nil {
 		return fmt.Errorf("constructing synthesis scheduling controller: %w", err)
 	}

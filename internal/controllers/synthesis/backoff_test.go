@@ -19,7 +19,7 @@ func TestControllerBackoff(t *testing.T) {
 	cli := mgr.GetClient()
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
-	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second))
+	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
