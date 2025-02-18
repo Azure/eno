@@ -33,7 +33,7 @@ func TestControllerHappyPath(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second))
+	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 
 	calls := atomic.Int64{}
@@ -108,7 +108,7 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second))
+	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 		output := &krmv1.ResourceList{}
@@ -186,7 +186,7 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 		return output, nil
 	})
 
-	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second))
+	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	mgr.Start(t)
 

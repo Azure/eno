@@ -31,7 +31,7 @@ var testSynthesisConfig = &synthesis.Config{
 
 func registerControllers(t *testing.T, mgr *testutil.Manager) {
 	require.NoError(t, NewSliceController(mgr.Manager, time.Minute*5))
-	require.NoError(t, scheduling.NewController(mgr.Manager, 10, time.Microsecond*10))
+	require.NoError(t, scheduling.NewController(mgr.Manager, 10, time.Microsecond*10, time.Second))
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, testSynthesisConfig))
 	require.NoError(t, synthesis.NewSliceCleanupController(mgr.Manager))
 }

@@ -46,7 +46,7 @@ func TestCompositionDeletion(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewSliceCleanupController(mgr.Manager))
-	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second))
+	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -125,7 +125,7 @@ func TestDeleteCompositionWhenSynthesizerMissing(t *testing.T) {
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewSliceCleanupController(mgr.Manager))
-	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second))
+	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}

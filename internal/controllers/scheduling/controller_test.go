@@ -26,7 +26,7 @@ import (
 func TestBasics(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
-	require.NoError(t, NewController(mgr.Manager, 100, 2*time.Second))
+	require.NoError(t, NewController(mgr.Manager, 100, 2*time.Second, 0))
 	mgr.Start(t)
 	cli := mgr.GetClient()
 
@@ -94,7 +94,7 @@ func TestBasics(t *testing.T) {
 func TestSynthRolloutBasics(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
-	require.NoError(t, NewController(mgr.Manager, 100, 2*time.Second))
+	require.NoError(t, NewController(mgr.Manager, 100, 2*time.Second, 0))
 	mgr.Start(t)
 	cli := mgr.GetClient()
 
@@ -187,7 +187,7 @@ func TestSynthRolloutBasics(t *testing.T) {
 func TestDeferredInput(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
-	require.NoError(t, NewController(mgr.Manager, 100, 2*time.Second))
+	require.NoError(t, NewController(mgr.Manager, 100, 2*time.Second, 0))
 	mgr.Start(t)
 	cli := mgr.GetClient()
 
@@ -253,7 +253,7 @@ func TestDeferredInput(t *testing.T) {
 func TestForcedResynth(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
-	require.NoError(t, NewController(mgr.Manager, 100, 2*time.Second))
+	require.NoError(t, NewController(mgr.Manager, 100, 2*time.Second, 0))
 	mgr.Start(t)
 	cli := mgr.GetClient()
 
@@ -295,7 +295,7 @@ func TestForcedResynth(t *testing.T) {
 func TestChaos(t *testing.T) {
 	t.Run("one leader", func(t *testing.T) {
 		mgr := testutil.NewManager(t)
-		require.NoError(t, NewController(mgr.Manager, 5, time.Second))
+		require.NoError(t, NewController(mgr.Manager, 5, time.Second, 0))
 		mgr.Start(t)
 
 		testChaos(t, mgr)
@@ -304,8 +304,8 @@ func TestChaos(t *testing.T) {
 	// Run the same test but with another controller competing for the same resources
 	t.Run("zombie leader", func(t *testing.T) {
 		mgr := testutil.NewManager(t)
-		require.NoError(t, NewController(mgr.Manager, 5, time.Second))
-		require.NoError(t, NewController(mgr.Manager, 5, time.Second))
+		require.NoError(t, NewController(mgr.Manager, 5, time.Second, 0))
+		require.NoError(t, NewController(mgr.Manager, 5, time.Second, 0))
 		mgr.Start(t)
 
 		testChaos(t, mgr)

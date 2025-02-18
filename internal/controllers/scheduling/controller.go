@@ -42,20 +42,22 @@ const (
 // Compositions will not receive the new synthesizer in the same order for every generation, but
 // the same generation will always roll out in the same order.
 type controller struct {
-	client           client.Client
-	concurrencyLimit int
-	cooldownPeriod   time.Duration
-	cacheGracePeriod time.Duration
+	client            client.Client
+	concurrencyLimit  int
+	cooldownPeriod    time.Duration
+	cacheGracePeriod  time.Duration
+	watchdogThreshold time.Duration
 
 	lastApplied *op
 }
 
-func NewController(mgr ctrl.Manager, concurrencyLimit int, cooldown time.Duration) error {
+func NewController(mgr ctrl.Manager, concurrencyLimit int, cooldown, watchdogThreshold time.Duration) error {
 	c := &controller{
-		client:           mgr.GetClient(),
-		concurrencyLimit: concurrencyLimit,
-		cooldownPeriod:   cooldown,
-		cacheGracePeriod: time.Second,
+		client:            mgr.GetClient(),
+		concurrencyLimit:  concurrencyLimit,
+		cooldownPeriod:    cooldown,
+		cacheGracePeriod:  time.Second,
+		watchdogThreshold: watchdogThreshold,
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("schedulingController").
@@ -101,10 +103,15 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	var inFlight int
 	var op *op
+	stuckReconciling.Reset()
 	for _, comp := range comps.Items {
 		comp := comp
 		if comp.Synthesizing() {
 			inFlight++
+		}
+
+		if missedReconciliation(&comp, c.watchdogThreshold) {
+			stuckReconciling.WithLabelValues(comp.Spec.Synthesizer.Name).Inc()
 		}
 
 		synth, ok := synthsByName[comp.Spec.Synthesizer.Name]
