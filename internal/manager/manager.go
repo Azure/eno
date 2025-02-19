@@ -206,6 +206,14 @@ func NewLogConstructor(mgr ctrl.Manager, controllerName string) func(*reconcile.
 	}
 }
 
+func NewTypedLogConstructor[T any](mgr ctrl.Manager, controllerName string) func(T) logr.Logger {
+	return func(req T) logr.Logger {
+		l := mgr.GetLogger().WithValues("controller", controllerName)
+		// TODO: Improve log fields and merge NewLogConstructor into NewTypedLogConstructor
+		return l
+	}
+}
+
 func NewCompositionToResourceSliceHandler(cli client.Client) handler.EventHandler {
 	apply := func(ctx context.Context, rli workqueue.TypedRateLimitingInterface[reconcile.Request], obj client.Object) {
 		list := &apiv1.ResourceSliceList{}

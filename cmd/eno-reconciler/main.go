@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/Azure/eno/internal/controllers/liveness"
@@ -112,13 +113,17 @@ func run() error {
 	recOpts.Cache = rCache
 	recOpts.WriteBuffer = writeBuffer
 	recOpts.Downstream = remoteConfig
-	reconciler, err := reconciliation.New(recOpts)
-	if err != nil {
-		return fmt.Errorf("constructing reconciliation controller: %w", err)
-	}
-	err = reconstitution.New(mgr, rCache, reconciler)
+	recOpts.Queue = workqueue.NewTypedRateLimitingQueue(
+		workqueue.DefaultTypedItemBasedRateLimiter[reconstitution.Request]())
+
+	err = reconstitution.New(mgr, rCache, recOpts.Queue)
 	if err != nil {
 		return fmt.Errorf("constructing reconstitution manager: %w", err)
+	}
+
+	err = reconciliation.New(mgr, recOpts)
+	if err != nil {
+		return fmt.Errorf("constructing reconciliation controller: %w", err)
 	}
 
 	return mgr.Start(ctx)
