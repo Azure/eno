@@ -15,6 +15,7 @@ type indexedResource struct {
 	Seen                bool
 	PendingDependencies map[Ref]struct{}
 	Dependents          map[Ref]*indexedResource
+	CompositionDeleting bool
 }
 
 // treeBuilder is used to index a set of resources into a stateTree.
@@ -112,11 +113,11 @@ func (t *tree) Get(key Ref) (res *Resource, visible bool, found bool) {
 	if !ok {
 		return nil, false, false
 	}
-	return idx.Resource, len(idx.PendingDependencies) == 0, true
+	return idx.Resource, len(idx.PendingDependencies) == 0 || idx.CompositionDeleting, true
 }
 
 // UpdateState updates the state of a resource and requeues dependents if necessary.
-func (t *tree) UpdateState(ref ManifestRef, state *apiv1.ResourceState, enqueue func(Ref)) {
+func (t *tree) UpdateState(comp *apiv1.Composition, ref ManifestRef, state *apiv1.ResourceState, enqueue func(Ref)) {
 	idx, ok := t.byManiRef[ref]
 	if !ok {
 		return
@@ -124,7 +125,7 @@ func (t *tree) UpdateState(ref ManifestRef, state *apiv1.ResourceState, enqueue 
 
 	// Requeue self when the state has changed
 	lastKnown := idx.State
-	if (!idx.Seen && lastKnown == nil) || !lastKnown.Equal(state) {
+	if (!idx.Seen && lastKnown == nil) || !lastKnown.Equal(state) || (!idx.CompositionDeleting && comp.DeletionTimestamp != nil) {
 		enqueue(idx.Resource.Ref)
 	}
 
@@ -137,6 +138,7 @@ func (t *tree) UpdateState(ref ManifestRef, state *apiv1.ResourceState, enqueue 
 	}
 
 	idx.State = state
+	idx.CompositionDeleting = comp.DeletionTimestamp != nil
 	idx.Seen = true
 }
 
