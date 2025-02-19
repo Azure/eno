@@ -58,7 +58,10 @@ func RenderChart(opts ...RenderOption) error {
 			return err
 		}
 	}
+
+	var usingDefaultWriter bool
 	if o.Writer == nil {
+		usingDefaultWriter = true
 		o.Writer = function.NewDefaultOutputWriter()
 	}
 
@@ -95,7 +98,11 @@ func RenderChart(opts ...RenderOption) error {
 		o.Writer.Add(m)
 	}
 
-	return o.Writer.Write()
+	if usingDefaultWriter {
+		return o.Writer.Write()
+	}
+
+	return nil
 }
 
 func inputsToValues(i *function.InputReader) (map[string]any, error) {
