@@ -191,7 +191,7 @@ func resourcesRemain(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
 	if len(slice.Status.Resources) == 0 && len(slice.Spec.Resources) > 0 {
 		return true // status is lagging behind
 	}
-	shouldOrphan := comp != nil && comp.Annotations != nil && comp.Annotations["eno.azure.io/deletion-strategy"] == "orphan"
+	shouldOrphan := comp != nil && comp.ShouldOrphanResources()
 	for _, state := range slice.Status.Resources {
 		if !state.Deleted && !shouldOrphan {
 			return true

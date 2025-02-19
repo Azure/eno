@@ -57,7 +57,6 @@ type Resource struct {
 	ManifestRef       ManifestRef
 	ReconcileInterval *metav1.Duration
 	GVK               schema.GroupVersionKind
-	SliceDeleted      bool
 	ReadinessChecks   readiness.Checks
 	Patch             jsonpatch.Patch
 	DisableUpdates    bool
@@ -69,8 +68,8 @@ type Resource struct {
 	value value.Value
 }
 
-func (r *Resource) Deleted() bool {
-	return r.SliceDeleted || r.Manifest.Deleted || (r.Patch != nil && r.patchSetsDeletionTimestamp())
+func (r *Resource) Deleted(comp *apiv1.Composition) bool {
+	return (comp.DeletionTimestamp != nil && !comp.ShouldOrphanResources()) || r.Manifest.Deleted || (r.Patch != nil && r.patchSetsDeletionTimestamp())
 }
 
 func (r *Resource) Parse() (*unstructured.Unstructured, error) {
@@ -250,8 +249,7 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 	logger := logr.FromContextOrDiscard(ctx)
 	resource := slice.Spec.Resources[index]
 	res := &Resource{
-		Manifest:     &resource,
-		SliceDeleted: slice.DeletionTimestamp != nil,
+		Manifest: &resource,
 		ManifestRef: ManifestRef{
 			Slice: types.NamespacedName{
 				Namespace: slice.Namespace,
