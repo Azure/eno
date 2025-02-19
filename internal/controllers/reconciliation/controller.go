@@ -174,7 +174,7 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 	}
 
 	// Evaluate the readiness of resources in the previous readiness group
-	if (status == nil || !status.Reconciled) && !resource.Deleted() {
+	if (status == nil || !status.Reconciled) && !resource.Deleted(comp) {
 		dependencies := c.resourceClient.RangeByReadinessGroup(ctx, synRef, resource.ReadinessGroup, reconstitution.RangeDesc)
 		for _, dep := range dependencies {
 			slice := &apiv1.ResourceSlice{}
@@ -202,12 +202,12 @@ func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request)
 
 	deleted := current == nil ||
 		current.GetDeletionTimestamp() != nil ||
-		(resource.Deleted() && comp.Annotations["eno.azure.io/deletion-strategy"] == "orphan") // orphaning should be reflected on the status.
+		(resource.Deleted(comp) && comp.ShouldOrphanResources()) // orphaning should be reflected on the status.
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 	if ready == nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}
-	if resource != nil && !resource.Deleted() && resource.ReconcileInterval != nil {
+	if resource != nil && !resource.Deleted(comp) && resource.ReconcileInterval != nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(resource.ReconcileInterval.Duration, 0.1)}, nil
 	}
 	return ctrl.Result{}, nil
@@ -220,12 +220,9 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		reconciliationLatency.Observe(float64(time.Since(start).Milliseconds()))
 	}()
 
-	if resource.Deleted() {
-		if current == nil || current.GetDeletionTimestamp() != nil {
+	if resource.Deleted(comp) {
+		if current == nil || current.GetDeletionTimestamp() != nil || comp.ShouldOrphanResources() {
 			return false, nil // already deleted - nothing to do
-		}
-		if comp.Annotations["eno.azure.io/deletion-strategy"] == "orphan" {
-			return false, nil
 		}
 
 		reconciliationActions.WithLabelValues("delete").Inc()

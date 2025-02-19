@@ -243,3 +243,7 @@ func (c *Composition) ShouldForceResynthesis() bool {
 	val, ok := c.GetAnnotations()[forceResynthesisAnnotation]
 	return ok && val == c.Status.GetCurrentSynthesisUUID()
 }
+
+func (c *Composition) ShouldOrphanResources() bool {
+	return c.Annotations["eno.azure.io/deletion-strategy"] == "orphan"
+}
