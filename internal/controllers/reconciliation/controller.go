@@ -14,15 +14,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/discovery"
@@ -36,10 +31,8 @@ var insecureLogPatch = os.Getenv("INSECURE_LOG_PATCH") == "true"
 
 type Options struct {
 	Manager     ctrl.Manager
-	Cache       *resource.Cache
 	WriteBuffer *flowcontrol.ResourceSliceWriteBuffer
 	Downstream  *rest.Config
-	Queue       workqueue.TypedRateLimitingInterface[resource.Request]
 
 	DiscoveryRPS float32
 
@@ -65,6 +58,11 @@ func New(mgr ctrl.Manager, opts Options) error {
 		return err
 	}
 
+	src, cache, err := newReconstitutionSource(mgr)
+	if err != nil {
+		return err
+	}
+
 	disc, err := discovery.NewCache(opts.Downstream, opts.DiscoveryRPS)
 	if err != nil {
 		return err
@@ -73,7 +71,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 	c := &Controller{
 		client:                opts.Manager.GetClient(),
 		writeBuffer:           opts.WriteBuffer,
-		resourceClient:        opts.Cache,
+		resourceClient:        cache,
 		timeout:               opts.Timeout,
 		readinessPollInterval: opts.ReadinessPollInterval,
 		upstreamClient:        upstreamClient,
@@ -83,15 +81,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 	return builder.TypedControllerManagedBy[resource.Request](mgr).
 		Named("reconciliationController").
 		WithLogConstructor(manager.NewTypedLogConstructor[*resource.Request](mgr, "reconciliationController")).
-
-		// Eventually the reconstitution cache will implement source.Source but for now we need to inject our own workqueue.
-		// Since controllers require at least one source, we also start a fake/no-op source+handler.
-		WatchesRawSource(source.TypedChannel[resource.Request, resource.Request](make(<-chan event.TypedGenericEvent[resource.Request]), &handler.TypedFuncs[resource.Request, resource.Request]{})).
-		WithOptions(controller.TypedOptions[resource.Request]{
-			NewQueue: func(name string, q workqueue.TypedRateLimiter[resource.Request]) workqueue.TypedRateLimitingInterface[resource.Request] {
-				return opts.Queue
-			},
-		}).
+		WatchesRawSource(src).
 		Complete(c)
 }
 
