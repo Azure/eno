@@ -245,7 +245,7 @@ func compareWithScheme(a, b *unstructured.Unstructured) bool {
 	return equality.Semantic.DeepEqual(aStruct, bStruct)
 }
 
-func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.ResourceSlice, index int) (*Resource, error) {
+func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*Resource, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 	resource := slice.Spec.Resources[index]
 	res := &Resource{
@@ -336,7 +336,7 @@ func NewResource(ctx context.Context, renv *readiness.Env, slice *apiv1.Resource
 			name = "default"
 		}
 
-		check, err := readiness.ParseCheck(renv, value)
+		check, err := readiness.ParseCheck(readiness.DefaultEnv, value)
 		if err != nil {
 			logger.Error(err, "invalid cel expression")
 			continue

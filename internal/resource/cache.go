@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/readiness"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
@@ -99,7 +98,7 @@ func (c *Cache) Fill(ctx context.Context, comp types.NamespacedName, synUUID str
 	for _, slice := range items {
 		slice := slice
 		for i := range slice.Spec.Resources {
-			res, err := NewResource(ctx, readiness.DefaultEnv, &slice, i)
+			res, err := NewResource(ctx, &slice, i)
 			if err != nil {
 				// This should be impossible since the synthesis executor process will not produce invalid resources
 				logger.Error(err, "invalid resource - cannot load into cache", "resourceSliceName", slice.Name, "resourceIndex", i)
