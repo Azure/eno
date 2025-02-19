@@ -6,7 +6,6 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/flowcontrol"
-	"github.com/Azure/eno/internal/readiness"
 	"github.com/Azure/eno/internal/reconstitution"
 	"github.com/Azure/eno/internal/resource"
 	"github.com/Azure/eno/internal/testutil"
@@ -28,17 +27,16 @@ func mapToResource(t *testing.T, res map[string]any) (*unstructured.Unstructured
 }
 
 func setupTestSubject(t *testing.T, mgr *testutil.Manager) {
-	rateLimiter := workqueue.DefaultTypedItemBasedRateLimiter[resource.Request]()
-	queue := workqueue.NewTypedRateLimitingQueue(rateLimiter)
 	rswb := flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager)
 
-	renv, err := readiness.NewEnv()
-	require.NoError(t, err)
-	cache := resource.NewCache(renv, queue)
+	var cache resource.Cache
+	rateLimiter := workqueue.DefaultTypedItemBasedRateLimiter[resource.Request]()
+	queue := workqueue.NewTypedRateLimitingQueue(rateLimiter)
+	cache.SetQueue(queue)
 
-	err = New(mgr.Manager, Options{
+	err := New(mgr.Manager, Options{
 		Manager:               mgr.Manager,
-		Cache:                 cache,
+		Cache:                 &cache,
 		WriteBuffer:           rswb,
 		Downstream:            mgr.DownstreamRestConfig,
 		Queue:                 queue,
@@ -48,6 +46,6 @@ func setupTestSubject(t *testing.T, mgr *testutil.Manager) {
 	})
 	require.NoError(t, err)
 
-	err = reconstitution.New(mgr.Manager, cache, queue)
+	err = reconstitution.New(mgr.Manager, &cache, queue)
 	require.NoError(t, err)
 }

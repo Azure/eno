@@ -19,7 +19,6 @@ import (
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/k8s"
 	"github.com/Azure/eno/internal/manager"
-	"github.com/Azure/eno/internal/readiness"
 	"github.com/Azure/eno/internal/reconstitution"
 	"github.com/Azure/eno/internal/resource"
 )
@@ -110,17 +109,13 @@ func run() error {
 	// This provides quick feedback in cases where only a few resources have changed.
 	writeBuffer := flowcontrol.NewResourceSliceWriteBufferForManager(mgr)
 
-	rEnv, err := readiness.NewEnv()
-	if err != nil {
-		return fmt.Errorf("constructing readiness environment: %w", err)
-	}
-
 	recOpts.Manager = mgr
 	recOpts.WriteBuffer = writeBuffer
 	recOpts.Downstream = remoteConfig
 	recOpts.Queue = workqueue.NewTypedRateLimitingQueue(
 		workqueue.DefaultTypedItemBasedRateLimiter[resource.Request]())
-	recOpts.Cache = resource.NewCache(rEnv, recOpts.Queue)
+	recOpts.Cache = &resource.Cache{}
+	recOpts.Cache.SetQueue(recOpts.Queue)
 
 	err = reconstitution.New(mgr, recOpts.Cache, recOpts.Queue)
 	if err != nil {

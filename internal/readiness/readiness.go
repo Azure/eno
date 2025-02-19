@@ -2,6 +2,7 @@ package readiness
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 
@@ -12,6 +13,16 @@ import (
 
 	"github.com/google/cel-go/cel"
 )
+
+var DefaultEnv *Env
+
+func init() {
+	var err error
+	DefaultEnv, err = NewEnv()
+	if err != nil {
+		panic(fmt.Sprintf("failed to create default CEL environment: %v", err))
+	}
+}
 
 // Env encapsulates a CEL environment for use in readiness checks.
 type Env struct {

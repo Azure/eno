@@ -23,7 +23,8 @@ func TestControllerIntegration(t *testing.T) {
 
 	rateLimiter := workqueue.DefaultTypedItemBasedRateLimiter[resource.Request]()
 	queue := workqueue.NewTypedRateLimitingQueue(rateLimiter)
-	cache := resource.NewCache(nil, queue)
+	cache := &resource.Cache{}
+	cache.SetQueue(queue)
 	err := New(mgr.Manager, cache, queue)
 	require.NoError(t, err)
 	mgr.Start(t)
