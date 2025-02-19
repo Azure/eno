@@ -23,19 +23,16 @@ type controller struct {
 	*Cache          // embedded because caching is logically part of the reconstituter's functionality
 	client          client.Client
 	nonCachedReader client.Reader
-	queue           workqueue.RateLimitingInterface
+	queue           workqueue.TypedRateLimitingInterface[Request]
 }
 
-func newController(mgr ctrl.Manager, cache *Cache) (*controller, error) {
+func New(mgr ctrl.Manager, cache *Cache, queue workqueue.TypedRateLimitingInterface[Request]) error {
 	r := &controller{
 		Cache:           cache,
 		client:          mgr.GetClient(),
 		nonCachedReader: mgr.GetAPIReader(),
+		queue:           queue,
 	}
-	rateLimiter := workqueue.DefaultItemBasedRateLimiter()
-	r.queue = workqueue.NewRateLimitingQueueWithConfig(rateLimiter, workqueue.RateLimitingQueueConfig{
-		Name: "reconciliationController",
-	})
 
 	err := ctrl.NewControllerManagedBy(mgr).
 		Named("readinessTransitionResponder").
@@ -43,10 +40,10 @@ func newController(mgr ctrl.Manager, cache *Cache) (*controller, error) {
 		WithLogConstructor(manager.NewLogConstructor(mgr, "readinessTransitionResponder")).
 		Complete(reconcile.Func(r.HandleReadinessTransition))
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return r, ctrl.NewControllerManagedBy(mgr).
+	return ctrl.NewControllerManagedBy(mgr).
 		Named("reconstituter").
 		For(&apiv1.Composition{}).
 		Owns(&apiv1.ResourceSlice{}).

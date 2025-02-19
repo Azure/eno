@@ -14,13 +14,20 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/discovery"
 	"github.com/Azure/eno/internal/flowcontrol"
+	"github.com/Azure/eno/internal/manager"
 	"github.com/Azure/eno/internal/reconstitution"
 	"github.com/go-logr/logr"
 )
@@ -32,6 +39,7 @@ type Options struct {
 	Cache       *reconstitution.Cache
 	WriteBuffer *flowcontrol.ResourceSliceWriteBuffer
 	Downstream  *rest.Config
+	Queue       workqueue.TypedRateLimitingInterface[reconstitution.Request]
 
 	DiscoveryRPS float32
 
@@ -49,20 +57,20 @@ type Controller struct {
 	discovery             *discovery.Cache
 }
 
-func New(opts Options) (*Controller, error) {
+func New(mgr ctrl.Manager, opts Options) error {
 	upstreamClient, err := client.New(opts.Downstream, client.Options{
 		Scheme: runtime.NewScheme(), // empty scheme since we shouldn't rely on compile-time types
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	disc, err := discovery.NewCache(opts.Downstream, opts.DiscoveryRPS)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return &Controller{
+	c := &Controller{
 		client:                opts.Manager.GetClient(),
 		writeBuffer:           opts.WriteBuffer,
 		resourceClient:        opts.Cache,
@@ -70,10 +78,24 @@ func New(opts Options) (*Controller, error) {
 		readinessPollInterval: opts.ReadinessPollInterval,
 		upstreamClient:        upstreamClient,
 		discovery:             disc,
-	}, nil
+	}
+
+	return builder.TypedControllerManagedBy[reconstitution.Request](mgr).
+		Named("reconciliationController").
+		WithLogConstructor(manager.NewTypedLogConstructor[*reconstitution.Request](mgr, "reconciliationController")).
+
+		// Eventually the reconstitution cache will implement source.Source but for now we need to inject our own workqueue.
+		// Since controllers require at least one source, we also start a fake/no-op source+handler.
+		WatchesRawSource(source.TypedChannel[reconstitution.Request, reconstitution.Request](make(<-chan event.TypedGenericEvent[reconstitution.Request]), &handler.TypedFuncs[reconstitution.Request, reconstitution.Request]{})).
+		WithOptions(controller.TypedOptions[reconstitution.Request]{
+			NewQueue: func(name string, q workqueue.TypedRateLimiter[reconstitution.Request]) workqueue.TypedRateLimitingInterface[reconstitution.Request] {
+				return opts.Queue
+			},
+		}).
+		Complete(c)
 }
 
-func (c *Controller) Reconcile(ctx context.Context, req *reconstitution.Request) (ctrl.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, req reconstitution.Request) (ctrl.Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
