@@ -19,21 +19,32 @@ type Request struct {
 // Cache caches resources indexed and logically grouped by the UUID of the synthesis that produced them.
 // Kind of like an informer but optimized for Eno.
 type Cache struct {
-	renv  *readiness.Env
-	queue workqueue.TypedRateLimitingInterface[Request]
-
 	mut       sync.Mutex
+	queue     workqueue.TypedRateLimitingInterface[Request]
 	syntheses map[string]*tree
 	synByComp map[types.NamespacedName][]string
 }
 
-func NewCache(renv *readiness.Env, queue workqueue.TypedRateLimitingInterface[Request]) *Cache {
-	return &Cache{
-		renv:      renv,
-		queue:     queue,
-		syntheses: map[string]*tree{},
-		synByComp: map[types.NamespacedName][]string{},
+func (c *Cache) initUnlocked() {
+	if c.syntheses == nil {
+		c.syntheses = map[string]*tree{}
 	}
+	if c.synByComp == nil {
+		c.synByComp = map[types.NamespacedName][]string{}
+	}
+	if c.queue == nil {
+		panic("attempted to use resource cache without a queue")
+	}
+}
+
+func (c *Cache) SetQueue(queue workqueue.TypedRateLimitingInterface[Request]) {
+	c.mut.Lock()
+	defer c.mut.Unlock()
+
+	if c.queue != nil {
+		panic("attempted to replace queue in resource cache")
+	}
+	c.queue = queue
 }
 
 func (c *Cache) Get(ctx context.Context, synthesisUUID string, ref Ref) (res *Resource, visible, found bool) {
@@ -52,6 +63,7 @@ func (c *Cache) Get(ctx context.Context, synthesisUUID string, ref Ref) (res *Re
 func (c *Cache) Visit(ctx context.Context, comp *apiv1.Composition, synUUID string, items []apiv1.ResourceSlice) bool {
 	c.mut.Lock()
 	defer c.mut.Unlock()
+	c.initUnlocked()
 
 	syn, ok := c.syntheses[synUUID]
 	if !ok {
@@ -87,7 +99,7 @@ func (c *Cache) Fill(ctx context.Context, comp types.NamespacedName, synUUID str
 	for _, slice := range items {
 		slice := slice
 		for i := range slice.Spec.Resources {
-			res, err := NewResource(ctx, c.renv, &slice, i)
+			res, err := NewResource(ctx, readiness.DefaultEnv, &slice, i)
 			if err != nil {
 				// This should be impossible since the synthesis executor process will not produce invalid resources
 				logger.Error(err, "invalid resource - cannot load into cache", "resourceSliceName", slice.Name, "resourceIndex", i)
@@ -99,6 +111,7 @@ func (c *Cache) Fill(ctx context.Context, comp types.NamespacedName, synUUID str
 	tree := builder.Build()
 
 	c.mut.Lock()
+	c.initUnlocked()
 	c.syntheses[synUUID] = tree
 	c.synByComp[comp] = append(c.synByComp[comp], synUUID)
 	c.mut.Unlock()
@@ -111,6 +124,7 @@ func (c *Cache) Purge(ctx context.Context, compNSN types.NamespacedName, comp *a
 	logger := logr.FromContextOrDiscard(ctx)
 	c.mut.Lock()
 	defer c.mut.Unlock()
+	c.initUnlocked()
 
 	remainingSyns := []string{}
 	for _, uuid := range c.synByComp[compNSN] {
