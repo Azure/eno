@@ -20,6 +20,7 @@ import (
 	"github.com/Azure/eno/internal/k8s"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/Azure/eno/internal/reconstitution"
+	"github.com/Azure/eno/internal/resource"
 )
 
 func main() {
@@ -108,15 +109,15 @@ func run() error {
 	// This provides quick feedback in cases where only a few resources have changed.
 	writeBuffer := flowcontrol.NewResourceSliceWriteBufferForManager(mgr)
 
-	rCache := reconstitution.NewCache(mgr.GetClient())
 	recOpts.Manager = mgr
-	recOpts.Cache = rCache
 	recOpts.WriteBuffer = writeBuffer
 	recOpts.Downstream = remoteConfig
 	recOpts.Queue = workqueue.NewTypedRateLimitingQueue(
-		workqueue.DefaultTypedItemBasedRateLimiter[reconstitution.Request]())
+		workqueue.DefaultTypedItemBasedRateLimiter[resource.Request]())
+	recOpts.Cache = &resource.Cache{}
+	recOpts.Cache.SetQueue(recOpts.Queue)
 
-	err = reconstitution.New(mgr, rCache, recOpts.Queue)
+	err = reconstitution.New(mgr, recOpts.Cache, recOpts.Queue)
 	if err != nil {
 		return fmt.Errorf("constructing reconstitution manager: %w", err)
 	}

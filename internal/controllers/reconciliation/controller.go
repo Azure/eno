@@ -28,7 +28,7 @@ import (
 	"github.com/Azure/eno/internal/discovery"
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/manager"
-	"github.com/Azure/eno/internal/reconstitution"
+	"github.com/Azure/eno/internal/resource"
 	"github.com/go-logr/logr"
 )
 
@@ -36,10 +36,10 @@ var insecureLogPatch = os.Getenv("INSECURE_LOG_PATCH") == "true"
 
 type Options struct {
 	Manager     ctrl.Manager
-	Cache       *reconstitution.Cache
+	Cache       *resource.Cache
 	WriteBuffer *flowcontrol.ResourceSliceWriteBuffer
 	Downstream  *rest.Config
-	Queue       workqueue.TypedRateLimitingInterface[reconstitution.Request]
+	Queue       workqueue.TypedRateLimitingInterface[resource.Request]
 
 	DiscoveryRPS float32
 
@@ -50,7 +50,7 @@ type Options struct {
 type Controller struct {
 	client                client.Client
 	writeBuffer           *flowcontrol.ResourceSliceWriteBuffer
-	resourceClient        reconstitution.Client
+	resourceClient        *resource.Cache
 	timeout               time.Duration
 	readinessPollInterval time.Duration
 	upstreamClient        client.Client
@@ -80,22 +80,22 @@ func New(mgr ctrl.Manager, opts Options) error {
 		discovery:             disc,
 	}
 
-	return builder.TypedControllerManagedBy[reconstitution.Request](mgr).
+	return builder.TypedControllerManagedBy[resource.Request](mgr).
 		Named("reconciliationController").
-		WithLogConstructor(manager.NewTypedLogConstructor[*reconstitution.Request](mgr, "reconciliationController")).
+		WithLogConstructor(manager.NewTypedLogConstructor[*resource.Request](mgr, "reconciliationController")).
 
 		// Eventually the reconstitution cache will implement source.Source but for now we need to inject our own workqueue.
 		// Since controllers require at least one source, we also start a fake/no-op source+handler.
-		WatchesRawSource(source.TypedChannel[reconstitution.Request, reconstitution.Request](make(<-chan event.TypedGenericEvent[reconstitution.Request]), &handler.TypedFuncs[reconstitution.Request, reconstitution.Request]{})).
-		WithOptions(controller.TypedOptions[reconstitution.Request]{
-			NewQueue: func(name string, q workqueue.TypedRateLimiter[reconstitution.Request]) workqueue.TypedRateLimitingInterface[reconstitution.Request] {
+		WatchesRawSource(source.TypedChannel[resource.Request, resource.Request](make(<-chan event.TypedGenericEvent[resource.Request]), &handler.TypedFuncs[resource.Request, resource.Request]{})).
+		WithOptions(controller.TypedOptions[resource.Request]{
+			NewQueue: func(name string, q workqueue.TypedRateLimiter[resource.Request]) workqueue.TypedRateLimitingInterface[resource.Request] {
 				return opts.Queue
 			},
 		}).
 		Complete(c)
 }
 
-func (c *Controller) Reconcile(ctx context.Context, req reconstitution.Request) (ctrl.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
@@ -115,58 +115,23 @@ func (c *Controller) Reconcile(ctx context.Context, req reconstitution.Request) 
 	ctx = logr.NewContext(ctx, logger)
 
 	// Find the current and (optionally) previous desired states in the cache
-	synRef := reconstitution.NewSynthesisRef(comp)
-	resource, exists := c.resourceClient.Get(ctx, synRef, &req.Resource)
+	var prev *resource.Resource
+	resource, visible, exists := c.resourceClient.Get(ctx, comp.Status.GetCurrentSynthesisUUID(), req.Resource)
 	if !exists {
 		// It's possible for the cache to be empty because a manifest for this resource no longer exists at the requested composition generation.
 		// Dropping the work item is safe since filling the new version will generate a new queue message.
 		logger.V(1).Info("dropping work item because the corresponding synthesis no longer exists in the cache")
 		return ctrl.Result{}, nil
 	}
-
-	var prev *reconstitution.Resource
-	if comp.Status.PreviousSynthesis != nil {
-		prevSynRef := reconstitution.NewSynthesisRef(comp)
-		prevSynRef.UUID = comp.Status.PreviousSynthesis.UUID
-		prev, _ = c.resourceClient.Get(ctx, prevSynRef, &req.Resource)
+	if !visible {
+		logger.V(1).Info("skipping because the resource isn't visible yet")
+		return ctrl.Result{}, nil
 	}
 	logger = logger.WithValues("resourceKind", resource.Ref.Kind, "resourceName", resource.Ref.Name, "resourceNamespace", resource.Ref.Namespace)
 	ctx = logr.NewContext(ctx, logger)
 
-	// Keep track of the last reconciliation time and report on it relative to the resource's reconcile interval
-	// This is useful for identifying cases where the loop can't keep up
-	if resource.ReconcileInterval != nil {
-		observation := resource.ObserveReconciliation()
-		if observation > 0 {
-			delta := observation - resource.ReconcileInterval.Duration
-			reconciliationScheduleDelta.Observe(delta.Seconds())
-		}
-	}
-
-	// CRDs must be reconciled before any CRs that use the type they define.
-	// For initial creation just failing and retrying will eventually converge but updates are tricky
-	// since unknown properties sent from clients are ignored by apiserver.
-	// i.e. ordering is necessary to handle adding a new property and populating it in the same synthesis.
-	crdResource, ok := c.resourceClient.GetDefiningCRD(ctx, synRef, resource.GVK.GroupKind())
-	if ok {
-		slice := &apiv1.ResourceSlice{}
-		err = c.client.Get(ctx, crdResource.ManifestRef.Slice, slice)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
-		}
-		status := crdResource.FindStatus(slice)
-		if status == nil || status.Ready == nil {
-			logger.V(1).Info("skipping because the CRD that defines this resource type isn't ready")
-			return ctrl.Result{}, nil
-		}
-
-		// apiserver doesn't "close the loop" on CRD loading, so there is no way to know
-		// when CRDs are actually ready. This normally only takes a couple of milliseconds
-		// but we round up to a full second here to be safe.
-		if delta := time.Second - time.Since(status.Ready.Time); delta > 0 {
-			logger.V(1).Info("deferring until the defining CRD has been ready for 1 second")
-			return ctrl.Result{RequeueAfter: delta}, nil
-		}
+	if syn := comp.Status.PreviousSynthesis; syn != nil {
+		prev, _, _ = c.resourceClient.Get(ctx, syn.UUID, req.Resource)
 	}
 
 	// Fetch the current resource
@@ -195,23 +160,6 @@ func (c *Controller) Reconcile(ctx context.Context, req reconstitution.Request) 
 		ready = status.Ready
 	}
 
-	// Evaluate the readiness of resources in the previous readiness group
-	if (status == nil || !status.Reconciled) && !resource.Deleted(comp) {
-		dependencies := c.resourceClient.RangeByReadinessGroup(ctx, synRef, resource.ReadinessGroup, reconstitution.RangeDesc)
-		for _, dep := range dependencies {
-			slice := &apiv1.ResourceSlice{}
-			err = c.client.Get(ctx, dep.ManifestRef.Slice, slice)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
-			}
-			status := dep.FindStatus(slice)
-			if status == nil || status.Ready == nil {
-				logger.V(1).Info("skipping because at least one resource in an earlier readiness group isn't ready yet")
-				return ctrl.Result{}, nil
-			}
-		}
-	}
-
 	modified, err := c.reconcileResource(ctx, comp, prev, resource, current)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -235,7 +183,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconstitution.Request) 
 	return ctrl.Result{}, nil
 }
 
-func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composition, prev, resource *reconstitution.Resource, current *unstructured.Unstructured) (bool, error) {
+func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composition, prev, resource *resource.Resource, current *unstructured.Unstructured) (bool, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 	start := time.Now()
 	defer func() {
@@ -324,7 +272,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	return true, nil
 }
 
-func (c *Controller) getCurrent(ctx context.Context, resource *reconstitution.Resource) (*unstructured.Unstructured, error) {
+func (c *Controller) getCurrent(ctx context.Context, resource *resource.Resource) (*unstructured.Unstructured, error) {
 	current := &unstructured.Unstructured{}
 	current.SetName(resource.Ref.Name)
 	current.SetNamespace(resource.Ref.Namespace)
