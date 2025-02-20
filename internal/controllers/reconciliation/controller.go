@@ -118,8 +118,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	var prev *resource.Resource
 	resource, visible, exists := c.resourceClient.Get(ctx, comp.Status.GetCurrentSynthesisUUID(), req.Resource)
 	if !exists {
-		// It's possible for the cache to be empty because a manifest for this resource no longer exists at the requested composition generation.
-		// Dropping the work item is safe since filling the new version will generate a new queue message.
+		// Returning is safe because filling the cache will enqueue a new work item
 		logger.V(1).Info("dropping work item because the corresponding synthesis no longer exists in the cache")
 		return ctrl.Result{}, nil
 	}
