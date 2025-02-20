@@ -283,6 +283,7 @@ func TestTimeouts(t *testing.T) {
 }
 
 func mustParse(expr string) *Check {
+	initDefaultEnv() // it's possible that the tests variables are evaluated before the init function is called
 	check, err := ParseCheck(expr)
 	if err != nil {
 		panic(err)

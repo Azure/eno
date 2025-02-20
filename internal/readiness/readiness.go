@@ -17,6 +17,10 @@ import (
 var defaultEnv *cel.Env
 
 func init() {
+	initDefaultEnv()
+}
+
+func initDefaultEnv() {
 	var err error
 	defaultEnv, err = cel.NewEnv(cel.Variable("self", cel.DynType))
 	if err != nil {
