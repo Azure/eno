@@ -336,7 +336,7 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 			name = "default"
 		}
 
-		check, err := readiness.ParseCheck(readiness.DefaultEnv, value)
+		check, err := readiness.ParseCheck(value)
 		if err != nil {
 			logger.Error(err, "invalid cel expression")
 			continue

@@ -118,12 +118,9 @@ var evalCheckTests = []struct {
 }
 
 func TestEvalCheck(t *testing.T) {
-	env, err := NewEnv()
-	require.NoError(t, err)
-
 	for _, tc := range evalCheckTests {
 		t.Run(tc.Name, func(t *testing.T) {
-			r, err := ParseCheck(env, tc.Expr)
+			r, err := ParseCheck(tc.Expr)
 			require.NoError(t, err)
 
 			time, ok := r.Eval(context.Background(), tc.Resource)
@@ -286,11 +283,7 @@ func TestTimeouts(t *testing.T) {
 }
 
 func mustParse(expr string) *Check {
-	e, err := NewEnv()
-	if err != nil {
-		panic(err)
-	}
-	check, err := ParseCheck(e, expr)
+	check, err := ParseCheck(expr)
 	if err != nil {
 		panic(err)
 	}

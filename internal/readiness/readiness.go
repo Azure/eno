@@ -14,27 +14,14 @@ import (
 	"github.com/google/cel-go/cel"
 )
 
-var DefaultEnv *Env
+var defaultEnv *cel.Env
 
 func init() {
 	var err error
-	DefaultEnv, err = NewEnv()
+	defaultEnv, err = cel.NewEnv(cel.Variable("self", cel.DynType))
 	if err != nil {
 		panic(fmt.Sprintf("failed to create default CEL environment: %v", err))
 	}
-}
-
-// Env encapsulates a CEL environment for use in readiness checks.
-type Env struct {
-	cel *cel.Env
-}
-
-func NewEnv() (*Env, error) {
-	ce, err := cel.NewEnv(cel.Variable("self", cel.DynType))
-	if err != nil {
-		return nil, err
-	}
-	return &Env{cel: ce}, nil
 }
 
 // Check represents a parsed readiness check CEL expression.
@@ -45,12 +32,12 @@ type Check struct {
 
 // ParseCheck parses the given CEL expression in the context of an environment,
 // and returns a reusable execution handle.
-func ParseCheck(env *Env, expr string) (*Check, error) {
-	ast, iss := env.cel.Compile(expr)
+func ParseCheck(expr string) (*Check, error) {
+	ast, iss := defaultEnv.Compile(expr)
 	if iss != nil && iss.Err() != nil {
 		return nil, iss.Err()
 	}
-	prgm, err := env.cel.Program(ast, cel.InterruptCheckFrequency(10))
+	prgm, err := defaultEnv.Program(ast, cel.InterruptCheckFrequency(10))
 	if err != nil {
 		return nil, err
 	}
