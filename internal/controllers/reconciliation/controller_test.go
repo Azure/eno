@@ -7,18 +7,19 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/reconstitution"
+	"github.com/Azure/eno/internal/resource"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/workqueue"
 )
 
-func mapToResource(t *testing.T, res map[string]any) (*unstructured.Unstructured, *reconstitution.Resource) {
+func mapToResource(t *testing.T, res map[string]any) (*unstructured.Unstructured, *resource.Resource) {
 	obj := &unstructured.Unstructured{Object: res}
 	js, err := obj.MarshalJSON()
 	require.NoError(t, err)
 
-	rr := &reconstitution.Resource{
+	rr := &resource.Resource{
 		Manifest: &apiv1.Manifest{Manifest: string(js)},
 		GVK:      obj.GroupVersionKind(),
 	}
@@ -27,13 +28,15 @@ func mapToResource(t *testing.T, res map[string]any) (*unstructured.Unstructured
 
 func setupTestSubject(t *testing.T, mgr *testutil.Manager) {
 	rswb := flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager)
-	cache := reconstitution.NewCache(mgr.GetClient())
-	rateLimiter := workqueue.DefaultTypedItemBasedRateLimiter[reconstitution.Request]()
+
+	var cache resource.Cache
+	rateLimiter := workqueue.DefaultTypedItemBasedRateLimiter[resource.Request]()
 	queue := workqueue.NewTypedRateLimitingQueue(rateLimiter)
+	cache.SetQueue(queue)
 
 	err := New(mgr.Manager, Options{
 		Manager:               mgr.Manager,
-		Cache:                 cache,
+		Cache:                 &cache,
 		WriteBuffer:           rswb,
 		Downstream:            mgr.DownstreamRestConfig,
 		Queue:                 queue,
@@ -43,6 +46,6 @@ func setupTestSubject(t *testing.T, mgr *testutil.Manager) {
 	})
 	require.NoError(t, err)
 
-	err = reconstitution.New(mgr.Manager, cache, queue)
+	err = reconstitution.New(mgr.Manager, &cache, queue)
 	require.NoError(t, err)
 }

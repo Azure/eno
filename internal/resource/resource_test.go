@@ -8,7 +8,6 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/readiness"
 	openapi_v2 "github.com/google/gnostic-models/openapiv2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -194,12 +193,9 @@ var newResourceTests = []struct {
 
 func TestNewResource(t *testing.T) {
 	ctx := context.Background()
-	renv, err := readiness.NewEnv()
-	require.NoError(t, err)
-
 	for _, tc := range newResourceTests {
 		t.Run(tc.Name, func(t *testing.T) {
-			r, err := NewResource(ctx, renv, &apiv1.ResourceSlice{
+			r, err := NewResource(ctx, &apiv1.ResourceSlice{
 				Spec: apiv1.ResourceSliceSpec{
 					Resources: []apiv1.Manifest{{Manifest: tc.Manifest}},
 				},
@@ -224,9 +220,6 @@ func testMergeBasics(t *testing.T, schemaName string) {
 
 	sg := newTestSchemaGetter(t, schemaName)
 
-	renv, err := readiness.NewEnv()
-	require.NoError(t, err)
-
 	newSlice := &apiv1.ResourceSlice{
 		Spec: apiv1.ResourceSliceSpec{
 			Resources: []apiv1.Manifest{{
@@ -248,7 +241,7 @@ func testMergeBasics(t *testing.T, schemaName string) {
 			}},
 		},
 	}
-	newState, err := NewResource(ctx, renv, newSlice, 0)
+	newState, err := NewResource(ctx, newSlice, 0)
 	require.NoError(t, err)
 
 	oldSlice := &apiv1.ResourceSlice{
@@ -274,7 +267,7 @@ func testMergeBasics(t *testing.T, schemaName string) {
 			}},
 		},
 	}
-	oldState, err := NewResource(ctx, renv, oldSlice, 0)
+	oldState, err := NewResource(ctx, oldSlice, 0)
 	require.NoError(t, err)
 
 	current := &unstructured.Unstructured{Object: map[string]any{
