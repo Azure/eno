@@ -13,8 +13,14 @@ import (
 	"github.com/Azure/eno/internal/controllers/selfhealing"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/controllers/watch"
+	"github.com/Azure/eno/internal/flowcontrol"
+	"github.com/Azure/eno/internal/reconstitution"
+	"github.com/Azure/eno/internal/resource"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -51,4 +57,43 @@ func writeComposition(t *testing.T, client client.Client, orphan bool) (*apiv1.S
 	require.NoError(t, client.Create(context.Background(), comp))
 
 	return syn, comp
+}
+
+func setupTestSubject(t *testing.T, mgr *testutil.Manager) {
+	rswb := flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager)
+
+	var cache resource.Cache
+	rateLimiter := workqueue.DefaultTypedItemBasedRateLimiter[resource.Request]()
+	queue := workqueue.NewTypedRateLimitingQueue(rateLimiter)
+	cache.SetQueue(queue)
+
+	downstream := rest.CopyConfig(mgr.DownstreamRestConfig)
+	downstream.QPS = 200 // minimal throttling for the tests
+
+	err := New(mgr.Manager, Options{
+		Manager:               mgr.Manager,
+		Cache:                 &cache,
+		WriteBuffer:           rswb,
+		Downstream:            downstream,
+		Queue:                 queue,
+		DiscoveryRPS:          5,
+		Timeout:               time.Minute,
+		ReadinessPollInterval: time.Hour,
+	})
+	require.NoError(t, err)
+
+	err = reconstitution.New(mgr.Manager, &cache, queue)
+	require.NoError(t, err)
+}
+
+func mapToResource(t *testing.T, res map[string]any) (*unstructured.Unstructured, *resource.Resource) {
+	obj := &unstructured.Unstructured{Object: res}
+	js, err := obj.MarshalJSON()
+	require.NoError(t, err)
+
+	rr := &resource.Resource{
+		Manifest: &apiv1.Manifest{Manifest: string(js)},
+		GVK:      obj.GroupVersionKind(),
+	}
+	return obj, rr
 }
