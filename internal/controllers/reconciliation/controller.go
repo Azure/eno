@@ -91,6 +91,13 @@ func New(mgr ctrl.Manager, opts Options) error {
 			NewQueue: func(name string, q workqueue.TypedRateLimiter[resource.Request]) workqueue.TypedRateLimitingInterface[resource.Request] {
 				return opts.Queue
 			},
+
+			// Since this controller uses requeues as feedback instead of watches, the default
+			// rate limiter's global 10 RPS token bucket quickly becomes a bottleneck.
+			//
+			// This rate limiter uses the same per-item rate limiter as the default, but without
+			// the additional shared/global/non-item-scoped limiter.
+			RateLimiter: workqueue.NewTypedItemExponentialFailureRateLimiter[resource.Request](5*time.Millisecond, 1000*time.Second),
 		}).
 		Complete(c)
 }

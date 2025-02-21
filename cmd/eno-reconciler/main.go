@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 
@@ -95,14 +96,14 @@ func run() error {
 		}
 	}
 
-	remoteConfig := mgr.GetConfig()
+	remoteConfig := rest.CopyConfig(mgr.GetConfig())
 	if remoteKubeconfigFile != "" {
 		if remoteConfig, err = k8s.GetRESTConfig(remoteKubeconfigFile); err != nil {
 			return err
 		}
-		if remoteQPS != 0 {
-			remoteConfig.QPS = float32(remoteQPS)
-		}
+	}
+	if remoteQPS >= 0 {
+		remoteConfig.QPS = float32(remoteQPS)
 	}
 
 	// Burst of 1 allows the first write to happen immediately, while subsequent writes are debounced/batched at writeBatchInterval.
