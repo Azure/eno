@@ -72,7 +72,9 @@ func (w *ResourceSliceWriteBuffer) PatchStatusAsync(ctx context.Context, ref *re
 		}
 	}
 
-	w.insertionTime[key] = time.Now()
+	if _, found := w.insertionTime[key]; !found {
+		w.insertionTime[key] = time.Now()
+	}
 	w.state[key] = append(currentSlice, &resourceSliceStatusUpdate{
 		SlicedResource: ref,
 		PatchFn:        patchFn,
@@ -113,8 +115,6 @@ func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 	if len(updates) > max {
 		w.state[sliceNSN] = updates[max:]
 		updates = updates[:max]
-	} else {
-		delete(w.insertionTime, sliceNSN)
 	}
 	w.mut.Unlock()
 
@@ -122,6 +122,9 @@ func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 	// So the first write is fast, but a steady stream of writes will be throttled exponentially.
 	if len(updates) == 0 {
 		w.queue.Forget(item)
+		w.mut.Lock()
+		delete(w.insertionTime, sliceNSN)
+		w.mut.Unlock()
 		return true // nothing to do
 	}
 
@@ -133,7 +136,6 @@ func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 	// Put the updates back in the buffer to retry on the next attempt
 	w.mut.Lock()
 	w.state[sliceNSN] = append(updates, w.state[sliceNSN]...)
-	w.insertionTime[sliceNSN] = insertionTime
 	w.mut.Unlock()
 	w.queue.AddRateLimited(item)
 
