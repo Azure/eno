@@ -342,7 +342,12 @@ func testMergeBasics(t *testing.T, schemaName string) {
 	merged, typed, err = newState.Merge(ctx, oldState, expected, sg)
 	require.NoError(t, err)
 	assert.Equal(t, schemaName != "", typed)
-	assert.Nil(t, merged)
+
+	if schemaName == "" {
+		assert.NotNil(t, merged)
+	} else {
+		assert.Nil(t, merged)
+	}
 }
 
 func TestResourceOrdering(t *testing.T) {

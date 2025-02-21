@@ -20,7 +20,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
-	"k8s.io/kubectl/pkg/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	smdschema "sigs.k8s.io/structured-merge-diff/v4/schema"
 	"sigs.k8s.io/structured-merge-diff/v4/typed"
@@ -175,7 +174,7 @@ func (r *Resource) Merge(ctx context.Context, old *Resource, current *unstructur
 			return nil, false, fmt.Errorf("parsing patched resource: %w", err)
 		}
 
-		if equality.Semantic.DeepEqual(current, patched) || compareWithScheme(current, patched) {
+		if equality.Semantic.DeepEqual(current, patched) {
 			return nil, false, nil
 		}
 		return patched, false, nil
@@ -216,33 +215,9 @@ func (r *Resource) Merge(ctx context.Context, old *Resource, current *unstructur
 	if err == nil && cmp.IsSame() {
 		return nil, true, nil // no changes
 	}
+
 	copy := &unstructured.Unstructured{Object: merged.AsValue().Unstructured().(map[string]any)}
-	if compareWithScheme(current, copy) {
-		return nil, true, nil
-	}
-
 	return copy, true, nil
-}
-
-// compareWithScheme uses logic registered with the global scheme to compare two resources.
-// This is necessary for cases in which resources have special comparison logic that isn't represented by the openapi spec.
-// For example: resource quantities.
-func compareWithScheme(a, b *unstructured.Unstructured) bool {
-	aStruct, err := scheme.Scheme.New(a.GroupVersionKind())
-	if err != nil {
-		return false // fail open
-	}
-	bStruct, _ := scheme.Scheme.New(a.GroupVersionKind())
-
-	err = scheme.Scheme.Convert(a, aStruct, nil)
-	if err != nil {
-		return false
-	}
-	err = scheme.Scheme.Convert(b, bStruct, nil)
-	if err != nil {
-		return false
-	}
-	return equality.Semantic.DeepEqual(aStruct, bStruct)
 }
 
 func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*Resource, error) {
