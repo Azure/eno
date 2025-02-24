@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -49,8 +48,6 @@ type ManifestRef struct {
 
 // Resource is the controller's internal representation of a single resource out of a ResourceSlice.
 type Resource struct {
-	lastReconciledMeta
-
 	Ref               Ref
 	Manifest          *apiv1.Manifest
 	ManifestRef       ManifestRef
@@ -338,26 +335,6 @@ type patchMeta struct {
 	APIVersion string          `json:"apiVersion"`
 	Kind       string          `json:"kind"`
 	Ops        jsonpatch.Patch `json:"ops"`
-}
-
-type lastReconciledMeta struct {
-	lock           sync.Mutex
-	lastReconciled *time.Time
-}
-
-func (l *lastReconciledMeta) ObserveReconciliation() time.Duration {
-	now := time.Now()
-
-	l.lock.Lock()
-	defer l.lock.Unlock()
-
-	var latency time.Duration
-	if l.lastReconciled != nil {
-		latency = now.Sub(*l.lastReconciled)
-	}
-
-	l.lastReconciled = &now
-	return time.Duration(latency.Abs().Milliseconds())
 }
 
 func NewInputRevisions(obj client.Object, refKey string) *apiv1.InputRevisions {
