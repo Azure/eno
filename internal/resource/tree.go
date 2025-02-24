@@ -127,6 +127,8 @@ func (t *tree) UpdateState(comp *apiv1.Composition, ref ManifestRef, state *apiv
 	if (!idx.Seen && lastKnown == nil) || !lastKnown.Equal(state) || (!idx.CompositionDeleting && comp.DeletionTimestamp != nil) {
 		enqueue(idx.Resource.Ref)
 	}
+	idx.Seen = true
+	idx.CompositionDeleting = comp.DeletionTimestamp != nil
 
 	// Dependents should no longer be blocked by this resource
 	if state.Ready != nil && (lastKnown == nil || lastKnown.Ready == nil) {
@@ -135,9 +137,6 @@ func (t *tree) UpdateState(comp *apiv1.Composition, ref ManifestRef, state *apiv
 			enqueue(dep.Resource.Ref)
 		}
 	}
-
-	idx.CompositionDeleting = comp.DeletionTimestamp != nil // TODO: Should move to the top?
-	idx.Seen = true
 }
 
 // MarshalJSON allows the current tree to be serialized to JSON for testing/debugging purposes.
