@@ -397,3 +397,45 @@ func TestOpPriorityTies(t *testing.T) {
 		}
 	}
 }
+
+// TestOpNewerInputInSynthesis covers an edge case where the synthesizer sees a newer version of an input
+// than the watch controller. This might happen during synthesis if the input is changing frequently.
+// In extreme cases synthesis might be blocked since it will be re-dispatched for every input change.
+func TestOpNewerInputInSynthesis(t *testing.T) {
+	synth := &apiv1.Synthesizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-synth", Generation: 11},
+		Spec: apiv1.SynthesizerSpec{
+			Refs: []apiv1.Ref{
+				{Key: "foo"},
+				{Key: "bar", Defer: true},
+			},
+		},
+	}
+
+	initTS := time.Date(8000, 0, 0, 0, 0, 0, 0, time.UTC)
+	comp := &apiv1.Composition{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-comp", Finalizers: []string{"eno.azure.io/cleanup"}, Generation: 1},
+		Spec: apiv1.CompositionSpec{
+			Bindings: []apiv1.Binding{
+				{Key: "foo", Resource: apiv1.ResourceBinding{Name: "foo"}},
+			},
+		},
+		Status: apiv1.CompositionStatus{
+			CurrentSynthesis: &apiv1.Synthesis{
+				ObservedCompositionGeneration: 1,
+				ObservedSynthesizerGeneration: 11,
+				Synthesized:                   ptr.To(metav1.Now()),
+				Initialized:                   ptr.To(metav1.NewTime(initTS)),
+				UUID:                          "initial-uuid",
+				InputRevisions: []apiv1.InputRevisions{
+					{Key: "foo", ResourceVersion: "2"},
+				},
+			},
+			InputRevisions: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+			},
+		},
+	}
+
+	assert.Nil(t, newOp(synth, comp))
+}

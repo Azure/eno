@@ -1,6 +1,8 @@
 package v1
 
 import (
+	"strconv"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -121,17 +123,25 @@ type InputRevisions struct {
 	SynthesizerGeneration *int64 `json:"synthesizerGeneration,omitempty"`
 }
 
-func (i *InputRevisions) Equal(b InputRevisions) bool {
+func (i *InputRevisions) Less(b InputRevisions) bool {
 	if i.Key != b.Key {
-		return false
+		return false // shouldn't be possible
 	}
 	if (i.Revision == nil) != (b.Revision == nil) {
-		return false
+		return true
 	}
 	if i.Revision != nil {
-		return *i.Revision == *b.Revision
+		return *i.Revision < *b.Revision
 	}
-	return i.ResourceVersion == b.ResourceVersion
+	if i.ResourceVersion == b.ResourceVersion {
+		return false
+	}
+	iInt, iErr := strconv.Atoi(i.ResourceVersion)
+	bInt, bErr := strconv.Atoi(b.ResourceVersion)
+	if iErr != nil || bErr != nil {
+		return true // effectively fall back to equality comparison if they aren't ints (shouldn't be possible)
+	}
+	return iInt < bInt
 }
 
 func (s *Synthesis) Failed() bool {
