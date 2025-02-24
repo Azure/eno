@@ -263,6 +263,65 @@ func TestPatchStrategyReplace(t *testing.T) {
 	})
 }
 
+func TestDeploymentFieldRefs(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+				"spec": map[string]any{
+					"selector": map[string]any{
+						"matchLabels": map[string]any{"app": "foobar"},
+					},
+					"template": map[string]any{
+						"metadata": map[string]any{
+							"labels": map[string]string{"app": "foobar"},
+						},
+						"spec": map[string]any{
+							"containers": []map[string]any{{
+								"name":  "nginx",
+								"image": "nginx:latest",
+								"env": []map[string]any{{
+									"name": "FOO",
+									"valueFrom": map[string]any{
+										"fieldRef": map[string]string{"fieldPath": "metadata.namespace"},
+									},
+								}},
+							}},
+						},
+					},
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	// It should be able to become ready
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == comp.Generation
+	})
+}
+
 // TestRemoveProperty proves that properties can be removed as part of the three-way merge.
 func TestRemoveProperty(t *testing.T) {
 	scheme := runtime.NewScheme()

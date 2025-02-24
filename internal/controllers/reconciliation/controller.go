@@ -229,12 +229,12 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 			return false, fmt.Errorf("encoding json patch: %w", err)
 		}
 
+		reconciliationActions.WithLabelValues("patch").Inc()
 		err = c.upstreamClient.Patch(ctx, current, client.RawPatch(types.JSONPatchType, patch))
 		if err != nil {
 			return false, fmt.Errorf("applying patch: %w", err)
 		}
 
-		reconciliationActions.WithLabelValues("patch").Inc()
 		logger.V(0).Info("patched resource", "resourceVersion", current.GetResourceVersion())
 		return true, nil
 	}
@@ -253,12 +253,17 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		logger.V(1).Info("INSECURE logging patch", "update", string(js))
 	}
 
+	reconciliationActions.WithLabelValues("patch").Inc()
 	err = c.upstreamClient.Update(ctx, updated)
 	if err != nil {
 		return false, fmt.Errorf("applying update: %w", err)
 	}
 
-	reconciliationActions.WithLabelValues("patch").Inc()
+	if updated.GetResourceVersion() == current.GetResourceVersion() {
+		logger.V(0).Info("updated resource but it did not change", "resourceVersion", updated.GetResourceVersion(), "typedMerge", typed)
+		return false, nil
+	}
+
 	logger.V(0).Info("updated resource", "resourceVersion", updated.GetResourceVersion(), "previousResourceVersion", current.GetResourceVersion(), "typedMerge", typed)
 	return true, nil
 }
