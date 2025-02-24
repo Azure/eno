@@ -85,9 +85,10 @@ func mapToResource(t *testing.T, res map[string]any) (*unstructured.Unstructured
 	js, err := obj.MarshalJSON()
 	require.NoError(t, err)
 
-	rr := &resource.Resource{
-		Manifest: &apiv1.Manifest{Manifest: string(js)},
-		GVK:      obj.GroupVersionKind(),
-	}
+	slice := &apiv1.ResourceSlice{}
+	slice.Spec.Resources = []apiv1.Manifest{{Manifest: string(js)}}
+	rr, err := resource.NewResource(context.Background(), slice, 0)
+	require.NoError(t, err)
+
 	return obj, rr
 }
