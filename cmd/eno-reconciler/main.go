@@ -12,7 +12,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/Azure/eno/internal/controllers/liveness"
@@ -20,8 +19,6 @@ import (
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/k8s"
 	"github.com/Azure/eno/internal/manager"
-	"github.com/Azure/eno/internal/reconstitution"
-	"github.com/Azure/eno/internal/resource"
 )
 
 func main() {
@@ -113,15 +110,6 @@ func run() error {
 	recOpts.Manager = mgr
 	recOpts.WriteBuffer = writeBuffer
 	recOpts.Downstream = remoteConfig
-	recOpts.Queue = workqueue.NewTypedRateLimitingQueue(
-		workqueue.DefaultTypedItemBasedRateLimiter[resource.Request]())
-	recOpts.Cache = &resource.Cache{}
-	recOpts.Cache.SetQueue(recOpts.Queue)
-
-	err = reconstitution.New(mgr, recOpts.Cache, recOpts.Queue)
-	if err != nil {
-		return fmt.Errorf("constructing reconstitution manager: %w", err)
-	}
 
 	err = reconciliation.New(mgr, recOpts)
 	if err != nil {

@@ -14,7 +14,6 @@ import (
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/controllers/watch"
 	"github.com/Azure/eno/internal/flowcontrol"
-	"github.com/Azure/eno/internal/reconstitution"
 	"github.com/Azure/eno/internal/resource"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/require"
@@ -72,17 +71,12 @@ func setupTestSubject(t *testing.T, mgr *testutil.Manager) {
 
 	err := New(mgr.Manager, Options{
 		Manager:               mgr.Manager,
-		Cache:                 &cache,
 		WriteBuffer:           rswb,
 		Downstream:            downstream,
-		Queue:                 queue,
 		DiscoveryRPS:          5,
 		Timeout:               time.Minute,
 		ReadinessPollInterval: time.Hour,
 	})
-	require.NoError(t, err)
-
-	err = reconstitution.New(mgr.Manager, &cache, queue)
 	require.NoError(t, err)
 }
 

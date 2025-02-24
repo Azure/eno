@@ -20,9 +20,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/discovery"
@@ -36,10 +33,8 @@ var insecureLogPatch = os.Getenv("INSECURE_LOG_PATCH") == "true"
 
 type Options struct {
 	Manager     ctrl.Manager
-	Cache       *resource.Cache
 	WriteBuffer *flowcontrol.ResourceSliceWriteBuffer
 	Downstream  *rest.Config
-	Queue       workqueue.TypedRateLimitingInterface[resource.Request]
 
 	DiscoveryRPS float32
 
@@ -65,6 +60,11 @@ func New(mgr ctrl.Manager, opts Options) error {
 		return err
 	}
 
+	src, cache, err := newReconstitutionSource(mgr)
+	if err != nil {
+		return err
+	}
+
 	disc, err := discovery.NewCache(opts.Downstream, opts.DiscoveryRPS)
 	if err != nil {
 		return err
@@ -73,7 +73,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 	c := &Controller{
 		client:                opts.Manager.GetClient(),
 		writeBuffer:           opts.WriteBuffer,
-		resourceClient:        opts.Cache,
+		resourceClient:        cache,
 		timeout:               opts.Timeout,
 		readinessPollInterval: opts.ReadinessPollInterval,
 		upstreamClient:        upstreamClient,
@@ -83,15 +83,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 	return builder.TypedControllerManagedBy[resource.Request](mgr).
 		Named("reconciliationController").
 		WithLogConstructor(manager.NewTypedLogConstructor[*resource.Request](mgr, "reconciliationController")).
-
-		// Eventually the reconstitution cache will implement source.Source but for now we need to inject our own workqueue.
-		// Since controllers require at least one source, we also start a fake/no-op source+handler.
-		WatchesRawSource(source.TypedChannel[resource.Request, resource.Request](make(<-chan event.TypedGenericEvent[resource.Request]), &handler.TypedFuncs[resource.Request, resource.Request]{})).
 		WithOptions(controller.TypedOptions[resource.Request]{
-			NewQueue: func(name string, q workqueue.TypedRateLimiter[resource.Request]) workqueue.TypedRateLimitingInterface[resource.Request] {
-				return opts.Queue
-			},
-
 			// Since this controller uses requeues as feedback instead of watches, the default
 			// rate limiter's global 10 RPS token bucket quickly becomes a bottleneck.
 			//
@@ -99,6 +91,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 			// the additional shared/global/non-item-scoped limiter.
 			RateLimiter: workqueue.NewTypedItemExponentialFailureRateLimiter[resource.Request](5*time.Millisecond, 1000*time.Second),
 		}).
+		WatchesRawSource(src).
 		Complete(c)
 }
 
@@ -124,13 +117,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	// Find the current and (optionally) previous desired states in the cache
 	var prev *resource.Resource
 	resource, visible, exists := c.resourceClient.Get(ctx, comp.Status.GetCurrentSynthesisUUID(), req.Resource)
-	if !exists {
-		// Returning is safe because filling the cache will enqueue a new work item
-		logger.V(1).Info("dropping work item because the corresponding synthesis no longer exists in the cache")
-		return ctrl.Result{}, nil
-	}
-	if !visible {
-		logger.V(1).Info("skipping because the resource isn't visible yet")
+	if !exists || !visible {
 		return ctrl.Result{}, nil
 	}
 	logger = logger.WithValues("resourceKind", resource.Ref.Kind, "resourceName", resource.Ref.Name, "resourceNamespace", resource.Ref.Namespace)
@@ -170,8 +157,6 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	// If we modified the resource, we should also re-evaluate readiness
-	// without waiting for the interval.
 	if modified {
 		return ctrl.Result{Requeue: true}, nil
 	}
