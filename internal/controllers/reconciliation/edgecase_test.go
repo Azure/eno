@@ -278,7 +278,7 @@ func TestDeploymentFieldRefs(t *testing.T) {
 		output.Items = []*unstructured.Unstructured{{
 			Object: map[string]any{
 				"apiVersion": "apps/v1",
-				"kind":       "Deployment", // only PDBs set patch strategy == replace
+				"kind":       "Deployment",
 				"metadata": map[string]any{
 					"name":      "test-obj",
 					"namespace": "default",
