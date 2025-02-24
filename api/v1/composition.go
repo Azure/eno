@@ -128,10 +128,7 @@ func (i *InputRevisions) Less(b InputRevisions) bool {
 	if i.Key != b.Key {
 		panic(fmt.Sprintf("cannot compare input revisions for different keys: %s != %s", i.Key, b.Key))
 	}
-	if (i.Revision == nil) != (b.Revision == nil) {
-		return true
-	}
-	if i.Revision != nil {
+	if i.Revision != nil && b.Revision != nil {
 		return *i.Revision < *b.Revision
 	}
 	if i.ResourceVersion == b.ResourceVersion {

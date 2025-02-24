@@ -146,7 +146,7 @@ func TestInputRevisionsLess(t *testing.T) {
 			ShouldPanic: true,
 		},
 		{
-			Name: "one nil and one non-nil revision",
+			Name: "one nil and one non-nil revision positive",
 			A: InputRevisions{
 				Key:             "key6",
 				Revision:        nil,
@@ -155,9 +155,23 @@ func TestInputRevisionsLess(t *testing.T) {
 			B: InputRevisions{
 				Key:             "key6",
 				Revision:        &revision1,
-				ResourceVersion: "6",
+				ResourceVersion: "7",
 			},
 			Expectation: true,
+		},
+		{
+			Name: "one nil and one non-nil revision negative",
+			A: InputRevisions{
+				Key:             "key6",
+				Revision:        &revision1,
+				ResourceVersion: "6",
+			},
+			B: InputRevisions{
+				Key:             "key6",
+				Revision:        nil,
+				ResourceVersion: "6",
+			},
+			Expectation: false,
 		},
 	}
 
