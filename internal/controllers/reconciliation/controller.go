@@ -137,13 +137,8 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	// - Readiness checks are skipped when this version of the resource's desired state has already become ready
 	// - Readiness checks are skipped when the resource hasn't changed since the last check
 	// - Readiness defaults to true if no checks are given
-	slice := &apiv1.ResourceSlice{}
-	err = c.client.Get(ctx, resource.ManifestRef.Slice, slice)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
-	}
 	var ready *metav1.Time
-	status := resource.FindStatus(slice)
+	status := resource.State()
 	if status == nil || status.Ready == nil {
 		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, current)
 		if ok {

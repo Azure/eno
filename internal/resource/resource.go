@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -64,7 +65,8 @@ type Resource struct {
 	// DefinedGroupKind is set on CRDs to represent the resource type they define.
 	DefinedGroupKind *schema.GroupKind
 
-	value value.Value
+	value            value.Value
+	latestKnownState atomic.Pointer[apiv1.ResourceState]
 }
 
 func (r *Resource) Deleted(comp *apiv1.Composition) bool {
@@ -75,13 +77,7 @@ func (r *Resource) Unstructured() *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: r.value.Unstructured().(map[string]any)}
 }
 
-func (r *Resource) FindStatus(slice *apiv1.ResourceSlice) *apiv1.ResourceState {
-	if len(slice.Status.Resources) <= r.ManifestRef.Index {
-		return nil
-	}
-	state := slice.Status.Resources[r.ManifestRef.Index]
-	return &state
-}
+func (r *Resource) State() *apiv1.ResourceState { return r.latestKnownState.Load() }
 
 func (r *Resource) NeedsToBePatched(current *unstructured.Unstructured) bool {
 	if r.Patch == nil || current == nil {
