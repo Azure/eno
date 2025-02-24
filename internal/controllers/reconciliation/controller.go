@@ -203,11 +203,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	// Create the resource when it doesn't exist
 	if current == nil {
 		reconciliationActions.WithLabelValues("create").Inc()
-		obj, err := resource.Parse()
-		if err != nil {
-			return false, fmt.Errorf("invalid resource: %w", err)
-		}
-		err = c.upstreamClient.Create(ctx, obj)
+		err := c.upstreamClient.Create(ctx, resource.Unstructured())
 		if err != nil {
 			return false, fmt.Errorf("creating resource: %w", err)
 		}

@@ -352,11 +352,11 @@ func testMergeBasics(t *testing.T, schemaName string) {
 
 func TestResourceOrdering(t *testing.T) {
 	resources := []*Resource{
-		{Manifest: &apiv1.Manifest{Manifest: "a"}},
+		{ManifestHash: []byte("a")},
 		{},
-		{Manifest: &apiv1.Manifest{Manifest: "b"}},
+		{ManifestHash: []byte("b")},
 		{},
-		{Manifest: &apiv1.Manifest{Manifest: "c"}},
+		{ManifestHash: []byte("c")},
 	}
 	sort.Slice(resources, func(i, j int) bool {
 		return resources[i].Less(resources[j])
@@ -365,9 +365,9 @@ func TestResourceOrdering(t *testing.T) {
 	assert.Equal(t, []*Resource{
 		{},
 		{},
-		{Manifest: &apiv1.Manifest{Manifest: "a"}},
-		{Manifest: &apiv1.Manifest{Manifest: "b"}},
-		{Manifest: &apiv1.Manifest{Manifest: "c"}},
+		{ManifestHash: []byte("a")},
+		{ManifestHash: []byte("b")},
+		{ManifestHash: []byte("c")},
 	}, resources)
 }
 
