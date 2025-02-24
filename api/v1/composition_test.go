@@ -8,7 +8,7 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-func TestInputRevisionsEqual(t *testing.T) {
+func TestInputRevisionsLess(t *testing.T) {
 	revision1 := 1
 	revision2 := 2
 	tests := []struct {
@@ -16,88 +16,160 @@ func TestInputRevisionsEqual(t *testing.T) {
 		A           InputRevisions
 		B           InputRevisions
 		Expectation bool
+		ShouldPanic bool
 	}{
 		{
-			Name: "Equal with nil revisions and same ResourceVersion",
+			Name: "nil revisions and same ResourceVersion",
 			A: InputRevisions{
 				Key:             "key1",
 				Revision:        nil,
-				ResourceVersion: "v1",
+				ResourceVersion: "1",
 			},
 			B: InputRevisions{
 				Key:             "key1",
 				Revision:        nil,
-				ResourceVersion: "v1",
+				ResourceVersion: "1",
+			},
+			Expectation: false,
+		},
+		{
+			Name: "nil revisions and < ResourceVersion",
+			A: InputRevisions{
+				Key:             "key1",
+				Revision:        nil,
+				ResourceVersion: "1",
+			},
+			B: InputRevisions{
+				Key:             "key1",
+				Revision:        nil,
+				ResourceVersion: "2",
 			},
 			Expectation: true,
 		},
 		{
-			Name: "Equal with non-nil revisions",
+			Name: "nil revisions and invalid non-matching ResourceVersions",
+			A: InputRevisions{
+				Key:             "key1",
+				Revision:        nil,
+				ResourceVersion: "foo",
+			},
+			B: InputRevisions{
+				Key:             "key1",
+				Revision:        nil,
+				ResourceVersion: "bar",
+			},
+			Expectation: true,
+		},
+		{
+			Name: "nil revisions and invalid matching ResourceVersions",
+			A: InputRevisions{
+				Key:             "key1",
+				Revision:        nil,
+				ResourceVersion: "foo",
+			},
+			B: InputRevisions{
+				Key:             "key1",
+				Revision:        nil,
+				ResourceVersion: "foo",
+			},
+			Expectation: false,
+		},
+		{
+			Name: "nil revisions and > ResourceVersion",
+			A: InputRevisions{
+				Key:             "key1",
+				Revision:        nil,
+				ResourceVersion: "2",
+			},
+			B: InputRevisions{
+				Key:             "key1",
+				Revision:        nil,
+				ResourceVersion: "1",
+			},
+			Expectation: false,
+		},
+		{
+			Name: "non-nil revisions equal",
 			A: InputRevisions{
 				Key:             "key2",
 				Revision:        &revision1,
-				ResourceVersion: "v2",
+				ResourceVersion: "2",
 			},
 			B: InputRevisions{
 				Key:             "key2",
 				Revision:        &revision1,
-				ResourceVersion: "v2",
+				ResourceVersion: "2",
+			},
+			Expectation: false,
+		},
+		{
+			Name: "non-nil revisions >",
+			A: InputRevisions{
+				Key:             "key2",
+				Revision:        &revision2,
+				ResourceVersion: "2",
+			},
+			B: InputRevisions{
+				Key:             "key2",
+				Revision:        &revision1,
+				ResourceVersion: "2",
+			},
+			Expectation: false,
+		},
+		{
+			Name: "non-nil revisions <",
+			A: InputRevisions{
+				Key:             "key2",
+				Revision:        &revision1,
+				ResourceVersion: "2",
+			},
+			B: InputRevisions{
+				Key:             "key2",
+				Revision:        &revision2,
+				ResourceVersion: "2",
 			},
 			Expectation: true,
 		},
 		{
-			Name: "Not equal with different keys",
+			Name: "different keys",
 			A: InputRevisions{
 				Key:             "key3",
 				Revision:        &revision1,
-				ResourceVersion: "v3",
+				ResourceVersion: "3",
 			},
 			B: InputRevisions{
 				Key:             "key4",
 				Revision:        &revision1,
-				ResourceVersion: "v3",
+				ResourceVersion: "3",
 			},
 			Expectation: false,
+			ShouldPanic: true,
 		},
 		{
-			Name: "Not equal with different non-nil revisions",
-			A: InputRevisions{
-				Key:             "key5",
-				Revision:        &revision1,
-				ResourceVersion: "v5",
-			},
-			B: InputRevisions{
-				Key:             "key5",
-				Revision:        &revision2,
-				ResourceVersion: "v5",
-			},
-			Expectation: false,
-		},
-		{
-			Name: "Not equal with one nil and one non-nil revision",
+			Name: "one nil and one non-nil revision positive",
 			A: InputRevisions{
 				Key:             "key6",
 				Revision:        nil,
-				ResourceVersion: "v6",
+				ResourceVersion: "6",
 			},
 			B: InputRevisions{
 				Key:             "key6",
 				Revision:        &revision1,
-				ResourceVersion: "v6",
+				ResourceVersion: "7",
 			},
-			Expectation: false,
+			Expectation: true,
 		},
 		{
-			Name: "Not equal with same keys but different ResourceVersions",
+			Name: "one nil and one non-nil revision negative",
 			A: InputRevisions{
-				Key:             "key7",
-				Revision:        nil,
-				ResourceVersion: "v7",
+				Key:             "key6",
+				Revision:        &revision1,
+				ResourceVersion: "6",
 			},
 			B: InputRevisions{
-				Key:             "key7",
+				Key:             "key6",
 				Revision:        nil,
-				ResourceVersion: "v8",
+				ResourceVersion: "6",
 			},
 			Expectation: false,
 		},
@@ -105,7 +177,14 @@ func TestInputRevisionsEqual(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
-			result := tt.A.Equal(tt.B)
+			if tt.ShouldPanic {
+				assert.Panics(t, func() {
+					tt.A.Less(tt.B)
+				})
+				return
+			}
+
+			result := tt.A.Less(tt.B)
 			assert.Equal(t, tt.Expectation, result)
 		})
 	}

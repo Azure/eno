@@ -230,7 +230,7 @@ func inputChangeCount(synth *apiv1.Synthesizer, a, b []apiv1.InputRevisions) (no
 			continue
 		}
 
-		if !ar.Equal(br) {
+		if br.Less(ar) {
 			if ref.Defer {
 				deferred++
 			} else {
