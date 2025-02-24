@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"fmt"
 	"strconv"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -125,7 +126,7 @@ type InputRevisions struct {
 
 func (i *InputRevisions) Less(b InputRevisions) bool {
 	if i.Key != b.Key {
-		return false // shouldn't be possible
+		panic(fmt.Sprintf("cannot compare input revisions for different keys: %s != %s", i.Key, b.Key))
 	}
 	if (i.Revision == nil) != (b.Revision == nil) {
 		return true

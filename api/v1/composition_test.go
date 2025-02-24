@@ -16,6 +16,7 @@ func TestInputRevisionsLess(t *testing.T) {
 		A           InputRevisions
 		B           InputRevisions
 		Expectation bool
+		ShouldPanic bool
 	}{
 		{
 			Name: "nil revisions and same ResourceVersion",
@@ -142,6 +143,7 @@ func TestInputRevisionsLess(t *testing.T) {
 				ResourceVersion: "3",
 			},
 			Expectation: false,
+			ShouldPanic: true,
 		},
 		{
 			Name: "one nil and one non-nil revision",
@@ -161,6 +163,13 @@ func TestInputRevisionsLess(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
+			if tt.ShouldPanic {
+				assert.Panics(t, func() {
+					tt.A.Less(tt.B)
+				})
+				return
+			}
+
 			result := tt.A.Less(tt.B)
 			assert.Equal(t, tt.Expectation, result)
 		})
