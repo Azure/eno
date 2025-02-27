@@ -122,17 +122,18 @@ func TestFuzzNewOp(t *testing.T) {
 		if forceResynth {
 			comp.ForceResynthesis()
 		}
+		if nilSynthesis {
+			comp.Status.CurrentSynthesis = nil
+		}
 		if synthesizing {
-			comp.Status.CurrentSynthesis.Synthesized = nil
+			comp.Status.PendingSynthesis = comp.Status.CurrentSynthesis
+			comp.Status.CurrentSynthesis = nil
 		}
 		if compDeleting {
 			comp.DeletionTimestamp = ptr.To(metav1.Now())
 		}
 		if compModified {
-			comp.Status.CurrentSynthesis.ObservedCompositionGeneration = 123
-		}
-		if nilSynthesis {
-			comp.Status.CurrentSynthesis = nil
+			comp.Generation = 345
 		}
 
 		op := newOp(synth, comp)
@@ -421,7 +422,7 @@ func TestOpNewerInputInSynthesis(t *testing.T) {
 			},
 		},
 		Status: apiv1.CompositionStatus{
-			CurrentSynthesis: &apiv1.Synthesis{
+			PendingSynthesis: &apiv1.Synthesis{
 				ObservedCompositionGeneration: 1,
 				ObservedSynthesizerGeneration: 11,
 				Synthesized:                   ptr.To(metav1.Now()),

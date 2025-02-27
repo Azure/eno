@@ -147,32 +147,30 @@ func (c *cleanupDecision) String() string {
 }
 
 func shouldDeleteSlice(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
-	if comp.Status.CurrentSynthesis == nil || slice.Spec.CompositionGeneration > comp.Status.CurrentSynthesis.ObservedCompositionGeneration {
+	if comp.Status.PendingSynthesis == nil || slice.Spec.CompositionGeneration > comp.Status.PendingSynthesis.ObservedCompositionGeneration {
 		return false // stale informer
 	}
 
 	var (
-		hasBeenRetried     = slice.Spec.Attempt != 0 && comp.Status.CurrentSynthesis.Attempts > slice.Spec.Attempt && slice.Spec.SynthesisUUID == comp.Status.CurrentSynthesis.UUID
-		isReferencedByComp = synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) || synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice)
-		isSynthesized      = comp.Status.CurrentSynthesis.Synthesized != nil
+		hasBeenRetried     = slice.Spec.Attempt != 0 && comp.Status.PendingSynthesis.Attempts > slice.Spec.Attempt && slice.Spec.SynthesisUUID == comp.Status.PendingSynthesis.UUID
+		isReferencedByComp = synthesisReferencesSlice(comp.Status.PendingSynthesis, slice) || synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) || synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice)
 		compIsDeleted      = comp.DeletionTimestamp != nil
-		fromOldComposition = slice.Spec.CompositionGeneration < comp.Status.CurrentSynthesis.ObservedCompositionGeneration
+		fromOldComposition = slice.Spec.CompositionGeneration < comp.Status.PendingSynthesis.ObservedCompositionGeneration
 	)
 
 	// We can only safely delete resource slices when either:
 	// - Another retry of the same synthesis has already started
-	// - Synthesis is complete and the composition is being deleted
+	// - The composition is being deleted
 	// - The slice was derived from an older composition
-	return hasBeenRetried || (isSynthesized && compIsDeleted) || (!isReferencedByComp && fromOldComposition)
+	return hasBeenRetried || compIsDeleted || (!isReferencedByComp && fromOldComposition)
 }
 
 func shouldReleaseSliceFinalizer(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
-	if comp.Status.CurrentSynthesis == nil || slice.Spec.CompositionGeneration > comp.Status.CurrentSynthesis.ObservedCompositionGeneration {
+	if comp.Status.PendingSynthesis == nil || slice.Spec.CompositionGeneration > comp.Status.PendingSynthesis.ObservedCompositionGeneration {
 		return false // stale informer
 	}
-	isOutdated := slice.Spec.Attempt != 0 && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Attempts > slice.Spec.Attempt
-	isSynthesized := comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
-	return isOutdated || (isSynthesized && (!resourcesRemain(comp, slice) || (!synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) && !synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice))))
+	isOutdated := slice.Spec.Attempt != 0 && comp.Status.PendingSynthesis != nil && comp.Status.PendingSynthesis.Attempts > slice.Spec.Attempt
+	return isOutdated || !resourcesRemain(comp, slice) || (!synthesisReferencesSlice(comp.Status.PendingSynthesis, slice) && !synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) && !synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice))
 }
 
 func synthesisReferencesSlice(syn *apiv1.Synthesis, slice *apiv1.ResourceSlice) bool {

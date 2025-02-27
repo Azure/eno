@@ -21,7 +21,7 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 		manager.CompositionNameLabelKey:      comp.Name,
 		manager.CompositionNamespaceLabelKey: comp.Namespace,
 		manager.ManagerLabelKey:              manager.ManagerLabelValue,
-		"eno.azure.io/synthesis-uuid":        comp.Status.CurrentSynthesis.UUID,
+		"eno.azure.io/synthesis-uuid":        comp.Status.PendingSynthesis.UUID,
 	}
 	for k, v := range syn.Spec.PodOverrides.Labels {
 		pod.Labels[k] = v
@@ -43,11 +43,11 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 		},
 		{
 			Name:  "SYNTHESIS_UUID",
-			Value: comp.Status.CurrentSynthesis.UUID,
+			Value: comp.Status.PendingSynthesis.UUID,
 		},
 		{
 			Name:  "SYNTHESIS_ATTEMPT",
-			Value: strconv.Itoa(comp.Status.CurrentSynthesis.Attempts + 1), // we write the next attempt _after_ pod creation
+			Value: strconv.Itoa(comp.Status.PendingSynthesis.Attempts + 1), // we write the next attempt _after_ pod creation
 		},
 	}
 
@@ -186,7 +186,7 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 }
 
 func podIsCurrent(comp *apiv1.Composition, pod *corev1.Pod) bool {
-	return pod.Labels != nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.UUID == pod.Labels["eno.azure.io/synthesis-uuid"]
+	return pod.Labels != nil && comp.Status.PendingSynthesis != nil && comp.Status.PendingSynthesis.UUID == pod.Labels["eno.azure.io/synthesis-uuid"]
 }
 
 // filterEnv returns env taking out any items that have the same name as
