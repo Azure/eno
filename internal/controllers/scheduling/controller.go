@@ -145,7 +145,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	if err := c.dispatchOp(ctx, op); err != nil {
 		if errors.IsInvalid(err) {
-			return ctrl.Result{}, fmt.Errorf("conflict while dispatching synthesis")
+			return ctrl.Result{}, fmt.Errorf("conflict while dispatching synthesis (reason=%s)", op.Reason)
 		}
 		return ctrl.Result{}, fmt.Errorf("dispatching synthesis operation: %w", err)
 	}
@@ -161,9 +161,10 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 func (c *controller) getNextCooldownSlot(comps *apiv1.CompositionList) time.Time {
 	var next time.Time
 	for _, comp := range comps.Items {
-		syn := comp.Status.CurrentSynthesis
-		if syn != nil && syn.Deferred && syn.Initialized != nil && syn.Initialized.Time.After(next) {
-			next = syn.Initialized.Time
+		for _, syn := range []*apiv1.Synthesis{comp.Status.PendingSynthesis, comp.Status.CurrentSynthesis, comp.Status.PreviousSynthesis} {
+			if syn != nil && syn.Deferred && syn.Initialized != nil && syn.Initialized.Time.After(next) {
+				next = syn.Initialized.Time
+			}
 		}
 	}
 	return next.Add(c.cooldownPeriod)

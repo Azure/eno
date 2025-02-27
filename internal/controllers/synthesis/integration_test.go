@@ -88,6 +88,10 @@ func TestControllerHappyPath(t *testing.T) {
 		t.Error("state wasn't swapped to previous")
 	}
 
+	if comp.Status.PendingSynthesis != nil {
+		t.Error("pending synthesis wasn't removed")
+	}
+
 	// The synthesizer is eventually executed a second time
 	testutil.Eventually(t, func() bool {
 		return calls.Load() >= 2
@@ -229,7 +233,7 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration > initialGen
+			return comp.Status.CurrentSynthesis!= nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration > initialGen
 		})
 		assert.NotEqual(t, comp.Status.CurrentSynthesis.ResourceSlices, initialSlices)
 	})

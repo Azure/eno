@@ -197,17 +197,24 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 		}
 
 		now := metav1.Now()
-		comp.Status.CurrentSynthesis.Synthesized = &now
-		comp.Status.CurrentSynthesis.ResourceSlices = refs
-		comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration = syn.Generation
-		comp.Status.CurrentSynthesis.InputRevisions = revs
+		comp.Status.PendingSynthesis.Synthesized = &now
+		comp.Status.PendingSynthesis.ResourceSlices = refs
+		comp.Status.PendingSynthesis.ObservedSynthesizerGeneration = syn.Generation
+		comp.Status.PendingSynthesis.InputRevisions = revs
 		for _, result := range rl.Results {
-			comp.Status.CurrentSynthesis.Results = append(comp.Status.CurrentSynthesis.Results, apiv1.Result{
+			comp.Status.PendingSynthesis.Results = append(comp.Status.PendingSynthesis.Results, apiv1.Result{
 				Message:  result.Message,
 				Severity: result.Severity,
 				Tags:     result.Tags,
 			})
 		}
+
+		// Swap pending->current->previous syntheses
+		if syn := comp.Status.CurrentSynthesis; syn != nil && !syn.Failed() {
+			comp.Status.PreviousSynthesis = syn
+		}
+		comp.Status.CurrentSynthesis = comp.Status.PendingSynthesis
+		comp.Status.PendingSynthesis = nil
 
 		err = e.Writer.Status().Update(ctx, comp)
 		if err != nil {
@@ -220,7 +227,7 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 }
 
 func skipSynthesis(comp *apiv1.Composition, env *Env) (string, bool) {
-	synthesis := comp.Status.CurrentSynthesis
+	synthesis := comp.Status.PendingSynthesis
 	if synthesis == nil {
 		return "MissingSynthesis", true
 	}

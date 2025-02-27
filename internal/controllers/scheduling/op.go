@@ -15,6 +15,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
+// TODO: Also swap if the current synthesis somehow didn't converge, to cover the migration case
+
 type op struct {
 	Synthesizer *apiv1.Synthesizer
 	Composition *apiv1.Composition
@@ -29,8 +31,13 @@ type op struct {
 func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition) *op {
 	o := &op{Synthesizer: synth, Composition: comp}
 
+	syn := comp.Status.PendingSynthesis
+	if syn == nil {
+		syn = comp.Status.CurrentSynthesis
+	}
+
 	var ok bool
-	o.Reason, ok = classifyOp(synth, comp, comp.Status.CurrentSynthesis)
+	o.Reason, ok = classifyOp(synth, comp, syn)
 	if !ok {
 		return nil
 	}
@@ -119,7 +126,7 @@ func (o *op) HasBeenPatched(ctx context.Context, cli client.Reader, grace time.D
 		return false, 0, err
 	}
 
-	return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.UUID == o.id.String(), wait, nil
+	return comp.Status.GetLatestSynthesisUUID() == o.id.String(), wait, nil
 }
 
 func (o *op) BuildPatch() any {
@@ -133,7 +140,7 @@ func (o *op) BuildPatch() any {
 	// Initialize the status if it's nil (zero value struct on the client == nil on the server side)
 	if reflect.DeepEqual(o.Composition.Status, apiv1.CompositionStatus{}) {
 		ops = append(ops,
-			jsonPatch{Op: "test", Path: "/status", Value: nil},
+			// jsonPatch{Op: "test", Path: "/status", Value: nil},
 			jsonPatch{Op: "add", Path: "/status", Value: map[string]any{}})
 	}
 
@@ -141,22 +148,18 @@ func (o *op) BuildPatch() any {
 	ops = append(ops, jsonPatch{Op: "test", Path: "/status/inputRevisions", Value: o.Composition.Status.InputRevisions})
 
 	// Protect against zombie leaders running this controller
-	if syn := o.Composition.Status.CurrentSynthesis; syn == nil {
-		ops = append(ops, jsonPatch{Op: "test", Path: "/status/currentSynthesis", Value: nil})
+	if syn := o.Composition.Status.PendingSynthesis; syn == nil {
+		ops = append(ops, jsonPatch{Op: "test", Path: "/status/pendingSynthesis", Value: nil})
 	} else {
 		ops = append(ops,
-			jsonPatch{Op: "test", Path: "/status/currentSynthesis/uuid", Value: syn.UUID},
-			jsonPatch{Op: "test", Path: "/status/currentSynthesis/observedCompositionGeneration", Value: syn.ObservedCompositionGeneration},
-			jsonPatch{Op: "test", Path: "/status/currentSynthesis/synthesized", Value: syn.Synthesized})
-
-		if syn.Synthesized != nil && !syn.Failed() {
-			ops = append(ops, jsonPatch{Op: "replace", Path: "/status/previousSynthesis", Value: syn})
-		}
+			jsonPatch{Op: "test", Path: "/status/pendingSynthesis/uuid", Value: syn.UUID},
+			jsonPatch{Op: "test", Path: "/status/pendingSynthesis/observedCompositionGeneration", Value: syn.ObservedCompositionGeneration},
+			jsonPatch{Op: "test", Path: "/status/pendingSynthesis/synthesized", Value: syn.Synthesized})
 	}
 
 	ops = append(ops, jsonPatch{
 		Op:   "replace",
-		Path: "/status/currentSynthesis",
+		Path: "/status/pendingSynthesis",
 		Value: map[string]any{
 			"observedCompositionGeneration": o.Composition.Generation,
 			"initialized":                   time.Now().Format(time.RFC3339),
