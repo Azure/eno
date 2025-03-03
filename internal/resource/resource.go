@@ -241,10 +241,6 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 	if err != nil {
 		return nil, fmt.Errorf("invalid json: %w", err)
 	}
-	if parsed.Object != nil {
-		delete(parsed.Object, "status")
-		parsed.SetCreationTimestamp(metav1.Time{})
-	}
 
 	res.value = value.NewValueInterface(parsed.Object)
 	gvk := parsed.GroupVersionKind()
