@@ -381,6 +381,7 @@ func TestBuildCleanupDecision_StaleCache(t *testing.T) {
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = "test-slice"
 	slice.Namespace = staleComp.Namespace
+	slice.Spec.CompositionGeneration = 2 // newer than the composition
 	slice.CreationTimestamp = metav1.NewTime(time.Now().Add(-time.Minute * 5))
 
 	comp := staleComp.DeepCopy()
