@@ -147,8 +147,13 @@ func (c *cleanupDecision) String() string {
 }
 
 func shouldDeleteSlice(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
-	// TODO: Current also
-	if comp.Status.PendingSynthesis == nil || slice.Spec.CompositionGeneration > comp.Status.PendingSynthesis.ObservedCompositionGeneration {
+	var synthesizedGeneration int64
+	if comp.Status.PendingSynthesis != nil {
+		synthesizedGeneration = comp.Status.PendingSynthesis.ObservedCompositionGeneration
+	} else if comp.Status.CurrentSynthesis != nil {
+		synthesizedGeneration = comp.Status.CurrentSynthesis.ObservedCompositionGeneration
+	}
+	if slice.Spec.CompositionGeneration > synthesizedGeneration {
 		return false // stale informer
 	}
 
@@ -168,7 +173,13 @@ func shouldDeleteSlice(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool
 }
 
 func shouldReleaseSliceFinalizer(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
-	if comp.Status.PendingSynthesis == nil || slice.Spec.CompositionGeneration > comp.Status.PendingSynthesis.ObservedCompositionGeneration {
+	var synthesizedGeneration int64
+	if comp.Status.PendingSynthesis != nil {
+		synthesizedGeneration = comp.Status.PendingSynthesis.ObservedCompositionGeneration
+	} else if comp.Status.CurrentSynthesis != nil {
+		synthesizedGeneration = comp.Status.CurrentSynthesis.ObservedCompositionGeneration
+	}
+	if slice.Spec.CompositionGeneration > synthesizedGeneration {
 		return false // stale informer
 	}
 	isOutdated := slice.Spec.Attempt != 0 && comp.Status.PendingSynthesis != nil && comp.Status.PendingSynthesis.Attempts > slice.Spec.Attempt
