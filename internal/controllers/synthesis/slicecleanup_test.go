@@ -98,7 +98,7 @@ func TestShouldDeleteSlice(t *testing.T) {
 			name: "another attempt started for a different synthesis, old one still references the slice",
 			comp: &apiv1.Composition{
 				Status: apiv1.CompositionStatus{
-					CurrentSynthesis: &apiv1.Synthesis{
+					PendingSynthesis: &apiv1.Synthesis{
 						Attempts: 5,
 						UUID:     "the-next-one",
 					},
@@ -121,7 +121,7 @@ func TestShouldDeleteSlice(t *testing.T) {
 			name: "another attempt started for the same synthesis",
 			comp: &apiv1.Composition{
 				Status: apiv1.CompositionStatus{
-					CurrentSynthesis: &apiv1.Synthesis{
+					PendingSynthesis: &apiv1.Synthesis{
 						Attempts: 5,
 					},
 				},
@@ -137,7 +137,7 @@ func TestShouldDeleteSlice(t *testing.T) {
 			name: "slice is referenced by composition",
 			comp: &apiv1.Composition{
 				Status: apiv1.CompositionStatus{
-					CurrentSynthesis: &apiv1.Synthesis{},
+					PendingSynthesis: &apiv1.Synthesis{},
 				},
 			},
 			slice: &apiv1.ResourceSlice{
@@ -154,6 +154,7 @@ func TestShouldDeleteSlice(t *testing.T) {
 					DeletionTimestamp: &metav1.Time{Time: time.Now()},
 				},
 				Status: apiv1.CompositionStatus{
+					PendingSynthesis: nil,
 					CurrentSynthesis: &apiv1.Synthesis{
 						Synthesized: &metav1.Time{Time: time.Now()},
 					},
