@@ -15,8 +15,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-// TODO: Also swap if the current synthesis somehow didn't converge, to cover the migration case
-
 type op struct {
 	Synthesizer *apiv1.Synthesizer
 	Composition *apiv1.Composition

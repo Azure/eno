@@ -145,7 +145,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	if err := c.dispatchOp(ctx, op); err != nil {
 		if errors.IsInvalid(err) {
-			return ctrl.Result{}, fmt.Errorf("conflict while dispatching synthesis (reason=%s)", op.Reason)
+			return ctrl.Result{}, fmt.Errorf("conflict while dispatching synthesis")
 		}
 		return ctrl.Result{}, fmt.Errorf("dispatching synthesis operation: %w", err)
 	}
