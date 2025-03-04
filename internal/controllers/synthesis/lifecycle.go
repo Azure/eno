@@ -69,8 +69,8 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 
 	logger = logger.WithValues("compositionName", comp.Name,
 		"compositionNamespace", comp.Namespace,
-		"compositionGeneration", comp.Generation,
-		"synthesisID", comp.Status.GetLatestSynthesisUUID())
+		"compositionGeneration", comp.Generation)
+	ctx = logr.NewContext(ctx, logger)
 
 	// It isn't safe to delete compositions until their resource slices have been cleaned up,
 	// since reconciling resources necessarily requires the composition.
@@ -119,7 +119,6 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 	if comp.DeletionTimestamp != nil {
-		ctx = logr.NewContext(ctx, logger)
 		return c.reconcileDeletedComposition(ctx, comp)
 	}
 	if exists {
@@ -140,6 +139,8 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	if comp.Status.PendingSynthesis == nil || comp.Status.PendingSynthesis.UUID == "" || comp.Status.PendingSynthesis.Synthesized != nil || comp.DeletionTimestamp != nil {
 		return ctrl.Result{}, nil
 	}
+	logger = logger.WithValues("synthesisID", comp.Status.PendingSynthesis.UUID)
+	ctx = logr.NewContext(ctx, logger)
 
 	// Back off to avoid constantly re-synthesizing impossible compositions (unlikely but possible)
 	if shouldBackOffPodCreation(comp) {
