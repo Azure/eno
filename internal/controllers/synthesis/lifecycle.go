@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -196,6 +198,32 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 func (c *podLifecycleController) reconcileDeletedComposition(ctx context.Context, comp *apiv1.Composition) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
+	// Deletion increments the composition's generation, but the reconstitution cache is only invalidated
+	// when the synthesized generation (from the status) changes, which will never happen because synthesis
+	// is righly disabled for deleted compositions. We break out of this deadlock condition by updating
+	// the status without actually synthesizing.
+	if shouldUpdateDeletedCompositionStatus(comp) {
+		comp.Status.CurrentSynthesis.ObservedCompositionGeneration = comp.Generation
+		comp.Status.CurrentSynthesis.Ready = nil
+		comp.Status.CurrentSynthesis.UUID = uuid.NewString()
+		now := metav1.Now()
+		if (comp.Status.PreviousSynthesis == nil || comp.Status.PreviousSynthesis.Synthesized == nil) &&
+			comp.Status.CurrentSynthesis.Synthesized == nil {
+			// In this case, the composition is not reconciling due to the synthesizer is missing and the composition finalizer should be removed.
+			// If not, the composition will stuck in waiting for reconciliation to be completed and the it can't be deleted.
+			comp.Status.CurrentSynthesis.Reconciled = &now
+		} else {
+			comp.Status.CurrentSynthesis.Reconciled = nil
+		}
+		comp.Status.CurrentSynthesis.Synthesized = &now
+		err := c.client.Status().Update(ctx, comp)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("updating current composition generation: %w", err)
+		}
+		logger.V(0).Info("updated composition status to reflect deletion")
+		return ctrl.Result{}, nil
+	}
+
 	// Remove the finalizer when all pods and slices have been deleted
 	if isReconciling(comp) {
 		logger.V(1).Info("refusing to remove composition finalizer because it is still being reconciled")
@@ -328,7 +356,7 @@ func shouldBackOffPodCreation(comp *apiv1.Composition) bool {
 }
 
 func isReconciling(comp *apiv1.Composition) bool {
-	return comp.Status.PendingSynthesis != nil && (comp.Status.PendingSynthesis.Reconciled == nil || comp.Status.PendingSynthesis.ObservedCompositionGeneration != comp.Generation)
+	return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled == nil
 }
 
 func getPodScheduledTime(pod *corev1.Pod) *time.Time {
@@ -342,4 +370,8 @@ func getPodScheduledTime(pod *corev1.Pod) *time.Time {
 		return &cond.LastTransitionTime.Time
 	}
 	return nil
+}
+
+func shouldUpdateDeletedCompositionStatus(comp *apiv1.Composition) bool {
+	return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation
 }
