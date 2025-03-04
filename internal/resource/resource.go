@@ -241,6 +241,10 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 	if err != nil {
 		return nil, fmt.Errorf("invalid json: %w", err)
 	}
+
+	// Prune out the status/creation time.
+	// This is a pragmatic choice to make Eno behave in expected ways for synthesizers written using client-go structs,
+	// which set metadata.creationTime=null and status={}.
 	if parsed.Object != nil {
 		delete(parsed.Object, "status")
 		parsed.SetCreationTimestamp(metav1.Time{})
