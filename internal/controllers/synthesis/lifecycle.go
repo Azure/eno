@@ -348,6 +348,10 @@ func shouldBackOffPodCreation(comp *apiv1.Composition) bool {
 	return current != nil && current.Attempts > 0 && current.PodCreation != nil
 }
 
+func shouldUpdateDeletedCompositionStatus(comp *apiv1.Composition) bool {
+	return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation
+}
+
 func isReconciling(comp *apiv1.Composition) bool {
 	return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled == nil
 }
@@ -363,8 +367,4 @@ func getPodScheduledTime(pod *corev1.Pod) *time.Time {
 		return &cond.LastTransitionTime.Time
 	}
 	return nil
-}
-
-func shouldUpdateDeletedCompositionStatus(comp *apiv1.Composition) bool {
-	return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation
 }
