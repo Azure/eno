@@ -488,6 +488,7 @@ func TestReconcileCacheRace(t *testing.T) {
 
 // TestCompositionDeletionOrdering proves that compositions are not deleted until all resulting resources have been deleted.
 // This covers significant surface area between reconciliation and synthesis.
+// TODO
 func TestCompositionDeletionOrdering(t *testing.T) {
 	scheme := runtime.NewScheme()
 	corev1.SchemeBuilder.AddToScheme(scheme)
@@ -547,6 +548,7 @@ func TestCompositionDeletionOrdering(t *testing.T) {
 }
 
 // TestMidSynthesisDeletion proves that compositions can be deleted while they are being synthesized.
+// TODO Fix
 func TestMidSynthesisDeletion(t *testing.T) {
 	scheme := runtime.NewScheme()
 	corev1.SchemeBuilder.AddToScheme(scheme)
@@ -703,6 +705,7 @@ func TestDisableUpdates(t *testing.T) {
 }
 
 // TestOrphanedCompositionDeletion proves that compositions can be deleted when their synthesizer is missing.
+// TODO
 func TestOrphanedCompositionDeletion(t *testing.T) {
 	scheme := runtime.NewScheme()
 	corev1.SchemeBuilder.AddToScheme(scheme)
