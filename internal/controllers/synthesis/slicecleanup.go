@@ -158,7 +158,7 @@ func shouldDeleteSlice(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool
 	}
 
 	var (
-		hasBeenRetried     = slice.Spec.Attempt != 0 && comp.Status.PendingSynthesis.Attempts > slice.Spec.Attempt && slice.Spec.SynthesisUUID == comp.Status.PendingSynthesis.UUID
+		hasBeenRetried     = slice.Spec.Attempt != 0 && comp.Status.PendingSynthesis != nil && comp.Status.PendingSynthesis.Attempts > slice.Spec.Attempt && slice.Spec.SynthesisUUID == comp.Status.PendingSynthesis.UUID
 		isReferencedByComp = synthesisReferencesSlice(comp.Status.PendingSynthesis, slice) || synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) || synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice)
 		isSynthesized      = comp.Status.CurrentSynthesis != nil
 		compIsDeleted      = comp.DeletionTimestamp != nil
