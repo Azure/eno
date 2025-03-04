@@ -220,17 +220,6 @@ func (s *CompositionStatus) GetCurrentSynthesisUUID() string {
 	return s.CurrentSynthesis.UUID
 }
 
-// TODO: Remove other?
-func (s *CompositionStatus) GetLatestSynthesisUUID() string {
-	if s.PendingSynthesis != nil {
-		return s.PendingSynthesis.UUID
-	}
-	if s.CurrentSynthesis != nil {
-		return s.CurrentSynthesis.UUID
-	}
-	return ""
-}
-
 func (c *Composition) ShouldIgnoreSideEffects() bool {
 	return c.Annotations["eno.azure.io/ignore-side-effects"] == "true"
 }
@@ -255,15 +244,25 @@ func (c *Composition) ForceResynthesis() {
 	if anno == nil {
 		anno = map[string]string{}
 	}
-	anno[forceResynthesisAnnotation] = c.Status.GetLatestSynthesisUUID()
+	anno[forceResynthesisAnnotation] = c.Status.getLatestSynthesisUUID()
 	c.SetAnnotations(anno)
 }
 
 func (c *Composition) ShouldForceResynthesis() bool {
 	val, ok := c.GetAnnotations()[forceResynthesisAnnotation]
-	return ok && val == c.Status.GetLatestSynthesisUUID()
+	return ok && val == c.Status.getLatestSynthesisUUID()
 }
 
 func (c *Composition) ShouldOrphanResources() bool {
 	return c.Annotations["eno.azure.io/deletion-strategy"] == "orphan"
+}
+
+func (s *CompositionStatus) getLatestSynthesisUUID() string {
+	if s.PendingSynthesis != nil {
+		return s.PendingSynthesis.UUID
+	}
+	if s.CurrentSynthesis != nil {
+		return s.CurrentSynthesis.UUID
+	}
+	return ""
 }
