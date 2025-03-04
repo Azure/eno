@@ -480,14 +480,14 @@ func TestNotEligibleForResynthesis(t *testing.T) {
 		{
 			name: "CurrentSynthesis Synthesized is nil",
 			comp: &apiv1.Composition{
-				Status: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{}},
+				Status: apiv1.CompositionStatus{PendingSynthesis: &apiv1.Synthesis{}},
 			},
 			expected: true,
 		},
 		{
 			name: "force-resynthesis is not nil",
 			comp: withForceResynthesis(&apiv1.Composition{
-				Status: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{}},
+				Status: apiv1.CompositionStatus{PendingSynthesis: &apiv1.Synthesis{}},
 			}),
 			expected: true,
 		},
