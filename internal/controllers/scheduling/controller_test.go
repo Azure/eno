@@ -44,17 +44,17 @@ func TestBasics(t *testing.T) {
 
 	testutil.Eventually(t, func() bool {
 		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.PendingSynthesis != nil && comp.Status.PendingSynthesis.UUID != ""
+		return err == nil && comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.UUID != ""
 	})
-	initialUUID := comp.Status.PendingSynthesis.UUID
+	initialUUID := comp.Status.InFlightSynthesis.UUID
 
 	// Mark this synthesis as complete
 	err := retry.RetryOnConflict(testutil.Backoff, func() error {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Status.PendingSynthesis.Synthesized = ptr.To(metav1.Now())
+		comp.Status.InFlightSynthesis.Synthesized = ptr.To(metav1.Now())
 		comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
-		comp.Status.CurrentSynthesis = comp.Status.PendingSynthesis
-		comp.Status.PendingSynthesis = nil
+		comp.Status.CurrentSynthesis = comp.Status.InFlightSynthesis
+		comp.Status.InFlightSynthesis = nil
 		return cli.Status().Update(ctx, comp)
 	})
 	require.NoError(t, err)
@@ -70,15 +70,15 @@ func TestBasics(t *testing.T) {
 	testutil.Eventually(t, func() bool {
 		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		return err == nil &&
-			comp.Status.PendingSynthesis != nil &&
-			comp.Status.PendingSynthesis.UUID != initialUUID
+			comp.Status.InFlightSynthesis != nil &&
+			comp.Status.InFlightSynthesis.UUID != initialUUID
 	})
 
 	// Remove the current synthesis, things should eventually converge
-	updatedUUID := comp.Status.PendingSynthesis.UUID
+	updatedUUID := comp.Status.InFlightSynthesis.UUID
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Status.PendingSynthesis = nil
+		comp.Status.InFlightSynthesis = nil
 		return cli.Status().Update(ctx, comp)
 	})
 	require.NoError(t, err)
@@ -86,9 +86,9 @@ func TestBasics(t *testing.T) {
 	testutil.Eventually(t, func() bool {
 		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		return err == nil &&
-			comp.Status.PendingSynthesis != nil &&
-			comp.Status.PendingSynthesis.UUID != initialUUID &&
-			comp.Status.PendingSynthesis.UUID != updatedUUID
+			comp.Status.InFlightSynthesis != nil &&
+			comp.Status.InFlightSynthesis.UUID != initialUUID &&
+			comp.Status.InFlightSynthesis.UUID != updatedUUID
 	})
 }
 
@@ -115,19 +115,19 @@ func TestSynthRolloutBasics(t *testing.T) {
 	// Initial synthesis
 	testutil.Eventually(t, func() bool {
 		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.PendingSynthesis != nil && comp.Status.PendingSynthesis.UUID != ""
+		return err == nil && comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.UUID != ""
 	})
-	lastUUID := comp.Status.PendingSynthesis.UUID
+	lastUUID := comp.Status.InFlightSynthesis.UUID
 
 	// Mark this synthesis as complete for the current synth version
 	start := time.Now()
 	err := retry.RetryOnConflict(testutil.Backoff, func() error {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Status.PendingSynthesis.Synthesized = ptr.To(metav1.Now())
-		comp.Status.PendingSynthesis.ObservedSynthesizerGeneration = synth.Generation
+		comp.Status.InFlightSynthesis.Synthesized = ptr.To(metav1.Now())
+		comp.Status.InFlightSynthesis.ObservedSynthesizerGeneration = synth.Generation
 		comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
-		comp.Status.CurrentSynthesis = comp.Status.PendingSynthesis
-		comp.Status.PendingSynthesis = nil
+		comp.Status.CurrentSynthesis = comp.Status.InFlightSynthesis
+		comp.Status.InFlightSynthesis = nil
 		return cli.Status().Update(ctx, comp)
 	})
 	require.NoError(t, err)
@@ -143,19 +143,19 @@ func TestSynthRolloutBasics(t *testing.T) {
 	// It should resynthesize immediately
 	testutil.Eventually(t, func() bool {
 		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.PendingSynthesis != nil && comp.Status.PendingSynthesis.UUID != lastUUID
+		return err == nil && comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.UUID != lastUUID
 	})
 	assert.Less(t, time.Since(start), time.Millisecond*500, "initial deferral period")
-	lastUUID = comp.Status.PendingSynthesis.UUID
+	lastUUID = comp.Status.InFlightSynthesis.UUID
 
 	// Mark this synthesis as complete for the current synth version
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Status.PendingSynthesis.Synthesized = ptr.To(metav1.Now())
-		comp.Status.PendingSynthesis.ObservedSynthesizerGeneration = synth.Generation
+		comp.Status.InFlightSynthesis.Synthesized = ptr.To(metav1.Now())
+		comp.Status.InFlightSynthesis.ObservedSynthesizerGeneration = synth.Generation
 		comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
-		comp.Status.CurrentSynthesis = comp.Status.PendingSynthesis
-		comp.Status.PendingSynthesis = nil
+		comp.Status.CurrentSynthesis = comp.Status.InFlightSynthesis
+		comp.Status.InFlightSynthesis = nil
 		return cli.Status().Update(ctx, comp)
 	})
 	require.NoError(t, err)
@@ -171,7 +171,7 @@ func TestSynthRolloutBasics(t *testing.T) {
 	// It should eventually resynthesize but this time with a cooldown
 	testutil.Eventually(t, func() bool {
 		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.PendingSynthesis != nil && comp.Status.PendingSynthesis.UUID != lastUUID
+		return err == nil && comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.UUID != lastUUID
 	})
 	assert.Greater(t, time.Since(start), time.Millisecond*500, "chilled deferral period")
 
@@ -219,19 +219,19 @@ func TestDeferredInput(t *testing.T) {
 	// Initial synthesis
 	testutil.Eventually(t, func() bool {
 		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.PendingSynthesis != nil && comp.Status.PendingSynthesis.UUID != ""
+		return err == nil && comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.UUID != ""
 	})
-	lastUUID := comp.Status.PendingSynthesis.UUID
+	lastUUID := comp.Status.InFlightSynthesis.UUID
 
 	// Mark this synthesis as complete but for the wrong input revision
 	start := time.Now()
 	err := retry.RetryOnConflict(testutil.Backoff, func() error {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Status.PendingSynthesis.Synthesized = ptr.To(metav1.Now())
-		comp.Status.PendingSynthesis.InputRevisions = []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "NOT bar"}}
+		comp.Status.InFlightSynthesis.Synthesized = ptr.To(metav1.Now())
+		comp.Status.InFlightSynthesis.InputRevisions = []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "NOT bar"}}
 		comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
-		comp.Status.CurrentSynthesis = comp.Status.PendingSynthesis
-		comp.Status.PendingSynthesis = nil
+		comp.Status.CurrentSynthesis = comp.Status.InFlightSynthesis
+		comp.Status.InFlightSynthesis = nil
 		return cli.Status().Update(ctx, comp)
 	})
 	require.NoError(t, err)
@@ -239,26 +239,26 @@ func TestDeferredInput(t *testing.T) {
 	// It should eventually resynthesize
 	testutil.Eventually(t, func() bool {
 		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.PendingSynthesis != nil && comp.Status.PendingSynthesis.UUID != lastUUID
+		return err == nil && comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.UUID != lastUUID
 	})
 	assert.Less(t, time.Since(start), time.Millisecond*500, "initial deferral period")
-	lastUUID = comp.Status.PendingSynthesis.UUID
+	lastUUID = comp.Status.InFlightSynthesis.UUID
 
 	// One more time
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Status.PendingSynthesis.Synthesized = ptr.To(metav1.Now())
-		comp.Status.PendingSynthesis.InputRevisions = []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "NOT bar"}}
+		comp.Status.InFlightSynthesis.Synthesized = ptr.To(metav1.Now())
+		comp.Status.InFlightSynthesis.InputRevisions = []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "NOT bar"}}
 		comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
-		comp.Status.CurrentSynthesis = comp.Status.PendingSynthesis
-		comp.Status.PendingSynthesis = nil
+		comp.Status.CurrentSynthesis = comp.Status.InFlightSynthesis
+		comp.Status.InFlightSynthesis = nil
 		return cli.Status().Update(ctx, comp)
 	})
 	require.NoError(t, err)
 
 	testutil.Eventually(t, func() bool {
 		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.PendingSynthesis != nil && comp.Status.PendingSynthesis.UUID != lastUUID
+		return err == nil && comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.UUID != lastUUID
 	})
 	assert.Greater(t, time.Since(start), time.Millisecond*500, "chilled deferral period")
 }
@@ -286,9 +286,9 @@ func TestForcedResynth(t *testing.T) {
 	// Initial synthesis
 	testutil.Eventually(t, func() bool {
 		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.PendingSynthesis != nil && comp.Status.PendingSynthesis.UUID != ""
+		return err == nil && comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.UUID != ""
 	})
-	initialUUID := comp.Status.PendingSynthesis.UUID
+	initialUUID := comp.Status.InFlightSynthesis.UUID
 
 	// Set the forced resynthesis annotation
 	err := retry.RetryOnConflict(testutil.Backoff, func() error {
@@ -301,7 +301,7 @@ func TestForcedResynth(t *testing.T) {
 	// It should eventually resynthesize
 	testutil.Eventually(t, func() bool {
 		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.PendingSynthesis.UUID != initialUUID
+		return err == nil && comp.Status.InFlightSynthesis.UUID != initialUUID
 	})
 }
 
@@ -351,12 +351,12 @@ func testChaos(t *testing.T, mgr *testutil.Manager) {
 
 			time.Sleep(time.Duration(rand.IntN(100)) * time.Millisecond)
 
-			comp.Status.PendingSynthesis.Synthesized = ptr.To(metav1.Now())
-			comp.Status.PendingSynthesis.ObservedSynthesizerGeneration = synth.Generation
+			comp.Status.InFlightSynthesis.Synthesized = ptr.To(metav1.Now())
+			comp.Status.InFlightSynthesis.ObservedSynthesizerGeneration = synth.Generation
 
 			comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
-			comp.Status.CurrentSynthesis = comp.Status.PendingSynthesis
-			comp.Status.PendingSynthesis = nil
+			comp.Status.CurrentSynthesis = comp.Status.InFlightSynthesis
+			comp.Status.InFlightSynthesis = nil
 			return reconcile.Result{}, cli.Status().Update(ctx, comp)
 		}))
 
@@ -384,7 +384,7 @@ func testChaos(t *testing.T, mgr *testutil.Manager) {
 		for _, comp := range list.Items {
 			if comp.Synthesizing() {
 				synthesizing++
-				assert.False(t, comp.Status.PendingSynthesis.Deferred)
+				assert.False(t, comp.Status.InFlightSynthesis.Deferred)
 			}
 		}
 
@@ -459,7 +459,7 @@ func TestSerializationGracePeriod(t *testing.T) {
 	assert.False(t, res.Requeue)
 
 	// Modify its synthesis uuid such that it no longer matches the controller's last known op
-	require.NoError(t, cli.Status().Patch(ctx, comp, client.RawPatch(types.JSONPatchType, []byte(`[{ "op": "replace", "path": "/status/pendingSynthesis/uuid", "value": "bar" }]`))))
+	require.NoError(t, cli.Status().Patch(ctx, comp, client.RawPatch(types.JSONPatchType, []byte(`[{ "op": "replace", "path": "/status/inFlightSynthesis/uuid", "value": "bar" }]`))))
 
 	// The controller hasn't seen its latest update, so it won't dispatch another synthesis
 	res, err = c.Reconcile(ctx, ctrl.Request{})

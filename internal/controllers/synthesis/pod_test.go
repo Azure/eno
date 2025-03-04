@@ -97,7 +97,7 @@ var newPodTests = []struct {
 			comp.Name = "test-composition"
 			comp.Namespace = "test-composition-ns"
 			comp.Generation = 123
-			comp.Status.PendingSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+			comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
 			comp.Spec.SynthesisEnv = []apiv1.EnvVar{{Name: "some_env", Value: "some-val"}}
 			return comp
 		}(),
@@ -112,7 +112,7 @@ var newPodTests = []struct {
 			comp.Name = "test-composition"
 			comp.Namespace = "test-composition-ns"
 			comp.Generation = 123
-			comp.Status.PendingSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+			comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
 			comp.Spec.SynthesisEnv = []apiv1.EnvVar{
 				{Name: "some_env", Value: "some-val"},
 				{Name: "COMPOSITION_NAME", Value: "some-comp"},
@@ -224,7 +224,7 @@ func TestNewPod(t *testing.T) {
 			comp.Name = "test-composition"
 			comp.Namespace = "test-composition-ns"
 			comp.Generation = 123
-			comp.Status.PendingSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+			comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
 			tc.Comp = comp
 		}
 

@@ -159,7 +159,7 @@ var shouldDeletePodTests = []struct {
 		Composition: &apiv1.Composition{
 			ObjectMeta: metav1.ObjectMeta{},
 			Status: apiv1.CompositionStatus{
-				PendingSynthesis: &apiv1.Synthesis{
+				InFlightSynthesis: &apiv1.Synthesis{
 					UUID: "test-uuid",
 				},
 			},
@@ -187,7 +187,7 @@ var shouldDeletePodTests = []struct {
 				Generation: 2,
 			},
 			Status: apiv1.CompositionStatus{
-				PendingSynthesis: &apiv1.Synthesis{
+				InFlightSynthesis: &apiv1.Synthesis{
 					Synthesized: ptr.To(metav1.Now()),
 				},
 			},
@@ -215,7 +215,7 @@ var shouldDeletePodTests = []struct {
 				Generation: 2,
 			},
 			Status: apiv1.CompositionStatus{
-				PendingSynthesis: &apiv1.Synthesis{
+				InFlightSynthesis: &apiv1.Synthesis{
 					Synthesized: ptr.To(metav1.Now()),
 				},
 			},
@@ -243,7 +243,7 @@ var shouldDeletePodTests = []struct {
 		}},
 		Composition: &apiv1.Composition{
 			Status: apiv1.CompositionStatus{
-				PendingSynthesis: &apiv1.Synthesis{},
+				InFlightSynthesis: &apiv1.Synthesis{},
 			},
 		},
 		Synth: &apiv1.Synthesizer{
@@ -273,7 +273,7 @@ var shouldDeletePodTests = []struct {
 		}},
 		Composition: &apiv1.Composition{
 			Status: apiv1.CompositionStatus{
-				PendingSynthesis: &apiv1.Synthesis{},
+				InFlightSynthesis: &apiv1.Synthesis{},
 			},
 		},
 		Synth: &apiv1.Synthesizer{
@@ -295,7 +295,7 @@ var shouldDeletePodTests = []struct {
 		}},
 		Composition: &apiv1.Composition{
 			Status: apiv1.CompositionStatus{
-				PendingSynthesis: &apiv1.Synthesis{},
+				InFlightSynthesis: &apiv1.Synthesis{},
 			},
 		},
 		Synth: &apiv1.Synthesizer{
@@ -317,7 +317,7 @@ var shouldDeletePodTests = []struct {
 		}},
 		Composition: &apiv1.Composition{
 			Status: apiv1.CompositionStatus{
-				PendingSynthesis: &apiv1.Synthesis{},
+				InFlightSynthesis: &apiv1.Synthesis{},
 			},
 		},
 		Synth: &apiv1.Synthesizer{
@@ -348,7 +348,7 @@ var shouldDeletePodTests = []struct {
 		}},
 		Composition: &apiv1.Composition{
 			Status: apiv1.CompositionStatus{
-				PendingSynthesis: &apiv1.Synthesis{},
+				InFlightSynthesis: &apiv1.Synthesis{},
 			},
 		},
 		Synth: &apiv1.Synthesizer{
@@ -374,7 +374,7 @@ var shouldDeletePodTests = []struct {
 		}},
 		Composition: &apiv1.Composition{
 			Status: apiv1.CompositionStatus{
-				PendingSynthesis: &apiv1.Synthesis{Attempts: 4},
+				InFlightSynthesis: &apiv1.Synthesis{Attempts: 4},
 			},
 		},
 		Synth: &apiv1.Synthesizer{
@@ -395,7 +395,7 @@ var shouldDeletePodTests = []struct {
 		}},
 		Composition: &apiv1.Composition{
 			Status: apiv1.CompositionStatus{
-				PendingSynthesis: &apiv1.Synthesis{},
+				InFlightSynthesis: &apiv1.Synthesis{},
 			},
 		},
 		Synth: &apiv1.Synthesizer{

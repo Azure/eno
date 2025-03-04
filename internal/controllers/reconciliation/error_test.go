@@ -187,7 +187,7 @@ func TestSliceCleanupOutdated(t *testing.T) {
 	// Wait for a few attempts
 	testutil.Eventually(t, func() bool {
 		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.PendingSynthesis != nil && comp.Status.PendingSynthesis.Attempts >= 3
+		return err == nil && comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.Attempts >= 3
 	})
 
 	// There should not be more than one set of resource slices

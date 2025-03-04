@@ -52,7 +52,7 @@ type CompositionSpec struct {
 
 type CompositionStatus struct {
 	Simplified         *SimplifiedStatus `json:"simplified,omitempty"`
-	PendingSynthesis   *Synthesis        `json:"pendingSynthesis,omitempty"`
+	InFlightSynthesis  *Synthesis        `json:"inFlightSynthesis,omitempty"`
 	CurrentSynthesis   *Synthesis        `json:"currentSynthesis,omitempty"`
 	PreviousSynthesis  *Synthesis        `json:"previousSynthesis,omitempty"`
 	InputRevisions     []InputRevisions  `json:"inputRevisions,omitempty"`
@@ -225,7 +225,7 @@ func (c *Composition) ShouldIgnoreSideEffects() bool {
 }
 
 func (c *Composition) Synthesizing() bool {
-	return c.Status.PendingSynthesis != nil
+	return c.Status.InFlightSynthesis != nil
 }
 
 func (c *Composition) EnableIgnoreSideEffects() {
@@ -258,8 +258,8 @@ func (c *Composition) ShouldOrphanResources() bool {
 }
 
 func (s *CompositionStatus) getLatestSynthesisUUID() string {
-	if s.PendingSynthesis != nil {
-		return s.PendingSynthesis.UUID
+	if s.InFlightSynthesis != nil {
+		return s.InFlightSynthesis.UUID
 	}
 	if s.CurrentSynthesis != nil {
 		return s.CurrentSynthesis.UUID

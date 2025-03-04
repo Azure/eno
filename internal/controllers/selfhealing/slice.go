@@ -131,7 +131,7 @@ func (s *sliceController) isSliceMissing(ctx context.Context, slice *apiv1.Resou
 // Composition should be resynthesized when the referenced resource slice is deleted
 func notEligibleForResynthesis(comp *apiv1.Composition) bool {
 	return comp.Status.CurrentSynthesis == nil ||
-		comp.Status.PendingSynthesis != nil ||
+		comp.Status.InFlightSynthesis != nil ||
 		comp.DeletionTimestamp != nil ||
 		comp.ShouldIgnoreSideEffects() ||
 		comp.ShouldForceResynthesis()

@@ -628,7 +628,7 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	// Wait for the state to be swapped
 	testutil.Eventually(t, func() bool {
 		err = upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.PendingSynthesis != nil
+		return err == nil && comp.Status.InFlightSynthesis != nil
 	})
 
 	// Delete the composition
