@@ -8,8 +8,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
-// TODO: Stuck synthesizing metric
-
 var (
 	freeSynthesisSlots = prometheus.NewGauge(
 		prometheus.GaugeOpts{

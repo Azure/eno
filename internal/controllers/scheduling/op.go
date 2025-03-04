@@ -31,13 +31,8 @@ type op struct {
 func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition) *op {
 	o := &op{Synthesizer: synth, Composition: comp}
 
-	syn := comp.Status.PendingSynthesis
-	if syn == nil {
-		syn = comp.Status.CurrentSynthesis
-	}
-
 	var ok bool
-	o.Reason, ok = classifyOp(synth, comp, syn)
+	o.Reason, ok = classifyOp(synth, comp)
 	if !ok {
 		return nil
 	}
@@ -51,22 +46,27 @@ func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition) *op {
 	return o
 }
 
-func classifyOp(synth *apiv1.Synthesizer, comp *apiv1.Composition, syn *apiv1.Synthesis) (opReason, bool) {
+func classifyOp(synth *apiv1.Synthesizer, comp *apiv1.Composition) (opReason, bool) {
 	switch {
 	case comp.DeletionTimestamp != nil || !comp.InputsExist(synth) || comp.InputsOutOfLockstep(synth) || !controllerutil.ContainsFinalizer(comp, "eno.azure.io/cleanup"):
 		return 0, false
 
-	case syn == nil:
+	case comp.Status.CurrentSynthesis == nil && comp.Status.PendingSynthesis == nil:
 		return initialSynthesisOp, true
 
 	case comp.ShouldForceResynthesis():
 		return forcedResynthesisOp, true
 
-	case syn.ObservedCompositionGeneration != comp.Generation:
+	case compositionHasBeenModified(comp):
 		return compositionModifiedOp, true
 
 	case comp.ShouldIgnoreSideEffects():
 		return 0, false
+	}
+
+	syn := comp.Status.CurrentSynthesis
+	if comp.Status.PendingSynthesis != nil {
+		syn = comp.Status.PendingSynthesis
 	}
 
 	nonDeferredInputChanges, deferredInputChanges := inputChangeCount(synth, comp.Status.InputRevisions, syn.InputRevisions)
@@ -83,6 +83,13 @@ func classifyOp(synth *apiv1.Synthesizer, comp *apiv1.Composition, syn *apiv1.Sy
 	}
 
 	return 0, false
+}
+
+func compositionHasBeenModified(comp *apiv1.Composition) bool {
+	if comp.Status.PendingSynthesis != nil {
+		return comp.Status.PendingSynthesis.ObservedCompositionGeneration != comp.Generation
+	}
+	return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation
 }
 
 func (o *op) Less(than *op) bool {
@@ -126,7 +133,13 @@ func (o *op) HasBeenPatched(ctx context.Context, cli client.Reader, grace time.D
 		return false, 0, err
 	}
 
-	return comp.Status.GetLatestSynthesisUUID() == o.id.String(), wait, nil
+	if syn := comp.Status.CurrentSynthesis; syn != nil && syn.UUID == o.id.String() {
+		return true, wait, nil
+	}
+	if syn := comp.Status.PendingSynthesis; syn != nil && syn.UUID == o.id.String() {
+		return true, wait, nil
+	}
+	return false, wait, nil
 }
 
 func (o *op) BuildPatch() any {
@@ -140,7 +153,7 @@ func (o *op) BuildPatch() any {
 	// Initialize the status if it's nil (zero value struct on the client == nil on the server side)
 	if reflect.DeepEqual(o.Composition.Status, apiv1.CompositionStatus{}) {
 		ops = append(ops,
-			// jsonPatch{Op: "test", Path: "/status", Value: nil},
+			jsonPatch{Op: "test", Path: "/status", Value: nil},
 			jsonPatch{Op: "add", Path: "/status", Value: map[string]any{}})
 	}
 

@@ -52,6 +52,9 @@ func TestBasics(t *testing.T) {
 	err := retry.RetryOnConflict(testutil.Backoff, func() error {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		comp.Status.PendingSynthesis.Synthesized = ptr.To(metav1.Now())
+		comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
+		comp.Status.CurrentSynthesis = comp.Status.PendingSynthesis
+		comp.Status.PendingSynthesis = nil
 		return cli.Status().Update(ctx, comp)
 	})
 	require.NoError(t, err)
@@ -67,6 +70,7 @@ func TestBasics(t *testing.T) {
 	testutil.Eventually(t, func() bool {
 		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		return err == nil &&
+			comp.Status.PendingSynthesis != nil &&
 			comp.Status.PendingSynthesis.UUID != initialUUID
 	})
 
@@ -121,6 +125,9 @@ func TestSynthRolloutBasics(t *testing.T) {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		comp.Status.PendingSynthesis.Synthesized = ptr.To(metav1.Now())
 		comp.Status.PendingSynthesis.ObservedSynthesizerGeneration = synth.Generation
+		comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
+		comp.Status.CurrentSynthesis = comp.Status.PendingSynthesis
+		comp.Status.PendingSynthesis = nil
 		return cli.Status().Update(ctx, comp)
 	})
 	require.NoError(t, err)
@@ -136,7 +143,7 @@ func TestSynthRolloutBasics(t *testing.T) {
 	// It should resynthesize immediately
 	testutil.Eventually(t, func() bool {
 		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.PendingSynthesis.UUID != lastUUID
+		return err == nil && comp.Status.PendingSynthesis != nil && comp.Status.PendingSynthesis.UUID != lastUUID
 	})
 	assert.Less(t, time.Since(start), time.Millisecond*500, "initial deferral period")
 	lastUUID = comp.Status.PendingSynthesis.UUID
@@ -146,6 +153,9 @@ func TestSynthRolloutBasics(t *testing.T) {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		comp.Status.PendingSynthesis.Synthesized = ptr.To(metav1.Now())
 		comp.Status.PendingSynthesis.ObservedSynthesizerGeneration = synth.Generation
+		comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
+		comp.Status.CurrentSynthesis = comp.Status.PendingSynthesis
+		comp.Status.PendingSynthesis = nil
 		return cli.Status().Update(ctx, comp)
 	})
 	require.NoError(t, err)
@@ -161,7 +171,7 @@ func TestSynthRolloutBasics(t *testing.T) {
 	// It should eventually resynthesize but this time with a cooldown
 	testutil.Eventually(t, func() bool {
 		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.PendingSynthesis.UUID != lastUUID
+		return err == nil && comp.Status.PendingSynthesis != nil && comp.Status.PendingSynthesis.UUID != lastUUID
 	})
 	assert.Greater(t, time.Since(start), time.Millisecond*500, "chilled deferral period")
 
@@ -219,6 +229,9 @@ func TestDeferredInput(t *testing.T) {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		comp.Status.PendingSynthesis.Synthesized = ptr.To(metav1.Now())
 		comp.Status.PendingSynthesis.InputRevisions = []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "NOT bar"}}
+		comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
+		comp.Status.CurrentSynthesis = comp.Status.PendingSynthesis
+		comp.Status.PendingSynthesis = nil
 		return cli.Status().Update(ctx, comp)
 	})
 	require.NoError(t, err)
@@ -226,7 +239,7 @@ func TestDeferredInput(t *testing.T) {
 	// It should eventually resynthesize
 	testutil.Eventually(t, func() bool {
 		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.PendingSynthesis.UUID != lastUUID
+		return err == nil && comp.Status.PendingSynthesis != nil && comp.Status.PendingSynthesis.UUID != lastUUID
 	})
 	assert.Less(t, time.Since(start), time.Millisecond*500, "initial deferral period")
 	lastUUID = comp.Status.PendingSynthesis.UUID
@@ -236,13 +249,16 @@ func TestDeferredInput(t *testing.T) {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		comp.Status.PendingSynthesis.Synthesized = ptr.To(metav1.Now())
 		comp.Status.PendingSynthesis.InputRevisions = []apiv1.InputRevisions{{Key: "foo", ResourceVersion: "NOT bar"}}
+		comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
+		comp.Status.CurrentSynthesis = comp.Status.PendingSynthesis
+		comp.Status.PendingSynthesis = nil
 		return cli.Status().Update(ctx, comp)
 	})
 	require.NoError(t, err)
 
 	testutil.Eventually(t, func() bool {
 		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.PendingSynthesis.UUID != lastUUID
+		return err == nil && comp.Status.PendingSynthesis != nil && comp.Status.PendingSynthesis.UUID != lastUUID
 	})
 	assert.Greater(t, time.Since(start), time.Millisecond*500, "chilled deferral period")
 }
@@ -337,6 +353,10 @@ func testChaos(t *testing.T, mgr *testutil.Manager) {
 
 			comp.Status.PendingSynthesis.Synthesized = ptr.To(metav1.Now())
 			comp.Status.PendingSynthesis.ObservedSynthesizerGeneration = synth.Generation
+
+			comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
+			comp.Status.CurrentSynthesis = comp.Status.PendingSynthesis
+			comp.Status.PendingSynthesis = nil
 			return reconcile.Result{}, cli.Status().Update(ctx, comp)
 		}))
 
@@ -388,8 +408,8 @@ func testChaos(t *testing.T, mgr *testutil.Manager) {
 		list := &apiv1.CompositionList{}
 		require.NoError(t, cli.List(ctx, list))
 		for _, comp := range list.Items {
-			if comp.Status.PendingSynthesis != nil && comp.Status.PendingSynthesis.Deferred {
-				dispatchTimes = append(dispatchTimes, comp.Status.PendingSynthesis.Initialized.Time)
+			if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Deferred {
+				dispatchTimes = append(dispatchTimes, comp.Status.CurrentSynthesis.Initialized.Time)
 			}
 		}
 
@@ -422,7 +442,7 @@ func TestSerializationGracePeriod(t *testing.T) {
 	comp.Finalizers = []string{"eno.azure.io/cleanup"}
 	comp.Generation = 2
 	comp.Spec.Synthesizer.Name = synth.Name
-	comp.Status.PendingSynthesis = &apiv1.Synthesis{UUID: "foo", ObservedCompositionGeneration: 1, Synthesized: ptr.To(metav1.Now())}
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: "foo", ObservedCompositionGeneration: 1, Synthesized: ptr.To(metav1.Now())}
 
 	comp2 := comp.DeepCopy()
 	comp2.Name = "test-comp-2"
@@ -474,7 +494,7 @@ func TestDispatchOrder(t *testing.T) {
 	comp.Finalizers = []string{"eno.azure.io/cleanup"}
 	comp.Generation = 2
 	comp.Spec.Synthesizer.Name = synth.Name
-	comp.Status.PendingSynthesis = &apiv1.Synthesis{
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
 		UUID:                          "foo",
 		ObservedCompositionGeneration: comp.Generation,
 		ObservedSynthesizerGeneration: synth.Generation,
@@ -484,14 +504,14 @@ func TestDispatchOrder(t *testing.T) {
 	// comp1 is ready for resynthesis because its spec has changed since its last synthesis
 	comp1 := comp.DeepCopy()
 	comp1.Name = "test-comp-1"
-	comp1.Status.PendingSynthesis.ObservedCompositionGeneration--
+	comp1.Status.CurrentSynthesis.ObservedCompositionGeneration--
 	require.NoError(t, cli.Create(ctx, comp1))
 	require.NoError(t, cli.Status().Update(ctx, comp1))
 
 	// comp2 is ready for synthesis because its synthesizer has changed since its last synthesis
 	comp2 := comp.DeepCopy()
 	comp2.Name = "test-comp-2"
-	comp2.Status.PendingSynthesis.ObservedSynthesizerGeneration--
+	comp2.Status.CurrentSynthesis.ObservedSynthesizerGeneration--
 	require.NoError(t, cli.Create(ctx, comp2))
 	require.NoError(t, cli.Status().Update(ctx, comp2))
 
@@ -547,7 +567,7 @@ func TestSynthOrdering(t *testing.T) {
 	comp.Spec.Synthesizer.Name = synth.Name
 	require.NoError(t, cli.Create(ctx, comp))
 
-	comp.Status.PendingSynthesis = &apiv1.Synthesis{UUID: "foo", ObservedCompositionGeneration: comp.Generation, ObservedSynthesizerGeneration: synth.Generation - 1, Synthesized: ptr.To(metav1.Now())}
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: "foo", ObservedCompositionGeneration: comp.Generation, ObservedSynthesizerGeneration: synth.Generation - 1, Synthesized: ptr.To(metav1.Now())}
 	require.NoError(t, cli.Status().Update(ctx, comp))
 
 	// The synthesizer has changed but should not be rolled out (yet)
