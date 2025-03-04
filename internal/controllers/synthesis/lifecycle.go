@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -204,18 +205,10 @@ func (c *podLifecycleController) reconcileDeletedComposition(ctx context.Context
 	// the status without actually synthesizing.
 	if shouldUpdateDeletedCompositionStatus(comp) {
 		comp.Status.CurrentSynthesis.ObservedCompositionGeneration = comp.Generation
-		comp.Status.CurrentSynthesis.Ready = nil
 		comp.Status.CurrentSynthesis.UUID = uuid.NewString()
-		now := metav1.Now()
-		if (comp.Status.PreviousSynthesis == nil || comp.Status.PreviousSynthesis.Synthesized == nil) &&
-			comp.Status.CurrentSynthesis.Synthesized == nil {
-			// In this case, the composition is not reconciling due to the synthesizer is missing and the composition finalizer should be removed.
-			// If not, the composition will stuck in waiting for reconciliation to be completed and the it can't be deleted.
-			comp.Status.CurrentSynthesis.Reconciled = &now
-		} else {
-			comp.Status.CurrentSynthesis.Reconciled = nil
-		}
-		comp.Status.CurrentSynthesis.Synthesized = &now
+		comp.Status.CurrentSynthesis.Synthesized = ptr.To(metav1.Now())
+		comp.Status.CurrentSynthesis.Reconciled = nil
+		comp.Status.CurrentSynthesis.Ready = nil
 		err := c.client.Status().Update(ctx, comp)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating current composition generation: %w", err)
