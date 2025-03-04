@@ -92,6 +92,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `simplified` _[SimplifiedStatus](#simplifiedstatus)_ |  |  |  |
+| `inFlightSynthesis` _[Synthesis](#synthesis)_ |  |  |  |
 | `currentSynthesis` _[Synthesis](#synthesis)_ |  |  |  |
 | `previousSynthesis` _[Synthesis](#synthesis)_ |  |  |  |
 | `inputRevisions` _[InputRevisions](#inputrevisions) array_ |  |  |  |

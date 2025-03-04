@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -68,8 +69,8 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 
 	logger = logger.WithValues("compositionName", comp.Name,
 		"compositionNamespace", comp.Namespace,
-		"compositionGeneration", comp.Generation,
-		"synthesisID", comp.Status.GetCurrentSynthesisUUID())
+		"compositionGeneration", comp.Generation)
+	ctx = logr.NewContext(ctx, logger)
 
 	// It isn't safe to delete compositions until their resource slices have been cleaned up,
 	// since reconciling resources necessarily requires the composition.
@@ -98,7 +99,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	// It's only safe to ignore as a missing synth if we have already started synthesis,
 	// otherwise creating the synth and composition around the same time could result in a deadlock
 	// if the composition is processed before the synth hits the informer cache.
-	if (errors.IsNotFound(err) || syn.DeletionTimestamp != nil) && comp.Status.CurrentSynthesis != nil {
+	if (errors.IsNotFound(err) || syn.DeletionTimestamp != nil) && comp.Status.InFlightSynthesis != nil {
 		syn = nil
 		err = nil
 	}
@@ -118,7 +119,6 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 	if comp.DeletionTimestamp != nil {
-		ctx = logr.NewContext(ctx, logger)
 		return c.reconcileDeletedComposition(ctx, comp)
 	}
 	if exists {
@@ -136,15 +136,17 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Bail if it isn't time to synthesize yet, or synthesis is already complete
-	if comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.UUID == "" || comp.Status.CurrentSynthesis.Synthesized != nil || comp.DeletionTimestamp != nil {
+	if comp.Status.InFlightSynthesis == nil || comp.Status.InFlightSynthesis.UUID == "" || comp.Status.InFlightSynthesis.Synthesized != nil || comp.DeletionTimestamp != nil {
 		return ctrl.Result{}, nil
 	}
+	logger = logger.WithValues("synthesisID", comp.Status.InFlightSynthesis.UUID)
+	ctx = logr.NewContext(ctx, logger)
 
 	// Back off to avoid constantly re-synthesizing impossible compositions (unlikely but possible)
 	if shouldBackOffPodCreation(comp) {
 		const base = time.Millisecond * 250
-		wait := base * time.Duration(comp.Status.CurrentSynthesis.Attempts)
-		nextAttempt := comp.Status.CurrentSynthesis.PodCreation.Time.Add(wait)
+		wait := base * time.Duration(comp.Status.InFlightSynthesis.Attempts)
+		nextAttempt := comp.Status.InFlightSynthesis.PodCreation.Time.Add(wait)
 		if time.Since(nextAttempt) < 0 { // positive when past the nextAttempt
 			logger.V(1).Info("backing off pod creation", "latency", wait.Abs().Milliseconds())
 			return ctrl.Result{RequeueAfter: wait}, nil
@@ -155,7 +157,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	// This protects against cases where synthesis has recently started and something causes
 	// another tick of this loop before the pod write hits the informer.
 	err = c.noCacheReader.List(ctx, pods, client.InNamespace(c.config.PodNamespace), client.MatchingLabels{
-		"eno.azure.io/synthesis-uuid": comp.Status.CurrentSynthesis.UUID,
+		"eno.azure.io/synthesis-uuid": comp.Status.InFlightSynthesis.UUID,
 	})
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("checking for existing pod: %w", err)
@@ -178,10 +180,10 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 
 	// This metadata is optional - it's safe for the process to crash before reaching this point
 	patch := []map[string]any{
-		{"op": "test", "path": "/status/currentSynthesis/uuid", "value": comp.Status.CurrentSynthesis.UUID},
-		{"op": "test", "path": "/status/currentSynthesis/synthesized", "value": nil},
-		{"op": "replace", "path": "/status/currentSynthesis/attempts", "value": comp.Status.CurrentSynthesis.Attempts + 1},
-		{"op": "replace", "path": "/status/currentSynthesis/podCreation", "value": pod.CreationTimestamp},
+		{"op": "test", "path": "/status/inFlightSynthesis/uuid", "value": comp.Status.InFlightSynthesis.UUID},
+		{"op": "test", "path": "/status/inFlightSynthesis/synthesized", "value": nil},
+		{"op": "replace", "path": "/status/inFlightSynthesis/attempts", "value": comp.Status.InFlightSynthesis.Attempts + 1},
+		{"op": "replace", "path": "/status/inFlightSynthesis/podCreation", "value": pod.CreationTimestamp},
 	}
 	patchJS, err := json.Marshal(&patch)
 	if err != nil {
@@ -198,37 +200,16 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 func (c *podLifecycleController) reconcileDeletedComposition(ctx context.Context, comp *apiv1.Composition) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	// If the composition was being synthesized at the time of deletion we need to swap the previous
-	// state back to current. Otherwise we'll get stuck waiting for a synthesis that can't happen.
-	if shouldRevertStateSwap(comp) {
-		comp.Status.CurrentSynthesis = comp.Status.PreviousSynthesis
-		comp.Status.PreviousSynthesis = nil
-		err := c.client.Status().Update(ctx, comp)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("reverting swapped status for deletion: %w", err)
-		}
-		logger.V(0).Info("reverted swapped status for deletion")
-		return ctrl.Result{}, nil
-	}
-
 	// Deletion increments the composition's generation, but the reconstitution cache is only invalidated
 	// when the synthesized generation (from the status) changes, which will never happen because synthesis
 	// is righly disabled for deleted compositions. We break out of this deadlock condition by updating
 	// the status without actually synthesizing.
 	if shouldUpdateDeletedCompositionStatus(comp) {
 		comp.Status.CurrentSynthesis.ObservedCompositionGeneration = comp.Generation
-		comp.Status.CurrentSynthesis.Ready = nil
 		comp.Status.CurrentSynthesis.UUID = uuid.NewString()
-		now := metav1.Now()
-		if (comp.Status.PreviousSynthesis == nil || comp.Status.PreviousSynthesis.Synthesized == nil) &&
-			comp.Status.CurrentSynthesis.Synthesized == nil {
-			// In this case, the composition is not reconciling due to the synthesizer is missing and the composition finalizer should be removed.
-			// If not, the composition will stuck in waiting for reconciliation to be completed and the it can't be deleted.
-			comp.Status.CurrentSynthesis.Reconciled = &now
-		} else {
-			comp.Status.CurrentSynthesis.Reconciled = nil
-		}
-		comp.Status.CurrentSynthesis.Synthesized = &now
+		comp.Status.CurrentSynthesis.Synthesized = ptr.To(metav1.Now())
+		comp.Status.CurrentSynthesis.Reconciled = nil
+		comp.Status.CurrentSynthesis.Ready = nil
 		err := c.client.Status().Update(ctx, comp)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating current composition generation: %w", err)
@@ -303,10 +284,10 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 		}
 
 		// Synthesis is done
-		if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.PodCreation != nil {
-			logger = logger.WithValues("latency", time.Since(comp.Status.CurrentSynthesis.PodCreation.Time).Abs().Milliseconds())
+		if comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.PodCreation != nil {
+			logger = logger.WithValues("latency", time.Since(comp.Status.InFlightSynthesis.PodCreation.Time).Abs().Milliseconds())
 		}
-		if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil {
+		if comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.Synthesized != nil {
 			logger = logger.WithValues("reason", "Success")
 			return logger, &pod, true
 		}
@@ -319,7 +300,7 @@ func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Syn
 		// i.e. when another pod for this synthesis isn't already terminating
 		// AND we bail out when the synthesis has already been tried a few times (what's a few more seconds latency at that point)
 		seenByKubelet := len(pod.Status.ContainerStatuses) != 0
-		retryPressure := comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Attempts > 3
+		retryPressure := comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.Attempts > 3
 		if scheduledTime := getPodScheduledTime(&pod); !onePodDeleting && !seenByKubelet && !retryPressure && scheduledTime != nil && time.Since(*scheduledTime) > creationTTL {
 			logger = logger.WithValues("reason", "ContainerCreationTimeout", "scheduledTime", scheduledTime.UnixMilli())
 			return logger, &pod, true
@@ -364,20 +345,16 @@ func (c *podLifecycleController) deletePod(ctx context.Context, comp types.Names
 }
 
 func shouldBackOffPodCreation(comp *apiv1.Composition) bool {
-	current := comp.Status.CurrentSynthesis
+	current := comp.Status.InFlightSynthesis
 	return current != nil && current.Attempts > 0 && current.PodCreation != nil
 }
 
-func shouldRevertStateSwap(comp *apiv1.Composition) bool {
-	return comp.Status.PreviousSynthesis != nil && (comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil)
-}
-
 func shouldUpdateDeletedCompositionStatus(comp *apiv1.Composition) bool {
-	return comp.Status.CurrentSynthesis != nil && (comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation || comp.Status.CurrentSynthesis.Synthesized == nil)
+	return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation
 }
 
 func isReconciling(comp *apiv1.Composition) bool {
-	return comp.Status.CurrentSynthesis != nil && (comp.Status.CurrentSynthesis.Reconciled == nil || comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation)
+	return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled == nil
 }
 
 func getPodScheduledTime(pod *corev1.Pod) *time.Time {

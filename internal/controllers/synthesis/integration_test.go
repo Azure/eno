@@ -88,6 +88,10 @@ func TestControllerHappyPath(t *testing.T) {
 		t.Error("state wasn't swapped to previous")
 	}
 
+	if comp.Status.InFlightSynthesis != nil {
+		t.Error("pending synthesis wasn't removed")
+	}
+
 	// The synthesizer is eventually executed a second time
 	testutil.Eventually(t, func() bool {
 		return calls.Load() >= 2

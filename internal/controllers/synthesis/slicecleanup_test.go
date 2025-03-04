@@ -98,7 +98,7 @@ func TestShouldDeleteSlice(t *testing.T) {
 			name: "another attempt started for a different synthesis, old one still references the slice",
 			comp: &apiv1.Composition{
 				Status: apiv1.CompositionStatus{
-					CurrentSynthesis: &apiv1.Synthesis{
+					InFlightSynthesis: &apiv1.Synthesis{
 						Attempts: 5,
 						UUID:     "the-next-one",
 					},
@@ -121,7 +121,7 @@ func TestShouldDeleteSlice(t *testing.T) {
 			name: "another attempt started for the same synthesis",
 			comp: &apiv1.Composition{
 				Status: apiv1.CompositionStatus{
-					CurrentSynthesis: &apiv1.Synthesis{
+					InFlightSynthesis: &apiv1.Synthesis{
 						Attempts: 5,
 					},
 				},
@@ -137,7 +137,7 @@ func TestShouldDeleteSlice(t *testing.T) {
 			name: "slice is referenced by composition",
 			comp: &apiv1.Composition{
 				Status: apiv1.CompositionStatus{
-					CurrentSynthesis: &apiv1.Synthesis{},
+					InFlightSynthesis: &apiv1.Synthesis{},
 				},
 			},
 			slice: &apiv1.ResourceSlice{
@@ -154,6 +154,7 @@ func TestShouldDeleteSlice(t *testing.T) {
 					DeletionTimestamp: &metav1.Time{Time: time.Now()},
 				},
 				Status: apiv1.CompositionStatus{
+					InFlightSynthesis: nil,
 					CurrentSynthesis: &apiv1.Synthesis{
 						Synthesized: &metav1.Time{Time: time.Now()},
 					},
@@ -380,6 +381,7 @@ func TestBuildCleanupDecision_StaleCache(t *testing.T) {
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = "test-slice"
 	slice.Namespace = staleComp.Namespace
+	slice.Spec.CompositionGeneration = 2 // newer than the composition
 	slice.CreationTimestamp = metav1.NewTime(time.Now().Add(-time.Minute * 5))
 
 	comp := staleComp.DeepCopy()
