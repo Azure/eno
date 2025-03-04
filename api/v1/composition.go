@@ -214,14 +214,6 @@ func (c *Composition) InputsOutOfLockstep(synth *Synthesizer) bool {
 }
 
 func (s *CompositionStatus) GetCurrentSynthesisUUID() string {
-	if s.CurrentSynthesis == nil {
-		return ""
-	}
-	return s.CurrentSynthesis.UUID
-}
-
-// TODO: Remove other?
-func (s *CompositionStatus) GetLatestSynthesisUUID() string {
 	if s.PendingSynthesis != nil {
 		return s.PendingSynthesis.UUID
 	}
@@ -255,13 +247,13 @@ func (c *Composition) ForceResynthesis() {
 	if anno == nil {
 		anno = map[string]string{}
 	}
-	anno[forceResynthesisAnnotation] = c.Status.GetLatestSynthesisUUID()
+	anno[forceResynthesisAnnotation] = c.Status.GetCurrentSynthesisUUID()
 	c.SetAnnotations(anno)
 }
 
 func (c *Composition) ShouldForceResynthesis() bool {
 	val, ok := c.GetAnnotations()[forceResynthesisAnnotation]
-	return ok && val == c.Status.GetLatestSynthesisUUID()
+	return ok && val == c.Status.GetCurrentSynthesisUUID()
 }
 
 func (c *Composition) ShouldOrphanResources() bool {
