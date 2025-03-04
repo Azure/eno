@@ -41,7 +41,7 @@ func TestBasics(t *testing.T) {
 	err = cli.Create(ctx, comp)
 	require.NoError(t, err)
 
-	comp.Status.PendingSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+	comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
 	err = cli.Status().Update(ctx, comp)
 	require.NoError(t, err)
 
@@ -69,7 +69,7 @@ func TestBasics(t *testing.T) {
 	env := &Env{
 		CompositionName:      comp.Name,
 		CompositionNamespace: comp.Namespace,
-		SynthesisUUID:        comp.Status.PendingSynthesis.UUID,
+		SynthesisUUID:        comp.Status.InFlightSynthesis.UUID,
 	}
 
 	// First pass
@@ -147,7 +147,7 @@ func TestWithInputs(t *testing.T) {
 	err = cli.Create(ctx, comp)
 	require.NoError(t, err)
 
-	comp.Status.PendingSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+	comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
 	err = cli.Status().Update(ctx, comp)
 	require.NoError(t, err)
 
@@ -177,7 +177,7 @@ func TestWithInputs(t *testing.T) {
 	env := &Env{
 		CompositionName:      comp.Name,
 		CompositionNamespace: comp.Namespace,
-		SynthesisUUID:        comp.Status.PendingSynthesis.UUID,
+		SynthesisUUID:        comp.Status.InFlightSynthesis.UUID,
 	}
 
 	err = e.Synthesize(ctx, env)
@@ -229,7 +229,7 @@ func TestWithVersionedInput(t *testing.T) {
 	err = cli.Create(ctx, comp)
 	require.NoError(t, err)
 
-	comp.Status.PendingSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+	comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
 	err = cli.Status().Update(ctx, comp)
 	require.NoError(t, err)
 
@@ -254,7 +254,7 @@ func TestWithVersionedInput(t *testing.T) {
 	env := &Env{
 		CompositionName:      comp.Name,
 		CompositionNamespace: comp.Namespace,
-		SynthesisUUID:        comp.Status.PendingSynthesis.UUID,
+		SynthesisUUID:        comp.Status.InFlightSynthesis.UUID,
 	}
 
 	err = e.Synthesize(ctx, env)
@@ -349,14 +349,14 @@ func TestCompletionMismatchDuringSynthesis(t *testing.T) {
 	err = cli.Create(ctx, comp)
 	require.NoError(t, err)
 
-	comp.Status.PendingSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+	comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
 	err = cli.Status().Update(ctx, comp)
 	require.NoError(t, err)
 
 	env := &Env{
 		CompositionName:      comp.Name,
 		CompositionNamespace: comp.Namespace,
-		SynthesisUUID:        comp.Status.PendingSynthesis.UUID,
+		SynthesisUUID:        comp.Status.InFlightSynthesis.UUID,
 	}
 	originalSynthTime := metav1.NewTime(time.Now().Round(time.Second).Local())
 	e := &Executor{
@@ -366,7 +366,7 @@ func TestCompletionMismatchDuringSynthesis(t *testing.T) {
 			// Act as if another synthesizer pod with the same synthesis uuid but different attempt has updated the status concurrently
 			err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 				require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-				comp.Status.PendingSynthesis.Synthesized = ptr.To(originalSynthTime)
+				comp.Status.InFlightSynthesis.Synthesized = ptr.To(originalSynthTime)
 				return cli.Status().Update(ctx, comp)
 			})
 			require.NoError(t, err)
@@ -374,7 +374,7 @@ func TestCompletionMismatchDuringSynthesis(t *testing.T) {
 			// Wait for that write to hit the informer cache
 			assert.Eventually(t, func() bool {
 				cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-				return comp.Status.PendingSynthesis.Synthesized != nil
+				return comp.Status.InFlightSynthesis.Synthesized != nil
 			}, time.Second*2, time.Millisecond*10)
 
 			out := &unstructured.Unstructured{
@@ -400,5 +400,5 @@ func TestCompletionMismatchDuringSynthesis(t *testing.T) {
 
 	err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 	require.NoError(t, err)
-	assert.Equal(t, originalSynthTime, *comp.Status.PendingSynthesis.Synthesized)
+	assert.Equal(t, originalSynthTime, *comp.Status.InFlightSynthesis.Synthesized)
 }

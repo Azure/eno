@@ -49,7 +49,7 @@ func classifyOp(synth *apiv1.Synthesizer, comp *apiv1.Composition) (opReason, bo
 	case comp.DeletionTimestamp != nil || !comp.InputsExist(synth) || comp.InputsOutOfLockstep(synth) || !controllerutil.ContainsFinalizer(comp, "eno.azure.io/cleanup"):
 		return 0, false
 
-	case (comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil) && comp.Status.PendingSynthesis == nil:
+	case (comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil) && comp.Status.InFlightSynthesis == nil:
 		return initialSynthesisOp, true
 
 	case comp.ShouldForceResynthesis():
@@ -63,8 +63,8 @@ func classifyOp(synth *apiv1.Synthesizer, comp *apiv1.Composition) (opReason, bo
 	}
 
 	syn := comp.Status.CurrentSynthesis
-	if comp.Status.PendingSynthesis != nil {
-		syn = comp.Status.PendingSynthesis
+	if comp.Status.InFlightSynthesis != nil {
+		syn = comp.Status.InFlightSynthesis
 	}
 
 	nonDeferredInputChanges, deferredInputChanges := inputChangeCount(synth, comp.Status.InputRevisions, syn.InputRevisions)
@@ -84,8 +84,8 @@ func classifyOp(synth *apiv1.Synthesizer, comp *apiv1.Composition) (opReason, bo
 }
 
 func compositionHasBeenModified(comp *apiv1.Composition) bool {
-	if comp.Status.PendingSynthesis != nil {
-		return comp.Status.PendingSynthesis.ObservedCompositionGeneration != comp.Generation
+	if comp.Status.InFlightSynthesis != nil {
+		return comp.Status.InFlightSynthesis.ObservedCompositionGeneration != comp.Generation
 	}
 	return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration != comp.Generation
 }
@@ -134,7 +134,7 @@ func (o *op) HasBeenPatched(ctx context.Context, cli client.Reader, grace time.D
 	if syn := comp.Status.CurrentSynthesis; syn != nil && syn.UUID == o.id.String() {
 		return true, wait, nil
 	}
-	if syn := comp.Status.PendingSynthesis; syn != nil && syn.UUID == o.id.String() {
+	if syn := comp.Status.InFlightSynthesis; syn != nil && syn.UUID == o.id.String() {
 		return true, wait, nil
 	}
 	return false, wait, nil
@@ -159,18 +159,18 @@ func (o *op) BuildPatch() any {
 	ops = append(ops, jsonPatch{Op: "test", Path: "/status/inputRevisions", Value: o.Composition.Status.InputRevisions})
 
 	// Protect against zombie leaders running this controller
-	if syn := o.Composition.Status.PendingSynthesis; syn == nil {
-		ops = append(ops, jsonPatch{Op: "test", Path: "/status/pendingSynthesis", Value: nil})
+	if syn := o.Composition.Status.InFlightSynthesis; syn == nil {
+		ops = append(ops, jsonPatch{Op: "test", Path: "/status/inFlightSynthesis", Value: nil})
 	} else {
 		ops = append(ops,
-			jsonPatch{Op: "test", Path: "/status/pendingSynthesis/uuid", Value: syn.UUID},
-			jsonPatch{Op: "test", Path: "/status/pendingSynthesis/observedCompositionGeneration", Value: syn.ObservedCompositionGeneration},
-			jsonPatch{Op: "test", Path: "/status/pendingSynthesis/synthesized", Value: syn.Synthesized})
+			jsonPatch{Op: "test", Path: "/status/inFlightSynthesis/uuid", Value: syn.UUID},
+			jsonPatch{Op: "test", Path: "/status/inFlightSynthesis/observedCompositionGeneration", Value: syn.ObservedCompositionGeneration},
+			jsonPatch{Op: "test", Path: "/status/inFlightSynthesis/synthesized", Value: syn.Synthesized})
 	}
 
 	ops = append(ops, jsonPatch{
 		Op:   "replace",
-		Path: "/status/pendingSynthesis",
+		Path: "/status/inFlightSynthesis",
 		Value: map[string]any{
 			"observedCompositionGeneration": o.Composition.Generation,
 			"initialized":                   time.Now().Format(time.RFC3339),

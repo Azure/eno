@@ -39,7 +39,7 @@ func TestControllerBackoff(t *testing.T) {
 	t.Run("initial creation", func(t *testing.T) {
 		testutil.Eventually(t, func() bool {
 			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-			return comp.Status.PendingSynthesis != nil && comp.Status.PendingSynthesis.Attempts >= 10
+			return comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.Attempts >= 10
 		})
 
 		// It shouldn't be possible to try this many times within 250ms

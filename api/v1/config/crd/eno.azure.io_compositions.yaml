@@ -214,24 +214,7 @@ spec:
                       Used internally for strict ordering semantics.
                     type: string
                 type: object
-              inputRevisions:
-                items:
-                  properties:
-                    key:
-                      type: string
-                    resourceVersion:
-                      type: string
-                    revision:
-                      type: integer
-                    synthesizerGeneration:
-                      format: int64
-                      type: integer
-                  type: object
-                type: array
-              pendingResynthesis:
-                format: date-time
-                type: string
-              pendingSynthesis:
+              inFlightSynthesis:
                 description: |-
                   A synthesis is the result of synthesizing a composition.
                   In other words: it's a collection of resources returned from a synthesizer.
@@ -329,6 +312,23 @@ spec:
                       Used internally for strict ordering semantics.
                     type: string
                 type: object
+              inputRevisions:
+                items:
+                  properties:
+                    key:
+                      type: string
+                    resourceVersion:
+                      type: string
+                    revision:
+                      type: integer
+                    synthesizerGeneration:
+                      format: int64
+                      type: integer
+                  type: object
+                type: array
+              pendingResynthesis:
+                format: date-time
+                type: string
               previousSynthesis:
                 description: |-
                   A synthesis is the result of synthesizing a composition.

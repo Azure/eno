@@ -161,7 +161,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 func (c *controller) getNextCooldownSlot(comps *apiv1.CompositionList) time.Time {
 	var next time.Time
 	for _, comp := range comps.Items {
-		for _, syn := range []*apiv1.Synthesis{comp.Status.PendingSynthesis, comp.Status.CurrentSynthesis, comp.Status.PreviousSynthesis} {
+		for _, syn := range []*apiv1.Synthesis{comp.Status.InFlightSynthesis, comp.Status.CurrentSynthesis, comp.Status.PreviousSynthesis} {
 			if syn != nil && syn.Deferred && syn.Initialized != nil && syn.Initialized.Time.After(next) {
 				next = syn.Initialized.Time
 			}
