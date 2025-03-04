@@ -3,14 +3,18 @@ package execution
 import (
 	"context"
 	"testing"
+	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -321,4 +325,80 @@ func TestUUIDMismatch(t *testing.T) {
 	err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 	require.NoError(t, err)
 	assert.Nil(t, comp.Status.CurrentSynthesis.Synthesized)
+}
+
+func TestCompletionMismatchDuringSynthesis(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	require.NoError(t, apiv1.SchemeBuilder.AddToScheme(scheme))
+
+	cli := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&apiv1.ResourceSlice{}, &apiv1.Composition{}).
+		Build()
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-synth"
+	err := cli.Create(ctx, syn)
+	require.NoError(t, err)
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	err = cli.Create(ctx, comp)
+	require.NoError(t, err)
+
+	comp.Status.PendingSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+	err = cli.Status().Update(ctx, comp)
+	require.NoError(t, err)
+
+	env := &Env{
+		CompositionName:      comp.Name,
+		CompositionNamespace: comp.Namespace,
+		SynthesisUUID:        comp.Status.PendingSynthesis.UUID,
+	}
+	originalSynthTime := metav1.NewTime(time.Now().Round(time.Second).Local())
+	e := &Executor{
+		Reader: cli,
+		Writer: cli,
+		Handler: func(ctx context.Context, s *apiv1.Synthesizer, rl *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+			// Act as if another synthesizer pod with the same synthesis uuid but different attempt has updated the status concurrently
+			err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+				require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+				comp.Status.PendingSynthesis.Synthesized = ptr.To(originalSynthTime)
+				return cli.Status().Update(ctx, comp)
+			})
+			require.NoError(t, err)
+
+			// Wait for that write to hit the informer cache
+			assert.Eventually(t, func() bool {
+				cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+				return comp.Status.PendingSynthesis.Synthesized != nil
+			}, time.Second*2, time.Millisecond*10)
+
+			out := &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]string{
+						"name":      "test",
+						"namespace": "default",
+					},
+					"data": map[string]string{"foo": "bar"},
+				},
+			}
+			return &krmv1.ResourceList{
+				Items:   []*unstructured.Unstructured{out},
+				Results: []*krmv1.Result{{Message: "foo", Severity: "error"}},
+			}, nil
+		},
+	}
+
+	err = e.Synthesize(ctx, env)
+	require.NoError(t, err)
+
+	err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+	require.NoError(t, err)
+	assert.Equal(t, originalSynthTime, *comp.Status.PendingSynthesis.Synthesized)
 }
