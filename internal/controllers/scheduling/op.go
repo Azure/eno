@@ -49,7 +49,7 @@ func classifyOp(synth *apiv1.Synthesizer, comp *apiv1.Composition) (opReason, bo
 	case comp.DeletionTimestamp != nil || !comp.InputsExist(synth) || comp.InputsOutOfLockstep(synth) || !controllerutil.ContainsFinalizer(comp, "eno.azure.io/cleanup"):
 		return 0, false
 
-	case comp.Status.CurrentSynthesis == nil && comp.Status.PendingSynthesis == nil:
+	case (comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil) && comp.Status.PendingSynthesis == nil:
 		return initialSynthesisOp, true
 
 	case comp.ShouldForceResynthesis():
