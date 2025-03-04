@@ -1,13 +1,15 @@
 package resource
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -49,11 +51,10 @@ type ManifestRef struct {
 
 // Resource is the controller's internal representation of a single resource out of a ResourceSlice.
 type Resource struct {
-	lastReconciledMeta
-
 	Ref               Ref
-	Manifest          *apiv1.Manifest
+	ManifestDeleted   bool
 	ManifestRef       ManifestRef
+	ManifestHash      []byte
 	ReconcileInterval *metav1.Duration
 	GVK               schema.GroupVersionKind
 	ReadinessChecks   readiness.Checks
@@ -64,30 +65,19 @@ type Resource struct {
 	// DefinedGroupKind is set on CRDs to represent the resource type they define.
 	DefinedGroupKind *schema.GroupKind
 
-	value value.Value
+	value            value.Value
+	latestKnownState atomic.Pointer[apiv1.ResourceState]
 }
 
 func (r *Resource) Deleted(comp *apiv1.Composition) bool {
-	return (comp.DeletionTimestamp != nil && !comp.ShouldOrphanResources()) || r.Manifest.Deleted || (r.Patch != nil && r.patchSetsDeletionTimestamp())
+	return (comp.DeletionTimestamp != nil && !comp.ShouldOrphanResources()) || r.ManifestDeleted || (r.Patch != nil && r.patchSetsDeletionTimestamp())
 }
 
-func (r *Resource) Parse() (*unstructured.Unstructured, error) {
-	u := &unstructured.Unstructured{}
-	err := u.UnmarshalJSON([]byte(r.Manifest.Manifest))
-	if u.Object != nil {
-		delete(u.Object, "status")
-		u.SetCreationTimestamp(metav1.Time{})
-	}
-	return u, err
+func (r *Resource) Unstructured() *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: r.value.Unstructured().(map[string]any)}
 }
 
-func (r *Resource) FindStatus(slice *apiv1.ResourceSlice) *apiv1.ResourceState {
-	if len(slice.Status.Resources) <= r.ManifestRef.Index {
-		return nil
-	}
-	state := slice.Status.Resources[r.ManifestRef.Index]
-	return &state
-}
+func (r *Resource) State() *apiv1.ResourceState { return r.latestKnownState.Load() }
 
 func (r *Resource) NeedsToBePatched(current *unstructured.Unstructured) bool {
 	if r.Patch == nil || current == nil {
@@ -156,10 +146,18 @@ func (r *Resource) Merge(ctx context.Context, old *Resource, current *unstructur
 
 		var prevJS []byte
 		if old != nil {
-			prevJS = []byte(old.Manifest.Manifest)
+			prevJS, err = old.Unstructured().MarshalJSON()
+			if err != nil {
+				return nil, false, fmt.Errorf("encoding old state: %w", err)
+			}
 		}
 
-		patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(prevJS, []byte(r.Manifest.Manifest), currentJS)
+		expectedJS, err := r.Unstructured().MarshalJSON()
+		if err != nil {
+			return nil, false, fmt.Errorf("encoding expected state: %w", err)
+		}
+
+		patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(prevJS, expectedJS, currentJS)
 		if err != nil {
 			return nil, false, fmt.Errorf("building merge patch: %w", err)
 		}
@@ -224,7 +222,7 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 	logger := logr.FromContextOrDiscard(ctx)
 	resource := slice.Spec.Resources[index]
 	res := &Resource{
-		Manifest: &resource,
+		ManifestDeleted: resource.Deleted,
 		ManifestRef: ManifestRef{
 			Slice: types.NamespacedName{
 				Namespace: slice.Namespace,
@@ -234,10 +232,24 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 		},
 	}
 
-	parsed, err := res.Parse()
+	hash := fnv.New64()
+	hash.Write([]byte(resource.Manifest))
+	res.ManifestHash = hash.Sum(nil)
+
+	parsed := &unstructured.Unstructured{}
+	err := parsed.UnmarshalJSON([]byte(resource.Manifest))
 	if err != nil {
 		return nil, fmt.Errorf("invalid json: %w", err)
 	}
+
+	// Prune out the status/creation time.
+	// This is a pragmatic choice to make Eno behave in expected ways for synthesizers written using client-go structs,
+	// which set metadata.creationTime=null and status={}.
+	if parsed.Object != nil {
+		delete(parsed.Object, "status")
+		parsed.SetCreationTimestamp(metav1.Time{})
+	}
+
 	res.value = value.NewValueInterface(parsed.Object)
 	gvk := parsed.GroupVersionKind()
 	res.GVK = gvk
@@ -328,36 +340,13 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 // Less returns true when r < than.
 // Used to establish determinstic ordering for conflicting resources.
 func (r *Resource) Less(than *Resource) bool {
-	if r.Manifest == nil || than.Manifest == nil {
-		return true
-	}
-	return r.Manifest.Manifest < than.Manifest.Manifest
+	return bytes.Compare(r.ManifestHash, than.ManifestHash) < 0
 }
 
 type patchMeta struct {
 	APIVersion string          `json:"apiVersion"`
 	Kind       string          `json:"kind"`
 	Ops        jsonpatch.Patch `json:"ops"`
-}
-
-type lastReconciledMeta struct {
-	lock           sync.Mutex
-	lastReconciled *time.Time
-}
-
-func (l *lastReconciledMeta) ObserveReconciliation() time.Duration {
-	now := time.Now()
-
-	l.lock.Lock()
-	defer l.lock.Unlock()
-
-	var latency time.Duration
-	if l.lastReconciled != nil {
-		latency = now.Sub(*l.lastReconciled)
-	}
-
-	l.lastReconciled = &now
-	return time.Duration(latency.Abs().Milliseconds())
 }
 
 func NewInputRevisions(obj client.Object, refKey string) *apiv1.InputRevisions {

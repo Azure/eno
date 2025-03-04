@@ -11,7 +11,6 @@ import (
 
 type indexedResource struct {
 	Resource            *Resource
-	State               *apiv1.ResourceState
 	Seen                bool
 	PendingDependencies map[Ref]struct{}
 	Dependents          map[Ref]*indexedResource
@@ -124,10 +123,12 @@ func (t *tree) UpdateState(comp *apiv1.Composition, ref ManifestRef, state *apiv
 	}
 
 	// Requeue self when the state has changed
-	lastKnown := idx.State
+	lastKnown := idx.Resource.latestKnownState.Swap(state)
 	if (!idx.Seen && lastKnown == nil) || !lastKnown.Equal(state) || (!idx.CompositionDeleting && comp.DeletionTimestamp != nil) {
 		enqueue(idx.Resource.Ref)
 	}
+	idx.Seen = true
+	idx.CompositionDeleting = comp.DeletionTimestamp != nil
 
 	// Dependents should no longer be blocked by this resource
 	if state.Ready != nil && (lastKnown == nil || lastKnown.Ready == nil) {
@@ -136,10 +137,6 @@ func (t *tree) UpdateState(comp *apiv1.Composition, ref ManifestRef, state *apiv
 			enqueue(dep.Resource.Ref)
 		}
 	}
-
-	idx.State = state
-	idx.CompositionDeleting = comp.DeletionTimestamp != nil
-	idx.Seen = true
 }
 
 // MarshalJSON allows the current tree to be serialized to JSON for testing/debugging purposes.
@@ -159,9 +156,10 @@ func (t *tree) MarshalJSON() ([]byte, error) {
 		}
 		slices.Sort(dependents)
 
+		state := value.Resource.latestKnownState.Load()
 		valMap := map[string]any{
-			"ready":        value.State != nil && value.State.Ready != nil,
-			"reconciled":   value.State != nil && value.State.Reconciled,
+			"ready":        state != nil && state.Ready != nil,
+			"reconciled":   state != nil && state.Reconciled,
 			"dependencies": dependencies,
 			"dependents":   dependents,
 		}
