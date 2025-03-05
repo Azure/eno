@@ -357,6 +357,66 @@ func TestShouldDeleteSlice(t *testing.T) {
 			},
 			expected: false,
 		},
+		{
+			name: "slice is from an older composition generation",
+			comp: &apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						ObservedCompositionGeneration: 3,
+					},
+				},
+			},
+			slice: &apiv1.ResourceSlice{
+				Spec: apiv1.ResourceSliceSpec{
+					CompositionGeneration: 2,
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "slice is from an older composition generation, no current synthesis",
+			comp: &apiv1.Composition{
+				Status: apiv1.CompositionStatus{},
+			},
+			slice: &apiv1.ResourceSlice{
+				Spec: apiv1.ResourceSliceSpec{
+					CompositionGeneration: 2,
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "slice is from the current composition generation",
+			comp: &apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						ObservedCompositionGeneration: 3,
+					},
+				},
+			},
+			slice: &apiv1.ResourceSlice{
+				Spec: apiv1.ResourceSliceSpec{
+					CompositionGeneration: 3,
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "slice is from a newer composition generation",
+			comp: &apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						ObservedCompositionGeneration: 3,
+					},
+				},
+			},
+			slice: &apiv1.ResourceSlice{
+				Spec: apiv1.ResourceSliceSpec{
+					CompositionGeneration: 4,
+				},
+			},
+			expected: false,
+		},
 	}
 
 	for _, tt := range tests {
