@@ -33,6 +33,15 @@ func TestCompositionSimplification(t *testing.T) {
 			},
 		},
 		{
+			Input: apiv1.CompositionStatus{
+				CurrentSynthesis:  &apiv1.Synthesis{UUID: "uuid", Synthesized: ptr.To(metav1.Now())},
+				InFlightSynthesis: &apiv1.Synthesis{UUID: "another-uuid"},
+			},
+			Expected: apiv1.SimplifiedStatus{
+				Status: "Synthesizing",
+			},
+		},
+		{
 			Input: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{UUID: "uuid", Synthesized: ptr.To(metav1.Now())}},
 			Expected: apiv1.SimplifiedStatus{
 				Status: "Reconciling",
