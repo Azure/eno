@@ -52,6 +52,7 @@ type CompositionSpec struct {
 
 type CompositionStatus struct {
 	Simplified         *SimplifiedStatus `json:"simplified,omitempty"`
+	InFlightSynthesis  *Synthesis        `json:"inFlightSynthesis,omitempty"`
 	CurrentSynthesis   *Synthesis        `json:"currentSynthesis,omitempty"`
 	PreviousSynthesis  *Synthesis        `json:"previousSynthesis,omitempty"`
 	InputRevisions     []InputRevisions  `json:"inputRevisions,omitempty"`
@@ -224,7 +225,7 @@ func (c *Composition) ShouldIgnoreSideEffects() bool {
 }
 
 func (c *Composition) Synthesizing() bool {
-	return c.Status.CurrentSynthesis != nil && c.Status.CurrentSynthesis.Synthesized == nil
+	return c.Status.InFlightSynthesis != nil
 }
 
 func (c *Composition) EnableIgnoreSideEffects() {
@@ -243,15 +244,25 @@ func (c *Composition) ForceResynthesis() {
 	if anno == nil {
 		anno = map[string]string{}
 	}
-	anno[forceResynthesisAnnotation] = c.Status.GetCurrentSynthesisUUID()
+	anno[forceResynthesisAnnotation] = c.Status.getLatestSynthesisUUID()
 	c.SetAnnotations(anno)
 }
 
 func (c *Composition) ShouldForceResynthesis() bool {
 	val, ok := c.GetAnnotations()[forceResynthesisAnnotation]
-	return ok && val == c.Status.GetCurrentSynthesisUUID()
+	return ok && val == c.Status.getLatestSynthesisUUID()
 }
 
 func (c *Composition) ShouldOrphanResources() bool {
 	return c.Annotations["eno.azure.io/deletion-strategy"] == "orphan"
+}
+
+func (s *CompositionStatus) getLatestSynthesisUUID() string {
+	if s.InFlightSynthesis != nil {
+		return s.InFlightSynthesis.UUID
+	}
+	if s.CurrentSynthesis != nil {
+		return s.CurrentSynthesis.UUID
+	}
+	return ""
 }

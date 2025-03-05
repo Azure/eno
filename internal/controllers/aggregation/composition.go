@@ -68,7 +68,7 @@ func (c *compositionController) aggregate(synth *apiv1.Synthesizer, comp *apiv1.
 	if !comp.InputsExist(synth) {
 		copy.Status = "MissingInputs"
 	}
-	if comp.Status.CurrentSynthesis == nil {
+	if comp.Status.CurrentSynthesis == nil && comp.Status.InFlightSynthesis == nil {
 		return copy
 	}
 
@@ -94,13 +94,16 @@ func (c *compositionController) aggregate(synth *apiv1.Synthesizer, comp *apiv1.
 	if !comp.InputsExist(synth) {
 		copy.Status = "MissingInputs"
 	}
-	if comp.Status.CurrentSynthesis.Synthesized != nil {
+	if comp.Status.InFlightSynthesis != nil {
+		return copy
+	}
+	if syn := comp.Status.CurrentSynthesis; syn.Synthesized != nil {
 		copy.Status = "Reconciling"
 	}
-	if comp.Status.CurrentSynthesis.Reconciled != nil {
+	if syn := comp.Status.CurrentSynthesis; syn.Reconciled != nil {
 		copy.Status = "NotReady"
 	}
-	if comp.Status.CurrentSynthesis.Ready != nil {
+	if syn := comp.Status.CurrentSynthesis; syn.Ready != nil {
 		copy.Status = "Ready"
 	}
 	if comp.InputsOutOfLockstep(synth) {

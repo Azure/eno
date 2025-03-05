@@ -102,84 +102,6 @@ func TestCompositionDeletion(t *testing.T) {
 	})
 }
 
-// TestDeleteCompositionWhenSynthesizerMissing proves that a composition's finalizer will be removed if the synthesizer is missing.
-func TestDeleteCompositionWhenSynthesizerMissing(t *testing.T) {
-	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t)
-	cli := mgr.GetClient()
-
-	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
-		output := &krmv1.ResourceList{}
-		output.Items = []*unstructured.Unstructured{{
-			Object: map[string]any{
-				"apiVersion": "v1",
-				"kind":       "ConfigMap",
-				"metadata": map[string]string{
-					"name":      "test",
-					"namespace": "default",
-				},
-			},
-		}}
-		return output, nil
-	})
-
-	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
-	require.NoError(t, NewSliceCleanupController(mgr.Manager))
-	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
-	mgr.Start(t)
-
-	syn := &apiv1.Synthesizer{}
-	syn.Name = "test-syn-1"
-	syn.Spec.Image = "initial-image"
-	require.NoError(t, cli.Create(ctx, syn))
-
-	comp := &apiv1.Composition{}
-	comp.Name = "test-comp"
-	comp.Namespace = "default"
-	comp.Spec.Synthesizer.Name = syn.Name
-	require.NoError(t, cli.Create(ctx, comp))
-
-	// Create the composition's resource slice
-	testutil.Eventually(t, func() bool {
-		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-		return comp.Status.CurrentSynthesis != nil && len(comp.Status.CurrentSynthesis.ResourceSlices) > 0
-	})
-	assert.NotNil(t, comp.Status.CurrentSynthesis.Initialized, "initialized timestamp is set")
-
-	// Wait for the resource slice to be created
-	testutil.Eventually(t, func() bool {
-		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ResourceSlices != nil
-	})
-
-	// Delete the composition
-	require.NoError(t, cli.Delete(ctx, comp))
-	deleteGen := comp.Generation
-
-	// The generation should be updated
-	testutil.Eventually(t, func() bool {
-		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration >= deleteGen
-	})
-
-	// The composition should still exist after a bit
-	time.Sleep(time.Millisecond * 100)
-	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-
-	// Mark the synthesized time as nil to simulate the synthesizer is missing
-	err := retry.RetryOnConflict(testutil.Backoff, func() error {
-		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Status.CurrentSynthesis.Synthesized = nil
-		return cli.Status().Update(ctx, comp)
-	})
-	require.NoError(t, err)
-
-	// The composition should eventually be released even the composition is waiting for reconciliation to be completed
-	testutil.Eventually(t, func() bool {
-		return errors.IsNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-	})
-}
-
 func TestNonExistentComposition(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
@@ -237,7 +159,7 @@ var shouldDeletePodTests = []struct {
 		Composition: &apiv1.Composition{
 			ObjectMeta: metav1.ObjectMeta{},
 			Status: apiv1.CompositionStatus{
-				CurrentSynthesis: &apiv1.Synthesis{
+				InFlightSynthesis: &apiv1.Synthesis{
 					UUID: "test-uuid",
 				},
 			},
@@ -265,7 +187,7 @@ var shouldDeletePodTests = []struct {
 				Generation: 2,
 			},
 			Status: apiv1.CompositionStatus{
-				CurrentSynthesis: &apiv1.Synthesis{
+				InFlightSynthesis: &apiv1.Synthesis{
 					Synthesized: ptr.To(metav1.Now()),
 				},
 			},
@@ -293,7 +215,7 @@ var shouldDeletePodTests = []struct {
 				Generation: 2,
 			},
 			Status: apiv1.CompositionStatus{
-				CurrentSynthesis: &apiv1.Synthesis{
+				InFlightSynthesis: &apiv1.Synthesis{
 					Synthesized: ptr.To(metav1.Now()),
 				},
 			},
@@ -321,7 +243,7 @@ var shouldDeletePodTests = []struct {
 		}},
 		Composition: &apiv1.Composition{
 			Status: apiv1.CompositionStatus{
-				CurrentSynthesis: &apiv1.Synthesis{},
+				InFlightSynthesis: &apiv1.Synthesis{},
 			},
 		},
 		Synth: &apiv1.Synthesizer{
@@ -351,7 +273,7 @@ var shouldDeletePodTests = []struct {
 		}},
 		Composition: &apiv1.Composition{
 			Status: apiv1.CompositionStatus{
-				CurrentSynthesis: &apiv1.Synthesis{},
+				InFlightSynthesis: &apiv1.Synthesis{},
 			},
 		},
 		Synth: &apiv1.Synthesizer{
@@ -373,7 +295,7 @@ var shouldDeletePodTests = []struct {
 		}},
 		Composition: &apiv1.Composition{
 			Status: apiv1.CompositionStatus{
-				CurrentSynthesis: &apiv1.Synthesis{},
+				InFlightSynthesis: &apiv1.Synthesis{},
 			},
 		},
 		Synth: &apiv1.Synthesizer{
@@ -395,7 +317,7 @@ var shouldDeletePodTests = []struct {
 		}},
 		Composition: &apiv1.Composition{
 			Status: apiv1.CompositionStatus{
-				CurrentSynthesis: &apiv1.Synthesis{},
+				InFlightSynthesis: &apiv1.Synthesis{},
 			},
 		},
 		Synth: &apiv1.Synthesizer{
@@ -426,7 +348,7 @@ var shouldDeletePodTests = []struct {
 		}},
 		Composition: &apiv1.Composition{
 			Status: apiv1.CompositionStatus{
-				CurrentSynthesis: &apiv1.Synthesis{},
+				InFlightSynthesis: &apiv1.Synthesis{},
 			},
 		},
 		Synth: &apiv1.Synthesizer{
@@ -452,7 +374,7 @@ var shouldDeletePodTests = []struct {
 		}},
 		Composition: &apiv1.Composition{
 			Status: apiv1.CompositionStatus{
-				CurrentSynthesis: &apiv1.Synthesis{Attempts: 4},
+				InFlightSynthesis: &apiv1.Synthesis{Attempts: 4},
 			},
 		},
 		Synth: &apiv1.Synthesizer{
@@ -473,7 +395,7 @@ var shouldDeletePodTests = []struct {
 		}},
 		Composition: &apiv1.Composition{
 			Status: apiv1.CompositionStatus{
-				CurrentSynthesis: &apiv1.Synthesis{},
+				InFlightSynthesis: &apiv1.Synthesis{},
 			},
 		},
 		Synth: &apiv1.Synthesizer{

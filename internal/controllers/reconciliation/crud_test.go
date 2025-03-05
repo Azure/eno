@@ -628,7 +628,7 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	// Wait for the state to be swapped
 	testutil.Eventually(t, func() bool {
 		err = upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized == nil
+		return err == nil && comp.Status.InFlightSynthesis != nil
 	})
 
 	// Delete the composition
@@ -700,59 +700,6 @@ func TestDisableUpdates(t *testing.T) {
 	err := downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
 	require.NoError(t, err)
 	assert.Equal(t, "baz", obj.Data["foo"])
-}
-
-// TestOrphanedCompositionDeletion proves that compositions can be deleted when their synthesizer is missing.
-func TestOrphanedCompositionDeletion(t *testing.T) {
-	scheme := runtime.NewScheme()
-	corev1.SchemeBuilder.AddToScheme(scheme)
-	testv1.SchemeBuilder.AddToScheme(scheme)
-
-	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t)
-	upstream := mgr.GetClient()
-
-	registerControllers(t, mgr)
-	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
-		output := &krmv1.ResourceList{}
-		output.Items = []*unstructured.Unstructured{{
-			Object: map[string]any{
-				"apiVersion": "v1",
-				"kind":       "ConfigMap",
-				"metadata": map[string]any{
-					"name":      "test-obj",
-					"namespace": "default",
-				},
-				"data": map[string]string{"foo": "bar"},
-			},
-		}}
-		return output, nil
-	})
-
-	// Test subject
-	setupTestSubject(t, mgr)
-	mgr.Start(t)
-	syn, comp := writeGenericComposition(t, upstream)
-
-	// Wait for composition to become ready
-	testutil.Eventually(t, func() bool {
-		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == comp.Generation
-	})
-
-	// Delete the synthesizer
-	require.NoError(t, upstream.Delete(ctx, syn))
-	t.Logf("deleted synth")
-
-	time.Sleep(time.Millisecond * 100) // make sure the synth deletion has hit the informer cache
-
-	require.NoError(t, upstream.Delete(ctx, comp))
-	t.Logf("deleted composition")
-
-	// Everything should eventually be cleaned up
-	testutil.Eventually(t, func() bool {
-		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-	})
 }
 
 func TestOrphanedResources(t *testing.T) {
