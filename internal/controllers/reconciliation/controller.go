@@ -137,13 +137,8 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	// - Readiness checks are skipped when this version of the resource's desired state has already become ready
 	// - Readiness checks are skipped when the resource hasn't changed since the last check
 	// - Readiness defaults to true if no checks are given
-	slice := &apiv1.ResourceSlice{}
-	err = c.client.Get(ctx, resource.ManifestRef.Slice, slice)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
-	}
 	var ready *metav1.Time
-	status := resource.FindStatus(slice)
+	status := resource.State()
 	if status == nil || status.Ready == nil {
 		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, current)
 		if ok {
@@ -203,11 +198,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	// Create the resource when it doesn't exist
 	if current == nil {
 		reconciliationActions.WithLabelValues("create").Inc()
-		obj, err := resource.Parse()
-		if err != nil {
-			return false, fmt.Errorf("invalid resource: %w", err)
-		}
-		err = c.upstreamClient.Create(ctx, obj)
+		err := c.upstreamClient.Create(ctx, resource.Unstructured())
 		if err != nil {
 			return false, fmt.Errorf("creating resource: %w", err)
 		}

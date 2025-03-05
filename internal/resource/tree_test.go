@@ -302,12 +302,12 @@ func TestTreeDeletion(t *testing.T) {
 func TestTreeRefConflicts(t *testing.T) {
 	var b treeBuilder
 	b.Add(&Resource{
-		Ref:      newTestRef("test-resource"),
-		Manifest: &apiv1.Manifest{Manifest: "b"},
+		Ref:          newTestRef("test-resource"),
+		ManifestHash: []byte("b"),
 	})
 	b.Add(&Resource{
-		Ref:      newTestRef("test-resource"),
-		Manifest: &apiv1.Manifest{Manifest: "a"},
+		Ref:          newTestRef("test-resource"),
+		ManifestHash: []byte("a"),
 	})
 
 	tree := b.Build()
@@ -315,5 +315,5 @@ func TestTreeRefConflicts(t *testing.T) {
 	res, visible, found := tree.Get(newTestRef("test-resource"))
 	assert.True(t, found)
 	assert.True(t, visible)
-	assert.Equal(t, "b", res.Manifest.Manifest)
+	assert.Equal(t, "b", string(res.ManifestHash))
 }
