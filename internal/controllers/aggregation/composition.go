@@ -72,6 +72,14 @@ func (c *compositionController) aggregate(synth *apiv1.Synthesizer, comp *apiv1.
 		return copy
 	}
 
+	copy.Status = "Synthesizing"
+	if !comp.InputsExist(synth) {
+		copy.Status = "MissingInputs"
+	}
+	if comp.Status.InFlightSynthesis != nil || comp.Status.CurrentSynthesis == nil {
+		return copy
+	}
+
 	for _, result := range comp.Status.CurrentSynthesis.Results {
 		if result.Severity == krmv1.ResultSeverityError {
 			copy.Error = result.Message
@@ -90,13 +98,6 @@ func (c *compositionController) aggregate(synth *apiv1.Synthesizer, comp *apiv1.
 		}
 	}
 
-	copy.Status = "Synthesizing"
-	if !comp.InputsExist(synth) {
-		copy.Status = "MissingInputs"
-	}
-	if comp.Status.InFlightSynthesis != nil {
-		return copy
-	}
 	if syn := comp.Status.CurrentSynthesis; syn.Synthesized != nil {
 		copy.Status = "Reconciling"
 	}

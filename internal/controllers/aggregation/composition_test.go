@@ -27,6 +27,12 @@ func TestCompositionSimplification(t *testing.T) {
 			},
 		},
 		{
+			Input: apiv1.CompositionStatus{InFlightSynthesis: &apiv1.Synthesis{UUID: "uuid"}},
+			Expected: apiv1.SimplifiedStatus{
+				Status: "Synthesizing",
+			},
+		},
+		{
 			Input: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{UUID: "uuid"}},
 			Expected: apiv1.SimplifiedStatus{
 				Status: "Synthesizing",
@@ -111,6 +117,18 @@ func TestCompositionSimplification(t *testing.T) {
 		},
 		{
 			Bindings: []apiv1.Binding{{Key: "foo"}},
+			Input:    apiv1.CompositionStatus{InFlightSynthesis: &apiv1.Synthesis{UUID: "uuid"}},
+			Synth: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{{Key: "bar"}},
+				},
+			},
+			Expected: apiv1.SimplifiedStatus{
+				Status: "Synthesizing",
+			},
+		},
+		{
+			Bindings: []apiv1.Binding{{Key: "foo"}},
 			Input:    apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{UUID: "uuid"}},
 			Synth: apiv1.Synthesizer{
 				Spec: apiv1.SynthesizerSpec{
@@ -126,6 +144,13 @@ func TestCompositionSimplification(t *testing.T) {
 			Input:    apiv1.CompositionStatus{},
 			Expected: apiv1.SimplifiedStatus{
 				Status: "PendingSynthesis",
+			},
+		},
+		{
+			Bindings: []apiv1.Binding{{Key: "foo"}},
+			Input:    apiv1.CompositionStatus{InFlightSynthesis: &apiv1.Synthesis{UUID: "uuid"}},
+			Expected: apiv1.SimplifiedStatus{
+				Status: "Synthesizing",
 			},
 		},
 		{
