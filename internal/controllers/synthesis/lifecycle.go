@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
@@ -32,8 +32,6 @@ type Config struct {
 
 	NodeAffinityKey   string
 	NodeAffinityValue string
-
-	ContainerCreationTimeout time.Duration
 }
 
 type podLifecycleController struct {
@@ -60,21 +58,19 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	logger := logr.FromContextOrDiscard(ctx)
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, req.NamespacedName, comp)
-	if errors.IsNotFound(err) {
-		// Clean up Pods for composition that no longer exists.
-		return ctrl.Result{}, c.deletePod(ctx, req.NamespacedName)
-	} else if err != nil {
+	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition resource: %w", err))
 	}
 
-	logger = logger.WithValues("compositionName", comp.Name,
-		"compositionNamespace", comp.Namespace,
-		"compositionGeneration", comp.Generation)
-	ctx = logr.NewContext(ctx, logger)
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
+
+	if comp.DeletionTimestamp != nil {
+		return c.reconcileDeletedComposition(ctx, comp)
+	}
 
 	// It isn't safe to delete compositions until their resource slices have been cleaned up,
 	// since reconciling resources necessarily requires the composition.
-	if comp.DeletionTimestamp == nil && controllerutil.AddFinalizer(comp, "eno.azure.io/cleanup") {
+	if controllerutil.AddFinalizer(comp, "eno.azure.io/cleanup") {
 		err = c.client.Update(ctx, comp)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating composition: %w", err)
@@ -83,7 +79,21 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	// Delete any unnecessary pods
+	if comp.Status.InFlightSynthesis == nil || comp.Status.InFlightSynthesis.Synthesized != nil {
+		return ctrl.Result{}, nil
+	}
+	logger = logger.WithValues("synthesisID", comp.Status.InFlightSynthesis.UUID)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = comp.Spec.Synthesizer.Name
+	err = c.client.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+	if err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting synthesizer: %w", err))
+	}
+	if syn != nil {
+		logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
+	}
+
 	pods := &corev1.PodList{}
 	err = c.client.List(ctx, pods, client.InNamespace(c.config.PodNamespace), client.MatchingFields{
 		manager.IdxPodsByComposition: manager.PodByCompIdxValueFromComp(comp),
@@ -92,55 +102,14 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, fmt.Errorf("listing pods: %w", err)
 	}
 
-	// Tolerate missing synths since we may still need to cleanup
-	syn := &apiv1.Synthesizer{}
-	syn.Name = comp.Spec.Synthesizer.Name
-	err = c.client.Get(ctx, client.ObjectKeyFromObject(syn), syn)
-	// It's only safe to ignore as a missing synth if we have already started synthesis,
-	// otherwise creating the synth and composition around the same time could result in a deadlock
-	// if the composition is processed before the synth hits the informer cache.
-	if (errors.IsNotFound(err) || syn.DeletionTimestamp != nil) && comp.Status.InFlightSynthesis != nil {
-		syn = nil
-		err = nil
-	}
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("getting synthesizer: %w", err)
-	}
-	if syn != nil {
-		logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
-	}
-
-	logger, toDelete, exists := shouldDeletePod(logger, comp, syn, pods, c.config.ContainerCreationTimeout)
-	if toDelete != nil {
-		if err := c.client.Delete(ctx, toDelete); err != nil {
-			return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("deleting pod: %w", err))
-		}
-		logger.V(0).Info("deleted synthesizer pod", "podName", toDelete.Name)
-		return ctrl.Result{}, nil
-	}
-	if comp.DeletionTimestamp != nil {
-		return c.reconcileDeletedComposition(ctx, comp)
-	}
-	if exists {
-		// The pod is still running.
-		// Poll periodically to check if has timed out.
-		if syn.Spec.PodTimeout == nil {
-			return ctrl.Result{}, nil
-		}
-		return ctrl.Result{RequeueAfter: syn.Spec.PodTimeout.Duration}, nil
-	}
-
-	// Synthesis isn't possible without a synth
-	if syn == nil {
-		return ctrl.Result{}, nil
-	}
-
-	// Bail if it isn't time to synthesize yet, or synthesis is already complete
-	if comp.Status.InFlightSynthesis == nil || comp.Status.InFlightSynthesis.UUID == "" || comp.Status.InFlightSynthesis.Synthesized != nil || comp.DeletionTimestamp != nil {
-		return ctrl.Result{}, nil
-	}
-	logger = logger.WithValues("synthesisID", comp.Status.InFlightSynthesis.UUID)
 	ctx = logr.NewContext(ctx, logger)
+	ok, err := c.safeToCreatePod(ctx, pods, comp)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if !ok {
+		return ctrl.Result{}, nil
+	}
 
 	// Back off to avoid constantly re-synthesizing impossible compositions (unlikely but possible)
 	if shouldBackOffPodCreation(comp) {
@@ -197,6 +166,41 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	return ctrl.Result{}, nil
 }
 
+// safeToCreatePod returns true when it is safe to create a new synthesizer pod.
+func (c *podLifecycleController) safeToCreatePod(ctx context.Context, pods *corev1.PodList, comp *apiv1.Composition) (bool, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+	sort.Slice(pods.Items, func(i, j int) bool { return pods.Items[i].CreationTimestamp.Before(&pods.Items[j].CreationTimestamp) })
+
+	var active bool
+	var deleting bool
+	for _, pod := range pods.Items {
+		if pod.DeletionTimestamp != nil {
+			if !deleting {
+				deleting = true
+				continue
+			}
+			return false, nil // don't create new pod if two are deleting
+		}
+
+		if podIsCurrent(comp, &pod) {
+			if !active {
+				active = true
+				continue
+			}
+
+			// Clean up any dupes
+			err := c.client.Delete(ctx, &pod)
+			if err != nil {
+				return false, fmt.Errorf("deleting duplicate synthesizer pod: %w", err)
+			}
+			logger.V(1).Info("deleting duplicate synthesizer pod", "podName", pod.Name)
+			return false, nil
+		}
+	}
+
+	return !active, nil // don't create pod when one is already active
+}
+
 func (c *podLifecycleController) reconcileDeletedComposition(ctx context.Context, comp *apiv1.Composition) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
@@ -233,115 +237,6 @@ func (c *podLifecycleController) reconcileDeletedComposition(ctx context.Context
 	}
 
 	return ctrl.Result{}, nil
-}
-
-func shouldDeletePod(logger logr.Logger, comp *apiv1.Composition, syn *apiv1.Synthesizer, pods *corev1.PodList, creationTTL time.Duration) (logr.Logger, *corev1.Pod, bool /* exists */) {
-	if len(pods.Items) == 0 {
-		return logger, nil, false
-	}
-
-	// Allow a single extra pod to be created while the previous one is terminating
-	// in order to break potential deadlocks while avoiding a thundering herd of pods
-	var onePodDeleting bool
-	for _, pod := range pods.Items {
-		if pod.DeletionTimestamp != nil {
-			if onePodDeleting {
-				return logger, nil, true
-			}
-			onePodDeleting = true
-		}
-	}
-
-	for _, pod := range pods.Items {
-		pod := pod
-		if pod.DeletionTimestamp != nil {
-			continue
-		}
-
-		if len(pod.Status.ContainerStatuses) > 0 {
-			logger = logger.WithValues("restarts", pod.Status.ContainerStatuses[0].RestartCount)
-		}
-
-		if syn == nil {
-			logger = logger.WithValues("reason", "SynthesizerDeleted")
-			return logger, &pod, true
-		}
-
-		if comp.DeletionTimestamp != nil {
-			logger = logger.WithValues("reason", "CompositionDeleted")
-			return logger, &pod, true
-		}
-
-		if pod.Status.Phase == corev1.PodSucceeded {
-			logger = logger.WithValues("reason", "Complete")
-			return logger, &pod, true
-		}
-
-		isCurrent := podIsCurrent(comp, &pod)
-		if !isCurrent {
-			logger = logger.WithValues("reason", "Superseded")
-			return logger, &pod, true
-		}
-
-		// Synthesis is done
-		if comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.PodCreation != nil {
-			logger = logger.WithValues("latency", time.Since(comp.Status.InFlightSynthesis.PodCreation.Time).Abs().Milliseconds())
-		}
-		if comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.Synthesized != nil {
-			logger = logger.WithValues("reason", "Success")
-			return logger, &pod, true
-		}
-
-		// Delete pods if they have been scheduled but not picked up by that node's kubelet
-		// This can happen when the node is Ready but recently partitioned from apiserver
-		//
-		// Clock jitter is a risk since the scheduled timestamp is written by the scheduler
-		// So we only enforce this timeout when a new pod can be created immediately
-		// i.e. when another pod for this synthesis isn't already terminating
-		// AND we bail out when the synthesis has already been tried a few times (what's a few more seconds latency at that point)
-		seenByKubelet := len(pod.Status.ContainerStatuses) != 0
-		retryPressure := comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.Attempts > 3
-		if scheduledTime := getPodScheduledTime(&pod); !onePodDeleting && !seenByKubelet && !retryPressure && scheduledTime != nil && time.Since(*scheduledTime) > creationTTL {
-			logger = logger.WithValues("reason", "ContainerCreationTimeout", "scheduledTime", scheduledTime.UnixMilli())
-			return logger, &pod, true
-		}
-
-		// Pod is too old
-		// We timeout eventually in case it landed on a node that for whatever reason isn't capable of running the pod
-		if time.Since(pod.CreationTimestamp.Time) > syn.Spec.PodTimeout.Duration {
-			logger = logger.WithValues("reason", "Timeout")
-			synthesPodRecreations.Inc()
-			return logger, &pod, true
-		}
-
-		// At this point the pod should still be running - no need to check other pods
-		return logger, nil, true
-	}
-	return logger, nil, false
-}
-
-// deletePod deletes one Pod associated to the given comp unconditionally.
-// Should only be used when the composition no longer exists.
-func (c *podLifecycleController) deletePod(ctx context.Context, comp types.NamespacedName) error {
-	logger := logr.FromContextOrDiscard(ctx)
-	pods := &corev1.PodList{}
-	if err := c.client.List(ctx, pods, client.InNamespace(c.config.PodNamespace), client.MatchingFields{
-		manager.IdxPodsByComposition: manager.PodByCompIdxValueFromNamespacedName(comp),
-	}); err != nil {
-		return fmt.Errorf("listing Pods: %w", err)
-	}
-	for _, pod := range pods.Items {
-		if pod.DeletionTimestamp != nil {
-			continue
-		}
-		err := c.client.Delete(ctx, &pod)
-		if client.IgnoreNotFound(err) != nil {
-			return fmt.Errorf("deleting Pod %s: %w", pod.Name, err)
-		}
-		logger.V(0).Info("deleted synthesizer pod", "podName", pod.Name, "reason", "CompositionDoesNotExist")
-		return nil
-	}
-	return nil
 }
 
 func shouldBackOffPodCreation(comp *apiv1.Composition) bool {

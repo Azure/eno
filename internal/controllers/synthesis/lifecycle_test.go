@@ -2,16 +2,17 @@ package synthesis
 
 import (
 	"context"
+	"math/rand/v2"
 	"testing"
 	"time"
 
-	"github.com/go-logr/logr/testr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -47,6 +48,7 @@ func TestCompositionDeletion(t *testing.T) {
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewSliceCleanupController(mgr.Manager))
 	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
+	require.NoError(t, NewPodGC(mgr.Manager, 0))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
@@ -130,464 +132,130 @@ func TestNonExistentComposition(t *testing.T) {
 	})
 }
 
-var shouldDeletePodTests = []struct {
-	Name               string
-	Pods               []corev1.Pod
-	Composition        *apiv1.Composition
-	Synth              *apiv1.Synthesizer
-	PodShouldExist     bool
-	PodShouldBeDeleted bool
-}{
-	{
-		Name:               "no-pods",
-		Pods:               []corev1.Pod{},
-		Composition:        &apiv1.Composition{},
-		Synth:              &apiv1.Synthesizer{},
-		PodShouldExist:     false,
-		PodShouldBeDeleted: false,
-	},
-	{
-		Name: "still-in-use",
-		Pods: []corev1.Pod{{
-			ObjectMeta: metav1.ObjectMeta{
-				CreationTimestamp: metav1.Now(),
-				Labels: map[string]string{
-					"eno.azure.io/synthesis-uuid": "test-uuid",
-				},
-			},
-		}},
-		Composition: &apiv1.Composition{
-			ObjectMeta: metav1.ObjectMeta{},
-			Status: apiv1.CompositionStatus{
-				InFlightSynthesis: &apiv1.Synthesis{
-					UUID: "test-uuid",
-				},
-			},
-		},
-		Synth: &apiv1.Synthesizer{
-			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
-			},
-		},
-		PodShouldExist:     true,
-		PodShouldBeDeleted: false,
-	},
-	{
-		Name: "success",
-		Pods: []corev1.Pod{{
-			ObjectMeta: metav1.ObjectMeta{
-				CreationTimestamp: metav1.Now(),
-				Annotations: map[string]string{
-					"eno.azure.io/composition-generation": "2",
-				},
-			},
-		}},
-		Composition: &apiv1.Composition{
-			ObjectMeta: metav1.ObjectMeta{
-				Generation: 2,
-			},
-			Status: apiv1.CompositionStatus{
-				InFlightSynthesis: &apiv1.Synthesis{
-					Synthesized: ptr.To(metav1.Now()),
-				},
-			},
-		},
-		Synth: &apiv1.Synthesizer{
-			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
-			},
-		},
-		PodShouldExist:     true,
-		PodShouldBeDeleted: true,
-	},
-	{
-		Name: "success-and-wrong-gen",
-		Pods: []corev1.Pod{{
-			ObjectMeta: metav1.ObjectMeta{
-				CreationTimestamp: metav1.Now(),
-				Annotations: map[string]string{
-					"eno.azure.io/composition-generation": "1",
-				},
-			},
-		}},
-		Composition: &apiv1.Composition{
-			ObjectMeta: metav1.ObjectMeta{
-				Generation: 2,
-			},
-			Status: apiv1.CompositionStatus{
-				InFlightSynthesis: &apiv1.Synthesis{
-					Synthesized: ptr.To(metav1.Now()),
-				},
-			},
-		},
-		Synth: &apiv1.Synthesizer{
-			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
-			},
-		},
-		PodShouldExist:     true,
-		PodShouldBeDeleted: true,
-	},
-	{
-		Name: "container-timeout",
-		Pods: []corev1.Pod{{
-			ObjectMeta: metav1.ObjectMeta{
-				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
-				Labels:            map[string]string{},
-			},
-			Status: corev1.PodStatus{Conditions: []corev1.PodCondition{{
-				Type:               corev1.PodScheduled,
-				Status:             corev1.ConditionTrue,
-				LastTransitionTime: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
-			}}},
-		}},
-		Composition: &apiv1.Composition{
-			Status: apiv1.CompositionStatus{
-				InFlightSynthesis: &apiv1.Synthesis{},
-			},
-		},
-		Synth: &apiv1.Synthesizer{
-			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
-			},
-		},
-		PodShouldExist:     true,
-		PodShouldBeDeleted: true,
-	},
-	{
-		Name: "container-timeout-negative",
-		Pods: []corev1.Pod{{
-			ObjectMeta: metav1.ObjectMeta{
-				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
-				Labels:            map[string]string{},
-			},
-			Spec: corev1.PodSpec{NodeName: "anything"},
-			Status: corev1.PodStatus{
-				ContainerStatuses: []corev1.ContainerStatus{{}},
-				Conditions: []corev1.PodCondition{{
-					Type:               corev1.PodScheduled,
-					Status:             corev1.ConditionTrue,
-					LastTransitionTime: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
-				}},
-			},
-		}},
-		Composition: &apiv1.Composition{
-			Status: apiv1.CompositionStatus{
-				InFlightSynthesis: &apiv1.Synthesis{},
-			},
-		},
-		Synth: &apiv1.Synthesizer{
-			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
-			},
-		},
-		PodShouldExist:     true,
-		PodShouldBeDeleted: false,
-	},
-	{
-		Name: "container-timeout-not-scheduled",
-		Pods: []corev1.Pod{{
-			ObjectMeta: metav1.ObjectMeta{
-				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
-				Labels:            map[string]string{},
-			},
-			Status: corev1.PodStatus{},
-		}},
-		Composition: &apiv1.Composition{
-			Status: apiv1.CompositionStatus{
-				InFlightSynthesis: &apiv1.Synthesis{},
-			},
-		},
-		Synth: &apiv1.Synthesizer{
-			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
-			},
-		},
-		PodShouldExist:     true,
-		PodShouldBeDeleted: false,
-	},
-	{
-		Name: "container-timeout-not-scheduled-but-somehow-created",
-		Pods: []corev1.Pod{{
-			ObjectMeta: metav1.ObjectMeta{
-				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
-				Labels:            map[string]string{},
-			},
-			Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{}}},
-		}},
-		Composition: &apiv1.Composition{
-			Status: apiv1.CompositionStatus{
-				InFlightSynthesis: &apiv1.Synthesis{},
-			},
-		},
-		Synth: &apiv1.Synthesizer{
-			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
-			},
-		},
-		PodShouldExist:     true,
-		PodShouldBeDeleted: false,
-	},
-	{
-		Name: "container-timeout-another-pod-deleting",
-		Pods: []corev1.Pod{{
-			ObjectMeta: metav1.ObjectMeta{
-				CreationTimestamp: metav1.Now(),
-				DeletionTimestamp: ptr.To(metav1.Now()),
-			},
-		}, {
-			ObjectMeta: metav1.ObjectMeta{
-				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
-				Labels:            map[string]string{},
-			},
-			Status: corev1.PodStatus{Conditions: []corev1.PodCondition{{
-				Type:               corev1.PodScheduled,
-				Status:             corev1.ConditionTrue,
-				LastTransitionTime: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
-			}}},
-		}},
-		Composition: &apiv1.Composition{
-			Status: apiv1.CompositionStatus{
-				InFlightSynthesis: &apiv1.Synthesis{},
-			},
-		},
-		Synth: &apiv1.Synthesizer{
-			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
-			},
-		},
-		PodShouldExist:     true,
-		PodShouldBeDeleted: false,
-	},
-	{
-		Name: "container-timeout-too-many-retries",
-		Pods: []corev1.Pod{{
-			ObjectMeta: metav1.ObjectMeta{
-				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
-				Labels:            map[string]string{},
-			},
-			Status: corev1.PodStatus{Conditions: []corev1.PodCondition{{
-				Type:               corev1.PodScheduled,
-				Status:             corev1.ConditionTrue,
-				LastTransitionTime: metav1.NewTime(time.Now().Add(-time.Minute * 2)),
-			}}},
-		}},
-		Composition: &apiv1.Composition{
-			Status: apiv1.CompositionStatus{
-				InFlightSynthesis: &apiv1.Synthesis{Attempts: 4},
-			},
-		},
-		Synth: &apiv1.Synthesizer{
-			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
-			},
-		},
-		PodShouldExist:     true,
-		PodShouldBeDeleted: false,
-	},
-	{
-		Name: "pod-timeout",
-		Pods: []corev1.Pod{{
-			ObjectMeta: metav1.ObjectMeta{
-				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Second * 2)),
-				Labels:            map[string]string{},
-			},
-		}},
-		Composition: &apiv1.Composition{
-			Status: apiv1.CompositionStatus{
-				InFlightSynthesis: &apiv1.Synthesis{},
-			},
-		},
-		Synth: &apiv1.Synthesizer{
-			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: ptr.To(metav1.Duration{Duration: time.Second}),
-			},
-		},
-		PodShouldExist:     true,
-		PodShouldBeDeleted: true,
-	},
-	{
-		Name: "composition-deleted",
-		Pods: []corev1.Pod{{
-			ObjectMeta: metav1.ObjectMeta{
-				CreationTimestamp: metav1.Now(),
-				Annotations: map[string]string{
-					"eno.azure.io/composition-generation": "2",
-				},
-			},
-		}},
-		Composition: &apiv1.Composition{
-			ObjectMeta: metav1.ObjectMeta{
-				DeletionTimestamp: &metav1.Time{Time: time.Now()},
-				Generation:        2,
-			},
-		},
-		Synth: &apiv1.Synthesizer{
-			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
-			},
-		},
-		PodShouldExist:     true,
-		PodShouldBeDeleted: true,
-	},
-	{
-		Name: "synth-deleted",
-		Pods: []corev1.Pod{{
-			ObjectMeta: metav1.ObjectMeta{
-				CreationTimestamp: metav1.Now(),
-				Annotations: map[string]string{
-					"eno.azure.io/composition-generation": "2",
-				},
-			},
-		}},
-		Composition: &apiv1.Composition{
-			ObjectMeta: metav1.ObjectMeta{
-				Generation: 2,
-			},
-		},
-		Synth:              nil,
-		PodShouldExist:     true,
-		PodShouldBeDeleted: true,
-	},
-	{
-		Name: "composition-and-pod-deleted",
-		Pods: []corev1.Pod{{
-			ObjectMeta: metav1.ObjectMeta{
-				CreationTimestamp: metav1.Now(),
-				DeletionTimestamp: ptr.To(metav1.Now()),
-				Annotations: map[string]string{
-					"eno.azure.io/composition-generation": "2",
-				},
-			},
-		}},
-		Composition: &apiv1.Composition{
-			ObjectMeta: metav1.ObjectMeta{
-				DeletionTimestamp: &metav1.Time{Time: time.Now()},
-				Generation:        2,
-			},
-		},
-		Synth: &apiv1.Synthesizer{
-			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
-			},
-		},
-		PodShouldExist:     false,
-		PodShouldBeDeleted: false,
-	},
-	{
-		Name: "one-pod-deleting",
-		Pods: []corev1.Pod{{
-			ObjectMeta: metav1.ObjectMeta{
-				CreationTimestamp: metav1.Now(),
-				DeletionTimestamp: &metav1.Time{Time: time.Now()},
-				Annotations: map[string]string{
-					"eno.azure.io/composition-generation": "2",
-				},
-			},
-		}},
-		Composition: &apiv1.Composition{
-			ObjectMeta: metav1.ObjectMeta{
-				Generation: 2,
-			},
-		},
-		Synth: &apiv1.Synthesizer{
-			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
-			},
-		},
-		PodShouldExist:     false,
-		PodShouldBeDeleted: false,
-	},
-	{
-		Name: "two-pods-deleting",
-		Pods: []corev1.Pod{
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					CreationTimestamp: metav1.Now(),
-					DeletionTimestamp: &metav1.Time{Time: time.Now()},
-					Annotations: map[string]string{
-						"eno.azure.io/composition-generation": "2",
-					},
-				},
-			},
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					CreationTimestamp: metav1.Now(),
-					DeletionTimestamp: &metav1.Time{Time: time.Now()},
-					Annotations: map[string]string{
-						"eno.azure.io/composition-generation": "2",
-					},
-				},
-			},
-		},
-		Composition: &apiv1.Composition{
-			ObjectMeta: metav1.ObjectMeta{
-				Generation: 2,
-			},
-		},
-		Synth: &apiv1.Synthesizer{
-			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
-			},
-		},
-		PodShouldExist:     true,
-		PodShouldBeDeleted: false,
-	},
-	{
-		Name: "three-pods-deleting",
-		Pods: []corev1.Pod{
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					CreationTimestamp: metav1.Now(),
-					DeletionTimestamp: &metav1.Time{Time: time.Now()},
-					Annotations: map[string]string{
-						"eno.azure.io/composition-generation": "2",
-					},
-				},
-			},
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					CreationTimestamp: metav1.Now(),
-					DeletionTimestamp: &metav1.Time{Time: time.Now()},
-					Annotations: map[string]string{
-						"eno.azure.io/composition-generation": "2",
-					},
-				},
-			},
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					CreationTimestamp: metav1.Now(),
-					DeletionTimestamp: &metav1.Time{Time: time.Now()},
-					Annotations: map[string]string{
-						"eno.azure.io/composition-generation": "2",
-					},
-				},
-			},
-		},
-		Composition: &apiv1.Composition{
-			ObjectMeta: metav1.ObjectMeta{
-				Generation: 2,
-			},
-		},
-		Synth: &apiv1.Synthesizer{
-			Spec: apiv1.SynthesizerSpec{
-				PodTimeout: ptr.To(metav1.Duration{Duration: time.Hour}),
-			},
-		},
-		PodShouldExist:     true,
-		PodShouldBeDeleted: false,
-	},
-}
+func TestCheckExistingPods(t *testing.T) {
+	ctx := testutil.NewContext(t)
 
-func TestShouldDeletePod(t *testing.T) {
-	logger := testr.New(t)
+	t.Run("no pods", func(t *testing.T) {
+		cli := testutil.NewClient(t)
+		c := &podLifecycleController{client: cli}
 
-	for _, tc := range shouldDeletePodTests {
-		t.Run(tc.Name, func(t *testing.T) {
-			logger, pod, exists := shouldDeletePod(logger, tc.Composition, tc.Synth, &corev1.PodList{Items: tc.Pods}, time.Minute)
-			assert.Equal(t, tc.PodShouldExist, exists)
-			assert.Equal(t, tc.PodShouldBeDeleted, pod != nil)
-			logger.V(0).Info("logging to see the appended fields for debugging purposes")
+		pods := &corev1.PodList{}
+		comp := &apiv1.Composition{}
+		ok, err := c.safeToCreatePod(ctx, pods, comp)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("one active pod", func(t *testing.T) {
+		cli := testutil.NewClient(t)
+		c := &podLifecycleController{client: cli}
+
+		comp := &apiv1.Composition{
+			Status: apiv1.CompositionStatus{
+				InFlightSynthesis: &apiv1.Synthesis{UUID: "some-uuid"},
+			},
+		}
+		pods := &corev1.PodList{
+			Items: []corev1.Pod{{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"eno.azure.io/synthesis-uuid": comp.Status.InFlightSynthesis.UUID},
+				},
+			}},
+		}
+		ok, err := c.safeToCreatePod(ctx, pods, comp)
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+
+	t.Run("one terminating pod", func(t *testing.T) {
+		cli := testutil.NewClient(t)
+		c := &podLifecycleController{client: cli}
+
+		comp := &apiv1.Composition{
+			Status: apiv1.CompositionStatus{
+				InFlightSynthesis: &apiv1.Synthesis{UUID: "some-uuid"},
+			},
+		}
+		pods := &corev1.PodList{
+			Items: []corev1.Pod{{
+				ObjectMeta: metav1.ObjectMeta{
+					DeletionTimestamp: &metav1.Time{},
+					Labels:            map[string]string{"eno.azure.io/synthesis-uuid": comp.Status.InFlightSynthesis.UUID},
+				},
+			}},
+		}
+		ok, err := c.safeToCreatePod(ctx, pods, comp)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("two terminating pods", func(t *testing.T) {
+		cli := testutil.NewClient(t)
+		c := &podLifecycleController{client: cli}
+
+		comp := &apiv1.Composition{
+			Status: apiv1.CompositionStatus{
+				InFlightSynthesis: &apiv1.Synthesis{UUID: "some-uuid"},
+			},
+		}
+		pods := &corev1.PodList{
+			Items: []corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						DeletionTimestamp: &metav1.Time{},
+						Labels:            map[string]string{"eno.azure.io/synthesis-uuid": comp.Status.InFlightSynthesis.UUID},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						DeletionTimestamp: &metav1.Time{},
+						Labels:            map[string]string{"eno.azure.io/synthesis-uuid": comp.Status.InFlightSynthesis.UUID},
+					},
+				},
+			},
+		}
+		ok, err := c.safeToCreatePod(ctx, pods, comp)
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+
+	t.Run("two active pods", func(t *testing.T) {
+		comp := &apiv1.Composition{
+			Status: apiv1.CompositionStatus{
+				InFlightSynthesis: &apiv1.Synthesis{UUID: "some-uuid"},
+			},
+		}
+		pods := &corev1.PodList{
+			Items: []corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "foo",
+						CreationTimestamp: metav1.NewTime(time.Date(1965, 1, 1, 0, 0, 0, 0, time.UTC)),
+						Labels:            map[string]string{"eno.azure.io/synthesis-uuid": comp.Status.InFlightSynthesis.UUID},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "bar",
+						CreationTimestamp: metav1.NewTime(time.Date(1964, 1, 1, 0, 0, 0, 0, time.UTC)),
+						Labels:            map[string]string{"eno.azure.io/synthesis-uuid": comp.Status.InFlightSynthesis.UUID},
+					},
+				},
+			},
+		}
+		rand.Shuffle(len(pods.Items), func(i, j int) {
+			pods.Items[i], pods.Items[j] = pods.Items[j], pods.Items[i]
 		})
-	}
+
+		cli := testutil.NewClient(t, &pods.Items[0], &pods.Items[1])
+		c := &podLifecycleController{client: cli}
+
+		ok, err := c.safeToCreatePod(ctx, pods, comp)
+		require.NoError(t, err)
+		assert.False(t, ok)
+
+		// The newest dup is deleted
+		assert.Error(t, cli.Get(ctx, types.NamespacedName{Name: "foo"}, &corev1.Pod{}))
+		assert.NoError(t, cli.Get(ctx, types.NamespacedName{Name: "bar"}, &corev1.Pod{}))
+	})
 }
