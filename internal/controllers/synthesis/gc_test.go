@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -53,6 +54,7 @@ func TestPodGCContainerCreationTimeout(t *testing.T) {
 	synth := &apiv1.Synthesizer{}
 	synth.Name = "test-syn"
 	synth.Spec.Image = "test-syn-image"
+	synth.Spec.PodTimeout = &metav1.Duration{Duration: time.Hour}
 	require.NoError(t, cli.Create(ctx, synth))
 
 	comp := &apiv1.Composition{}
@@ -61,12 +63,22 @@ func TestPodGCContainerCreationTimeout(t *testing.T) {
 	comp.Spec.Synthesizer.Name = synth.Name
 	require.NoError(t, cli.Create(ctx, comp))
 
-	comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "anything"}
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "anything"}
+		return cli.Status().Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
 	pod := newPod(minimalTestConfig, comp, synth)
 	require.NoError(t, cli.Create(ctx, pod))
 
-	pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionTrue}}
-	require.NoError(t, cli.Status().Update(ctx, pod))
+	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(pod), pod)
+		pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionTrue}}
+		return cli.Status().Update(ctx, pod)
+	})
+	require.NoError(t, err)
 
 	testutil.Eventually(t, func() bool {
 		return errors.IsNotFound(mgr.GetAPIReader().Get(ctx, client.ObjectKeyFromObject(pod), pod))

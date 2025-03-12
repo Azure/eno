@@ -97,6 +97,10 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, p.deletePod(ctx, pod, logger)
 	}
 
+	if syn.Spec.PodTimeout == nil {
+		return ctrl.Result{RequeueAfter: time.Second}, nil
+	}
+
 	// Timeout
 	age := time.Since(pod.CreationTimestamp.Time)
 	if age > syn.Spec.PodTimeout.Duration {
