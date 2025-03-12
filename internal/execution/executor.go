@@ -141,14 +141,18 @@ func (e *Executor) writeSlices(ctx context.Context, comp *apiv1.Composition, rl 
 	return sliceRefs, nil
 }
 
+// fetchPreviousSlices retrieves the previous slices from the composition's current synthesis status.
+// This function runs before the updateComposition function, which will later swap the current synthesis
+// to become the previous synthesis. Therefore, the resourceslice retrieved from the current synthesis is
+// actually the "previous" resource slices after the update is complete.
 func (e *Executor) fetchPreviousSlices(ctx context.Context, comp *apiv1.Composition) ([]*apiv1.ResourceSlice, error) {
-	if comp.Status.PreviousSynthesis == nil {
+	if comp.Status.CurrentSynthesis == nil {
 		return nil, nil // nothing to fetch
 	}
 	logger := logr.FromContextOrDiscard(ctx)
 
 	slices := []*apiv1.ResourceSlice{}
-	for _, ref := range comp.Status.PreviousSynthesis.ResourceSlices {
+	for _, ref := range comp.Status.CurrentSynthesis.ResourceSlices {
 		slice := &apiv1.ResourceSlice{}
 		slice.Name = ref.Name
 		slice.Namespace = comp.Namespace
