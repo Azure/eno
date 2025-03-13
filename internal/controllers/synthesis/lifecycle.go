@@ -112,7 +112,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	// another tick of this loop before the pod write hits the informer.
 	pods := &corev1.PodList{}
 	err = c.noCacheReader.List(ctx, pods, client.InNamespace(c.config.PodNamespace), client.MatchingLabels{
-		"eno.azure.io/synthesis-uuid": comp.Status.InFlightSynthesis.UUID,
+		synthesisIDLabelKey: comp.Status.InFlightSynthesis.UUID,
 	})
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("checking for existing pod: %w", err)

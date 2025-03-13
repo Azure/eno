@@ -16,6 +16,7 @@ import (
 const (
 	compositionNameLabelKey      = "eno.azure.io/composition-name"
 	compositionNamespaceLabelKey = "eno.azure.io/composition-namespace"
+	synthesisIDLabelKey          = "eno.azure.io/synthesis-uuid"
 )
 
 func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev1.Pod {
@@ -23,10 +24,10 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 	pod.GenerateName = "synthesis-"
 	pod.Namespace = cfg.PodNamespace
 	pod.Labels = map[string]string{
-		compositionNameLabelKey:       comp.Name,
-		compositionNamespaceLabelKey:  comp.Namespace,
-		manager.ManagerLabelKey:       manager.ManagerLabelValue,
-		"eno.azure.io/synthesis-uuid": comp.Status.InFlightSynthesis.UUID,
+		compositionNameLabelKey:      comp.Name,
+		compositionNamespaceLabelKey: comp.Namespace,
+		synthesisIDLabelKey:          comp.Status.InFlightSynthesis.UUID,
+		manager.ManagerLabelKey:      manager.ManagerLabelValue,
 	}
 	for k, v := range syn.Spec.PodOverrides.Labels {
 		pod.Labels[k] = v
@@ -191,7 +192,7 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 }
 
 func podIsCurrent(comp *apiv1.Composition, pod *corev1.Pod) bool {
-	return pod.Labels != nil && comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.UUID == pod.Labels["eno.azure.io/synthesis-uuid"]
+	return pod.Labels != nil && comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.UUID == pod.Labels[synthesisIDLabelKey]
 }
 
 // filterEnv returns env taking out any items that have the same name as
