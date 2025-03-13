@@ -3,7 +3,7 @@ package resourceslice
 import (
 	"context"
 	"fmt"
-	"reflect"
+	"slices"
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -11,7 +11,7 @@ import (
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -25,7 +25,7 @@ type cleanupController struct {
 func NewCleanupController(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.ResourceSlice{}).
-		Watches(&apiv1.Composition{}, manager.NewCompositionToResourceSliceHandler(mgr.GetClient())).
+		Watches(&apiv1.Composition{}, manager.NewCompositionToResourceSliceHandler(mgr.GetClient())). // TODO: Filter, avoid index?
 		WithLogConstructor(manager.NewLogConstructor(mgr, "sliceCleanupController")).
 		Complete(&cleanupController{
 			client:        mgr.GetClient(),
@@ -41,173 +41,80 @@ func (c *cleanupController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting resource slice: %w", err))
 	}
+	logger = logger.WithValues("synthesisUUID", slice.Spec.SynthesisUUID)
 
 	owner := metav1.GetControllerOf(slice)
 	if owner != nil {
 		logger = logger.WithValues("compositionName", owner.Name, "compositionNamespace", req.Namespace)
 	}
 
-	decision, err := c.buildCleanupDecision(ctx, slice, owner)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("building cleanup decision: %w", err)
-	}
-	if decision.DeferBy != nil {
-		return ctrl.Result{RequeueAfter: *decision.DeferBy}, nil
-	}
-
-	if slice.DeletionTimestamp != nil || owner == nil {
-		if decision.HoldFinalizer {
-			return ctrl.Result{}, nil
-		}
-		if !controllerutil.RemoveFinalizer(slice, "eno.azure.io/cleanup") {
-			return ctrl.Result{}, nil // nothing to do - just wait for apiserver to delete
-		}
+	// Remove any old finalizers - resource slices don't use them any more
+	if controllerutil.RemoveFinalizer(slice, "eno.azure.io/cleanup") {
+		// TODO: test
 		if err := c.client.Update(ctx, slice); err != nil {
 			return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
 		}
-
-		logger.V(0).Info("released unused resource slice")
-		return ctrl.Result{}, nil
-	}
-	if decision.DoNotDelete {
+		logger.V(0).Info("removed old resource slice finalizer")
 		return ctrl.Result{}, nil
 	}
 
-	if err := c.client.Delete(ctx, slice); err != nil {
+	// Don't bother checking on brand new resource slices
+	if delta := time.Since(slice.CreationTimestamp.Time); delta < 5*time.Second {
+		// TODO: test
+		return ctrl.Result{RequeueAfter: delta}, nil
+	}
+
+	del, err := c.shouldDelete(ctx, c.client, slice, owner)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("checking if resource slice should be deleted (cached): %w", err)
+	}
+	if !del {
+		return ctrl.Result{}, nil // fail safe for stale cache
+	}
+
+	del, err = c.shouldDelete(ctx, c.noCacheReader, slice, owner)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("checking if resource slice should be deleted: %w", err)
+	}
+	if !del {
+		return ctrl.Result{}, nil
+	}
+
+	if err := c.client.Delete(ctx, slice, &client.Preconditions{UID: &slice.UID}); err != nil {
 		return ctrl.Result{}, fmt.Errorf("deleting resource slice: %w", err)
 	}
-	logger.V(0).Info("deleted unused resource slice")
+	logger.V(0).Info("deleted unused resource slice", "age", time.Since(slice.CreationTimestamp.Time).Milliseconds())
+
 	return ctrl.Result{}, nil
 }
 
-func (c *cleanupController) buildCleanupDecision(ctx context.Context, slice *apiv1.ResourceSlice, owner *metav1.OwnerReference) (cleanupDecision, error) {
-	logger := logr.FromContextOrDiscard(ctx)
-	if owner == nil {
-		logger.V(1).Info("resource slice can be deleted because it does not have an owner")
-		return cleanupDecision{}, nil // delete
-	}
-
-	// Bail out early if the cache suggests that we shouldn't delete the resource slice
-	informerDecision, err := checkCompositionState(ctx, c.client, slice, owner)
-	if err != nil {
-		return cleanupDecision{}, err
-	}
-	if informerDecision.DoNotDelete && informerDecision.HoldFinalizer {
-		return informerDecision, nil
-	}
-
-	// Don't run the actual (non-cached) check if the resource is too new - the cache is probably just stale
-	// This is not intended to improve safety, only to reduce the number of unnecessary gets to apiserver
-	age := time.Since(slice.CreationTimestamp.Time)
-	const threshold = time.Second * 5
-	if age < threshold {
-		logger.V(1).Info("refusing to delete resource slice because it's too new", "age", age.Milliseconds())
-		return cleanupDecision{DeferBy: ptr.To(threshold - age)}, nil
-	}
-
-	// Check the state against apiserver without any caching before making a final decision
-	apiDecision, err := checkCompositionState(ctx, c.noCacheReader, slice, owner)
-	if err != nil {
-		return cleanupDecision{}, err
-	}
-	if !reflect.DeepEqual(informerDecision, apiDecision) {
-		// We trust the apiserver decision even if it doesn't align with the cache,
-		// although this is should rarely happen and might be reason for concern
-		logger.Info("cleanup decisions derived from informer cache and non-caching client do not agree!", "cache", informerDecision.String(), "noCache", apiDecision.String())
-	}
-
-	return apiDecision, nil
-}
-
-func checkCompositionState(ctx context.Context, reader client.Reader, slice *apiv1.ResourceSlice, owner *metav1.OwnerReference) (cleanupDecision, error) {
+func (c *cleanupController) shouldDelete(ctx context.Context, reader client.Reader, slice *apiv1.ResourceSlice, ref *metav1.OwnerReference) (bool, error) {
 	comp := &apiv1.Composition{}
-	comp.Name = owner.Name
-	comp.Namespace = slice.Namespace
-	err := reader.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+	err := reader.Get(ctx, types.NamespacedName{Name: ref.Name, Namespace: slice.Namespace}, comp)
 	if errors.IsNotFound(err) {
-		return cleanupDecision{}, nil // delete
+		return true, nil
 	}
 	if err != nil {
-		return cleanupDecision{}, fmt.Errorf("getting composition: %w", err)
-	}
-	return cleanupDecision{
-		DoNotDelete:   !shouldDeleteSlice(comp, slice),
-		HoldFinalizer: !shouldReleaseSliceFinalizer(comp, slice),
-	}, nil
-}
-
-type cleanupDecision struct {
-	DoNotDelete   bool
-	HoldFinalizer bool
-	DeferBy       *time.Duration
-}
-
-func (c *cleanupDecision) String() string {
-	return fmt.Sprintf("DoNotDelete=%t,HoldFinalizer=%t", c.DoNotDelete, c.HoldFinalizer)
-}
-
-func shouldDeleteSlice(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
-	var synthesizedGeneration int64
-	if comp.Status.InFlightSynthesis != nil {
-		synthesizedGeneration = comp.Status.InFlightSynthesis.ObservedCompositionGeneration
-	} else if comp.Status.CurrentSynthesis != nil {
-		synthesizedGeneration = comp.Status.CurrentSynthesis.ObservedCompositionGeneration
-	}
-	if slice.Spec.CompositionGeneration > synthesizedGeneration {
-		return false // stale informer
+		return false, fmt.Errorf("getting composition: %w", err)
 	}
 
-	var (
-		hasBeenRetried     = slice.Spec.Attempt != 0 && comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.Attempts > slice.Spec.Attempt && slice.Spec.SynthesisUUID == comp.Status.InFlightSynthesis.UUID
-		isReferencedByComp = synthesisReferencesSlice(comp.Status.InFlightSynthesis, slice) || synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) || synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice)
-		isSynthesized      = comp.Status.CurrentSynthesis != nil
-		compIsDeleted      = comp.DeletionTimestamp != nil
-		fromOldComposition = comp.Status.CurrentSynthesis == nil || slice.Spec.CompositionGeneration < comp.Status.CurrentSynthesis.ObservedCompositionGeneration
-	)
-
-	// We can only safely delete resource slices when either:
-	// - Another retry of the same synthesis has already started
-	// - Synthesis is complete and the composition is being deleted
-	// - The slice was derived from an older composition
-	return hasBeenRetried || (isSynthesized && compIsDeleted) || (!isReferencedByComp && fromOldComposition)
-}
-
-func shouldReleaseSliceFinalizer(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
-	var synthesizedGeneration int64
-	if comp.Status.InFlightSynthesis != nil {
-		synthesizedGeneration = comp.Status.InFlightSynthesis.ObservedCompositionGeneration
-	} else if comp.Status.CurrentSynthesis != nil {
-		synthesizedGeneration = comp.Status.CurrentSynthesis.ObservedCompositionGeneration
+	// Don't delete slices that are part of an active synthesis
+	if comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.UUID == slice.Spec.SynthesisUUID {
+		return false, nil
 	}
-	if slice.Spec.CompositionGeneration > synthesizedGeneration {
-		return false // stale informer
-	}
-	isOutdated := slice.Spec.Attempt != 0 && comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.Attempts > slice.Spec.Attempt
-	isSynthesized := comp.Status.CurrentSynthesis != nil
-	return isOutdated || (isSynthesized && (!resourcesRemain(comp, slice) || (!synthesisReferencesSlice(comp.Status.InFlightSynthesis, slice) && !synthesisReferencesSlice(comp.Status.CurrentSynthesis, slice) && !synthesisReferencesSlice(comp.Status.PreviousSynthesis, slice))))
-}
 
-func synthesisReferencesSlice(syn *apiv1.Synthesis, slice *apiv1.ResourceSlice) bool {
-	if syn == nil {
-		return false
-	}
-	for _, ref := range syn.ResourceSlices {
-		if ref.Name == slice.Name {
-			return true // referenced by the composition
+	// Check resource slice references
+	for _, syn := range []*apiv1.Synthesis{comp.Status.CurrentSynthesis, comp.Status.PreviousSynthesis} {
+		if syn == nil {
+			continue
+		}
+		idx := slices.IndexFunc(syn.ResourceSlices, func(ref *apiv1.ResourceSliceRef) bool {
+			return ref.Name == slice.Name
+		})
+		if idx != -1 {
+			return false, nil
 		}
 	}
-	return false
-}
 
-func resourcesRemain(comp *apiv1.Composition, slice *apiv1.ResourceSlice) bool {
-	if len(slice.Status.Resources) == 0 && len(slice.Spec.Resources) > 0 {
-		return true // status is lagging behind
-	}
-	shouldOrphan := comp != nil && comp.ShouldOrphanResources()
-	for _, state := range slice.Status.Resources {
-		if !state.Deleted && !shouldOrphan {
-			return true
-		}
-	}
-	return false
+	return true, nil
 }
