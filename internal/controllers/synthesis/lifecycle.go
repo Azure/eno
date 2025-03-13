@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
@@ -51,9 +52,28 @@ func NewPodLifecycleController(mgr ctrl.Manager, cfg *Config) error {
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
-		Watches(&corev1.Pod{}, newPodDeletionHandler()).
+		WatchesRawSource(source.TypedKind[*corev1.Pod](mgr.GetCache(), &corev1.Pod{}, c.newPodEventHandler())).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "podLifecycleController")).
 		Complete(c)
+}
+
+func (c *podLifecycleController) newPodEventHandler() handler.TypedEventHandler[*corev1.Pod, reconcile.Request] {
+	return &handler.TypedFuncs[*corev1.Pod, reconcile.Request]{
+		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*corev1.Pod], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+		},
+		UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*corev1.Pod], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+		},
+		DeleteFunc: func(ctx context.Context, e event.TypedDeleteEvent[*corev1.Pod], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			if e.DeleteStateUnknown || e.Object.Labels == nil {
+				return
+			}
+			nsn := types.NamespacedName{
+				Name:      e.Object.GetLabels()[compositionNameLabelKey],
+				Namespace: e.Object.GetLabels()[compositionNamespaceLabelKey],
+			}
+			q.Add(reconcile.Request{NamespacedName: nsn})
+		},
+	}
 }
 
 func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -201,24 +221,4 @@ func shouldUpdateDeletedCompositionStatus(comp *apiv1.Composition) bool {
 
 func isReconciling(comp *apiv1.Composition) bool {
 	return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled == nil
-}
-
-func newPodDeletionHandler() handler.Funcs {
-	return handler.Funcs{
-		CreateFunc: func(ctx context.Context, tce event.TypedCreateEvent[client.Object], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-		},
-		UpdateFunc: func(ctx context.Context, tue event.TypedUpdateEvent[client.Object], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-		},
-		DeleteFunc: func(ctx context.Context, tde event.TypedDeleteEvent[client.Object], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			pod, ok := tde.Object.(*corev1.Pod)
-			if !ok || pod.Labels == nil || tde.DeleteStateUnknown {
-				return
-			}
-			nsn := types.NamespacedName{
-				Name:      pod.GetLabels()[compositionNameLabelKey],
-				Namespace: pod.GetLabels()[compositionNamespaceLabelKey],
-			}
-			q.Add(reconcile.Request{NamespacedName: nsn})
-		},
-	}
 }
