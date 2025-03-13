@@ -17,23 +17,23 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-type sliceCleanupController struct {
+type cleanupController struct {
 	client        client.Client
 	noCacheReader client.Reader
 }
 
-func NewSliceCleanupController(mgr ctrl.Manager) error {
+func NewCleanupController(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.ResourceSlice{}).
 		Watches(&apiv1.Composition{}, manager.NewCompositionToResourceSliceHandler(mgr.GetClient())).
-		WithLogConstructor(manager.NewLogConstructor(mgr, "resourceSliceCleanupController")).
-		Complete(&sliceCleanupController{
+		WithLogConstructor(manager.NewLogConstructor(mgr, "sliceCleanupController")).
+		Complete(&cleanupController{
 			client:        mgr.GetClient(),
 			noCacheReader: mgr.GetAPIReader(),
 		})
 }
 
-func (c *sliceCleanupController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (c *cleanupController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx).WithValues("resourceSliceName", req.Name, "resourceSliceNamespace", req.Namespace)
 
 	slice := &apiv1.ResourceSlice{}
@@ -80,7 +80,7 @@ func (c *sliceCleanupController) Reconcile(ctx context.Context, req ctrl.Request
 	return ctrl.Result{}, nil
 }
 
-func (c *sliceCleanupController) buildCleanupDecision(ctx context.Context, slice *apiv1.ResourceSlice, owner *metav1.OwnerReference) (cleanupDecision, error) {
+func (c *cleanupController) buildCleanupDecision(ctx context.Context, slice *apiv1.ResourceSlice, owner *metav1.OwnerReference) (cleanupDecision, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 	if owner == nil {
 		logger.V(1).Info("resource slice can be deleted because it does not have an owner")

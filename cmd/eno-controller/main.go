@@ -107,11 +107,6 @@ func runController() error {
 		return fmt.Errorf("constructing pod lifecycle controller: %w", err)
 	}
 
-	err = synthesis.NewSliceCleanupController(mgr)
-	if err != nil {
-		return fmt.Errorf("constructing resource slice cleanup controller: %w", err)
-	}
-
 	err = synthesis.NewPodGC(mgr, containerCreationTimeout)
 	if err != nil {
 		return fmt.Errorf("constructing pod garbage collector: %w", err)
@@ -135,6 +130,11 @@ func runController() error {
 	err = resourceslice.NewController(mgr)
 	if err != nil {
 		return fmt.Errorf("constructing resource slice controller: %w", err)
+	}
+
+	err = resourceslice.NewCleanupController(mgr)
+	if err != nil {
+		return fmt.Errorf("constructing resource slice cleanup controller: %w", err)
 	}
 
 	err = watch.NewController(mgr)

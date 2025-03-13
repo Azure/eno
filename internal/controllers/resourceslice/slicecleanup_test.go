@@ -22,7 +22,7 @@ import (
 func TestSliceCleanupControllerOrphanedSlice(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
-	require.NoError(t, NewSliceCleanupController(mgr.Manager))
+	require.NoError(t, NewCleanupController(mgr.Manager))
 	mgr.Start(t)
 
 	comp := &apiv1.Composition{}
@@ -429,7 +429,7 @@ func TestShouldDeleteSlice(t *testing.T) {
 
 func TestBuildCleanupDecision_StaleCache(t *testing.T) {
 	ctx := testutil.NewContext(t)
-	c := &sliceCleanupController{}
+	c := &cleanupController{}
 
 	staleComp := &apiv1.Composition{}
 	staleComp.Name = "test-comp"
