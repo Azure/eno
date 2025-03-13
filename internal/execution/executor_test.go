@@ -55,11 +55,11 @@ func TestBasics(t *testing.T) {
 				Object: map[string]any{
 					"apiVersion": "v1",
 					"kind":       "ConfigMap",
-					"metadata": map[string]string{
+					"metadata": map[string]any{
 						"name":      "test",
 						"namespace": "default",
 					},
-					"data": map[string]string{"foo": "bar"},
+					"data": map[string]any{"foo": "bar"},
 				},
 			}
 			return &krmv1.ResourceList{
@@ -166,11 +166,11 @@ func TestWithInputs(t *testing.T) {
 				Object: map[string]any{
 					"apiVersion": "v1",
 					"kind":       "ConfigMap",
-					"metadata": map[string]string{
+					"metadata": map[string]any{
 						"name":      "test",
 						"namespace": "default",
 					},
-					"data": map[string]string{"foo": "bar"},
+					"data": map[string]any{"foo": "bar"},
 				},
 			}
 			return &krmv1.ResourceList{Items: []*unstructured.Unstructured{out}}, nil
@@ -243,11 +243,11 @@ func TestWithVersionedInput(t *testing.T) {
 				Object: map[string]any{
 					"apiVersion": "v1",
 					"kind":       "ConfigMap",
-					"metadata": map[string]string{
+					"metadata": map[string]any{
 						"name":      "test",
 						"namespace": "default",
 					},
-					"data": map[string]string{"foo": "bar"},
+					"data": map[string]any{"foo": "bar"},
 				},
 			}
 			return &krmv1.ResourceList{Items: []*unstructured.Unstructured{out}}, nil
@@ -302,11 +302,11 @@ func TestUUIDMismatch(t *testing.T) {
 				Object: map[string]any{
 					"apiVersion": "v1",
 					"kind":       "ConfigMap",
-					"metadata": map[string]string{
+					"metadata": map[string]any{
 						"name":      "test",
 						"namespace": "default",
 					},
-					"data": map[string]string{"foo": "bar"},
+					"data": map[string]any{"foo": "bar"},
 				},
 			}
 			return &krmv1.ResourceList{
@@ -383,11 +383,11 @@ func TestCompletionMismatchDuringSynthesis(t *testing.T) {
 				Object: map[string]any{
 					"apiVersion": "v1",
 					"kind":       "ConfigMap",
-					"metadata": map[string]string{
+					"metadata": map[string]any{
 						"name":      "test",
 						"namespace": "default",
 					},
-					"data": map[string]string{"foo": "bar"},
+					"data": map[string]any{"foo": "bar"},
 				},
 			}
 			return &krmv1.ResourceList{
