@@ -58,8 +58,8 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// GC pods from deleted compositions
 	comp := &apiv1.Composition{}
-	comp.Name = pod.GetLabels()[manager.CompositionNameLabelKey]
-	comp.Namespace = pod.GetLabels()[manager.CompositionNamespaceLabelKey]
+	comp.Name = pod.GetLabels()[compositionNameLabelKey]
+	comp.Namespace = pod.GetLabels()[compositionNamespaceLabelKey]
 	err = p.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
 	if errors.IsNotFound(err) || comp.DeletionTimestamp != nil {
@@ -85,7 +85,7 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Pods from old syntheses
 	if !podIsCurrent(comp, pod) {
-		const gracePeriod = 250 * time.Millisecond
+		const gracePeriod = time.Second
 
 		// Ignore brand new pods since the pod/composition informer might not be in sync
 		delta := gracePeriod - time.Since(pod.CreationTimestamp.Time)

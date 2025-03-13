@@ -155,13 +155,6 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 	}
 
 	if isController {
-		err = mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Pod{}, IdxPodsByComposition, func(o client.Object) []string {
-			return []string{PodByCompIdxValueFromPod(o)}
-		})
-		if err != nil {
-			return nil, err
-		}
-
 		err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.Composition{}, IdxCompositionsBySynthesizer, func(o client.Object) []string {
 			comp := o.(*apiv1.Composition)
 			return []string{comp.Spec.Synthesizer.Name}

@@ -13,15 +13,20 @@ import (
 	"github.com/Azure/eno/internal/manager"
 )
 
+const (
+	compositionNameLabelKey      = "eno.azure.io/composition-name"
+	compositionNamespaceLabelKey = "eno.azure.io/composition-namespace"
+)
+
 func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev1.Pod {
 	pod := &corev1.Pod{}
 	pod.GenerateName = "synthesis-"
 	pod.Namespace = cfg.PodNamespace
 	pod.Labels = map[string]string{
-		manager.CompositionNameLabelKey:      comp.Name,
-		manager.CompositionNamespaceLabelKey: comp.Namespace,
-		manager.ManagerLabelKey:              manager.ManagerLabelValue,
-		"eno.azure.io/synthesis-uuid":        comp.Status.InFlightSynthesis.UUID,
+		compositionNameLabelKey:       comp.Name,
+		compositionNamespaceLabelKey:  comp.Namespace,
+		manager.ManagerLabelKey:       manager.ManagerLabelValue,
+		"eno.azure.io/synthesis-uuid": comp.Status.InFlightSynthesis.UUID,
 	}
 	for k, v := range syn.Spec.PodOverrides.Labels {
 		pod.Labels[k] = v

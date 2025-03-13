@@ -6,7 +6,6 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/manager"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/Azure/eno/internal/testutil/statespace"
 	"github.com/stretchr/testify/require"
@@ -122,7 +121,7 @@ func TestPodGCDoesNotPanic(t *testing.T) {
 		}).
 		WithMutation("missing name label", func(pg *podGCState) *podGCState {
 			if pg.Pod.Labels != nil {
-				delete(pg.Pod.Labels, manager.CompositionNameLabelKey)
+				delete(pg.Pod.Labels, compositionNameLabelKey)
 			}
 			return pg
 		}).

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -12,11 +11,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
@@ -49,7 +51,7 @@ func NewPodLifecycleController(mgr ctrl.Manager, cfg *Config) error {
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
-		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(manager.PodToCompMapFunc)).
+		Watches(&corev1.Pod{}, newPodDeletionHandler()).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "podLifecycleController")).
 		Complete(c)
 }
@@ -94,23 +96,6 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
 	}
 
-	pods := &corev1.PodList{}
-	err = c.client.List(ctx, pods, client.InNamespace(c.config.PodNamespace), client.MatchingFields{
-		manager.IdxPodsByComposition: manager.PodByCompIdxValueFromComp(comp),
-	})
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("listing pods: %w", err)
-	}
-
-	ctx = logr.NewContext(ctx, logger)
-	ok, err := c.safeToCreatePod(ctx, pods, comp)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	if !ok {
-		return ctrl.Result{}, nil
-	}
-
 	// Back off to avoid constantly re-synthesizing impossible compositions (unlikely but possible)
 	if shouldBackOffPodCreation(comp) {
 		const base = time.Millisecond * 250
@@ -125,6 +110,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	// Confirm that a pod doesn't already exist for this synthesis without trusting informers.
 	// This protects against cases where synthesis has recently started and something causes
 	// another tick of this loop before the pod write hits the informer.
+	pods := &corev1.PodList{}
 	err = c.noCacheReader.List(ctx, pods, client.InNamespace(c.config.PodNamespace), client.MatchingLabels{
 		"eno.azure.io/synthesis-uuid": comp.Status.InFlightSynthesis.UUID,
 	})
@@ -164,41 +150,6 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	return ctrl.Result{}, nil
-}
-
-// safeToCreatePod returns true when it is safe to create a new synthesizer pod.
-func (c *podLifecycleController) safeToCreatePod(ctx context.Context, pods *corev1.PodList, comp *apiv1.Composition) (bool, error) {
-	logger := logr.FromContextOrDiscard(ctx)
-	sort.Slice(pods.Items, func(i, j int) bool { return pods.Items[i].CreationTimestamp.Before(&pods.Items[j].CreationTimestamp) })
-
-	var active bool
-	var deleting bool
-	for _, pod := range pods.Items {
-		if pod.DeletionTimestamp != nil {
-			if !deleting {
-				deleting = true
-				continue
-			}
-			return false, nil // don't create new pod if two are deleting
-		}
-
-		if podIsCurrent(comp, &pod) {
-			if !active {
-				active = true
-				continue
-			}
-
-			// Clean up any dupes
-			err := c.client.Delete(ctx, &pod)
-			if err != nil {
-				return false, fmt.Errorf("deleting duplicate synthesizer pod: %w", err)
-			}
-			logger.V(1).Info("deleting duplicate synthesizer pod", "podName", pod.Name)
-			return false, nil
-		}
-	}
-
-	return !active, nil // don't create pod when one is already active
 }
 
 func (c *podLifecycleController) reconcileDeletedComposition(ctx context.Context, comp *apiv1.Composition) (ctrl.Result, error) {
@@ -252,15 +203,22 @@ func isReconciling(comp *apiv1.Composition) bool {
 	return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled == nil
 }
 
-func getPodScheduledTime(pod *corev1.Pod) *time.Time {
-	for _, cond := range pod.Status.Conditions {
-		if cond.Type != corev1.PodScheduled {
-			continue
-		}
-		if cond.Status == corev1.ConditionFalse {
-			return nil
-		}
-		return &cond.LastTransitionTime.Time
+func newPodDeletionHandler() handler.Funcs {
+	return handler.Funcs{
+		CreateFunc: func(ctx context.Context, tce event.TypedCreateEvent[client.Object], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+		},
+		UpdateFunc: func(ctx context.Context, tue event.TypedUpdateEvent[client.Object], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+		},
+		DeleteFunc: func(ctx context.Context, tde event.TypedDeleteEvent[client.Object], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			pod, ok := tde.Object.(*corev1.Pod)
+			if !ok || pod.Labels == nil || tde.DeleteStateUnknown {
+				return
+			}
+			nsn := types.NamespacedName{
+				Name:      pod.GetLabels()[compositionNameLabelKey],
+				Namespace: pod.GetLabels()[compositionNamespaceLabelKey],
+			}
+			q.Add(reconcile.Request{NamespacedName: nsn})
+		},
 	}
-	return nil
 }

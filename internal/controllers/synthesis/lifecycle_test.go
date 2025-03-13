@@ -2,7 +2,6 @@ package synthesis
 
 import (
 	"context"
-	"math/rand/v2"
 	"testing"
 	"time"
 
@@ -12,7 +11,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -129,133 +127,5 @@ func TestNonExistentComposition(t *testing.T) {
 	testutil.Eventually(t, func() bool {
 		err := cli.Get(ctx, pnn, pod)
 		return errors.IsNotFound(err)
-	})
-}
-
-func TestCheckExistingPods(t *testing.T) {
-	ctx := testutil.NewContext(t)
-
-	t.Run("no pods", func(t *testing.T) {
-		cli := testutil.NewClient(t)
-		c := &podLifecycleController{client: cli}
-
-		pods := &corev1.PodList{}
-		comp := &apiv1.Composition{}
-		ok, err := c.safeToCreatePod(ctx, pods, comp)
-		require.NoError(t, err)
-		assert.True(t, ok)
-	})
-
-	t.Run("one active pod", func(t *testing.T) {
-		cli := testutil.NewClient(t)
-		c := &podLifecycleController{client: cli}
-
-		comp := &apiv1.Composition{
-			Status: apiv1.CompositionStatus{
-				InFlightSynthesis: &apiv1.Synthesis{UUID: "some-uuid"},
-			},
-		}
-		pods := &corev1.PodList{
-			Items: []corev1.Pod{{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{"eno.azure.io/synthesis-uuid": comp.Status.InFlightSynthesis.UUID},
-				},
-			}},
-		}
-		ok, err := c.safeToCreatePod(ctx, pods, comp)
-		require.NoError(t, err)
-		assert.False(t, ok)
-	})
-
-	t.Run("one terminating pod", func(t *testing.T) {
-		cli := testutil.NewClient(t)
-		c := &podLifecycleController{client: cli}
-
-		comp := &apiv1.Composition{
-			Status: apiv1.CompositionStatus{
-				InFlightSynthesis: &apiv1.Synthesis{UUID: "some-uuid"},
-			},
-		}
-		pods := &corev1.PodList{
-			Items: []corev1.Pod{{
-				ObjectMeta: metav1.ObjectMeta{
-					DeletionTimestamp: &metav1.Time{},
-					Labels:            map[string]string{"eno.azure.io/synthesis-uuid": comp.Status.InFlightSynthesis.UUID},
-				},
-			}},
-		}
-		ok, err := c.safeToCreatePod(ctx, pods, comp)
-		require.NoError(t, err)
-		assert.True(t, ok)
-	})
-
-	t.Run("two terminating pods", func(t *testing.T) {
-		cli := testutil.NewClient(t)
-		c := &podLifecycleController{client: cli}
-
-		comp := &apiv1.Composition{
-			Status: apiv1.CompositionStatus{
-				InFlightSynthesis: &apiv1.Synthesis{UUID: "some-uuid"},
-			},
-		}
-		pods := &corev1.PodList{
-			Items: []corev1.Pod{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						DeletionTimestamp: &metav1.Time{},
-						Labels:            map[string]string{"eno.azure.io/synthesis-uuid": comp.Status.InFlightSynthesis.UUID},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						DeletionTimestamp: &metav1.Time{},
-						Labels:            map[string]string{"eno.azure.io/synthesis-uuid": comp.Status.InFlightSynthesis.UUID},
-					},
-				},
-			},
-		}
-		ok, err := c.safeToCreatePod(ctx, pods, comp)
-		require.NoError(t, err)
-		assert.False(t, ok)
-	})
-
-	t.Run("two active pods", func(t *testing.T) {
-		comp := &apiv1.Composition{
-			Status: apiv1.CompositionStatus{
-				InFlightSynthesis: &apiv1.Synthesis{UUID: "some-uuid"},
-			},
-		}
-		pods := &corev1.PodList{
-			Items: []corev1.Pod{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:              "foo",
-						CreationTimestamp: metav1.NewTime(time.Date(1965, 1, 1, 0, 0, 0, 0, time.UTC)),
-						Labels:            map[string]string{"eno.azure.io/synthesis-uuid": comp.Status.InFlightSynthesis.UUID},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:              "bar",
-						CreationTimestamp: metav1.NewTime(time.Date(1964, 1, 1, 0, 0, 0, 0, time.UTC)),
-						Labels:            map[string]string{"eno.azure.io/synthesis-uuid": comp.Status.InFlightSynthesis.UUID},
-					},
-				},
-			},
-		}
-		rand.Shuffle(len(pods.Items), func(i, j int) {
-			pods.Items[i], pods.Items[j] = pods.Items[j], pods.Items[i]
-		})
-
-		cli := testutil.NewClient(t, &pods.Items[0], &pods.Items[1])
-		c := &podLifecycleController{client: cli}
-
-		ok, err := c.safeToCreatePod(ctx, pods, comp)
-		require.NoError(t, err)
-		assert.False(t, ok)
-
-		// The newest dup is deleted
-		assert.Error(t, cli.Get(ctx, types.NamespacedName{Name: "foo"}, &corev1.Pod{}))
-		assert.NoError(t, cli.Get(ctx, types.NamespacedName{Name: "bar"}, &corev1.Pod{}))
 	})
 }
