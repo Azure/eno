@@ -2,6 +2,8 @@ package execution
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -401,4 +403,122 @@ func TestCompletionMismatchDuringSynthesis(t *testing.T) {
 	err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 	require.NoError(t, err)
 	assert.Equal(t, originalSynthTime, *comp.Status.InFlightSynthesis.Synthesized)
+}
+
+// TestDeleteResource verifies any resources that were previously created
+// but are no longer included in the executor's output will be deleted.
+func TestDeleteResource(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	require.NoError(t, apiv1.SchemeBuilder.AddToScheme(scheme))
+
+	cli := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&apiv1.ResourceSlice{}, &apiv1.Composition{}).
+		Build()
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-synth"
+	err := cli.Create(ctx, syn)
+	require.NoError(t, err)
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	err = cli.Create(ctx, comp)
+	require.NoError(t, err)
+
+	comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+	err = cli.Status().Update(ctx, comp)
+	require.NoError(t, err)
+
+	env := &Env{
+		CompositionName:      comp.Name,
+		CompositionNamespace: comp.Namespace,
+		SynthesisUUID:        comp.Status.InFlightSynthesis.UUID,
+	}
+	e := &Executor{
+		Reader: cli,
+		Writer: cli,
+		Handler: func(ctx context.Context, s *apiv1.Synthesizer, rl *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+			out := &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "test",
+						"namespace": "default",
+					},
+					"data": map[string]any{"foo": "bar"},
+				},
+			}
+			out2 := &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "test2",
+						"namespace": "default",
+					},
+					"data": map[string]any{"foo": "bar"},
+				},
+			}
+			return &krmv1.ResourceList{
+				Items:   []*unstructured.Unstructured{out, out2},
+				Results: []*krmv1.Result{{Message: "foo", Severity: "error"}},
+			}, nil
+		},
+	}
+
+	err = e.Synthesize(ctx, env)
+	require.NoError(t, err)
+
+	// remove test2 configmap
+	e.Handler = func(ctx context.Context, s *apiv1.Synthesizer, rl *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		out := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test",
+					"namespace": "default",
+				},
+				"data": map[string]any{"foo": "bar"},
+			},
+		}
+		return &krmv1.ResourceList{
+			Items:   []*unstructured.Unstructured{out},
+			Results: []*krmv1.Result{{Message: "foo", Severity: "error"}},
+		}, nil
+	}
+
+	// Set InFlightSynthesis for the second synthesis
+	err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+	require.NoError(t, err)
+	comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "test-uuid-2"}
+	err = cli.Status().Update(ctx, comp)
+	require.NoError(t, err)
+
+	// Resynthesize with only one configmap in output.
+	env.SynthesisUUID = comp.Status.InFlightSynthesis.UUID
+	err = e.Synthesize(ctx, env)
+	require.NoError(t, err)
+
+	// Get current synthesis's resource slice
+	err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+	assert.NoError(t, err)
+	rs := &apiv1.ResourceSlice{}
+	rs.Name = comp.Status.CurrentSynthesis.ResourceSlices[0].Name
+	rs.Namespace = comp.Namespace
+	err = cli.Get(ctx, client.ObjectKeyFromObject(rs), rs)
+	assert.NoError(t, err)
+
+	// Check resource slice and should find resource removed from output is marked as deleted
+	deletedIdx := slices.IndexFunc(rs.Spec.Resources, func(resource apiv1.Manifest) bool {
+		return strings.Contains(resource.Manifest, "test2")
+	})
+
+	assert.NotEqual(t, -1, deletedIdx)
+	assert.Equal(t, rs.Spec.Resources[deletedIdx].Deleted, true)
 }
