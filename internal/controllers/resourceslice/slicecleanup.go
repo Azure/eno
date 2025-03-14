@@ -48,7 +48,7 @@ func (c *cleanupController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		logger = logger.WithValues("compositionName", owner.Name, "compositionNamespace", req.Namespace)
 	}
 
-	// Remove any old finalizers - resource slices don't use them any more
+	// Remove any old finalizers - resource slices don't use them any more because they aren't necessary
 	if controllerutil.ContainsFinalizer(slice, "eno.azure.io/cleanup") {
 		fullSlice := &apiv1.ResourceSlice{}
 		if err := c.noCacheReader.Get(ctx, client.ObjectKeyFromObject(slice), fullSlice); err != nil {
@@ -66,7 +66,6 @@ func (c *cleanupController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// Don't bother checking on brand new resource slices
 	if delta := time.Since(slice.CreationTimestamp.Time); delta < 5*time.Second {
-		// TODO: test
 		return ctrl.Result{RequeueAfter: delta}, nil
 	}
 
@@ -98,7 +97,7 @@ func (c *cleanupController) shouldDelete(ctx context.Context, reader client.Read
 	comp := &apiv1.Composition{}
 	err := reader.Get(ctx, types.NamespacedName{Name: ref.Name, Namespace: slice.Namespace}, comp)
 	if errors.IsNotFound(err) {
-		return true, nil
+		return false, nil // let the k8s GC controller handle it
 	}
 	if err != nil {
 		return false, fmt.Errorf("getting composition: %w", err)

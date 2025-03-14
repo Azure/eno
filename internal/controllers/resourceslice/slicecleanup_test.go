@@ -3,8 +3,10 @@ package resourceslice
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -104,7 +106,7 @@ func TestSliceCleanupMissingComp(t *testing.T) {
 
 	_, err := c.Reconcile(ctx, req)
 	require.NoError(t, err)
-	require.True(t, errors.IsNotFound(cli.Get(ctx, client.ObjectKeyFromObject(slice), slice)))
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(slice), slice))
 }
 
 func TestSliceCleanupStaleCache(t *testing.T) {
@@ -162,4 +164,30 @@ func TestSliceCleanupStaleCache(t *testing.T) {
 	_, err = c.Reconcile(ctx, req)
 	require.NoError(t, err)
 	require.True(t, errors.IsNotFound(cli.Get(ctx, client.ObjectKeyFromObject(slice), slice)))
+}
+
+func TestSliceCleanupSliceTooNew(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+	c := cleanupController{client: cli, noCacheReader: cli}
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-1"
+	comp.Namespace = "default"
+	require.NoError(t, cli.Create(ctx, comp))
+
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-1"
+	slice.Namespace = comp.Namespace
+	slice.Spec.SynthesisUUID = "test-uuid"
+	slice.CreationTimestamp = metav1.Now()
+	require.NoError(t, controllerutil.SetControllerReference(comp, slice, cli.Scheme()))
+	require.NoError(t, cli.Create(ctx, slice))
+	req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(slice)}
+
+	// Slice would have been deleted
+	result, err := c.Reconcile(ctx, req)
+	require.NoError(t, err)
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(slice), slice))
+	assert.NotZero(t, result.RequeueAfter)
 }
