@@ -20,8 +20,8 @@ import (
 	v1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/controllers/aggregation"
 	"github.com/Azure/eno/internal/controllers/replication"
+	"github.com/Azure/eno/internal/controllers/resourceslice"
 	"github.com/Azure/eno/internal/controllers/scheduling"
-	"github.com/Azure/eno/internal/controllers/selfhealing"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/controllers/watch"
 	"github.com/Azure/eno/internal/execution"
@@ -102,19 +102,9 @@ func runController() error {
 		return fmt.Errorf("constructing manager: %w", err)
 	}
 
-	err = selfhealing.NewSliceController(mgr, selfHealingGracePeriod)
-	if err != nil {
-		return fmt.Errorf("constructing self healing resource slice controller: %w", err)
-	}
-
 	err = synthesis.NewPodLifecycleController(mgr, synconf)
 	if err != nil {
 		return fmt.Errorf("constructing pod lifecycle controller: %w", err)
-	}
-
-	err = synthesis.NewSliceCleanupController(mgr)
-	if err != nil {
-		return fmt.Errorf("constructing resource slice cleanup controller: %w", err)
 	}
 
 	err = synthesis.NewPodGC(mgr, containerCreationTimeout)
@@ -137,9 +127,14 @@ func runController() error {
 		return fmt.Errorf("constructing composition status aggregation controller: %w", err)
 	}
 
-	err = aggregation.NewSliceController(mgr)
+	err = resourceslice.NewController(mgr)
 	if err != nil {
-		return fmt.Errorf("constructing status aggregation controller: %w", err)
+		return fmt.Errorf("constructing resource slice controller: %w", err)
+	}
+
+	err = resourceslice.NewCleanupController(mgr)
+	if err != nil {
+		return fmt.Errorf("constructing resource slice cleanup controller: %w", err)
 	}
 
 	err = watch.NewController(mgr)
