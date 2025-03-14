@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -190,4 +191,79 @@ func TestSliceCleanupSliceTooNew(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(slice), slice))
 	assert.NotZero(t, result.RequeueAfter)
+}
+
+func TestSliceCleanupFinalizersCompMissing(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+	c := cleanupController{client: cli, noCacheReader: cli}
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-1"
+	comp.Namespace = "default"
+	require.NoError(t, cli.Create(ctx, comp))
+
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-1"
+	slice.Namespace = comp.Namespace
+	slice.Spec.SynthesisUUID = "test-uuid"
+	slice.Finalizers = []string{"anything.io/any-finalizer"}
+	require.NoError(t, controllerutil.SetControllerReference(comp, slice, cli.Scheme()))
+	require.NoError(t, cli.Create(ctx, slice))
+	require.NoError(t, cli.Delete(ctx, slice))
+	req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(slice)}
+
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}}}
+	require.NoError(t, cli.Status().Update(ctx, comp))
+
+	// Comp exists - finalizer is not removed
+	_, err := c.Reconcile(ctx, req)
+	require.NoError(t, err)
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(slice), slice))
+
+	// Comp is gone - finalizer should be removed
+	require.NoError(t, cli.Delete(ctx, comp))
+	_, err = c.Reconcile(ctx, req)
+	require.NoError(t, err)
+	require.True(t, errors.IsNotFound(cli.Get(ctx, client.ObjectKeyFromObject(slice), slice)))
+
+	// Idempotence check (just make sure it doesn't error or panic)
+	_, err = c.Reconcile(ctx, req)
+	require.NoError(t, err)
+}
+
+func TestSliceCleanupFinalizersCompReconciled(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+	c := cleanupController{client: cli, noCacheReader: cli}
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-1"
+	comp.Namespace = "default"
+	require.NoError(t, cli.Create(ctx, comp))
+
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-1"
+	slice.Namespace = comp.Namespace
+	slice.Spec.SynthesisUUID = "test-uuid"
+	slice.Finalizers = []string{"anything.io/any-finalizer"}
+	require.NoError(t, controllerutil.SetControllerReference(comp, slice, cli.Scheme()))
+	require.NoError(t, cli.Create(ctx, slice))
+	require.NoError(t, cli.Delete(ctx, slice))
+	req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(slice)}
+
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}}}
+	require.NoError(t, cli.Status().Update(ctx, comp))
+
+	// Comp exists - finalizer is not removed
+	_, err := c.Reconcile(ctx, req)
+	require.NoError(t, err)
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(slice), slice))
+
+	// Comp has been reconciled - finalizer should be removed
+	comp.Status.CurrentSynthesis.Reconciled = ptr.To(metav1.Now())
+	require.NoError(t, cli.Status().Update(ctx, comp))
+	_, err = c.Reconcile(ctx, req)
+	require.NoError(t, err)
+	require.True(t, errors.IsNotFound(cli.Get(ctx, client.ObjectKeyFromObject(slice), slice)))
 }

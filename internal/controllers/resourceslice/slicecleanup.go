@@ -14,7 +14,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 type cleanupController struct {
@@ -47,21 +46,10 @@ func (c *cleanupController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if owner != nil {
 		logger = logger.WithValues("compositionName", owner.Name, "compositionNamespace", req.Namespace)
 	}
+	ctx = logr.NewContext(ctx, logger)
 
-	// Remove any old finalizers - resource slices don't use them any more because they aren't necessary
-	if controllerutil.ContainsFinalizer(slice, "eno.azure.io/cleanup") {
-		fullSlice := &apiv1.ResourceSlice{}
-		if err := c.noCacheReader.Get(ctx, client.ObjectKeyFromObject(slice), fullSlice); err != nil {
-			return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
-		}
-		if !controllerutil.RemoveFinalizer(fullSlice, "eno.azure.io/cleanup") {
-			return ctrl.Result{}, nil
-		}
-		if err := c.client.Update(ctx, fullSlice); err != nil {
-			return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
-		}
-		logger.V(0).Info("removed old resource slice finalizer")
-		return ctrl.Result{}, nil
+	if slice.DeletionTimestamp != nil {
+		return c.removeFinalizer(ctx, slice, owner)
 	}
 
 	// Don't bother checking on brand new resource slices
@@ -122,4 +110,44 @@ func (c *cleanupController) shouldDelete(ctx context.Context, reader client.Read
 	}
 
 	return true, nil
+}
+
+// removeFinalizer removes the finalizer from the resource slice if the slice is not needed for deletion of the composition.
+// The finalizer exists only to handle a case where the k8s GC controller deletes the resource slices before the composition's deletion has been reconciled.
+// So we can safely release finalizers in every case _except_ when the slice is referenced by the current synthesis of a deleting composition.
+//
+// Since order of informer events isn't guaranteed, it's safer to avoid checking the deletion status of the composition.
+// Instead, we check if the slice is part of the current synthesis of a composition that is being deleted.
+// If the composition is not being deleted, holding the finalizer until reconciliation has completed is not a bad idea anyway.
+func (c *cleanupController) removeFinalizer(ctx context.Context, slice *apiv1.ResourceSlice, ref *metav1.OwnerReference) (ctrl.Result, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+
+	if len(slice.Finalizers) == 0 {
+		return ctrl.Result{}, nil // shouldn't be possible
+	}
+
+	comp := &apiv1.Composition{}
+	err := c.client.Get(ctx, types.NamespacedName{Name: ref.Name, Namespace: slice.Namespace}, comp)
+	if client.IgnoreNotFound(err) != nil {
+		return ctrl.Result{}, fmt.Errorf("getting composition: %w", err)
+	}
+
+	syn := comp.Status.CurrentSynthesis
+	if syn != nil && syn.Reconciled == nil {
+		idx := slices.IndexFunc(syn.ResourceSlices, func(ref *apiv1.ResourceSliceRef) bool {
+			return ref.Name == slice.Name
+		})
+		if idx != -1 {
+			return ctrl.Result{}, err // slice is needed for cleanup
+		}
+	}
+
+	// It's important to not update the whole slice resource, since our informer cached representation is missing fields (to save memory)
+	patchJSON := []byte(`[{"op": "remove", "path": "/metadata/finalizers"}]`)
+	if err := c.client.Patch(ctx, slice, client.RawPatch(types.JSONPatchType, patchJSON)); err != nil {
+		return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
+	}
+	logger.V(0).Info("removed resource slice finalizers")
+
+	return ctrl.Result{}, nil
 }
