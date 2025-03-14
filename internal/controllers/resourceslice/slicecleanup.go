@@ -49,9 +49,15 @@ func (c *cleanupController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// Remove any old finalizers - resource slices don't use them any more
-	if controllerutil.RemoveFinalizer(slice, "eno.azure.io/cleanup") {
-		// TODO: test
-		if err := c.client.Update(ctx, slice); err != nil {
+	if controllerutil.ContainsFinalizer(slice, "eno.azure.io/cleanup") {
+		fullSlice := &apiv1.ResourceSlice{}
+		if err := c.noCacheReader.Get(ctx, client.ObjectKeyFromObject(slice), fullSlice); err != nil {
+			return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
+		}
+		if !controllerutil.RemoveFinalizer(fullSlice, "eno.azure.io/cleanup") {
+			return ctrl.Result{}, nil
+		}
+		if err := c.client.Update(ctx, fullSlice); err != nil {
 			return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
 		}
 		logger.V(0).Info("removed old resource slice finalizer")
