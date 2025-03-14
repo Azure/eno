@@ -12,8 +12,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 type cleanupController struct {
@@ -22,14 +27,42 @@ type cleanupController struct {
 }
 
 func NewCleanupController(mgr ctrl.Manager) error {
+	c := &cleanupController{
+		client:        mgr.GetClient(),
+		noCacheReader: mgr.GetAPIReader(),
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.ResourceSlice{}).
-		Watches(&apiv1.Composition{}, manager.NewCompositionToResourceSliceHandler(mgr.GetClient())). // TODO: Filter, avoid index?
+		WatchesRawSource(source.Kind(mgr.GetCache(), &apiv1.Composition{}, c.newCompEventHandler())).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "sliceCleanupController")).
-		Complete(&cleanupController{
-			client:        mgr.GetClient(),
-			noCacheReader: mgr.GetAPIReader(),
-		})
+		Complete(c)
+}
+
+func (c *cleanupController) newCompEventHandler() handler.TypedEventHandler[*apiv1.Composition, reconcile.Request] {
+	fn := func(c *apiv1.Composition, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+		for _, syn := range []*apiv1.Synthesis{c.Status.CurrentSynthesis, c.Status.PreviousSynthesis} {
+			if syn == nil {
+				continue
+			}
+			for _, ref := range syn.ResourceSlices {
+				q.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: ref.Name, Namespace: c.Namespace}})
+			}
+		}
+	}
+	return &handler.TypedFuncs[*apiv1.Composition, reconcile.Request]{
+		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*apiv1.Composition], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			fn(e.Object, q)
+		},
+		UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*apiv1.Composition], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			fn(e.ObjectNew, q)
+			fn(e.ObjectOld, q)
+		},
+		DeleteFunc: func(ctx context.Context, e event.TypedDeleteEvent[*apiv1.Composition], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			if !e.DeleteStateUnknown {
+				fn(e.Object, q)
+			}
+		},
+	}
 }
 
 func (c *cleanupController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

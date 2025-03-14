@@ -15,15 +15,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/config"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -177,11 +174,6 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 		if err != nil {
 			return nil, err
 		}
-
-		err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.ResourceSlice{}, IdxResourceSlicesByComposition, indexController())
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	mgr.AddHealthzCheck("ping", healthz.Ping)
@@ -204,33 +196,6 @@ func NewTypedLogConstructor[T any](mgr ctrl.Manager, controllerName string) func
 		l := mgr.GetLogger().WithValues("controller", controllerName)
 		// TODO: Improve log fields and merge NewLogConstructor into NewTypedLogConstructor
 		return l
-	}
-}
-
-func NewCompositionToResourceSliceHandler(cli client.Client) handler.EventHandler {
-	apply := func(ctx context.Context, rli workqueue.TypedRateLimitingInterface[reconcile.Request], obj client.Object) {
-		list := &apiv1.ResourceSliceList{}
-		err := cli.List(ctx, list, client.InNamespace(obj.GetNamespace()), client.MatchingFields{
-			IdxResourceSlicesByComposition: obj.GetName(),
-		})
-		if err != nil {
-			logr.FromContextOrDiscard(ctx).Error(err, "listing resource slices by composition")
-			return
-		}
-		for _, item := range list.Items {
-			rli.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: item.Name, Namespace: item.Namespace}})
-		}
-	}
-	return &handler.Funcs{
-		CreateFunc: func(ctx context.Context, ce event.TypedCreateEvent[client.Object], rli workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			apply(ctx, rli, ce.Object)
-		},
-		UpdateFunc: func(ctx context.Context, ue event.TypedUpdateEvent[client.Object], rli workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			apply(ctx, rli, ue.ObjectNew)
-		},
-		DeleteFunc: func(ctx context.Context, de event.TypedDeleteEvent[client.Object], rli workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			apply(ctx, rli, de.Object)
-		},
 	}
 }
 
