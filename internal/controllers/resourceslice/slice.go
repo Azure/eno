@@ -60,7 +60,7 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return s.handleMissingSlice(ctx, comp, ref.Name)
 		}
 		if err != nil {
-			return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting resource slice: %w", err))
+			return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
 		}
 
 		// Handle a case where the reconciliation controller hasn't updated the slice's status yet
