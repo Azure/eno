@@ -79,7 +79,7 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			if state.Ready == nil {
 				snapshot.Ready = false
 			}
-			if state.Ready != nil && (snapshot.ReadyTime == nil || snapshot.ReadyTime.Before(state.Ready)) {
+			if state.Ready != nil && (snapshot.ReadyTime == nil || state.Ready.After(snapshot.ReadyTime.Time)) {
 				snapshot.ReadyTime = state.Ready
 			}
 		}
