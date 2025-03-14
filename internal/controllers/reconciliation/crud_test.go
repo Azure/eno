@@ -765,7 +765,6 @@ func TestOrphanedResources(t *testing.T) {
 	// The resource should be orphaned after the composition is gone.
 	err := downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
 	require.NoError(t, err)
-
 }
 
 // TestResourceDefaulting proves that resources which define properties equal to the field's default will eventually converge.

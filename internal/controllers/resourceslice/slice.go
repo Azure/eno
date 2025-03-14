@@ -15,6 +15,8 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// sliceController manages the lifecycle of resource slices in the context of their owning composition.
+// This consists of aggregating their status into the composition, and replacing missing slices.
 type sliceController struct {
 	client client.Client
 }
@@ -91,7 +93,7 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, fmt.Errorf("updating composition '%s' status: %w", comp.Name, err)
 
 	}
-	logger.V(1).Info("aggregated resource status into composition")
+	logger.V(1).Info("aggregated resource status into composition", "reconciled", snapshot.Reconciled, "ready", snapshot.Ready)
 
 	return ctrl.Result{}, nil
 }

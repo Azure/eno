@@ -107,7 +107,7 @@ func TestSliceCleanupMissingComp(t *testing.T) {
 
 	_, err := c.Reconcile(ctx, req)
 	require.NoError(t, err)
-	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(slice), slice))
+	require.True(t, errors.IsNotFound(cli.Get(ctx, client.ObjectKeyFromObject(slice), slice)))
 }
 
 func TestSliceCleanupStaleCache(t *testing.T) {

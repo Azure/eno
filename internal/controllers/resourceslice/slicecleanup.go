@@ -21,6 +21,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
+// cleanupController is responsible for deleting resource slices when they are no longer needed by their composition.
+// It holds a finalizer on slices so they can't be deleted by the k8s GC controller until the composition has been deleted.
+// The controller has very little surface area: it deletes slices and removes their finalizers without modifying the composition.
+//
+// A non-cached apiserver client is used to be absolutely sure that a slice can be safely deleted.
+// But we avoid using it by excluding brand new resource slices and always checking the informer cache first.
 type cleanupController struct {
 	client        client.Client
 	noCacheReader client.Reader
@@ -118,7 +124,7 @@ func (c *cleanupController) shouldDelete(ctx context.Context, reader client.Read
 	comp := &apiv1.Composition{}
 	err := reader.Get(ctx, types.NamespacedName{Name: ref.Name, Namespace: slice.Namespace}, comp)
 	if errors.IsNotFound(err) {
-		return false, nil // let the k8s GC controller handle it
+		return true, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("getting composition: %w", err)

@@ -189,7 +189,7 @@ func (c *podLifecycleController) reconcileDeletedComposition(ctx context.Context
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("updating current composition generation: %w", err)
 		}
-		logger.V(0).Info("updated composition status to reflect deletion")
+		logger.V(0).Info("updated composition status to reflect deletion", "synthesisID", comp.Status.CurrentSynthesis.UUID)
 		return ctrl.Result{}, nil
 	}
 
