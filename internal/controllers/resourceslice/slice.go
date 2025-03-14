@@ -17,6 +17,7 @@ import (
 
 // sliceController manages the lifecycle of resource slices in the context of their owning composition.
 // This consists of aggregating their status into the composition, and replacing missing slices.
+// Deletion of slices is handled by a separate controller to handle cases where the related composition no longer exists.
 type sliceController struct {
 	client client.Client
 }
