@@ -128,7 +128,7 @@ func (s *sliceController) handleMissingSlice(ctx context.Context, comp *apiv1.Co
 	}
 
 	// Resynthesis is required
-	logger.Info("resource slice is missing, resynthesizing", "resourceSliceName", sliceName)
+	logger.Info("resource slice is missing - resynthesizing", "resourceSliceName", sliceName)
 	comp.ForceResynthesis()
 	err = s.client.Update(ctx, comp)
 	if err != nil {
