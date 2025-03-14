@@ -184,7 +184,7 @@ func processCompositionTransition(ctx context.Context, comp *apiv1.Composition, 
 	return true
 }
 
-// resourceNotReconciled returns true when a resource should be considered reconciled.
+// resourceNotReconciled returns true when the resource has not been reconciled.
 // - When its status has Reconciled == true
 // - When it has been deleted and the composition has also been deleted
 // - When it has been deleted and the composition is configured to orphan resources
