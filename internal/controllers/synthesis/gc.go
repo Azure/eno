@@ -41,10 +41,9 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 	logger = logger.WithValues("podName", pod.Name, "podNamespace", pod.Namespace)
 
-	// Pods can't progress after exiting 0
-	if pod.Status.Phase == corev1.PodSucceeded {
-		logger = logger.WithValues("reason", "Success")
-		return ctrl.Result{}, p.deletePod(ctx, pod, logger)
+	if pod.Labels == nil {
+		logger.V(0).Info("saw a pod without any labels - this shouldn't be possible!")
+		return ctrl.Result{}, nil
 	}
 
 	// Avoid waiting for the lease to expire for broken nodes
@@ -83,35 +82,37 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, fmt.Errorf("getting synthesizer: %w", err)
 	}
 
-	// Pods from old syntheses
-	if !podIsCurrent(comp, pod) {
-		const gracePeriod = time.Second
+	// Ignore brand new pods since the pod/composition informer might not be in sync
+	const gracePeriod = time.Second
+	delta := gracePeriod - time.Since(pod.CreationTimestamp.Time)
+	if delta > 0 {
+		return ctrl.Result{RequeueAfter: delta}, nil
+	}
 
-		// Ignore brand new pods since the pod/composition informer might not be in sync
-		delta := gracePeriod - time.Since(pod.CreationTimestamp.Time)
-		if delta > 0 {
-			return ctrl.Result{RequeueAfter: delta}, nil
+	if syn := comp.Status.InFlightSynthesis; syn != nil {
+		if syn.Canceled != nil {
+			logger = logger.WithValues("reason", "Timeout")
+			return ctrl.Result{}, p.deletePod(ctx, pod, logger)
 		}
 
-		logger = logger.WithValues("reason", "Superseded")
+		// A new synthesis has replaced the previous
+		if syn.UUID != pod.Labels[synthesisIDLabelKey] {
+			logger = logger.WithValues("reason", "Superseded")
+			return ctrl.Result{}, p.deletePod(ctx, pod, logger)
+		}
+
+		return ctrl.Result{RequeueAfter: time.Second}, nil // still active
+	}
+
+	// In-flight synthesis being swapped to current == synthesis completed
+	if syn := comp.Status.CurrentSynthesis; syn != nil && syn.UUID == pod.Labels[synthesisIDLabelKey] {
+		logger = logger.WithValues("reason", "Success")
 		return ctrl.Result{}, p.deletePod(ctx, pod, logger)
 	}
 
-	if syn.Spec.PodTimeout == nil {
-		return ctrl.Result{RequeueAfter: time.Second}, nil
-	}
-
-	// Timeout
-	age := time.Since(pod.CreationTimestamp.Time)
-	if age > syn.Spec.PodTimeout.Duration {
-		logger = logger.WithValues("reason", "Timeout")
-		return ctrl.Result{}, p.deletePod(ctx, pod, logger)
-	}
-	delta := syn.Spec.PodTimeout.Duration - age
-
-	// Poll every second in case the composition/synthesizer is updated during synthesis.
-	// This avoids the need to watch their informers, map events to pods, and deal with possible races.
-	return ctrl.Result{RequeueAfter: min(delta, time.Second)}, nil
+	// This condition should only be able to happen when the composition has been deleted
+	logger = logger.WithValues("reason", "Orphaned")
+	return ctrl.Result{}, p.deletePod(ctx, pod, logger)
 }
 
 func (p *podGarbageCollector) deletePod(ctx context.Context, pod *corev1.Pod, logger logr.Logger) error {

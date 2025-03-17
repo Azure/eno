@@ -7,6 +7,7 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/controllers/aggregation"
+	"github.com/Azure/eno/internal/controllers/composition"
 	"github.com/Azure/eno/internal/controllers/liveness"
 	"github.com/Azure/eno/internal/controllers/replication"
 	"github.com/Azure/eno/internal/controllers/resourceslice"
@@ -34,6 +35,7 @@ func registerControllers(t *testing.T, mgr *testutil.Manager) {
 	require.NoError(t, watch.NewController(mgr.Manager))
 	require.NoError(t, resourceslice.NewController(mgr.Manager))
 	require.NoError(t, resourceslice.NewCleanupController(mgr.Manager))
+	require.NoError(t, composition.NewController(mgr.Manager))
 }
 
 func writeGenericComposition(t *testing.T, client client.Client) (*apiv1.Synthesizer, *apiv1.Composition) {

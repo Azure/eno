@@ -609,3 +609,109 @@ func TestIndexSynthesizersEpoch(t *testing.T) {
 	_, e := indexSynthesizers(synths)
 	assert.NotEqual(t, d, e)
 }
+
+// TestRetries proves that canceled syntheses will be retried eventually.
+func TestRetries(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	require.NoError(t, NewController(mgr.Manager, 100, 2*time.Second, 0))
+	mgr.Start(t)
+	cli := mgr.GetClient()
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	synth.Namespace = "default"
+	require.NoError(t, cli.Create(ctx, synth))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Finalizers = []string{"eno.azure.io/cleanup"}
+	comp.Spec.Synthesizer.Name = synth.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.UUID != ""
+	})
+
+	// Mark this synthesis as canceled and wait for the retry a few times
+	timings := []time.Duration{}
+	last := time.Time{}
+	for range 3 {
+		var canceledUUID string
+		err := retry.RetryOnConflict(testutil.Backoff, func() error {
+			cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+			// metav1.Time has a precision of 1s when marshaled to JSON, so sadly this test takes a few seconds
+			comp.Status.InFlightSynthesis.Canceled = ptr.To(metav1.NewTime(time.Now().Add(time.Second)))
+			canceledUUID = comp.Status.InFlightSynthesis.UUID
+			return cli.Status().Update(ctx, comp)
+		})
+		require.NoError(t, err)
+
+		testutil.Eventually(t, func() bool {
+			err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+			return err == nil &&
+				comp.Status.InFlightSynthesis != nil &&
+				comp.Status.InFlightSynthesis.UUID != canceledUUID
+		})
+
+		now := time.Now()
+		if !last.IsZero() {
+			timings = append(timings, now.Sub(last))
+		}
+		last = now
+	}
+
+	assert.Greater(t, timings[1], timings[0]+time.Second)
+}
+
+// TestRetryContention proves that a new composition will eventually be synthesized even though the
+// concurrency limit has been reached by compositions that will never succeed.
+func TestRetryContention(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	require.NoError(t, NewController(mgr.Manager, 1, 2*time.Second, 0))
+	mgr.Start(t)
+	cli := mgr.GetClient()
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	synth.Namespace = "default"
+	require.NoError(t, cli.Create(ctx, synth))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-stuck-comp"
+	comp.Namespace = "default"
+	comp.Finalizers = []string{"eno.azure.io/cleanup"}
+	comp.Spec.Synthesizer.Name = synth.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	// Wait for the concurrency limit to be reached
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.UUID != ""
+	})
+
+	// Create another composition
+	secondComp := &apiv1.Composition{}
+	secondComp.Name = "test-second-comp"
+	secondComp.Namespace = "default"
+	secondComp.Finalizers = []string{"eno.azure.io/cleanup"}
+	secondComp.Spec.Synthesizer.Name = synth.Name
+	require.NoError(t, cli.Create(ctx, secondComp))
+
+	// Mark the active synthesis as canceled with a retry time past test timeout
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Status.InFlightSynthesis.Canceled = ptr.To(metav1.NewTime(time.Now().Add(time.Hour)))
+		return cli.Status().Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	// The new composition should eventually be synthesized
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, client.ObjectKeyFromObject(secondComp), secondComp)
+		return err == nil && secondComp.Status.InFlightSynthesis != nil
+	})
+}

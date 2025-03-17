@@ -125,6 +125,12 @@ spec:
                     description: Counter used internally to calculate back off when
                       retrying failed syntheses.
                     type: integer
+                  canceled:
+                    description: |-
+                      Canceled signals that any running synthesis pods should be deleted,
+                      and new synthesis pods should never be created for this synthesis UUID.
+                    format: date-time
+                    type: string
                   deferred:
                     description: |-
                       Deferred is true when this synthesis was caused by a change to either the synthesizer
@@ -223,6 +229,12 @@ spec:
                     description: Counter used internally to calculate back off when
                       retrying failed syntheses.
                     type: integer
+                  canceled:
+                    description: |-
+                      Canceled signals that any running synthesis pods should be deleted,
+                      and new synthesis pods should never be created for this synthesis UUID.
+                    format: date-time
+                    type: string
                   deferred:
                     description: |-
                       Deferred is true when this synthesis was caused by a change to either the synthesizer
@@ -338,6 +350,12 @@ spec:
                     description: Counter used internally to calculate back off when
                       retrying failed syntheses.
                     type: integer
+                  canceled:
+                    description: |-
+                      Canceled signals that any running synthesis pods should be deleted,
+                      and new synthesis pods should never be created for this synthesis UUID.
+                    format: date-time
+                    type: string
                   deferred:
                     description: |-
                       Deferred is true when this synthesis was caused by a change to either the synthesizer
