@@ -9,11 +9,10 @@ import (
 )
 
 const (
-	IdxCompositionsBySynthesizer   = ".spec.synthesizer"
-	IdxCompositionsBySymphony      = ".compositionsBySymphony"
-	IdxResourceSlicesByComposition = ".resourceSlicesByComposition"
-	IdxCompositionsByBinding       = ".compositionsByBinding"
-	IdxSynthesizersByRef           = ".synthesizersByRef"
+	IdxCompositionsBySynthesizer = ".spec.synthesizer"
+	IdxCompositionsBySymphony    = ".compositionsBySymphony"
+	IdxCompositionsByBinding     = ".compositionsByBinding"
+	IdxSynthesizersByRef         = ".synthesizersByRef"
 )
 
 func indexController() client.IndexerFunc {
