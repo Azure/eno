@@ -46,7 +46,7 @@ func NewCleanupController(mgr ctrl.Manager) error {
 
 func (c *cleanupController) newCompEventHandler() handler.TypedEventHandler[*apiv1.Composition, reconcile.Request] {
 	fn := func(c *apiv1.Composition, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-		for _, syn := range []*apiv1.Synthesis{c.Status.CurrentSynthesis, c.Status.PreviousSynthesis} {
+		for _, syn := range []*apiv1.Synthesis{c.Status.InFlightSynthesis, c.Status.CurrentSynthesis, c.Status.PreviousSynthesis} {
 			if syn == nil {
 				continue
 			}
