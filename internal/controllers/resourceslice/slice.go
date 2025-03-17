@@ -162,8 +162,6 @@ func processCompositionTransition(ctx context.Context, comp *apiv1.Composition, 
 			if latency.Milliseconds() > 0 {
 				logger.V(0).Info("composition became ready", "latency", latency.Abs().Milliseconds())
 			}
-		} else {
-			logger.V(0).Info("composition somehow became ready before synthesis - this shouldn't be possible!")
 		}
 	} else {
 		comp.Status.CurrentSynthesis.Ready = nil
