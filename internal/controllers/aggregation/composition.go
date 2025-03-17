@@ -72,6 +72,8 @@ func (c *compositionController) aggregate(synth *apiv1.Synthesizer, comp *apiv1.
 		return copy
 	}
 
+	// TODO: New status for synthesis retry backoff
+
 	copy.Status = "Synthesizing"
 	if !comp.InputsExist(synth) {
 		copy.Status = "MissingInputs"

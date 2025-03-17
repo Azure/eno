@@ -136,7 +136,7 @@ func TestFuzzNewOp(t *testing.T) {
 			comp.Generation = 345
 		}
 
-		op := newOp(synth, comp)
+		op := newOp(synth, comp, time.Time{})
 
 		// Prove out the invariants
 		switch {
@@ -206,7 +206,7 @@ func TestFuzzNewOp(t *testing.T) {
 			require.NoError(t, err)
 
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			assert.Nil(t, newOp(synth, comp), args)
+			assert.Nil(t, newOp(synth, comp, time.Time{}), args)
 		}
 
 		// Patches against the original, non-mutated test composition should always fail.
@@ -399,6 +399,27 @@ func TestOpPriorityTies(t *testing.T) {
 	}
 }
 
+func TestOpPriorityRetries(t *testing.T) {
+	ops := []*op{
+		{Reason: synthesizerModifiedOp, Composition: &apiv1.Composition{ObjectMeta: metav1.ObjectMeta{UID: "d"}}},
+		{Reason: retrySynthesisOp, NotBefore: time.Unix(2000, 0), Composition: &apiv1.Composition{ObjectMeta: metav1.ObjectMeta{UID: "a"}}},
+		{Reason: retrySynthesisOp, NotBefore: time.Unix(1000, 0), Composition: &apiv1.Composition{ObjectMeta: metav1.ObjectMeta{UID: "b"}}},
+		{Reason: initialSynthesisOp, Composition: &apiv1.Composition{ObjectMeta: metav1.ObjectMeta{UID: "c"}}},
+	}
+
+	for i := 0; i < 100; i++ {
+		rand.Shuffle(len(ops), func(i, j int) { ops[i], ops[j] = ops[j], ops[i] })
+		sort.Slice(ops, func(i, j int) bool { return ops[i].Less(ops[j]) })
+
+		var names []string
+		for _, op := range ops {
+			names = append(names, string(op.Composition.UID))
+		}
+
+		assert.Equal(t, []string{"c", "d", "a", "b"}, names)
+	}
+}
+
 // TestOpNewerInputInSynthesis covers an edge case where the synthesizer sees a newer version of an input
 // than the watch controller. This might happen during synthesis if the input is changing frequently.
 // In extreme cases synthesis might be blocked since it will be re-dispatched for every input change.
@@ -438,5 +459,5 @@ func TestOpNewerInputInSynthesis(t *testing.T) {
 		},
 	}
 
-	assert.Nil(t, newOp(synth, comp))
+	assert.Nil(t, newOp(synth, comp, time.Time{}))
 }

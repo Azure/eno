@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -54,6 +53,7 @@ func TestControllerHappyPath(t *testing.T) {
 	comp := &apiv1.Composition{}
 	comp.Name = "test-comp"
 	comp.Namespace = "default"
+	comp.Finalizers = []string{"eno.azure.io/cleanup"}
 	comp.Spec.Synthesizer.Name = syn.Name
 	require.NoError(t, cli.Create(ctx, comp))
 
@@ -133,6 +133,7 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 	comp := &apiv1.Composition{}
 	comp.Name = "test-comp"
 	comp.Namespace = "default"
+	comp.Finalizers = []string{"eno.azure.io/cleanup"}
 	comp.Spec.Synthesizer.Name = syn.Name
 	require.NoError(t, cli.Create(ctx, comp))
 
@@ -211,6 +212,7 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 	comp := &apiv1.Composition{}
 	comp.Name = "test-comp"
 	comp.Namespace = "default"
+	comp.Finalizers = []string{"eno.azure.io/cleanup"}
 	comp.Spec.Synthesizer.Name = syn1.Name
 	require.NoError(t, cli.Create(ctx, comp))
 
@@ -240,40 +242,5 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration > initialGen
 		})
 		assert.NotEqual(t, comp.Status.CurrentSynthesis.ResourceSlices, initialSlices)
-	})
-}
-
-func TestControllerBackoff(t *testing.T) {
-	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t)
-	cli := mgr.GetClient()
-
-	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
-	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
-	require.NoError(t, NewPodGC(mgr.Manager, 0))
-	mgr.Start(t)
-
-	syn := &apiv1.Synthesizer{}
-	syn.Name = "test-syn-1"
-	syn.Spec.Image = "initial-image"
-	syn.Spec.PodTimeout = &metav1.Duration{Duration: time.Millisecond * 2}
-	syn.Spec.ExecTimeout = &metav1.Duration{Duration: time.Millisecond}
-	require.NoError(t, cli.Create(ctx, syn))
-
-	start := time.Now()
-	comp := &apiv1.Composition{}
-	comp.Name = "test-comp"
-	comp.Namespace = "default"
-	comp.Spec.Synthesizer.Name = syn.Name
-	require.NoError(t, cli.Create(ctx, comp))
-
-	t.Run("initial creation", func(t *testing.T) {
-		testutil.Eventually(t, func() bool {
-			require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
-			return comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.Attempts >= 10
-		})
-
-		// It shouldn't be possible to try this many times within 250ms
-		assert.Greater(t, int(time.Since(start).Milliseconds()), 250)
 	})
 }

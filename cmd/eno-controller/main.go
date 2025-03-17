@@ -19,6 +19,7 @@ import (
 
 	v1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/controllers/aggregation"
+	"github.com/Azure/eno/internal/controllers/composition"
 	"github.com/Azure/eno/internal/controllers/replication"
 	"github.com/Azure/eno/internal/controllers/resourceslice"
 	"github.com/Azure/eno/internal/controllers/scheduling"
@@ -145,6 +146,11 @@ func runController() error {
 	err = scheduling.NewController(mgr, concurrencyLimit, rolloutCooldown, watchdogThres)
 	if err != nil {
 		return fmt.Errorf("constructing synthesis scheduling controller: %w", err)
+	}
+
+	err = composition.NewController(mgr)
+	if err != nil {
+		return fmt.Errorf("constructing composition controller: %w", err)
 	}
 
 	return mgr.Start(ctx)

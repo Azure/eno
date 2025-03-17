@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/controllers/composition"
 	"github.com/Azure/eno/internal/controllers/resourceslice"
 	"github.com/Azure/eno/internal/controllers/scheduling"
 	"github.com/Azure/eno/internal/testutil"
@@ -47,6 +48,7 @@ func TestCompositionDeletion(t *testing.T) {
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, resourceslice.NewCleanupController(mgr.Manager))
 	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
+	require.NoError(t, composition.NewController(mgr.Manager))
 	require.NoError(t, NewPodGC(mgr.Manager, 0))
 	mgr.Start(t)
 

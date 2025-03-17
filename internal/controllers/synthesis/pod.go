@@ -191,10 +191,6 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 	return pod
 }
 
-func podIsCurrent(comp *apiv1.Composition, pod *corev1.Pod) bool {
-	return pod.Labels != nil && comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.UUID == pod.Labels[synthesisIDLabelKey]
-}
-
 // filterEnv returns env taking out any items that have the same name as
 // any item in filter.
 func filterEnv(filter []corev1.EnvVar, env []apiv1.EnvVar) []apiv1.EnvVar {

@@ -94,6 +94,10 @@ type Synthesis struct {
 	// Time at which the synthesis's reconciled resources became ready.
 	Ready *metav1.Time `json:"ready,omitempty"`
 
+	// Canceled signals that any running synthesis pods should be deleted,
+	// and new synthesis pods should never be created for this synthesis UUID.
+	Canceled *metav1.Time `json:"canceled,omitempty"`
+
 	// Counter used internally to calculate back off when retrying failed syntheses.
 	Attempts int `json:"attempts,omitempty"`
 
@@ -225,7 +229,7 @@ func (c *Composition) ShouldIgnoreSideEffects() bool {
 }
 
 func (c *Composition) Synthesizing() bool {
-	return c.Status.InFlightSynthesis != nil
+	return c.Status.InFlightSynthesis != nil && c.Status.InFlightSynthesis.Canceled == nil
 }
 
 func (c *Composition) EnableIgnoreSideEffects() {

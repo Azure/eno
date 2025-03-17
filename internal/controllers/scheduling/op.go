@@ -19,6 +19,7 @@ type op struct {
 	Synthesizer *apiv1.Synthesizer
 	Composition *apiv1.Composition
 	Reason      opReason
+	NotBefore   time.Time
 
 	Dispatched time.Time
 
@@ -26,13 +27,26 @@ type op struct {
 	synthRolloutHash []byte    // memoized
 }
 
-func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition) *op {
+func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition, nextCooldownSlot time.Time) *op {
 	o := &op{Synthesizer: synth, Composition: comp}
 
 	var ok bool
 	o.Reason, ok = classifyOp(synth, comp)
 	if !ok {
-		return nil
+		syn := comp.Status.InFlightSynthesis
+		if syn == nil || syn.Canceled == nil {
+			return nil
+		}
+
+		// Retry canceled syntheses with exponential backoff
+		backoff := time.Duration(float64(syn.Canceled.Sub(syn.Initialized.Time)) * float64(syn.Attempts) * 1.5)
+		o.Reason = retrySynthesisOp
+		o.NotBefore = syn.Canceled.Add(backoff)
+		return o
+	}
+
+	if o.Reason.Deferred() {
+		o.NotBefore = nextCooldownSlot
 	}
 
 	// Deferred ops have a special property: they won't replace an in-flight synthesis
@@ -96,6 +110,10 @@ func (o *op) Less(than *op) bool {
 		if cmp != 0 {
 			return cmp > 0
 		}
+	}
+
+	if !o.NotBefore.IsZero() && than.NotBefore.IsZero() && o.NotBefore.Before(than.NotBefore) {
+		return true
 	}
 
 	if o.Reason == than.Reason {
@@ -168,6 +186,11 @@ func (o *op) BuildPatch() any {
 			jsonPatch{Op: "test", Path: "/status/inFlightSynthesis/synthesized", Value: syn.Synthesized})
 	}
 
+	var attempts int
+	if syn := o.Composition.Status.InFlightSynthesis; syn != nil && o.Reason == retrySynthesisOp {
+		attempts = syn.Attempts
+	}
+
 	ops = append(ops, jsonPatch{
 		Op:   "replace",
 		Path: "/status/inFlightSynthesis",
@@ -176,6 +199,7 @@ func (o *op) BuildPatch() any {
 			"initialized":                   time.Now().Format(time.RFC3339),
 			"uuid":                          o.id.String(),
 			"deferred":                      o.Reason.Deferred(),
+			"attempts":                      attempts + 1,
 		},
 	})
 
@@ -197,6 +221,7 @@ const (
 	inputModifiedOp
 	deferredInputModifiedOp
 	synthesizerModifiedOp
+	retrySynthesisOp
 )
 
 var allReasons = []opReason{initialSynthesisOp, forcedResynthesisOp, compositionModifiedOp, inputModifiedOp, deferredInputModifiedOp, synthesizerModifiedOp}
@@ -217,6 +242,8 @@ func (r opReason) String() string {
 		return "DeferredInputModified"
 	case synthesizerModifiedOp:
 		return "SynthesizerModified"
+	case retrySynthesisOp:
+		return "Retry"
 	default:
 		return "Unknown"
 	}
