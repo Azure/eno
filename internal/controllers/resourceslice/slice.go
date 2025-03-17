@@ -152,33 +152,9 @@ func processCompositionTransition(ctx context.Context, comp *apiv1.Composition, 
 		snapshot.ReadyTime = comp.Status.CurrentSynthesis.Reconciled
 	}
 
-	// Readiness
 	now := metav1.Now()
-	if snapshot.Ready && snapshot.ReadyTime != nil {
-		comp.Status.CurrentSynthesis.Ready = snapshot.ReadyTime
-
-		if synthed := comp.Status.CurrentSynthesis.Synthesized; synthed != nil {
-			latency := snapshot.ReadyTime.Sub(synthed.Time)
-			if latency.Milliseconds() > 0 {
-				logger.V(0).Info("composition became ready", "latency", latency.Abs().Milliseconds())
-			}
-		}
-	} else {
-		comp.Status.CurrentSynthesis.Ready = nil
-	}
-
-	// Reconciled state
-	if snapshot.Reconciled {
-		comp.Status.CurrentSynthesis.Reconciled = &now
-
-		if synthed := comp.Status.CurrentSynthesis.Synthesized; synthed != nil {
-			latency := now.Sub(synthed.Time)
-			logger.V(0).Info("composition was reconciled", "latency", latency.Abs().Milliseconds())
-		}
-	} else {
-		comp.Status.CurrentSynthesis.Reconciled = nil
-	}
-
+	comp.Status.CurrentSynthesis.Reconciled = snapshot.GetReconciled(comp, &now, logger)
+	comp.Status.CurrentSynthesis.Ready = snapshot.GetReady(comp, logger)
 	return true
 }
 
@@ -195,4 +171,36 @@ type statusSnapshot struct {
 	Reconciled bool
 	Ready      bool
 	ReadyTime  *metav1.Time
+}
+
+func (s *statusSnapshot) GetReconciled(comp *apiv1.Composition, now *metav1.Time, logger logr.Logger) *metav1.Time {
+	if !s.Reconciled {
+		return nil
+	}
+
+	if synthed := comp.Status.CurrentSynthesis.Synthesized; synthed != nil {
+		latency := now.Sub(synthed.Time)
+		if latency > 0 {
+			logger = logger.WithValues("latency", latency.Milliseconds())
+		}
+	}
+
+	logger.V(0).Info("composition was reconciled")
+	return now
+}
+
+func (s *statusSnapshot) GetReady(comp *apiv1.Composition, logger logr.Logger) *metav1.Time {
+	if !s.Ready || s.ReadyTime == nil {
+		return nil
+	}
+
+	if synthed := comp.Status.CurrentSynthesis.Synthesized; synthed != nil {
+		latency := s.ReadyTime.Sub(synthed.Time)
+		if latency > 0 {
+			logger = logger.WithValues("latency", latency.Milliseconds())
+		}
+	}
+
+	logger.V(0).Info("composition became ready")
+	return s.ReadyTime
 }

@@ -2,6 +2,7 @@ package resourceslice
 
 import (
 	"testing"
+	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/testutil"
@@ -34,7 +35,7 @@ func TestResourceSliceLifecycle(t *testing.T) {
 
 	retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Status.InFlightSynthesis = &apiv1.Synthesis{}
+		comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
 		return cli.Status().Update(ctx, comp)
 	})
 
@@ -50,6 +51,8 @@ func TestResourceSliceLifecycle(t *testing.T) {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		comp.Status.InFlightSynthesis = nil
 		comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+			UUID:           "test-uuid",
+			Synthesized:    ptr.To(metav1.Now()),
 			ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
 		}
 		return cli.Status().Update(ctx, comp)
@@ -64,7 +67,7 @@ func TestResourceSliceLifecycle(t *testing.T) {
 	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		cli.Get(ctx, client.ObjectKeyFromObject(slice), slice)
 		slice.Status.Resources = []apiv1.ResourceState{
-			{Reconciled: true, Ready: ptr.To(metav1.Now())},
+			{Reconciled: true, Ready: ptr.To(metav1.NewTime(time.Now().Add(time.Minute)))},
 		}
 		return cli.Status().Update(ctx, slice)
 	})
@@ -81,6 +84,8 @@ func TestResourceSliceLifecycle(t *testing.T) {
 	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+			UUID:           "test-uuid",
+			Synthesized:    ptr.To(metav1.Now()),
 			ResourceSlices: []*apiv1.ResourceSliceRef{{Name: "another-slice"}},
 		}
 		return cli.Status().Update(ctx, comp)
