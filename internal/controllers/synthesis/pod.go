@@ -2,7 +2,6 @@ package synthesis
 
 import (
 	"slices"
-	"strconv"
 
 	"github.com/imdario/mergo"
 	corev1 "k8s.io/api/core/v1"
@@ -50,10 +49,6 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 		{
 			Name:  "SYNTHESIS_UUID",
 			Value: comp.Status.InFlightSynthesis.UUID,
-		},
-		{
-			Name:  "SYNTHESIS_ATTEMPT",
-			Value: strconv.Itoa(comp.Status.InFlightSynthesis.Attempts + 1), // we write the next attempt _after_ pod creation
 		},
 	}
 

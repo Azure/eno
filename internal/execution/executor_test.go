@@ -5,18 +5,15 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/retry"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -360,7 +357,6 @@ func TestCompletionMismatchDuringSynthesis(t *testing.T) {
 		CompositionNamespace: comp.Namespace,
 		SynthesisUUID:        comp.Status.InFlightSynthesis.UUID,
 	}
-	originalSynthTime := metav1.NewTime(time.Now().Round(time.Second).Local())
 	e := &Executor{
 		Reader: cli,
 		Writer: cli,
@@ -368,16 +364,10 @@ func TestCompletionMismatchDuringSynthesis(t *testing.T) {
 			// Act as if another synthesizer pod with the same synthesis uuid but different attempt has updated the status concurrently
 			err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 				require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-				comp.Status.InFlightSynthesis.Synthesized = ptr.To(originalSynthTime)
+				comp.Status.InFlightSynthesis.UUID = "not-the-original"
 				return cli.Status().Update(ctx, comp)
 			})
 			require.NoError(t, err)
-
-			// Wait for that write to hit the informer cache
-			assert.Eventually(t, func() bool {
-				cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-				return comp.Status.InFlightSynthesis.Synthesized != nil
-			}, time.Second*2, time.Millisecond*10)
 
 			out := &unstructured.Unstructured{
 				Object: map[string]any{
@@ -402,7 +392,8 @@ func TestCompletionMismatchDuringSynthesis(t *testing.T) {
 
 	err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 	require.NoError(t, err)
-	assert.Equal(t, originalSynthTime, *comp.Status.InFlightSynthesis.Synthesized)
+	assert.Nil(t, comp.Status.CurrentSynthesis)
+	assert.Equal(t, "not-the-original", comp.Status.InFlightSynthesis.UUID)
 }
 
 // TestDeleteResource verifies any resources that were previously created
