@@ -50,10 +50,6 @@ type SynthesizerSpec struct {
 	// +kubebuilder:default="2m"
 	PodTimeout *metav1.Duration `json:"podTimeout,omitempty"`
 
-	// Synthesized resources can optionally be reconciled at a given interval.
-	// Per-resource jitter will be applied to avoid spikes in request rate.
-	ReconcileInterval *metav1.Duration `json:"reconcileInterval,omitempty"`
-
 	// Refs define the Synthesizer's input schema without binding it to specific
 	// resources.
 	Refs []Ref `json:"refs,omitempty"`
