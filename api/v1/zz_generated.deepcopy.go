@@ -772,11 +772,6 @@ func (in *SynthesizerSpec) DeepCopyInto(out *SynthesizerSpec) {
 		*out = new(metav1.Duration)
 		**out = **in
 	}
-	if in.ReconcileInterval != nil {
-		in, out := &in.ReconcileInterval, &out.ReconcileInterval
-		*out = new(metav1.Duration)
-		**out = **in
-	}
 	if in.Refs != nil {
 		in, out := &in.Refs, &out.Refs
 		*out = make([]Ref, len(*in))
