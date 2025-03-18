@@ -235,14 +235,8 @@ func skipSynthesis(comp *apiv1.Composition, env *Env) (string, bool) {
 	if synthesis == nil {
 		return "MissingSynthesis", true
 	}
-	if synthesis.Synthesized != nil {
-		return "AlreadySynthesized", true
-	}
 	if synthesis.UUID != env.SynthesisUUID {
 		return "UUIDMismatch", true
-	}
-	if synthesis.Attempts > 0 && synthesis.Attempts > env.SynthesisAttempt {
-		return "StaleAttempt", true
 	}
 	return "", false
 }
