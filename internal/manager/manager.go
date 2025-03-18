@@ -99,6 +99,7 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 		LeaderElectionID:              opts.LeaderElectionID,
 		LeaseDuration:                 &opts.ElectionLeaseDuration,
 		RenewDeadline:                 &opts.ElectionLeaseRenewDeadline,
+		RetryPeriod:                   &opts.ElectionLeaseRetryPeriod,
 		LeaderElectionReleaseOnCancel: true,
 		Controller:                    config.Controller{SkipNameValidation: ptr.To(true)},
 	}

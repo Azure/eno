@@ -15,6 +15,7 @@ type Options struct {
 	leaderelection.Options
 	ElectionLeaseDuration      time.Duration
 	ElectionLeaseRenewDeadline time.Duration
+	ElectionLeaseRetryPeriod   time.Duration
 
 	Rest                    *rest.Config
 	HealthProbeAddr         string
@@ -36,8 +37,9 @@ func (o *Options) Bind(set *flag.FlagSet) {
 	set.StringVar(&o.LeaderElectionNamespace, "leader-election-namespace", os.Getenv("POD_NAMESPACE"), "Determines the namespace in which the leader election resource will be created")
 	set.StringVar(&o.LeaderElectionResourceLock, "leader-election-resource-lock", "", "Determines which resource lock to use for leader election")
 	set.StringVar(&o.LeaderElectionID, "leader-election-id", "", "Determines the name of the resource that leader election will use for holding the leader lock")
-	set.DurationVar(&o.ElectionLeaseDuration, "leader-election-lease-duration", time.Second*90, "")
-	set.DurationVar(&o.ElectionLeaseRenewDeadline, "leader-election-lease-renew-deadline", time.Second*60, "")
+	set.DurationVar(&o.ElectionLeaseDuration, "leader-election-lease-duration", 35*time.Second, "How long before non-leaders will forcibly take leadership")
+	set.DurationVar(&o.ElectionLeaseRenewDeadline, "leader-election-lease-renew-deadline", 30*time.Second, "Max duration of all retries when leader is updating the election lease")
+	set.DurationVar(&o.ElectionLeaseRetryPeriod, "leader-election-lease-retry", 4*time.Second, "Interval at which the leader will update the election lease")
 }
 
 func newCacheOptions(ns string, selector labels.Selector) cache.ByObject {
