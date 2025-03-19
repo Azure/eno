@@ -129,7 +129,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if op == nil || inFlight >= c.concurrencyLimit {
 		return ctrl.Result{}, nil
 	}
-	if !op.NotBefore.IsZero() {
+	if !op.NotBefore.IsZero() { // the next op isn't ready to be dispathced yet
 		if wait := time.Until(op.NotBefore); wait > 0 {
 			return ctrl.Result{RequeueAfter: wait}, nil
 		}
