@@ -2,6 +2,7 @@ package function
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -23,7 +24,7 @@ func NewDefaultInputReader() (*InputReader, error) {
 func NewInputReader(r io.Reader) (*InputReader, error) {
 	rl := krmv1.ResourceList{}
 	err := json.NewDecoder(r).Decode(&rl)
-	if err != nil {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("decoding stdin as krm resource list: %w", err)
 	}
 	return &InputReader{
