@@ -643,6 +643,10 @@ func (in *Synthesis) DeepCopyInto(out *Synthesis) {
 		in, out := &in.Ready, &out.Ready
 		*out = (*in).DeepCopy()
 	}
+	if in.Canceled != nil {
+		in, out := &in.Canceled, &out.Canceled
+		*out = (*in).DeepCopy()
+	}
 	if in.ResourceSlices != nil {
 		in, out := &in.ResourceSlices, &out.ResourceSlices
 		*out = make([]*ResourceSliceRef, len(*in))

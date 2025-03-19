@@ -342,6 +342,7 @@ _Appears in:_
 | `synthesized` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ | Time at which the synthesis completed i.e. resourceSlices was written |  |  |
 | `reconciled` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ | Time at which the synthesis's resources were reconciled into real Kubernetes resources. |  |  |
 | `ready` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ | Time at which the synthesis's reconciled resources became ready. |  |  |
+| `canceled` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ | Canceled signals that any running synthesis pods should be deleted,<br />and new synthesis pods should never be created for this synthesis UUID. |  |  |
 | `attempts` _integer_ | Counter used internally to calculate back off when retrying failed syntheses. |  |  |
 | `results` _[Result](#result) array_ | Results are passed through opaquely from the synthesizer's KRM function. |  |  |
 | `inputRevisions` _[InputRevisions](#inputrevisions) array_ | InputRevisions contains the versions of the input resources that were used for this synthesis. |  |  |

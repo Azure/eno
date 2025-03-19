@@ -119,7 +119,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			continue
 		}
 
-		next := newOp(&synth, &comp)
+		next := newOp(&synth, &comp, nextSlot)
 		if next != nil && (op == nil || next.Less(op)) {
 			op = next
 		}
@@ -129,8 +129,10 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if op == nil || inFlight >= c.concurrencyLimit {
 		return ctrl.Result{}, nil
 	}
-	if wait := time.Until(nextSlot); op.Reason.Deferred() && wait > 0 {
-		return ctrl.Result{RequeueAfter: wait}, nil
+	if !op.NotBefore.IsZero() { // the next op isn't ready to be dispathced yet
+		if wait := time.Until(op.NotBefore); wait > 0 {
+			return ctrl.Result{RequeueAfter: wait}, nil
+		}
 	}
 	logger = logger.WithValues("compositionName", op.Composition.Name, "compositionNamespace", op.Composition.Namespace, "reason", op.Reason, "synthEpoch", synthEpoch)
 
