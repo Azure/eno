@@ -5,16 +5,25 @@ import (
 
 	"github.com/Azure/eno/pkg/function"
 	"helm.sh/helm/v3/pkg/action"
+	"helm.sh/helm/v3/pkg/chart"
+	"helm.sh/helm/v3/pkg/chart/loader"
 )
 
 type ValuesFunc func(*function.InputReader) (map[string]any, error)
 
+// ChartLoader is the function for loading a helm chart.
+type ChartLoader func() (*chart.Chart, error)
+
+func defaultChartLoader() (*chart.Chart, error) {
+	return loader.Load("./chart")
+}
+
 type options struct {
-	Action     *action.Install
-	ValuesFunc ValuesFunc
-	ChartPath  string
-	Reader     *function.InputReader
-	Writer     *function.OutputWriter
+	Action      *action.Install
+	ValuesFunc  ValuesFunc
+	ChartLoader ChartLoader
+	Reader      *function.InputReader
+	Writer      *function.OutputWriter
 }
 
 type RenderOption func(*options)
@@ -46,7 +55,18 @@ func WithChartPath(path string) RenderOption {
 		if o == nil {
 			return
 		}
-		o.ChartPath = path
+		o.ChartLoader = func() (*chart.Chart, error) {
+			return loader.Load(path)
+		}
+	})
+}
+
+func WithChartLoader(cl ChartLoader) RenderOption {
+	return RenderOption(func(o *options) {
+		if o == nil {
+			return
+		}
+		o.ChartLoader = cl
 	})
 }
 
