@@ -15,7 +15,7 @@ type ValuesFunc func(*function.InputReader) (map[string]any, error)
 type ChartLoader func() (*chart.Chart, error)
 
 func defaultChartLoader() (*chart.Chart, error) {
-	return loader.Load("./charts")
+	return loader.Load("./chart")
 }
 
 type options struct {
