@@ -46,7 +46,7 @@ type SymphonyStatus struct {
 	Synthesized        *metav1.Time     `json:"synthesized,omitempty"`
 	Reconciled         *metav1.Time     `json:"reconciled,omitempty"`
 	Ready              *metav1.Time     `json:"ready,omitempty"`
-	Synthesizers       []SynthesizerRef `json:"synthesizers,omitempty"`
+	Synthesizers       []SynthesizerRef `json:"synthesizers,omitempty"` // deprecated
 }
 
 type Variation struct {
