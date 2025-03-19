@@ -9,7 +9,6 @@ import (
 
 	"github.com/Azure/eno/pkg/function"
 	"helm.sh/helm/v3/pkg/action"
-	"helm.sh/helm/v3/pkg/chart/loader"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/yaml"
 )
@@ -43,9 +42,9 @@ func RenderChart(opts ...RenderOption) error {
 	a.IncludeCRDs = true
 
 	o := &options{
-		Action:     a,
-		ValuesFunc: inputsToValues,
-		ChartPath:  "./chart",
+		Action:      a,
+		ValuesFunc:  inputsToValues,
+		ChartLoader: defaultChartLoader,
 	}
 	for _, opt := range opts {
 		opt.apply(o)
@@ -65,7 +64,7 @@ func RenderChart(opts ...RenderOption) error {
 		o.Writer = function.NewDefaultOutputWriter()
 	}
 
-	c, err := loader.Load(o.ChartPath)
+	c, err := o.ChartLoader()
 	if err != nil {
 		return errors.Join(ErrChartNotFound, err)
 	}
