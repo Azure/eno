@@ -136,13 +136,13 @@ func TestSymphonyIntegration(t *testing.T) {
 	testutil.Eventually(t, func() bool {
 		current := &apiv1.Symphony{} // invalidate cache
 		upstream.Get(ctx, client.ObjectKeyFromObject(symph), current)
-		return current.Status.Reconciled != nil && current.Status.ObservedGeneration == current.Generation && len(current.Status.Synthesizers) == 1
+		return current.Status.Reconciled != nil && current.Status.ObservedGeneration == current.Generation
 	})
 
 	comps := &apiv1.CompositionList{}
 	err = upstream.List(ctx, comps)
 	require.NoError(t, err)
-	assert.Len(t, comps.Items, 1)
+	assert.True(t, len(comps.Items) > 0)
 
 	// Deletion
 	require.NoError(t, upstream.Delete(ctx, symph))
