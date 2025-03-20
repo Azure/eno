@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -174,7 +175,8 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 				return false, fmt.Errorf("listing existing compositions without cache: %w", err)
 			}
 			for _, cur := range comps.Items {
-				if cur.Spec.Synthesizer.Name == variation.Synthesizer.Name {
+				owner := metav1.GetControllerOf(&cur)
+				if owner != nil && owner.UID == symph.UID && cur.Spec.Synthesizer.Name == variation.Synthesizer.Name {
 					return false, fmt.Errorf("stale cache - composition already exists")
 				}
 			}
