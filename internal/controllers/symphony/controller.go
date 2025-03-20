@@ -18,7 +18,8 @@ import (
 )
 
 type symphonyController struct {
-	client client.Client
+	client        client.Client
+	noCacheClient client.Reader
 }
 
 func NewController(mgr ctrl.Manager) error {
@@ -27,7 +28,8 @@ func NewController(mgr ctrl.Manager) error {
 		Owns(&apiv1.Composition{}).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "symphonyController")).
 		Complete(&symphonyController{
-			client: mgr.GetClient(),
+			client:        mgr.GetClient(),
+			noCacheClient: mgr.GetAPIReader(),
 		})
 }
 
@@ -167,7 +169,7 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 			return existing.Spec.Synthesizer.Name == variation.Synthesizer.Name
 		})
 		if idx == -1 {
-			err := c.client.List(ctx, comps, client.InNamespace(symph.Namespace))
+			err := c.noCacheClient.List(ctx, comps, client.InNamespace(symph.Namespace))
 			if err != nil {
 				return false, fmt.Errorf("listing existing compositions without cache: %w", err)
 			}
