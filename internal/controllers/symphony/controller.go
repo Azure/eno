@@ -167,6 +167,16 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 			return existing.Spec.Synthesizer.Name == variation.Synthesizer.Name
 		})
 		if idx == -1 {
+			err := c.client.List(ctx, comps, client.InNamespace(symph.Namespace))
+			if err != nil {
+				return false, fmt.Errorf("listing existing compositions without cache: %w", err)
+			}
+			for _, cur := range comps.Items {
+				if cur.Spec.Synthesizer.Name == variation.Synthesizer.Name {
+					return false, fmt.Errorf("stale cache - composition already exists")
+				}
+			}
+
 			err = c.client.Create(ctx, comp)
 			if k8serrors.IsForbidden(err) && k8serrors.HasStatusCause(err, corev1.NamespaceTerminatingCause) {
 				logger.V(0).Info("skipping composition creation because the namespace is being terminated")

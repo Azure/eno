@@ -142,7 +142,7 @@ func TestSymphonyIntegration(t *testing.T) {
 	comps := &apiv1.CompositionList{}
 	err = upstream.List(ctx, comps)
 	require.NoError(t, err)
-	assert.True(t, len(comps.Items) > 0)
+	assert.Len(t, comps.Items, 1)
 
 	// Deletion
 	require.NoError(t, upstream.Delete(ctx, symph))
