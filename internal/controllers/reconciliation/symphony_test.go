@@ -139,10 +139,11 @@ func TestSymphonyIntegration(t *testing.T) {
 		return current.Status.Reconciled != nil && current.Status.ObservedGeneration == current.Generation
 	})
 
-	comps := &apiv1.CompositionList{}
-	err = upstream.List(ctx, comps)
-	require.NoError(t, err)
-	assert.Len(t, comps.Items, 1)
+	testutil.Eventually(t, func() bool {
+		comps := &apiv1.CompositionList{}
+		err = upstream.List(ctx, comps)
+		return err == nil && len(comps.Items) == 1
+	})
 
 	// Deletion
 	require.NoError(t, upstream.Delete(ctx, symph))
@@ -150,7 +151,7 @@ func TestSymphonyIntegration(t *testing.T) {
 		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph))
 	})
 
-	comps = &apiv1.CompositionList{}
+	comps := &apiv1.CompositionList{}
 	err = upstream.List(ctx, comps)
 	require.NoError(t, err)
 	assert.Len(t, comps.Items, 0)
