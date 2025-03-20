@@ -29,7 +29,6 @@ func registerControllers(t *testing.T, mgr *testutil.Manager) {
 	require.NoError(t, synthesis.NewPodGC(mgr.Manager, time.Second))
 	require.NoError(t, replication.NewSymphonyController(mgr.Manager))
 	require.NoError(t, aggregation.NewSymphonyController(mgr.Manager))
-	require.NoError(t, aggregation.NewCompositionController(mgr.Manager))
 	require.NoError(t, scheduling.NewController(mgr.Manager, 10, time.Millisecond, time.Second))
 	require.NoError(t, liveness.NewNamespaceController(mgr.Manager, 3, time.Second))
 	require.NoError(t, watch.NewController(mgr.Manager))

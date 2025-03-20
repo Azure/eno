@@ -6,6 +6,8 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/testutil"
+	"github.com/Azure/eno/internal/testutil/statespace"
+	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -107,7 +109,11 @@ func TestTimeoutDeferral(t *testing.T) {
 	cli := testutil.NewClient(t, comp, synth)
 	c := &compositionController{client: cli}
 
-	res, err := c.Reconcile(ctx, req)
+	res, err := c.Reconcile(ctx, req) // status update
+	require.NoError(t, err)
+	assert.Zero(t, res.RequeueAfter)
+
+	res, err = c.Reconcile(ctx, req)
 	require.NoError(t, err)
 	assert.NotZero(t, res.RequeueAfter)
 
@@ -132,10 +138,115 @@ func TestTimeoutCancelation(t *testing.T) {
 	cli := testutil.NewClient(t, comp, synth)
 	c := &compositionController{client: cli}
 
-	res, err := c.Reconcile(ctx, req)
+	res, err := c.Reconcile(ctx, req) // status update
+	require.NoError(t, err)
+	assert.Zero(t, res.RequeueAfter)
+
+	res, err = c.Reconcile(ctx, req)
 	require.NoError(t, err)
 	assert.Zero(t, res.RequeueAfter)
 
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 	assert.NotNil(t, comp.Status.InFlightSynthesis.Canceled)
+}
+
+func TestSimplifiedStatus(t *testing.T) {
+	statespace.Test(func(state *simplifiedStatusState) *apiv1.SimplifiedStatus {
+		return buildSimplifiedStatus(state.Synth, state.Comp)
+	}).
+		WithInitialState(func() *simplifiedStatusState {
+			return &simplifiedStatusState{
+				Synth: &apiv1.Synthesizer{},
+				Comp:  &apiv1.Composition{},
+			}
+		}).
+		WithMutation("nil synth", func(state *simplifiedStatusState) *simplifiedStatusState {
+			state.Synth = nil
+			return state
+		}).
+		WithMutation("deleting composition", func(state *simplifiedStatusState) *simplifiedStatusState {
+			state.Comp.DeletionTimestamp = &metav1.Time{}
+			return state
+		}).
+		WithMutation("in-flight synthesis", func(state *simplifiedStatusState) *simplifiedStatusState {
+			state.Comp.Status.InFlightSynthesis = &apiv1.Synthesis{}
+			return state
+		}).
+		WithMutation("canceled in-flight synthesis", func(state *simplifiedStatusState) *simplifiedStatusState {
+			if state.Comp.Status.InFlightSynthesis != nil {
+				state.Comp.Status.InFlightSynthesis.Canceled = ptr.To(metav1.Now())
+			}
+			return state
+		}).
+		WithMutation("non-nil current synthesis", func(state *simplifiedStatusState) *simplifiedStatusState {
+			state.Comp.Status.CurrentSynthesis = &apiv1.Synthesis{}
+			return state
+		}).
+		WithMutation("reconciled current synthesis", func(state *simplifiedStatusState) *simplifiedStatusState {
+			if state.Comp.Status.CurrentSynthesis != nil {
+				state.Comp.Status.CurrentSynthesis.Reconciled = ptr.To(metav1.Now())
+			}
+			return state
+		}).
+		WithMutation("ready current synthesis", func(state *simplifiedStatusState) *simplifiedStatusState {
+			if state.Comp.Status.CurrentSynthesis != nil {
+				state.Comp.Status.CurrentSynthesis.Ready = ptr.To(metav1.Now())
+			}
+			return state
+		}).
+		WithMutation("with error message", func(state *simplifiedStatusState) *simplifiedStatusState {
+			if state.Comp.Status.InFlightSynthesis != nil {
+				state.Comp.Status.InFlightSynthesis.Results = []apiv1.Result{
+					{Severity: krmv1.ResultSeverityError, Message: "Test error"},
+				}
+			}
+			return state
+		}).
+		WithInvariant("missing synth", func(state *simplifiedStatusState, result *apiv1.SimplifiedStatus) bool {
+			return state.Comp.DeletionTimestamp != nil || state.Synth != nil || result.Status == "MissingSynthesizer"
+		}).
+		WithInvariant("deleting composition", func(state *simplifiedStatusState, result *apiv1.SimplifiedStatus) bool {
+			return state.Comp.DeletionTimestamp == nil || result.Status == "Deleting"
+		}).
+		WithInvariant("in flight", func(state *simplifiedStatusState, result *apiv1.SimplifiedStatus) bool {
+			return state.Comp.DeletionTimestamp != nil ||
+				state.Synth == nil ||
+				state.Comp.Status.InFlightSynthesis == nil ||
+				state.Comp.Status.InFlightSynthesis.Canceled != nil ||
+				result.Status == "Synthesizing"
+		}).
+		WithInvariant("synthesis canceled", func(state *simplifiedStatusState, result *apiv1.SimplifiedStatus) bool {
+			return state.Comp.DeletionTimestamp != nil ||
+				state.Synth == nil ||
+				state.Comp.Status.InFlightSynthesis == nil ||
+				state.Comp.Status.InFlightSynthesis.Canceled == nil ||
+				result.Status == "SynthesisBackoff"
+		}).
+		WithInvariant("synthesis canceled no message", func(state *simplifiedStatusState, result *apiv1.SimplifiedStatus) bool {
+			return result.Status != "SynthesisBackoff" ||
+				state.Comp.Status.InFlightSynthesis == nil ||
+				len(state.Comp.Status.InFlightSynthesis.Results) > 0 ||
+				result.Error == "Timeout"
+		}).
+		WithInvariant("synthesis error", func(state *simplifiedStatusState, result *apiv1.SimplifiedStatus) bool {
+			return state.Comp.DeletionTimestamp != nil ||
+				state.Synth == nil ||
+				state.Comp.Status.InFlightSynthesis == nil ||
+				len(state.Comp.Status.InFlightSynthesis.Results) == 0 ||
+				result.Error == "Test error"
+		}).
+		WithInvariant("ready", func(state *simplifiedStatusState, result *apiv1.SimplifiedStatus) bool {
+			return state.Comp.DeletionTimestamp != nil ||
+				state.Synth == nil ||
+				state.Comp.Status.InFlightSynthesis != nil ||
+				state.Comp.Status.CurrentSynthesis == nil ||
+				state.Comp.Status.CurrentSynthesis.Ready == nil ||
+				result.Status == "Ready"
+		}).
+		Evaluate(t)
+}
+
+type simplifiedStatusState struct {
+	Synth *apiv1.Synthesizer
+	Comp  *apiv1.Composition
 }
