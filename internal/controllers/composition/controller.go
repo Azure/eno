@@ -2,12 +2,17 @@ package composition
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
+	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
+	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -57,11 +62,21 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 	synth := &apiv1.Synthesizer{}
 	synth.Name = comp.Spec.Synthesizer.Name
 	err = c.client.Get(ctx, client.ObjectKeyFromObject(synth), synth)
+	if errors.IsNotFound(err) {
+		synth = nil
+		err = nil
+	}
 	if err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting synthesizer: %w", err))
+		return ctrl.Result{}, fmt.Errorf("getting synthesizer: %w", err)
 	}
 	if synth != nil {
 		logger = logger.WithValues("synthesizerName", synth.Name, "synthesizerGeneration", synth.Generation)
+	}
+
+	// Write the simplified status
+	modified, err := c.reconcileSimplifiedStatus(ctx, synth, comp)
+	if err != nil || modified {
+		return ctrl.Result{}, err
 	}
 
 	// Enforce the synthesis timeout period
@@ -120,4 +135,86 @@ func (c *compositionController) reconcileDeletedComposition(ctx context.Context,
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func (c *compositionController) reconcileSimplifiedStatus(ctx context.Context, synth *apiv1.Synthesizer, comp *apiv1.Composition) (bool, error) {
+	next := buildSimplifiedStatus(synth, comp)
+	if equality.Semantic.DeepEqual(next, comp.Status.Simplified) {
+		return false, nil
+	}
+
+	js, err := json.Marshal(&[]map[string]any{
+		// this is the only writer - no need for concurrency safety
+		{"op": "replace", "path": "/status/simplified", "value": next},
+	})
+	if err != nil {
+		return false, fmt.Errorf("encoding simplified status patch: %w", err)
+	}
+
+	if err := c.client.Status().Patch(ctx, comp, client.RawPatch(types.JSONPatchType, js)); err != nil {
+		return false, fmt.Errorf("patching simplified status: %w", err)
+	}
+
+	return true, nil
+}
+
+func buildSimplifiedStatus(synth *apiv1.Synthesizer, comp *apiv1.Composition) *apiv1.SimplifiedStatus {
+	status := &apiv1.SimplifiedStatus{}
+
+	if comp.DeletionTimestamp != nil {
+		status.Status = "Deleting"
+		return status
+	}
+	if synth == nil {
+		status.Status = "MissingSynthesizer"
+		return status
+	}
+
+	if syn := comp.Status.InFlightSynthesis; syn != nil {
+		for _, result := range syn.Results {
+			if result.Severity == krmv1.ResultSeverityError {
+				status.Error = result.Message
+				break
+			}
+		}
+
+		if syn.Canceled != nil {
+			if status.Error == "" {
+				status.Error = "Timeout"
+			}
+			status.Status = "SynthesisBackoff"
+			return status
+		}
+
+		status.Status = "Synthesizing"
+		return status
+	}
+
+	if !comp.InputsExist(synth) {
+		status.Status = "MissingInputs"
+		return status
+	}
+	if comp.InputsOutOfLockstep(synth) {
+		status.Status = "MismatchedInputs"
+	}
+
+	if comp.Status.CurrentSynthesis == nil && comp.Status.InFlightSynthesis == nil {
+		status.Status = "PendingSynthesis"
+		return status
+	}
+	if syn := comp.Status.CurrentSynthesis; syn.Ready != nil {
+		status.Status = "Ready"
+		return status
+	}
+	if syn := comp.Status.CurrentSynthesis; syn.Reconciled != nil {
+		status.Status = "NotReady"
+		return status
+	}
+	if syn := comp.Status.CurrentSynthesis; syn != nil && syn.Reconciled == nil {
+		status.Status = "Reconciling"
+		return status
+	}
+
+	status.Status = "Unknown"
+	return status
 }
