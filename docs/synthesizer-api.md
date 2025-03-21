@@ -40,10 +40,7 @@ The synthesizer process's `stderr` is piped to the synthesizer container it's ru
 
 The KRM API supports "results", which are a kind of metadata related to the execution process that would not otherwise be reflected in the generated resources.
 Each result has a severity of info, warning, or error.
-Eno currently supports only the error severity.
-
-Functions that produce one or more results with severity == error will cause the resulting synthesis to be marked as failed.
-Failed syntheses will not be retried until they or their synthesizer are modified.
+Eno passes through the results to the composition's status opaquely, and uses the first error result for kubectl output.
 
 ```yaml
 apiVersion: eno.azure.io/v1
