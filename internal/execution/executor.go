@@ -214,9 +214,7 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 		}
 
 		// Swap pending->current->previous syntheses
-		if syn := comp.Status.CurrentSynthesis; syn != nil && !syn.Failed() {
-			comp.Status.PreviousSynthesis = syn
-		}
+		comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
 		comp.Status.CurrentSynthesis = comp.Status.InFlightSynthesis
 		comp.Status.InFlightSynthesis = nil
 
