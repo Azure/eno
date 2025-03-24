@@ -75,7 +75,7 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Write the simplified status
 	modified, err := c.reconcileSimplifiedStatus(ctx, synth, comp)
-	if err != nil || modified {
+	if err != nil || modified || synth == nil {
 		return ctrl.Result{}, err
 	}
 
