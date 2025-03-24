@@ -147,15 +147,6 @@ func (i *InputRevisions) Less(b InputRevisions) bool {
 	return iInt < bInt
 }
 
-func (s *Synthesis) Failed() bool {
-	for _, result := range s.Results {
-		if result.Severity == "error" {
-			return true
-		}
-	}
-	return false
-}
-
 func (c *Composition) InputsExist(syn *Synthesizer) bool {
 	refs := map[string]struct{}{}
 	for _, ref := range syn.Spec.Refs {

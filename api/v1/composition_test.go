@@ -190,60 +190,6 @@ func TestInputRevisionsLess(t *testing.T) {
 	}
 }
 
-func TestSynthesisFailed(t *testing.T) {
-	tests := []struct {
-		Name        string
-		Syn         Synthesis
-		Expectation bool
-	}{
-		{
-			Name:        "No results",
-			Syn:         Synthesis{Results: []Result{}},
-			Expectation: false,
-		},
-		{
-			Name: "No errors in results",
-			Syn: Synthesis{Results: []Result{
-				{Severity: "info"},
-				{Severity: "warning"},
-			}},
-			Expectation: false,
-		},
-		{
-			Name: "One error in results",
-			Syn: Synthesis{Results: []Result{
-				{Severity: "info"},
-				{Severity: "error"},
-			}},
-			Expectation: true,
-		},
-		{
-			Name: "Multiple errors in results",
-			Syn: Synthesis{Results: []Result{
-				{Severity: "error"},
-				{Severity: "error"},
-			}},
-			Expectation: true,
-		},
-		{
-			Name: "Mixed severities with error",
-			Syn: Synthesis{Results: []Result{
-				{Severity: "info"},
-				{Severity: "warning"},
-				{Severity: "error"},
-			}},
-			Expectation: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.Name, func(t *testing.T) {
-			result := tt.Syn.Failed()
-			assert.Equal(t, tt.Expectation, result)
-		})
-	}
-}
-
 func TestCompositionInputsExist(t *testing.T) {
 	tests := []struct {
 		Name        string

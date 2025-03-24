@@ -6,7 +6,6 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/controllers/aggregation"
 	"github.com/Azure/eno/internal/controllers/composition"
 	"github.com/Azure/eno/internal/controllers/liveness"
 	"github.com/Azure/eno/internal/controllers/resourceslice"
@@ -27,7 +26,6 @@ import (
 func registerControllers(t *testing.T, mgr *testutil.Manager) {
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, synthesis.NewPodGC(mgr.Manager, time.Second))
-	require.NoError(t, aggregation.NewCompositionController(mgr.Manager))
 	require.NoError(t, scheduling.NewController(mgr.Manager, 10, time.Millisecond, time.Second))
 	require.NoError(t, liveness.NewNamespaceController(mgr.Manager, 3, time.Second))
 	require.NoError(t, watch.NewController(mgr.Manager))

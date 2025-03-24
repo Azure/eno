@@ -18,7 +18,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	v1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/controllers/aggregation"
 	"github.com/Azure/eno/internal/controllers/composition"
 	"github.com/Azure/eno/internal/controllers/resourceslice"
 	"github.com/Azure/eno/internal/controllers/scheduling"
@@ -111,11 +110,6 @@ func runController() error {
 	err = synthesis.NewPodGC(mgr, containerCreationTimeout)
 	if err != nil {
 		return fmt.Errorf("constructing pod garbage collector: %w", err)
-	}
-
-	err = aggregation.NewCompositionController(mgr)
-	if err != nil {
-		return fmt.Errorf("constructing composition status aggregation controller: %w", err)
 	}
 
 	err = resourceslice.NewController(mgr)
