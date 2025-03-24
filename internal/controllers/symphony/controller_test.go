@@ -1,7 +1,6 @@
-package replication
+package symphony
 
 import (
-	"context"
 	"reflect"
 	"testing"
 	"time"
@@ -10,18 +9,18 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func TestSymphonyCRUD(t *testing.T) {
+func TestBasics(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
-	err := NewSymphonyController(mgr.Manager)
+	err := NewController(mgr.Manager)
 	require.NoError(t, err)
 	mgr.Start(t)
 
@@ -92,6 +91,22 @@ func TestSymphonyCRUD(t *testing.T) {
 		return true
 	})
 
+	// Mark each composition as reconciled
+	comps := &apiv1.CompositionList{}
+	err = cli.List(ctx, comps)
+	require.NoError(t, err)
+	for _, comp := range comps.Items {
+		comp.Status.CurrentSynthesis = &apiv1.Synthesis{Reconciled: ptr.To(metav1.Now()), ObservedCompositionGeneration: comp.Generation}
+		err = cli.Status().Update(ctx, &comp)
+		require.NoError(t, err)
+	}
+
+	// The symphony should eventually be marked as reconciled
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, client.ObjectKeyFromObject(sym), sym)
+		return err == nil && sym.Status.Reconciled != nil
+	})
+
 	// Update the bindings and prove the new bindings are replicated to the compositions
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		cli.Get(ctx, client.ObjectKeyFromObject(sym), sym)
@@ -113,6 +128,12 @@ func TestSymphonyCRUD(t *testing.T) {
 			}
 		}
 		return true
+	})
+
+	// Because the compositions have been updated, the symphony should be marked as not reconciled
+	testutil.Eventually(t, func() bool {
+		err := cli.Get(ctx, client.ObjectKeyFromObject(sym), sym)
+		return err == nil && sym.Status.Reconciled == nil
 	})
 
 	// Update the labels and annotations and prove they're replicated to the compositions
@@ -150,7 +171,7 @@ func TestSymphonyCRUD(t *testing.T) {
 		return errors.IsNotFound(cli.Get(ctx, client.ObjectKeyFromObject(sym), sym))
 	})
 
-	comps := &apiv1.CompositionList{}
+	comps = &apiv1.CompositionList{}
 	err = cli.List(ctx, comps)
 	require.NoError(t, err)
 	assert.Len(t, comps.Items, 0)
@@ -180,8 +201,132 @@ func TestSymphonyDuplicateCleanup(t *testing.T) {
 	comp2.Spec.Synthesizer.Name = "foo"
 
 	comps := &apiv1.CompositionList{Items: []apiv1.Composition{comp, comp2}}
-	_, _, err := s.reconcileReverse(ctx, sym, comps)
+	_, err := s.reconcileReverse(ctx, sym, comps)
 	require.EqualError(t, err, `deleting duplicate composition: compositions.eno.azure.io "bar" not found`)
+}
+
+func TestBuildStatus(t *testing.T) {
+	c := &symphonyController{}
+
+	t.Run("empty", func(t *testing.T) {
+		symph := &apiv1.Symphony{}
+		symph.Generation = 123
+
+		comps := &apiv1.CompositionList{}
+
+		status := c.buildStatus(symph, comps)
+		assert.Equal(t, apiv1.SymphonyStatus{
+			ObservedGeneration: symph.Generation,
+		}, status)
+	})
+
+	t.Run("one ready", func(t *testing.T) {
+		readyTime := ptr.To(metav1.NewTime(time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC)))
+
+		symph := &apiv1.Symphony{
+			Spec: apiv1.SymphonySpec{
+				Variations: []apiv1.Variation{
+					{Synthesizer: apiv1.SynthesizerRef{Name: "foo"}},
+				},
+			},
+		}
+		comps := &apiv1.CompositionList{}
+		comps.Items = []apiv1.Composition{{
+			Spec: apiv1.CompositionSpec{
+				Synthesizer: apiv1.SynthesizerRef{Name: "foo"},
+			},
+			Status: apiv1.CompositionStatus{
+				CurrentSynthesis: &apiv1.Synthesis{
+					Ready: readyTime,
+				},
+			},
+		}}
+
+		status := c.buildStatus(symph, comps)
+		assert.Equal(t, apiv1.SymphonyStatus{
+			Ready: readyTime,
+		}, status)
+	})
+
+	t.Run("one ready, one not ready", func(t *testing.T) {
+		readyTime := ptr.To(metav1.NewTime(time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC)))
+
+		symph := &apiv1.Symphony{
+			Spec: apiv1.SymphonySpec{
+				Variations: []apiv1.Variation{
+					{Synthesizer: apiv1.SynthesizerRef{Name: "foo"}},
+					{Synthesizer: apiv1.SynthesizerRef{Name: "bar"}},
+				},
+			},
+		}
+		comps := &apiv1.CompositionList{}
+		comps.Items = []apiv1.Composition{
+			{
+				Spec: apiv1.CompositionSpec{
+					Synthesizer: apiv1.SynthesizerRef{Name: "foo"},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						Ready: readyTime,
+					},
+				},
+			},
+			{
+				Spec: apiv1.CompositionSpec{
+					Synthesizer: apiv1.SynthesizerRef{Name: "bar"},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						Ready: nil,
+					},
+				},
+			},
+		}
+
+		status := c.buildStatus(symph, comps)
+		assert.Equal(t, apiv1.SymphonyStatus{}, status)
+	})
+
+	t.Run("two ready", func(t *testing.T) {
+		readyTime := ptr.To(metav1.NewTime(time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC)))
+
+		symph := &apiv1.Symphony{
+			Spec: apiv1.SymphonySpec{
+				Variations: []apiv1.Variation{
+					{Synthesizer: apiv1.SynthesizerRef{Name: "foo"}},
+					{Synthesizer: apiv1.SynthesizerRef{Name: "bar"}},
+				},
+			},
+		}
+		comps := &apiv1.CompositionList{}
+		comps.Items = []apiv1.Composition{
+			{
+				Spec: apiv1.CompositionSpec{
+					Synthesizer: apiv1.SynthesizerRef{Name: "foo"},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						Ready: readyTime,
+					},
+				},
+			},
+			{
+				Spec: apiv1.CompositionSpec{
+					Synthesizer: apiv1.SynthesizerRef{Name: "bar"},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						Ready: ptr.To(metav1.NewTime(readyTime.Add(-time.Second))),
+					},
+				},
+			},
+		}
+
+		status := c.buildStatus(symph, comps)
+		assert.Equal(t, apiv1.SymphonyStatus{
+			Ready: readyTime,
+		}, status)
+	})
 }
 
 func TestGetBindings(t *testing.T) {
@@ -430,105 +575,4 @@ func TestCoalesceMetadata(t *testing.T) {
 			assert.Equal(t, tt.expectedAnnos, tt.existing.Annotations)
 		})
 	}
-}
-
-func TestReconcileForward_NamespaceTerminating(t *testing.T) {
-	ns := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-namespace",
-		},
-		Status: corev1.NamespaceStatus{
-			Phase: corev1.NamespaceTerminating,
-		},
-	}
-
-	symph := &apiv1.Symphony{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "test-namespace",
-		},
-		Spec: apiv1.SymphonySpec{
-			Variations: []apiv1.Variation{{
-				Synthesizer: apiv1.SynthesizerRef{Name: "test-synth"},
-			}},
-		},
-	}
-
-	cli := testutil.NewClient(t, ns, symph)
-	controller := &symphonyController{client: cli, reader: cli}
-
-	// Execute the reconcileForward function
-	ctx := context.Background()
-	existingBySynthName := make(map[string][]*apiv1.Composition)
-	result, err := controller.reconcileForward(ctx, symph, existingBySynthName)
-	require.NoError(t, err)
-	assert.True(t, result)
-
-	// No compositions were created
-	compositions := &apiv1.CompositionList{}
-	err = cli.List(ctx, compositions, &client.ListOptions{Namespace: symph.Namespace})
-	assert.NoError(t, err)
-	assert.Len(t, compositions.Items, 0)
-}
-
-func TestReconcileForward_NamespaceNotFound(t *testing.T) {
-	symph := &apiv1.Symphony{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "test-namespace",
-		},
-		Spec: apiv1.SymphonySpec{
-			Variations: []apiv1.Variation{{
-				Synthesizer: apiv1.SynthesizerRef{Name: "test-synth"},
-			}},
-		},
-	}
-
-	cli := testutil.NewClient(t, symph)
-	controller := &symphonyController{client: cli, reader: cli}
-
-	ctx := context.Background()
-	existingBySynthName := make(map[string][]*apiv1.Composition)
-	result, err := controller.reconcileForward(ctx, symph, existingBySynthName)
-	require.NoError(t, err)
-	assert.True(t, result)
-
-	// No compositions were created
-	compositions := &apiv1.CompositionList{}
-	err = cli.List(ctx, compositions, &client.ListOptions{Namespace: symph.Namespace})
-	assert.NoError(t, err)
-	assert.Len(t, compositions.Items, 0)
-}
-
-func TestReconcileForward_CreateComposition(t *testing.T) {
-	ns := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-namespace",
-		},
-	}
-
-	symph := &apiv1.Symphony{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-symph",
-			Namespace: "test-namespace",
-		},
-		Spec: apiv1.SymphonySpec{
-			Variations: []apiv1.Variation{{
-				Synthesizer: apiv1.SynthesizerRef{Name: "test-synth"},
-			}},
-		},
-	}
-
-	cli := testutil.NewClient(t, ns, symph)
-	controller := &symphonyController{client: cli, reader: cli}
-
-	ctx := context.Background()
-	existingBySynthName := make(map[string][]*apiv1.Composition)
-	result, err := controller.reconcileForward(ctx, symph, existingBySynthName)
-	require.NoError(t, err)
-	assert.True(t, result)
-
-	// A composition was created
-	compositions := &apiv1.CompositionList{}
-	err = cli.List(ctx, compositions, &client.ListOptions{Namespace: ns.Name})
-	assert.NoError(t, err)
-	assert.Len(t, compositions.Items, 1)
 }

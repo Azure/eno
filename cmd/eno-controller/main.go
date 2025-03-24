@@ -18,11 +18,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	v1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/controllers/aggregation"
 	"github.com/Azure/eno/internal/controllers/composition"
-	"github.com/Azure/eno/internal/controllers/replication"
 	"github.com/Azure/eno/internal/controllers/resourceslice"
 	"github.com/Azure/eno/internal/controllers/scheduling"
+	"github.com/Azure/eno/internal/controllers/symphony"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/controllers/watch"
 	"github.com/Azure/eno/internal/execution"
@@ -113,16 +112,6 @@ func runController() error {
 		return fmt.Errorf("constructing pod garbage collector: %w", err)
 	}
 
-	err = replication.NewSymphonyController(mgr)
-	if err != nil {
-		return fmt.Errorf("constructing symphony replication controller: %w", err)
-	}
-
-	err = aggregation.NewSymphonyController(mgr)
-	if err != nil {
-		return fmt.Errorf("constructing symphony aggregation controller: %w", err)
-	}
-
 	err = resourceslice.NewController(mgr)
 	if err != nil {
 		return fmt.Errorf("constructing resource slice controller: %w", err)
@@ -146,6 +135,11 @@ func runController() error {
 	err = composition.NewController(mgr)
 	if err != nil {
 		return fmt.Errorf("constructing composition controller: %w", err)
+	}
+
+	err = symphony.NewController(mgr)
+	if err != nil {
+		return fmt.Errorf("constructing symphony controller: %w", err)
 	}
 
 	return mgr.Start(ctx)
