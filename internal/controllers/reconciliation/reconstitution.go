@@ -119,7 +119,7 @@ func (r *reconstitutionSource) populateCache(ctx context.Context, comp *apiv1.Co
 		slice.Namespace = comp.Namespace
 		err := r.client.Get(ctx, client.ObjectKeyFromObject(&slice), &slice)
 		if err != nil {
-			return false, fmt.Errorf("unable to get resource slice: %w", err)
+			return false, client.IgnoreNotFound(fmt.Errorf("unable to get resource slice (cached): %w", err))
 		}
 		slices[i] = slice
 	}
@@ -137,7 +137,7 @@ func (r *reconstitutionSource) populateCache(ctx context.Context, comp *apiv1.Co
 		slice.Namespace = comp.Namespace
 		err := r.nonCachedReader.Get(ctx, client.ObjectKeyFromObject(&slice), &slice)
 		if err != nil {
-			return false, fmt.Errorf("unable to get resource slice: %w", err)
+			return false, client.IgnoreNotFound(fmt.Errorf("unable to get resource slice (no cache): %w", err))
 		}
 		slices[i] = slice
 	}

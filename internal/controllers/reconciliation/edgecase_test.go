@@ -439,3 +439,65 @@ func TestForceResynthesis(t *testing.T) {
 		return comp.Status.GetCurrentSynthesisUUID() != initialUUID && !comp.ShouldForceResynthesis()
 	})
 }
+
+func TestDeletedResourceSlice(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	// Wait for initial synthesis
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
+	})
+	initialUUID := comp.Status.GetCurrentSynthesisUUID()
+
+	for i := 0; i < 2; i++ {
+		// Force delete the slices
+		require.NoError(t, upstream.DeleteAllOf(ctx, &apiv1.ResourceSlice{}, client.InNamespace("default")))
+		err := retry.RetryOnConflict(testutil.Backoff, func() error {
+			list := &apiv1.ResourceSliceList{}
+			require.NoError(t, upstream.List(ctx, list))
+
+			for _, item := range list.Items {
+				if len(item.Finalizers) == 0 {
+					continue
+				}
+				item.Finalizers = []string{}
+				if err := upstream.Update(ctx, &item); err != nil {
+					return err
+				}
+			}
+
+			return nil
+		})
+		require.NoError(t, err)
+
+		// The composition should eventually be resynth'd
+		testutil.Eventually(t, func() bool {
+			err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+			return err == nil && comp.Status.GetCurrentSynthesisUUID() != initialUUID && comp.Status.CurrentSynthesis.Reconciled != nil
+		})
+		initialUUID = comp.Status.GetCurrentSynthesisUUID()
+	}
+}
