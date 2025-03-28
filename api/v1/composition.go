@@ -65,6 +65,16 @@ type SimplifiedStatus struct {
 	Error  string `json:"error,omitempty"`
 }
 
+func (s *SimplifiedStatus) String() string {
+	if s == nil {
+		return "Nil"
+	}
+	if s.Error == "" {
+		return s.Status
+	}
+	return fmt.Sprintf("%s (error: %s)", s.Status, s.Error)
+}
+
 // A synthesis is the result of synthesizing a composition.
 // In other words: it's a collection of resources returned from a synthesizer.
 type Synthesis struct {
