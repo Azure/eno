@@ -292,6 +292,21 @@ func TestCompositionInputsExist(t *testing.T) {
 	}
 }
 
+func TestCompositionInputsExistImplicitBinding(t *testing.T) {
+	comp := &Composition{}
+	synth := &Synthesizer{}
+	synth.Spec.Refs = []Ref{{Key: "key", Resource: ResourceRef{Name: "foo"}}}
+
+	t.Run("negative", func(t *testing.T) {
+		assert.False(t, comp.InputsExist(synth))
+	})
+
+	t.Run("positive", func(t *testing.T) {
+		comp.Status.InputRevisions = []InputRevisions{{Key: "key"}}
+		assert.True(t, comp.InputsExist(synth))
+	})
+}
+
 func TestInputsInLockstep(t *testing.T) {
 	revision1 := 1
 	revision2 := 2
