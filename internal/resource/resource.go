@@ -180,14 +180,8 @@ func (r *Resource) Merge(ctx context.Context, old *Resource, current *unstructur
 
 	// Convert to SMD values
 	currentVal := value.NewValueInterface(current.Object)
-	typedNew, err := typed.AsTyped(r.value, schem, *typeref)
-	if err != nil {
-		return nil, false, fmt.Errorf("converting new version to typed: %w", err)
-	}
-	typedCurrent, err := typed.AsTyped(currentVal, schem, *typeref)
-	if err != nil {
-		return nil, false, fmt.Errorf("converting current state to typed: %w", err)
-	}
+	typedNew := typed.AsTypedUnvalidated(r.value, schem, *typeref)
+	typedCurrent := typed.AsTypedUnvalidated(currentVal, schem, *typeref)
 
 	// Merge properties that are set in the new state onto the current state
 	merged, err := typedCurrent.Merge(typedNew)

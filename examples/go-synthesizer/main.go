@@ -37,6 +37,7 @@ func main() {
 			Containers: []corev1.Container{{
 				Name:  "nginx",
 				Image: "nginx:latest",
+				Ports: []corev1.ContainerPort{{ContainerPort: 80}},
 			}},
 		},
 	}
