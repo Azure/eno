@@ -128,9 +128,8 @@ func (k *KindWatchController) buildRequests(synth *apiv1.Synthesizer, comps ...a
 	keys := map[string]struct{}{}
 	reqs := []reconcile.Request{}
 	for _, ref := range synth.Spec.Refs {
-		keys[ref.Key] = struct{}{}
-
 		if ref.Resource.Name == "" {
+			keys[ref.Key] = struct{}{}
 			continue // ref does not have an "implicit" binding
 		}
 
@@ -149,11 +148,9 @@ func (k *KindWatchController) buildRequests(synth *apiv1.Synthesizer, comps ...a
 
 			nsn := types.NamespacedName{Namespace: binding.Resource.Namespace, Name: binding.Resource.Name}
 			req := reconcile.Request{NamespacedName: nsn}
-			idx := slices.Index(reqs, req)
-			if idx > 0 {
-				reqs[idx] = req // override the ref's name/namespace if set
+			if !slices.Contains(reqs, req) {
+				reqs = append(reqs, req)
 			}
-			reqs = append(reqs, req)
 		}
 	}
 

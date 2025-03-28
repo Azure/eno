@@ -72,6 +72,7 @@ type ResourceRef struct {
 
 	// If set, name and namespace form an "implicit binding", i.e. a ref that is bound to
 	// a specific resource without a corresponding binding on the composition resource.
+	// The implied binding takes precedence over a corresponding binding from the composition.
 	Name      string `json:"name,omitempty"`
 	Namespace string `json:"namespace,omitempty"`
 }
