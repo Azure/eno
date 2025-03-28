@@ -152,19 +152,9 @@ func (c *Composition) InputsExist(syn *Synthesizer) bool {
 	refs := map[string]struct{}{}
 	for _, ref := range syn.Spec.Refs {
 		refs[ref.Key] = struct{}{}
-
-		// Handle missing resources for implied bindings
-		if ref.Resource.Name == "" {
-			continue
-		}
-		found := slices.ContainsFunc(c.Status.InputRevisions, func(rev InputRevisions) bool {
-			return ref.Key == rev.Key
-		})
-		if !found {
-			return false
-		}
 	}
 
+	bound := map[string]struct{}{}
 	for _, binding := range c.Spec.Bindings {
 		if _, ok := refs[binding.Key]; !ok {
 			// Ignore missing resources if the synthesizer doesn't require them
@@ -177,7 +167,27 @@ func (c *Composition) InputsExist(syn *Synthesizer) bool {
 		if !found {
 			return false
 		}
+		bound[binding.Key] = struct{}{}
 	}
+
+	for _, ref := range syn.Spec.Refs {
+		// Handle missing resources for implied bindings
+		if ref.Resource.Name != "" {
+			found := slices.ContainsFunc(c.Status.InputRevisions, func(rev InputRevisions) bool {
+				return ref.Key == rev.Key
+			})
+			if !found {
+				return false
+			}
+			continue
+		}
+
+		// Every ref must be bound
+		if _, ok := bound[ref.Key]; !ok {
+			return false
+		}
+	}
+
 	return true
 }
 

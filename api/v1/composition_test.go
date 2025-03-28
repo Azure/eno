@@ -190,123 +190,6 @@ func TestInputRevisionsLess(t *testing.T) {
 	}
 }
 
-func TestCompositionInputsExist(t *testing.T) {
-	tests := []struct {
-		Name        string
-		Comp        Composition
-		Expectation bool
-	}{
-		{
-			Name: "No bindings, no revisions",
-			Comp: Composition{
-				Spec:   CompositionSpec{Bindings: []Binding{}},
-				Status: CompositionStatus{InputRevisions: []InputRevisions{}},
-			},
-			Expectation: true,
-		},
-		{
-			Name: "Bindings with matching revisions",
-			Comp: Composition{
-				Spec: CompositionSpec{Bindings: []Binding{
-					{Key: "key1"},
-					{Key: "key2"},
-				}},
-				Status: CompositionStatus{InputRevisions: []InputRevisions{
-					{Key: "key1"},
-					{Key: "key2"},
-				}},
-			},
-			Expectation: true,
-		},
-		{
-			Name: "Bindings with matching revisions but missing ref",
-			Comp: Composition{
-				Spec: CompositionSpec{Bindings: []Binding{
-					{Key: "key1"},
-					{Key: "key5"},
-				}},
-				Status: CompositionStatus{InputRevisions: []InputRevisions{
-					{Key: "key1"},
-					{Key: "key5"},
-				}},
-			},
-			Expectation: true,
-		},
-		{
-			Name: "Bindings with non-matching revisions",
-			Comp: Composition{
-				Spec: CompositionSpec{Bindings: []Binding{
-					{Key: "key1"},
-					{Key: "key3"},
-				}},
-				Status: CompositionStatus{InputRevisions: []InputRevisions{
-					{Key: "key1"},
-					{Key: "key2"},
-				}},
-			},
-			Expectation: false,
-		},
-		{
-			Name: "Bindings with missing revisions",
-			Comp: Composition{
-				Spec: CompositionSpec{Bindings: []Binding{
-					{Key: "key1"},
-					{Key: "key2"},
-				}},
-				Status: CompositionStatus{InputRevisions: []InputRevisions{
-					{Key: "key1"},
-				}},
-			},
-			Expectation: false,
-		},
-		{
-			Name: "Empty bindings, non-empty revisions",
-			Comp: Composition{
-				Spec: CompositionSpec{Bindings: []Binding{}},
-				Status: CompositionStatus{InputRevisions: []InputRevisions{
-					{Key: "key1"},
-					{Key: "key2"},
-				}},
-			},
-			Expectation: true,
-		},
-		{
-			Name: "Non-empty bindings, empty revisions",
-			Comp: Composition{
-				Spec: CompositionSpec{Bindings: []Binding{
-					{Key: "key1"},
-				}},
-				Status: CompositionStatus{InputRevisions: []InputRevisions{}},
-			},
-			Expectation: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.Name, func(t *testing.T) {
-			s := &Synthesizer{}
-			s.Spec.Refs = []Ref{{Key: "key1"}, {Key: "key2"}, {Key: "key3"}}
-			result := tt.Comp.InputsExist(s)
-			assert.Equal(t, tt.Expectation, result)
-		})
-	}
-}
-
-func TestCompositionInputsExistImplicitBinding(t *testing.T) {
-	comp := &Composition{}
-	synth := &Synthesizer{}
-	synth.Spec.Refs = []Ref{{Key: "key", Resource: ResourceRef{Name: "foo"}}}
-
-	t.Run("negative", func(t *testing.T) {
-		assert.False(t, comp.InputsExist(synth))
-	})
-
-	t.Run("positive", func(t *testing.T) {
-		comp.Status.InputRevisions = []InputRevisions{{Key: "key"}}
-		assert.True(t, comp.InputsExist(synth))
-	})
-}
-
 func TestInputsInLockstep(t *testing.T) {
 	revision1 := 1
 	revision2 := 2
@@ -462,4 +345,187 @@ func TestForceSynthesisAnnotation(t *testing.T) {
 	// Update the synthesis UUID
 	comp.Status.CurrentSynthesis.UUID = "234"
 	assert.False(t, comp.ShouldForceResynthesis())
+}
+
+func TestInputsExist(t *testing.T) {
+	// GPT generated - beware!!!
+	tests := []struct {
+		Name        string
+		Composition Composition
+		Synthesizer Synthesizer
+		Expectation bool
+	}{
+		{
+			Name: "All required refs are bound and exist in InputRevisions",
+			Composition: Composition{
+				Spec: CompositionSpec{
+					Bindings: []Binding{
+						{Key: "key1"},
+						{Key: "key2"},
+					},
+				},
+				Status: CompositionStatus{
+					InputRevisions: []InputRevisions{
+						{Key: "key1"},
+						{Key: "key2"},
+					},
+				},
+			},
+			Synthesizer: Synthesizer{
+				Spec: SynthesizerSpec{
+					Refs: []Ref{
+						{Key: "key1"},
+						{Key: "key2"},
+					},
+				},
+			},
+			Expectation: true,
+		},
+		{
+			Name: "Missing InputRevisions for a required ref",
+			Composition: Composition{
+				Spec: CompositionSpec{
+					Bindings: []Binding{
+						{Key: "key1"},
+					},
+				},
+				Status: CompositionStatus{
+					InputRevisions: []InputRevisions{
+						{Key: "key1"},
+					},
+				},
+			},
+			Synthesizer: Synthesizer{
+				Spec: SynthesizerSpec{
+					Refs: []Ref{
+						{Key: "key1"},
+						{Key: "key2"},
+					},
+				},
+			},
+			Expectation: false,
+		},
+		{
+			Name: "Binding exists but not required by synthesizer",
+			Composition: Composition{
+				Spec: CompositionSpec{
+					Bindings: []Binding{
+						{Key: "key1"},
+						{Key: "key3"},
+					},
+				},
+				Status: CompositionStatus{
+					InputRevisions: []InputRevisions{
+						{Key: "key1"},
+						{Key: "key3"},
+					},
+				},
+			},
+			Synthesizer: Synthesizer{
+				Spec: SynthesizerSpec{
+					Refs: []Ref{
+						{Key: "key1"},
+					},
+				},
+			},
+			Expectation: true,
+		},
+		{
+			Name: "Implied binding missing in InputRevisions",
+			Composition: Composition{
+				Spec: CompositionSpec{
+					Bindings: []Binding{
+						{Key: "key1"},
+					},
+				},
+				Status: CompositionStatus{
+					InputRevisions: []InputRevisions{
+						{Key: "key1"},
+					},
+				},
+			},
+			Synthesizer: Synthesizer{
+				Spec: SynthesizerSpec{
+					Refs: []Ref{
+						{Key: "key1"},
+						{Key: "key2", Resource: ResourceRef{Name: "resource2"}},
+					},
+				},
+			},
+			Expectation: false,
+		},
+		{
+			Name: "All implied bindings exist in InputRevisions",
+			Composition: Composition{
+				Spec: CompositionSpec{
+					Bindings: []Binding{
+						{Key: "key1"},
+					},
+				},
+				Status: CompositionStatus{
+					InputRevisions: []InputRevisions{
+						{Key: "key1"},
+						{Key: "key2"},
+					},
+				},
+			},
+			Synthesizer: Synthesizer{
+				Spec: SynthesizerSpec{
+					Refs: []Ref{
+						{Key: "key1"},
+						{Key: "key2", Resource: ResourceRef{Name: "resource2"}},
+					},
+				},
+			},
+			Expectation: true,
+		},
+		{
+			Name: "No bindings or refs",
+			Composition: Composition{
+				Spec: CompositionSpec{
+					Bindings: []Binding{},
+				},
+				Status: CompositionStatus{
+					InputRevisions: []InputRevisions{},
+				},
+			},
+			Synthesizer: Synthesizer{
+				Spec: SynthesizerSpec{
+					Refs: []Ref{},
+				},
+			},
+			Expectation: true,
+		},
+		{
+			Name: "Extra InputRevisions not required by synthesizer",
+			Composition: Composition{
+				Spec: CompositionSpec{
+					Bindings: []Binding{
+						{Key: "key1"},
+					},
+				},
+				Status: CompositionStatus{
+					InputRevisions: []InputRevisions{
+						{Key: "key1"},
+						{Key: "key3"},
+					},
+				},
+			},
+			Synthesizer: Synthesizer{
+				Spec: SynthesizerSpec{
+					Refs: []Ref{
+						{Key: "key1"},
+					},
+				},
+			},
+			Expectation: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.Name, func(t *testing.T) {
+			result := tt.Composition.InputsExist(&tt.Synthesizer)
+			assert.Equal(t, tt.Expectation, result)
+		})
+	}
 }

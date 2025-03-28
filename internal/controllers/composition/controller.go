@@ -2,7 +2,6 @@ package composition
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -12,7 +11,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -143,15 +141,9 @@ func (c *compositionController) reconcileSimplifiedStatus(ctx context.Context, s
 		return false, nil
 	}
 
-	js, err := json.Marshal(&[]map[string]any{
-		// this is the only writer - no need for concurrency safety
-		{"op": "replace", "path": "/status/simplified", "value": next},
-	})
-	if err != nil {
-		return false, fmt.Errorf("encoding simplified status patch: %w", err)
-	}
-
-	if err := c.client.Status().Patch(ctx, comp, client.RawPatch(types.JSONPatchType, js)); err != nil {
+	copy := comp.DeepCopy()
+	copy.Status.Simplified = next
+	if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(comp)); err != nil {
 		return false, fmt.Errorf("patching simplified status: %w", err)
 	}
 
