@@ -198,6 +198,123 @@ func TestDeferredWithIgnoreSideEffects(t *testing.T) {
 		return rv != ""
 	})
 }
+
+func TestBasicsImplicitBinding(t *testing.T) {
+	mgr := testutil.NewManager(t)
+	require.NoError(t, NewController(mgr.Manager))
+	mgr.Start(t)
+
+	ctx := testutil.NewContext(t)
+	cli := mgr.GetClient()
+
+	input := &corev1.ConfigMap{}
+	input.Name = "test-input"
+	input.Namespace = "default"
+	require.NoError(t, cli.Create(ctx, input))
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	synth.Spec.Refs = []apiv1.Ref{{
+		Key: "foo",
+		Resource: apiv1.ResourceRef{
+			Version:   "v1",
+			Kind:      "ConfigMap",
+			Name:      input.Name,
+			Namespace: input.Namespace,
+		},
+	}}
+	require.NoError(t, cli.Create(ctx, synth))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = synth.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	// The initial status is populated
+	var initialResourceVersion string
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if len(comp.Status.InputRevisions) != 1 {
+			return false
+		}
+
+		rv := comp.Status.InputRevisions[0].ResourceVersion
+		initialResourceVersion = rv
+		return rv != ""
+	})
+
+	// Update the input
+	input.Data = map[string]string{"foo": "bar"}
+	require.NoError(t, cli.Update(ctx, input))
+
+	// The status is eventually updated
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if len(comp.Status.InputRevisions) != 1 {
+			return false
+		}
+
+		rv := comp.Status.InputRevisions[0].ResourceVersion
+		return rv != "" && rv != initialResourceVersion
+	})
+}
+
+func TestBasicsImplicitBindingConflict(t *testing.T) {
+	mgr := testutil.NewManager(t)
+	require.NoError(t, NewController(mgr.Manager))
+	mgr.Start(t)
+
+	ctx := testutil.NewContext(t)
+	cli := mgr.GetClient()
+
+	input := &corev1.ConfigMap{}
+	input.Name = "test-input"
+	input.Namespace = "default"
+	require.NoError(t, cli.Create(ctx, input))
+
+	input2 := &corev1.ConfigMap{}
+	input2.Name = "test-input-2"
+	input2.Namespace = "default"
+	require.NoError(t, cli.Create(ctx, input2))
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	synth.Spec.Refs = []apiv1.Ref{{
+		Key: "foo",
+		Resource: apiv1.ResourceRef{
+			Version:   "v1",
+			Kind:      "ConfigMap",
+			Name:      input2.Name,
+			Namespace: input2.Namespace,
+		},
+	}}
+	require.NoError(t, cli.Create(ctx, synth))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = synth.Name
+	comp.Spec.Bindings = []apiv1.Binding{{
+		Key: "foo",
+		Resource: apiv1.ResourceBinding{
+			Name:      input.Name,
+			Namespace: input.Namespace,
+		},
+	}}
+	require.NoError(t, cli.Create(ctx, comp))
+
+	// The implicit binding wins
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if len(comp.Status.InputRevisions) != 1 {
+			return false
+		}
+
+		return comp.Status.InputRevisions[0].ResourceVersion == input2.ResourceVersion
+	})
+}
+
 func TestCompositionChange(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	require.NoError(t, NewController(mgr.Manager))

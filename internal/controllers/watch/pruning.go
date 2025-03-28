@@ -21,8 +21,15 @@ func (c *pruningController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	synth := &apiv1.Synthesizer{}
+	synth.Name = comp.Spec.Synthesizer.Name
+	err = c.client.Get(ctx, client.ObjectKeyFromObject(synth), synth)
+	if client.IgnoreNotFound(err) != nil {
+		return ctrl.Result{}, err
+	}
+
 	for i, ir := range comp.Status.InputRevisions {
-		if hasBindingKey(comp, ir.Key) {
+		if hasBindingKey(comp, synth, ir.Key) {
 			continue
 		}
 		comp.Status.InputRevisions = append(comp.Status.InputRevisions[:i], comp.Status.InputRevisions[i+1:]...)
@@ -38,10 +45,15 @@ func (c *pruningController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return ctrl.Result{}, nil
 }
 
-func hasBindingKey(comp *apiv1.Composition, key string) bool {
+func hasBindingKey(comp *apiv1.Composition, synth *apiv1.Synthesizer, key string) bool {
 	for _, b := range comp.Spec.Bindings {
 		if b.Key == key {
 			return true
+		}
+	}
+	for _, ref := range synth.Spec.Refs {
+		if ref.Key == key && ref.Resource.Name != "" {
+			return true // implicit binding
 		}
 	}
 	return false

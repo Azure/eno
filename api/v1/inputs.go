@@ -69,4 +69,9 @@ type ResourceRef struct {
 	Group   string `json:"group,omitempty"`
 	Version string `json:"version,omitempty"`
 	Kind    string `json:"kind"`
+
+	// If set, name and namespace form an "implicit binding", i.e. a ref that is bound to
+	// a specific resource without a corresponding binding on the composition resource.
+	Name      string `json:"name,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
 }
