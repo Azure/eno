@@ -69,3 +69,24 @@ Synthesizers can opt-in to also honor the cooldown period for specific inputs by
 This is useful for inputs that are shared between many compositions, similar to synthesizers.
 
 > Note: if a synthesis honoring the cooldown fails, Eno will move onto the next period after one retry.
+
+
+## Implicit Bindings
+
+It's possible to avoid bindings in cases where a synthesizer's ref will only be bound to a single resource globally across all compositions.
+
+```yaml
+apiVersion: eno.azure.io/v1
+kind: Synthesizer
+spec:
+  refs:
+    - key: foo
+      resource:
+        group: ""
+        version: v1
+        kind: "ConfigMap"
+        name: my-configmap
+        namespace: default
+```
+
+Note that any other bindings to this ref will be ignored.

@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"path"
 	"reflect"
+	"slices"
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -125,11 +126,20 @@ func (k *KindWatchController) newResourceWatchController(parent *WatchController
 // buildRequests returns a reconcile request for every binding to this resource kind.
 func (k *KindWatchController) buildRequests(synth *apiv1.Synthesizer, comps ...apiv1.Composition) []reconcile.Request {
 	keys := map[string]struct{}{}
+	reqs := []reconcile.Request{}
 	for _, ref := range synth.Spec.Refs {
-		keys[ref.Key] = struct{}{}
+		if ref.Resource.Name == "" {
+			keys[ref.Key] = struct{}{}
+			continue // ref does not have an "implicit" binding
+		}
+
+		nsn := types.NamespacedName{Namespace: ref.Resource.Namespace, Name: ref.Resource.Name}
+		req := reconcile.Request{NamespacedName: nsn}
+		if !slices.Contains(reqs, req) {
+			reqs = append(reqs, req)
+		}
 	}
 
-	reqs := []reconcile.Request{}
 	for _, comp := range comps {
 		for _, binding := range comp.Spec.Bindings {
 			if _, found := keys[binding.Key]; !found {
@@ -137,18 +147,13 @@ func (k *KindWatchController) buildRequests(synth *apiv1.Synthesizer, comps ...a
 			}
 
 			nsn := types.NamespacedName{Namespace: binding.Resource.Namespace, Name: binding.Resource.Name}
-			var exists bool
-			for _, req := range reqs {
-				if req.NamespacedName == nsn {
-					exists = true
-					break
-				}
-			}
-			if !exists {
-				reqs = append(reqs, reconcile.Request{NamespacedName: nsn})
+			req := reconcile.Request{NamespacedName: nsn}
+			if !slices.Contains(reqs, req) {
+				reqs = append(reqs, req)
 			}
 		}
 	}
+
 	return reqs
 }
 
@@ -180,6 +185,24 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 	rand.Shuffle(len(list.Items), func(i, j int) { list.Items[i], list.Items[j] = list.Items[j], list.Items[i] })
 
 	for _, synth := range list.Items {
+		for _, ref := range synth.Spec.Refs {
+			if ref.Resource.Name != meta.GetName() || ref.Resource.Namespace != meta.GetNamespace() || ref.Resource.Group != k.gvk.Group || ref.Resource.Kind != k.gvk.Kind || ref.Resource.Version != k.gvk.Version {
+				continue
+			}
+
+			list := &apiv1.CompositionList{}
+			err = k.client.List(ctx, list, client.MatchingFields{
+				manager.IdxCompositionsBySynthesizer: synth.Name,
+			})
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
+			}
+			modified, err := k.updateCompositions(ctx, logger, &synth, meta, list)
+			if modified || err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+
 		list := &apiv1.CompositionList{}
 		err = k.client.List(ctx, list, client.MatchingFields{
 			manager.IdxCompositionsByBinding: path.Join(synth.Name, meta.Namespace, meta.Name),
@@ -187,30 +210,38 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 		}
-
-		for _, comp := range list.Items {
-			key := findRefKey(&comp, &synth, meta)
-			if key == "" {
-				logger.V(1).Info("no matching input key found for resource")
-				continue
-			}
-
-			revs := resource.NewInputRevisions(meta, key)
-			if !setInputRevisions(&comp, revs) {
-				continue
-			}
-
-			// TODO: Reduce risk of conflict errors here
-			err = k.client.Status().Update(ctx, &comp)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("updating input revisions: %w", err)
-			}
-			logger.V(0).Info("noticed input resource change", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key)
-			return ctrl.Result{}, nil // wait for requeue
+		modified, err := k.updateCompositions(ctx, logger, &synth, meta, list)
+		if modified || err != nil {
+			return ctrl.Result{}, err
 		}
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func (k *KindWatchController) updateCompositions(ctx context.Context, logger logr.Logger, synth *apiv1.Synthesizer, meta *metav1.PartialObjectMetadata, list *apiv1.CompositionList) (bool, error) {
+	for _, comp := range list.Items {
+		key := findRefKey(&comp, synth, meta)
+		if key == "" {
+			logger.V(1).Info("no matching input key found for resource")
+			continue
+		}
+
+		revs := resource.NewInputRevisions(meta, key)
+		if !setInputRevisions(&comp, revs) {
+			continue
+		}
+
+		// TODO: Reduce risk of conflict errors here
+		err := k.client.Status().Update(ctx, &comp)
+		if err != nil {
+			return false, fmt.Errorf("updating input revisions: %w", err)
+		}
+		logger.V(0).Info("noticed input resource change", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key)
+		return true, nil // wait for requeue
+	}
+
+	return false, nil
 }
 
 func findRefKey(comp *apiv1.Composition, synth *apiv1.Synthesizer, meta *metav1.PartialObjectMetadata) string {
@@ -224,7 +255,10 @@ func findRefKey(comp *apiv1.Composition, synth *apiv1.Synthesizer, meta *metav1.
 
 	for _, ref := range synth.Spec.Refs {
 		gvk := meta.GetObjectKind().GroupVersionKind()
-		if bindingKey == ref.Key && ref.Resource.Group == gvk.Group && ref.Resource.Version == gvk.Version && ref.Resource.Kind == gvk.Kind {
+		matchesGVK := ref.Resource.Group == gvk.Group && ref.Resource.Version == gvk.Version && ref.Resource.Kind == gvk.Kind
+		matchesKey := bindingKey == ref.Key
+		matchesNSN := ref.Resource.Name == meta.GetName() && ref.Resource.Namespace == meta.GetNamespace()
+		if matchesGVK && (matchesKey || matchesNSN) {
 			return ref.Key
 		}
 	}

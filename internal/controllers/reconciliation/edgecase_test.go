@@ -501,3 +501,60 @@ func TestDeletedResourceSlice(t *testing.T) {
 		initialUUID = comp.Status.GetCurrentSynthesisUUID()
 	}
 }
+
+func TestMissingInput(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "create"
+	syn.Spec.Refs = []apiv1.Ref{{Key: "test-ref"}}
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	comp.Spec.Bindings = []apiv1.Binding{{Key: "test-ref"}}
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	// Status should eventually be updated
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.Simplified != nil && comp.Status.Simplified.Status == "MissingInputs"
+	})
+}
+
+func TestMissingInputBinding(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "create"
+	syn.Spec.Refs = []apiv1.Ref{{Key: "test-ref"}}
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	// Status should eventually be updated
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.Simplified != nil && comp.Status.Simplified.Status == "MissingInputs"
+	})
+}

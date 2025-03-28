@@ -218,6 +218,8 @@ _Appears in:_
 | `group` _string_ |  |  |  |
 | `version` _string_ |  |  |  |
 | `kind` _string_ |  |  |  |
+| `name` _string_ | If set, name and namespace form an "implicit binding", i.e. a ref that is bound to<br />a specific resource without a corresponding binding on the composition resource.<br />The implied binding takes precedence over a corresponding binding from the composition. |  |  |
+| `namespace` _string_ |  |  |  |
 
 
 
