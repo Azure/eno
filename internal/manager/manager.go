@@ -183,19 +183,12 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 }
 
 func NewLogConstructor(mgr ctrl.Manager, controllerName string) func(*reconcile.Request) logr.Logger {
-	return func(req *reconcile.Request) logr.Logger {
-		l := mgr.GetLogger().WithValues("controller", controllerName)
-		if req != nil {
-			l.WithValues("requestName", req.Name, "requestNamespace", req.Namespace)
-		}
-		return l
-	}
+	return NewTypedLogConstructor[*reconcile.Request](mgr, controllerName)
 }
 
 func NewTypedLogConstructor[T any](mgr ctrl.Manager, controllerName string) func(T) logr.Logger {
 	return func(req T) logr.Logger {
 		l := mgr.GetLogger().WithValues("controller", controllerName)
-		// TODO: Improve log fields and merge NewLogConstructor into NewTypedLogConstructor
 		return l
 	}
 }

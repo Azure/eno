@@ -51,11 +51,14 @@ func NewNamespaceController(mgr ctrl.Manager, checks int, creationGracePeriod ti
 }
 
 func (c *namespaceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+
 	ns := &corev1.Namespace{}
 	ns.Name = req.Name
 	err := c.client.Get(ctx, req.NamespacedName, ns)
 	if client.IgnoreNotFound(err) != nil {
-		return ctrl.Result{}, fmt.Errorf("getting namespace: %w", err)
+		logger.Error(err, "failed to get namespace")
+		return ctrl.Result{}, err
 	}
 
 	const annoKey = "eno.azure.io/recreation-reason"
@@ -63,14 +66,15 @@ func (c *namespaceController) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Delete the recreated namespace immediately.
 	// Its finalizers will keep it around until we've had time to remove our finalizers.
-	logger := logr.FromContextOrDiscard(ctx).WithValues("resourceNamespace", ns.Name)
+	logger = logger.WithValues("resourceNamespace", ns.Name)
 	if ns.Annotations != nil && ns.Annotations[annoKey] == annoValue {
 		if ns.DeletionTimestamp != nil {
 			return ctrl.Result{}, c.cleanup(ctx, req.Name)
 		}
 		err := c.client.Delete(ctx, ns)
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("deleting namespace: %w", err)
+			logger.Error(err, "failed to delete namespace")
+			return ctrl.Result{}, err
 		}
 		logger.V(0).Info("deleting recreated namespace")
 		return ctrl.Result{}, nil
@@ -86,6 +90,7 @@ func (c *namespaceController) Reconcile(ctx context.Context, req ctrl.Request) (
 		for _, kind := range orphanableKinds {
 			hasOrphans, res, err := c.findOrphans(ctx, ns.Name, kind)
 			if err != nil {
+				logger.Error(err, "failed to find orphaned resources", "resourceKind", kind)
 				return ctrl.Result{}, err
 			}
 			if res != nil {
@@ -111,7 +116,8 @@ func (c *namespaceController) Reconcile(ctx context.Context, req ctrl.Request) (
 	ns.Annotations = map[string]string{annoKey: annoValue}
 	err = c.client.Create(ctx, ns)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("creating namespace: %w", err)
+		logger.Error(err, "failed to create namespace")
+		return ctrl.Result{}, err
 	}
 	logger.V(0).Info("recreated missing namespace to free orphaned resources")
 	return ctrl.Result{}, nil
@@ -141,7 +147,7 @@ func (c *namespaceController) findOrphans(ctx context.Context, ns, kind string) 
 	list.APIVersion = "eno.azure.io/v1"
 	err := c.client.List(ctx, list, client.InNamespace(ns))
 	if err != nil {
-		return false, nil, fmt.Errorf("listing resources of kind %q: %w", kind, err)
+		return false, nil, err
 	}
 	if len(list.Items) == 0 {
 		return false, nil, nil // no orphaned resources, nothing to do

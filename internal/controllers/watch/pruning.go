@@ -2,7 +2,6 @@ package watch
 
 import (
 	"context"
-	"fmt"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/go-logr/logr"
@@ -15,9 +14,12 @@ type pruningController struct {
 }
 
 func (c *pruningController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, req.NamespacedName, comp)
 	if err != nil {
+		logger.Error(err, "failed to get composition")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
@@ -25,6 +27,7 @@ func (c *pruningController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	synth.Name = comp.Spec.Synthesizer.Name
 	err = c.client.Get(ctx, client.ObjectKeyFromObject(synth), synth)
 	if client.IgnoreNotFound(err) != nil {
+		logger.Error(err, "failed to get synthesizer")
 		return ctrl.Result{}, err
 	}
 
@@ -35,10 +38,11 @@ func (c *pruningController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		comp.Status.InputRevisions = append(comp.Status.InputRevisions[:i], comp.Status.InputRevisions[i+1:]...)
 		err = c.client.Status().Update(ctx, comp)
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("updating status: %w", err)
+			logger.Error(err, "failed to update composition status")
+			return ctrl.Result{}, err
 		}
 
-		logr.FromContextOrDiscard(ctx).V(1).Info("pruned old input revision from composition status", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", ir.Key)
+		logger.V(1).Info("pruned old input revision from composition status", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", ir.Key)
 		return ctrl.Result{}, nil
 	}
 
