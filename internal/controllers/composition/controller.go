@@ -39,7 +39,8 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, req.NamespacedName, comp)
 	if err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition resource: %w", err))
+		logger.Error(err, "failed to get composition resource")
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisID", comp.Status.GetCurrentSynthesisUUID())
@@ -51,7 +52,8 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 	if controllerutil.AddFinalizer(comp, "eno.azure.io/cleanup") {
 		err = c.client.Update(ctx, comp)
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("updating composition: %w", err)
+			logger.Error(err, "failed to update composition")
+			return ctrl.Result{}, err
 		}
 		logger.V(1).Info("added cleanup finalizer to composition")
 		return ctrl.Result{}, nil
@@ -65,7 +67,8 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 		err = nil
 	}
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("getting synthesizer: %w", err)
+		logger.Error(err, "failed to get synthesizer")
+		return ctrl.Result{}, err
 	}
 	if synth != nil {
 		logger = logger.WithValues("synthesizerName", synth.Name, "synthesizerGeneration", synth.Generation)
@@ -73,8 +76,12 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Write the simplified status
 	modified, err := c.reconcileSimplifiedStatus(ctx, synth, comp)
-	if err != nil || modified || synth == nil {
+	if err != nil {
+		logger.Error(err, "failed to reconcile simplified status")
 		return ctrl.Result{}, err
+	}
+	if modified || synth == nil {
+		return ctrl.Result{}, nil
 	}
 
 	// Enforce the synthesis timeout period
@@ -85,7 +92,8 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		syn.Canceled = ptr.To(metav1.Now())
 		if err := c.client.Status().Update(ctx, comp); err != nil {
-			return ctrl.Result{}, fmt.Errorf("updating compostion to reflect synthesis timeout: %w", err)
+			logger.Error(err, "failed to update composition status to reflect synthesis timeout")
+			return ctrl.Result{}, err
 		}
 		logger.V(0).Info("synthesis timed out")
 		return ctrl.Result{}, nil
@@ -111,7 +119,8 @@ func (c *compositionController) reconcileDeletedComposition(ctx context.Context,
 			comp.Status.CurrentSynthesis.Ready = nil
 			err := c.client.Status().Update(ctx, comp)
 			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("updating current composition generation: %w", err)
+				logger.Error(err, "failed to update current composition generation")
+				return ctrl.Result{}, err
 			}
 			logger.V(0).Info("updated composition status to reflect deletion", "synthesisID", comp.Status.CurrentSynthesis.UUID)
 			return ctrl.Result{}, nil
@@ -126,7 +135,8 @@ func (c *compositionController) reconcileDeletedComposition(ctx context.Context,
 	if controllerutil.RemoveFinalizer(comp, "eno.azure.io/cleanup") {
 		err := c.client.Update(ctx, comp)
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
+			logger.Error(err, "failed to remove finalizer")
+			return ctrl.Result{}, err
 		}
 
 		logger.V(0).Info("removed finalizer from composition")

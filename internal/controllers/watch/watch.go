@@ -4,6 +4,7 @@ import (
 	"context"
 	"math/rand"
 
+	"github.com/go-logr/logr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -40,9 +41,12 @@ func NewController(mgr ctrl.Manager) error {
 }
 
 func (c *WatchController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+
 	synths := &apiv1.SynthesizerList{}
 	err := c.client.List(ctx, synths)
 	if err != nil {
+		logger.Error(err, "failed to list synthesizers")
 		return ctrl.Result{}, err
 	}
 
@@ -67,6 +71,7 @@ func (c *WatchController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 			rc, err := NewKindWatchController(ctx, c, &ref.Resource)
 			if err != nil {
+				logger.Error(err, "failed to create kind watch controller", "resource", ref.Resource)
 				return ctrl.Result{}, err
 			}
 			c.refControllers[ref.Resource] = rc
@@ -82,6 +87,7 @@ func (c *WatchController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 		rc.Stop(ctx)
 		delete(c.refControllers, ref)
+		logger.Error(nil, "stopped and removed controller for resource", "resource", ref)
 		return ctrl.Result{Requeue: true}, nil
 	}
 

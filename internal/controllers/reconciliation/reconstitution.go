@@ -70,6 +70,8 @@ func newReconstitutionSource(mgr ctrl.Manager) (source.TypedSource[resource.Requ
 }
 
 func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+
 	comp := &apiv1.Composition{}
 	err := r.client.Get(ctx, req.NamespacedName, comp)
 	if errors.IsNotFound(err) {
@@ -77,16 +79,18 @@ func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("getting resource: %w", err)
+		logger.Error(err, "failed to get composition")
+		return ctrl.Result{}, err
 	}
 
-	logger := logr.FromContextOrDiscard(ctx).WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace)
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace)
 	ctx = logr.NewContext(ctx, logger)
 
 	// The reconciliation controller assumes that the previous synthesis will be loaded first
 	filled, err := r.populateCache(ctx, comp, comp.Status.PreviousSynthesis)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("processing previous state: %w", err)
+		logger.Error(err, "failed to process previous state")
+		return ctrl.Result{}, err
 	}
 	if filled {
 		return ctrl.Result{Requeue: true}, nil
@@ -94,7 +98,8 @@ func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	filled, err = r.populateCache(ctx, comp, comp.Status.CurrentSynthesis)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("processing current state: %w", err)
+		logger.Error(err, "failed to process current state")
+		return ctrl.Result{}, err
 	}
 	if filled {
 		return ctrl.Result{Requeue: true}, nil

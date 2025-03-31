@@ -36,7 +36,8 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	comp := &apiv1.Composition{}
 	err := s.client.Get(ctx, req.NamespacedName, comp)
 	if err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition: %w", err))
+		logger.Error(err, "failed to get composition")
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	logger = logger.WithValues("compositionGeneration", comp.Generation, "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesisID", comp.Status.GetCurrentSynthesisUUID())
 	ctx = logr.NewContext(ctx, logger)
@@ -60,7 +61,8 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return s.handleMissingSlice(ctx, comp, ref.Name)
 		}
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("getting resource slice: %w", err)
+			logger.Error(err, "failed to get resource slice")
+			return ctrl.Result{}, err
 		}
 
 		// Handle a case where the reconciliation controller hasn't updated the slice's status yet
@@ -91,8 +93,8 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 	err = s.client.Status().Update(ctx, comp)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("updating composition '%s' status: %w", comp.Name, err)
-
+		logger.Error(err, "failed to update composition status")
+		return ctrl.Result{}, err
 	}
 	logger.V(1).Info("aggregated resource status into composition", "reconciled", snapshot.Reconciled, "ready", snapshot.Ready)
 

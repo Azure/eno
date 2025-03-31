@@ -96,15 +96,15 @@ func New(mgr ctrl.Manager, opts Options) error {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.Result, error) {
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
-	defer cancel()
+	logger := logr.FromContextOrDiscard(ctx)
 
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, types.NamespacedName{Name: req.Composition.Name, Namespace: req.Composition.Namespace}, comp)
 	if err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition: %w", err))
+		logger.Error(err, "failed to get composition")
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	logger := logr.FromContextOrDiscard(ctx).WithValues("compositionGeneration", comp.Generation)
+	logger = logger.WithValues("compositionGeneration", comp.Generation)
 
 	if comp.Status.CurrentSynthesis == nil {
 		return ctrl.Result{}, nil // nothing to do
@@ -130,7 +130,8 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	// Fetch the current resource
 	current, err := c.getCurrent(ctx, resource)
 	if client.IgnoreNotFound(err) != nil && !isErrMissingNS(err) {
-		return ctrl.Result{}, fmt.Errorf("getting current state: %w", err)
+		logger.Error(err, "failed to get current state")
+		return ctrl.Result{}, err
 	}
 
 	// Evaluate resource readiness
@@ -150,6 +151,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 
 	modified, err := c.reconcileResource(ctx, comp, prev, resource, current)
 	if err != nil {
+		logger.Error(err, "failed to reconcile resource")
 		return ctrl.Result{}, err
 	}
 	if modified {

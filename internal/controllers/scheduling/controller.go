@@ -78,7 +78,8 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if c.lastApplied != nil {
 		ok, wait, err := c.lastApplied.HasBeenPatched(ctx, c.client, c.cacheGracePeriod)
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("checking cache for previous op: %w", err)
+			logger.Error(err, "checking cache for previous op")
+			return ctrl.Result{}, err
 		}
 		if !ok {
 			logger.V(1).Info("waiting for cache to reflect previous operation")
@@ -90,14 +91,16 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	synths := &apiv1.SynthesizerList{}
 	err := c.client.List(ctx, synths)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("listing synthesizers: %w", err)
+		logger.Error(err, "failed to list synthesizers")
+		return ctrl.Result{}, err
 	}
 	synthsByName, synthEpoch := indexSynthesizers(synths.Items)
 
 	comps := &apiv1.CompositionList{}
 	err = c.client.List(ctx, comps)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
+		logger.Error(err, "failed to list compositions")
+		return ctrl.Result{}, err
 	}
 	nextSlot := c.getNextCooldownSlot(comps)
 
@@ -139,7 +142,8 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// Maintain ordering across synth/composition informers by doing a 2PC on the composition
 	if op.Reason == synthesizerModifiedOp && setSynthEpochAnnotation(op.Composition, synthEpoch) {
 		if err := c.client.Update(ctx, op.Composition); err != nil {
-			return ctrl.Result{}, fmt.Errorf("updating synthesizer epoch: %w", err)
+			logger.Error(err, "updating synthesizer epoch")
+			return ctrl.Result{}, err
 		}
 		logger.V(1).Info("updated global synthesizer epoch")
 		return ctrl.Result{}, nil
@@ -147,9 +151,11 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	if err := c.dispatchOp(ctx, op); err != nil {
 		if errors.IsInvalid(err) {
-			return ctrl.Result{}, fmt.Errorf("conflict while dispatching synthesis")
+			logger.Error(err, "conflict while dispatching synthesis")
+			return ctrl.Result{}, err
 		}
-		return ctrl.Result{}, fmt.Errorf("dispatching synthesis operation: %w", err)
+		logger.Error(err, "dispatching synthesis operation")
+		return ctrl.Result{}, err
 	}
 
 	op.Dispatched = time.Now()
