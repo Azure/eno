@@ -37,7 +37,7 @@ var newResourceTests = []struct {
 					"eno.azure.io/readiness-group": "250",
 					"eno.azure.io/readiness": "true",
 					"eno.azure.io/readiness-test": "false",
-					"eno.azure.io/disable-updates": "true"
+					"eno.azure.io/update-mode": "disabled"
 				}
 			}
 		}`,

@@ -1,0 +1,52 @@
+apiVersion: eno.azure.io/v1
+kind: Synthesizer
+metadata:
+  name: update-mode-example
+  namespace: default
+spec:
+  image: docker.io/ubuntu:latest
+  command:
+  - /bin/bash
+  - -c
+  - |
+    echo '{
+        "apiVersion":"config.kubernetes.io/v1",
+        "kind":"ResourceList",
+        "items":[
+          {
+            "apiVersion":"v1",
+            "kind":"ConfigMap",
+            "metadata":{
+              "name":"replace-mode-example",
+              "namespace": "default",
+              "annotations": {
+                "eno.azure.io/update-mode": "replace"
+              }
+            },
+            "data": {"key":"value"}
+          },
+          {
+            "apiVersion":"v1",
+            "kind":"ConfigMap",
+            "metadata":{
+              "name":"disabled-mode-example",
+              "namespace": "default",
+              "annotations": {
+                "eno.azure.io/update-mode": "disabled"
+              }
+            },
+            "data": {"key":"value"}
+          }
+        ]
+      }'
+
+---
+
+apiVersion: eno.azure.io/v1
+kind: Composition
+metadata:
+  name: update-mode-example
+  namespace: default
+spec:
+  synthesizer:
+    name: update-mode-example
