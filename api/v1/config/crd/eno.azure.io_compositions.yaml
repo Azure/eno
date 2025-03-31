@@ -94,7 +94,7 @@ spec:
                 items:
                   properties:
                     name:
-                      maxLength: 1000
+                      maxLength: 63
                       type: string
                     value:
                       type: string

@@ -66,6 +66,6 @@ type Variation struct {
 	// SynthesisEnv
 	// Copied opaquely into the compositions that's derived from this variation.
 	// It gets merged with the Symhony environment and takes precedence over it.
-	// +kubebuilder:validation:MaxItems:=50
+	// +kubebuilder:validation:MaxItems:=25
 	SynthesisEnv []EnvVar `json:"synthesisEnv,omitempty"`
 }
