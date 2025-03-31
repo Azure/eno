@@ -8,19 +8,15 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func main() {
-	w := function.NewDefaultOutputWriter()
-	r, err := function.NewDefaultInputReader()
-	if err != nil {
-		panic(err) // non-zero exits will be retried
-	}
+type Inputs struct {
+	Config *corev1.ConfigMap `eno_key:"example-input"`
+}
 
-	input := &corev1.ConfigMap{}
-	function.ReadInput(r, "example-input", input)
-
-	replicas, _ := strconv.Atoi(input.Data["replicas"])
+func synthesize(inputs Inputs) ([]client.Object, error) {
+	replicas, _ := strconv.Atoi(inputs.Config.Data["replicas"])
 
 	deploy := &appsv1.Deployment{}
 	deploy.APIVersion = "apps/v1"
@@ -41,7 +37,10 @@ func main() {
 			}},
 		},
 	}
-	w.Add(deploy)
 
-	w.Write()
+	return []client.Object{deploy}, nil
+}
+
+func main() {
+	function.Main(synthesize)
 }
