@@ -163,7 +163,7 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		comp.GenerateName = variation.Synthesizer.Name + "-"
 		comp.Spec.Bindings = getBindings(symph, &variation)
 		comp.Spec.Synthesizer = variation.Synthesizer
-		comp.Spec.SynthesisEnv = symph.Spec.SynthesisEnv
+		comp.Spec.SynthesisEnv = getSynthesisEnv(symph, &variation)
 		comp.Labels = variation.Labels
 		comp.Annotations = variation.Annotations
 		err := controllerutil.SetControllerReference(symph, comp, c.client.Scheme())
@@ -299,6 +299,20 @@ func getBindings(symph *apiv1.Symphony, vrn *apiv1.Variation) []apiv1.Binding {
 		deduped = append(deduped, bnd)
 	}
 	return deduped
+}
+
+func getSynthesisEnv(symph *apiv1.Symphony, vrn *apiv1.Variation) []apiv1.EnvVar {
+	res := append([]apiv1.EnvVar(nil), vrn.SynthesisEnv...)
+	for _, evar := range symph.Spec.SynthesisEnv {
+		i := slices.IndexFunc(res, func(e apiv1.EnvVar) bool {
+			return evar.Name == e.Name
+		})
+		// Only use symhony var if the variation didn't specify it.
+		if i == -1 {
+			res = append(res, evar)
+		}
+	}
+	return res
 }
 
 func coalesceMetadata(variation *apiv1.Variation, existing *apiv1.Composition) bool {

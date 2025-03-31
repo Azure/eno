@@ -427,6 +427,74 @@ func TestGetBindings(t *testing.T) {
 	}
 }
 
+func TestGetSynthesisEnv(t *testing.T) {
+	tcs := []struct {
+		name        string
+		symph       apiv1.Symphony
+		variation   apiv1.Variation
+		expectedEnv []apiv1.EnvVar
+	}{
+		{
+			name: "just symphony env",
+			symph: apiv1.Symphony{
+				Spec: apiv1.SymphonySpec{
+					SynthesisEnv: []apiv1.EnvVar{{Name: "var1", Value: "val1"}},
+				},
+			},
+			expectedEnv: []apiv1.EnvVar{{Name: "var1", Value: "val1"}},
+		},
+		{
+			name: "just variation env",
+			variation: apiv1.Variation{
+				SynthesisEnv: []apiv1.EnvVar{{Name: "var1", Value: "val1"}},
+			},
+			expectedEnv: []apiv1.EnvVar{{Name: "var1", Value: "val1"}},
+		},
+		{
+			name: "symphony and variation env",
+			variation: apiv1.Variation{
+				SynthesisEnv: []apiv1.EnvVar{{Name: "var1", Value: "val1"}},
+			},
+			symph: apiv1.Symphony{
+				Spec: apiv1.SymphonySpec{
+					SynthesisEnv: []apiv1.EnvVar{{Name: "var2", Value: "val2"}},
+				},
+			},
+			expectedEnv: []apiv1.EnvVar{{Name: "var1", Value: "val1"}, {Name: "var2", Value: "val2"}},
+		},
+		{
+			name: "symphony and variation env with dups",
+			variation: apiv1.Variation{
+				SynthesisEnv: []apiv1.EnvVar{{Name: "var1", Value: "val1"}, {Name: "val2", Value: "var2"}},
+			},
+			symph: apiv1.Symphony{
+				Spec: apiv1.SymphonySpec{
+					SynthesisEnv: []apiv1.EnvVar{{Name: "var1", Value: "val1"}, {Name: "val2", Value: "var2"}},
+				},
+			},
+			expectedEnv: []apiv1.EnvVar{{Name: "var1", Value: "val1"}, {Name: "val2", Value: "var2"}},
+		},
+		{
+			name: "variation takes precedence over symphony",
+			variation: apiv1.Variation{
+				SynthesisEnv: []apiv1.EnvVar{{Name: "var1", Value: "comp-override"}, {Name: "val2", Value: "var2"}},
+			},
+			symph: apiv1.Symphony{
+				Spec: apiv1.SymphonySpec{
+					SynthesisEnv: []apiv1.EnvVar{{Name: "var1", Value: "val1"}, {Name: "val2", Value: "var2"}},
+				},
+			},
+			expectedEnv: []apiv1.EnvVar{{Name: "var1", Value: "comp-override"}, {Name: "val2", Value: "var2"}},
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			actualEnv := getSynthesisEnv(&tc.symph, &tc.variation)
+			require.ElementsMatch(t, tc.expectedEnv, actualEnv)
+		})
+	}
+}
+
 func TestCoalesceMetadata(t *testing.T) {
 	tests := []struct {
 		name           string

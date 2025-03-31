@@ -37,8 +37,8 @@ type SymphonySpec struct {
 
 	// SynthesisEnv
 	// Copied opaquely into the compositions managed by this symphony.
-	// +kubebuilder:validation:MaxItems:=500
-	SynthesisEnv []EnvVar `json:"synthesisEnv,omitempty"`
+	// +kubebuilder:validation:MaxItems:=50
+	SynthesisEnv []EnvVar `json:"synthesisEnv,omitempty"` // deprecated synthesis env should always be variation scoped.
 }
 
 type SymphonyStatus struct {
@@ -62,4 +62,10 @@ type Variation struct {
 	// Variation-specific bindings get merged with Symphony bindings and take
 	// precedence over them.
 	Bindings []Binding `json:"bindings,omitempty"`
+
+	// SynthesisEnv
+	// Copied opaquely into the compositions that's derived from this variation.
+	// It gets merged with the Symhony environment and takes precedence over it.
+	// +kubebuilder:validation:MaxItems:=25
+	SynthesisEnv []EnvVar `json:"synthesisEnv,omitempty"`
 }
