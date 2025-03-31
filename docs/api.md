@@ -114,7 +114,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `name` _string_ |  |  | MaxLength: 63 <br /> |
+| `name` _string_ |  |  | MaxLength: 100 <br /> |
 | `value` _string_ |  |  |  |
 
 
