@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 
+	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -19,10 +20,11 @@ func TestOutputWriter(t *testing.T) {
 
 	require.NoError(t, w.Add(nil))
 	require.NoError(t, w.Add(cm))
+	w.AddResult(&krmv1.Result{Message: "test message", Severity: krmv1.ResultSeverityError})
 	assert.Equal(t, 0, out.Len())
 
 	require.NoError(t, w.Write())
-	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[{\"metadata\":{\"creationTimestamp\":null,\"name\":\"test-cm\"}}]}\n", out.String())
+	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[{\"metadata\":{\"creationTimestamp\":null,\"name\":\"test-cm\"}}],\"results\":[{\"message\":\"test message\",\"severity\":\"error\"}]}\n", out.String())
 
 	require.Error(t, w.Add(nil))
 }
