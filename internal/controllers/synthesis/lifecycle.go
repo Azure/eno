@@ -76,7 +76,8 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, req.NamespacedName, comp)
 	if err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting composition resource: %w", err))
+		logger.Error(err, "failed to get composition resource")
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if comp.DeletionTimestamp != nil ||
 		!controllerutil.ContainsFinalizer(comp, "eno.azure.io/cleanup") ||
@@ -91,7 +92,8 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	syn.Name = comp.Spec.Synthesizer.Name
 	err = c.client.Get(ctx, client.ObjectKeyFromObject(syn), syn)
 	if err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting synthesizer: %w", err))
+		logger.Error(err, "failed to get synthesizer")
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if syn != nil {
 		logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)

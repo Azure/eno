@@ -77,7 +77,8 @@ func (c *cleanupController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	slice := &apiv1.ResourceSlice{}
 	err := c.client.Get(ctx, req.NamespacedName, slice)
 	if err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(fmt.Errorf("getting resource slice: %w", err))
+		logger.Error(err, "failed to get resource slice")
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	logger = logger.WithValues("synthesisUUID", slice.Spec.SynthesisUUID)
 
@@ -98,7 +99,8 @@ func (c *cleanupController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	del, err := c.shouldDelete(ctx, c.client, slice, owner)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("checking if resource slice should be deleted (cached): %w", err)
+		logger.Error(err, "failed to check if resource slice should be deleted (cached)")
+		return ctrl.Result{}, err
 	}
 	if !del {
 		return ctrl.Result{}, nil // fail safe for stale cache
@@ -106,14 +108,16 @@ func (c *cleanupController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	del, err = c.shouldDelete(ctx, c.noCacheReader, slice, owner)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("checking if resource slice should be deleted: %w", err)
+		logger.Error(err, "failed to check if resource slice should be deleted")
+		return ctrl.Result{}, err
 	}
 	if !del {
 		return ctrl.Result{}, nil
 	}
 
 	if err := c.client.Delete(ctx, slice, &client.Preconditions{UID: &slice.UID}); err != nil {
-		return ctrl.Result{}, fmt.Errorf("deleting resource slice: %w", err)
+		logger.Error(err, "failed to delete resource slice")
+		return ctrl.Result{}, err
 	}
 	logger.V(0).Info("deleted unused resource slice", "age", time.Since(slice.CreationTimestamp.Time).Milliseconds())
 

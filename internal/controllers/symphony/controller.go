@@ -40,6 +40,7 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 	symph := &apiv1.Symphony{}
 	err := c.client.Get(ctx, req.NamespacedName, symph)
 	if err != nil {
+		logger.Error(err, "failed to get symphony")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	logger = logger.WithValues("symphonyName", symph.Name, "symphonyNamespace", symph.Namespace)
@@ -48,7 +49,8 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if controllerutil.AddFinalizer(symph, "eno.azure.io/cleanup") {
 		err := c.client.Update(ctx, symph)
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("adding finalizer: %w", err)
+			logger.Error(err, "failed to add finalizer")
+			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
 	}
@@ -58,11 +60,13 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 		manager.IdxCompositionsBySymphony: symph.Name,
 	})
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("listing existing compositions: %w", err)
+		logger.Error(err, "failed to list existing compositions")
+		return ctrl.Result{}, err
 	}
 
 	modified, err := c.reconcileReverse(ctx, symph, existing)
 	if err != nil {
+		logger.Error(err, "failed to reconcile reverse")
 		return ctrl.Result{}, err
 	}
 	if modified {
@@ -76,13 +80,15 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		err = c.client.Update(ctx, symph)
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
+			logger.Error(err, "failed to remove finalizer")
+			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
 	}
 
 	modified, err = c.reconcileForward(ctx, symph, existing)
 	if err != nil {
+		logger.Error(err, "failed to reconcile forward")
 		return ctrl.Result{}, err
 	}
 	if modified {
@@ -91,6 +97,7 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	err = c.syncStatus(ctx, symph, existing)
 	if err != nil {
+		logger.Error(err, "failed to sync status")
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil

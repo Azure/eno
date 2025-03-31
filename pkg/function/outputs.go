@@ -14,6 +14,7 @@ import (
 
 type OutputWriter struct {
 	outputs   []*unstructured.Unstructured
+	results   []*krmv1.Result
 	io        io.Writer
 	committed bool
 	munge     MungeFunc
@@ -32,6 +33,10 @@ func NewOutputWriter(w io.Writer, munge MungeFunc) *OutputWriter {
 		committed: false,
 		munge:     munge,
 	}
+}
+
+func (w *OutputWriter) AddResult(result *krmv1.Result) {
+	w.results = append(w.results, result)
 }
 
 func (w *OutputWriter) Add(outs ...client.Object) error {
@@ -67,6 +72,7 @@ func (w *OutputWriter) Write() error {
 		Kind:       krmv1.ResourceListKind,
 		APIVersion: krmv1.SchemeGroupVersion.String(),
 		Items:      w.outputs,
+		Results:    w.results,
 	}
 
 	err := json.NewEncoder(w.io).Encode(rl)

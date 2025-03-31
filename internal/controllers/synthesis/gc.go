@@ -37,6 +37,7 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 	pod := &corev1.Pod{}
 	err := p.client.Get(ctx, req.NamespacedName, pod)
 	if err != nil || pod.DeletionTimestamp != nil {
+		logger.Error(err, "failed to get pod or pod is marked for deletion")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	logger = logger.WithValues("podName", pod.Name, "podNamespace", pod.Namespace)
@@ -66,7 +67,8 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, p.deletePod(ctx, pod, logger)
 	}
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("getting composition resource: %w", err)
+		logger.Error(err, "failed to get composition resource")
+		return ctrl.Result{}, err
 	}
 
 	// GC pods from missing synthesizers
@@ -79,7 +81,8 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, p.deletePod(ctx, pod, logger)
 	}
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("getting synthesizer: %w", err)
+		logger.Error(err, "failed to get synthesizer")
+		return ctrl.Result{}, err
 	}
 
 	// Ignore brand new pods since the pod/composition informer might not be in sync
