@@ -40,16 +40,7 @@ func Evaluate[T function.Inputs](t *testing.T, synth function.SynthFunc[T], scen
 // LoadScenarios recursively loads yaml and json input fixtures from the specified directory.
 func LoadScenarios[T any](t *testing.T, dir string, assertion Assertion[T]) []Scenario[T] {
 	scenarios := []Scenario[T]{}
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil
-		}
-
-		ext := filepath.Ext(info.Name())
-		if ext != ".yaml" && ext != ".yml" && ext != ".json" {
-			return nil
-		}
-
+	walkFiles(t, dir, func(path, name string) error {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Errorf("error while reading fixture %q: %s", path, err)
@@ -63,15 +54,12 @@ func LoadScenarios[T any](t *testing.T, dir string, assertion Assertion[T]) []Sc
 			return nil
 		}
 		scenarios = append(scenarios, Scenario[T]{
-			Name:      info.Name()[:len(info.Name())-len(ext)],
+			Name:      name,
 			Inputs:    input,
 			Assertion: assertion,
 		})
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("unable to read fixtures: %s", err)
-	}
 	return scenarios
 }
 
@@ -99,27 +87,15 @@ func AssertionChain[T function.Inputs](asserts ...Assertion[T]) Assertion[T] {
 // tests with ENO_GEN_SNAPSHOTS=true.
 func LoadSnapshots[T function.Inputs](t *testing.T, dir string) Assertion[T] {
 	snapshots := map[string][]byte{}
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil
-		}
-
-		ext := filepath.Ext(info.Name())
-		if ext != ".yaml" && ext != ".yml" && ext != ".json" {
-			return nil
-		}
-
+	walkFiles(t, dir, func(path, name string) error {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Errorf("error while reading fixture %q: %s", path, err)
 			return nil
 		}
-		snapshots[info.Name()[:len(info.Name())-len(ext)]] = data
+		snapshots[name] = data
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("unable to read fixtures: %s", err)
-	}
 
 	return func(t *testing.T, s Scenario[T], outputs []client.Object) {
 		expected, ok := snapshots[s.Name]
@@ -143,5 +119,21 @@ func LoadSnapshots[T function.Inputs](t *testing.T, dir string) Assertion[T] {
 		if !bytes.Equal(data, expected) {
 			t.Errorf("outputs do not match the snapshot - re-run tests with ENO_GEN_SNAPSHOTS=true to update them")
 		}
+	}
+}
+
+func walkFiles(t *testing.T, dir string, fn func(path, name string) error) {
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		ext := filepath.Ext(info.Name())
+		if ext != ".yaml" && ext != ".yml" && ext != ".json" {
+			return nil
+		}
+		return fn(path, info.Name()[:len(info.Name())-len(ext)])
+	})
+	if err != nil {
+		t.Errorf("error while walking files: %s", err)
 	}
 }
