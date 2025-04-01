@@ -189,6 +189,38 @@ var newResourceTests = []struct {
 			assert.Equal(t, &schema.GroupKind{Group: "", Kind: ""}, r.DefinedGroupKind)
 		},
 	},
+	{
+		Name: "extra-metadata",
+		Manifest: `{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "foo",
+				"labels": {
+					"eno.azure.io/extra-label": "should be pruned"
+				},
+				"annotations": {
+					"foo": "bar",
+					"eno.azure.io/extra-annotation": "should be pruned",
+					"eno.azure.io/reconcile-interval": "10s"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Resource) {
+			assert.Equal(t, time.Second*10, r.ReconcileInterval.Duration)
+			assert.Equal(t, &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":        "foo",
+						"annotations": map[string]any{"foo": "bar"},
+						"labels":      map[string]any{},
+					},
+				},
+			}, r.Unstructured())
+		},
+	},
 }
 
 func TestNewResource(t *testing.T) {

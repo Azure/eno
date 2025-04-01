@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"maps"
 	"sort"
 	"strconv"
 	"strings"
@@ -283,34 +284,35 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 
 	anno := parsed.GetAnnotations()
 	if anno == nil {
-		return res, nil
+		anno = map[string]string{}
 	}
 
 	const reconcileIntervalKey = "eno.azure.io/reconcile-interval"
-	reconcileInterval, err := time.ParseDuration(anno[reconcileIntervalKey])
-	if anno[reconcileIntervalKey] != "" && err != nil {
-		logger.V(0).Info("invalid reconcile interval - ignoring")
+	if str, ok := anno[reconcileIntervalKey]; ok {
+		reconcileInterval, err := time.ParseDuration(str)
+		if anno[reconcileIntervalKey] != "" && err != nil {
+			logger.V(0).Info("invalid reconcile interval - ignoring")
+		}
+		res.ReconcileInterval = &metav1.Duration{Duration: reconcileInterval}
 	}
-	res.ReconcileInterval = &metav1.Duration{Duration: reconcileInterval}
-	delete(anno, reconcileIntervalKey)
 
 	const disableUpdatesKey = "eno.azure.io/disable-updates"
 	res.DisableUpdates = anno[disableUpdatesKey] == "true"
-	delete(anno, disableUpdatesKey)
 
 	const readinessGroupKey = "eno.azure.io/readiness-group"
-	rg, err := strconv.ParseInt(anno[readinessGroupKey], 10, 64)
-	if anno[readinessGroupKey] != "" && err != nil {
-		logger.V(0).Info("invalid readiness group - ignoring")
+	if str, ok := anno[readinessGroupKey]; ok {
+		rg, err := strconv.ParseInt(str, 10, 64)
+		if err != nil {
+			logger.V(0).Info("invalid readiness group - ignoring")
+		} else {
+			res.ReadinessGroup = int(rg)
+		}
 	}
-	res.ReadinessGroup = int(rg)
-	delete(anno, readinessGroupKey)
 
 	for key, value := range anno {
-		if !strings.HasPrefix(key, "eno.azure.io/readiness") {
+		if !strings.HasPrefix(key, "eno.azure.io/readiness") || key == readinessGroupKey {
 			continue
 		}
-		delete(anno, key)
 
 		name := strings.TrimPrefix(key, "eno.azure.io/readiness-")
 		if name == "eno.azure.io/readiness" {
@@ -325,8 +327,19 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 		check.Name = name
 		res.ReadinessChecks = append(res.ReadinessChecks, check)
 	}
-	parsed.SetAnnotations(anno)
 	sort.Slice(res.ReadinessChecks, func(i, j int) bool { return res.ReadinessChecks[i].Name < res.ReadinessChecks[j].Name })
+
+	m := parsed.GetAnnotations()
+	maps.DeleteFunc(m, func(key string, value string) bool {
+		return strings.HasPrefix(key, "eno.azure.io/")
+	})
+	parsed.SetAnnotations(m)
+
+	m = parsed.GetLabels()
+	maps.DeleteFunc(m, func(key string, value string) bool {
+		return strings.HasPrefix(key, "eno.azure.io/")
+	})
+	parsed.SetLabels(m)
 
 	return res, nil
 }
