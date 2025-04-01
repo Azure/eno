@@ -14,6 +14,7 @@ Compose Kubernetes deployments.
 - Support deployments larger than apiserver's 1.5MB resource limit
 - Define complex ordering relationships between resources
 - Patch resources without taking full ownership
+- Use custom CEL expressions to determine the readiness of resources
 
 ## Docs
 
