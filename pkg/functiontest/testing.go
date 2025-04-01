@@ -25,6 +25,7 @@ type Scenario[T function.Inputs] struct {
 func Evaluate[T function.Inputs](t *testing.T, synth function.SynthFunc[T], scenarios ...Scenario[T]) {
 	for _, s := range scenarios {
 		t.Run(s.Name, func(t *testing.T) {
+			t.Parallel()
 			outputs, err := synth(s.Inputs)
 			if err != nil && !s.ExpectError {
 				t.Fatalf("unexpected error: %v", err)
