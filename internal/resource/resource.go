@@ -301,11 +301,11 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 
 	const readinessGroupKey = "eno.azure.io/readiness-group"
 	if str, ok := anno[readinessGroupKey]; ok {
-		rg, err := strconv.ParseInt(str, 10, 64)
+		rg, err := strconv.Atoi(str)
 		if err != nil {
 			logger.V(0).Info("invalid readiness group - ignoring")
 		} else {
-			res.ReadinessGroup = int(rg)
+			res.ReadinessGroup = rg
 		}
 	}
 
