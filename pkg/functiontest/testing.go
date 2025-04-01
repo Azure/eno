@@ -21,18 +21,22 @@ type Scenario[T function.Inputs] struct {
 	ExpectError bool
 }
 
+func (s *Scenario[T]) Evaluate(t *testing.T, synth function.SynthFunc[T]) {
+	outputs, err := synth(s.Inputs)
+	if err != nil && !s.ExpectError {
+		t.Fatalf("unexpected error: %v", err)
+	} else if err == nil && s.ExpectError {
+		t.Fatal("expected error, got nil")
+	}
+	s.Assertion(t, s, outputs)
+}
+
 // Evaluate runs the synthesizer function with the provided scenarios and asserts on the outputs.
 func Evaluate[T function.Inputs](t *testing.T, synth function.SynthFunc[T], scenarios ...Scenario[T]) {
 	for _, s := range scenarios {
 		t.Run(s.Name, func(t *testing.T) {
 			t.Parallel()
-			outputs, err := synth(s.Inputs)
-			if err != nil && !s.ExpectError {
-				t.Fatalf("unexpected error: %v", err)
-			} else if err == nil && s.ExpectError {
-				t.Fatal("expected error, got nil")
-			}
-			s.Assertion(t, s, outputs)
+			s.Evaluate(t, synth)
 		})
 	}
 }
@@ -63,11 +67,11 @@ func LoadScenarios[T any](t *testing.T, dir string, assertion Assertion[T]) []Sc
 	return scenarios
 }
 
-type Assertion[T function.Inputs] func(t *testing.T, s Scenario[T], outputs []client.Object)
+type Assertion[T function.Inputs] func(t *testing.T, s *Scenario[T], outputs []client.Object)
 
 // AssertionChain is a helper function to create an assertion that runs multiple assertions in sequence.
 func AssertionChain[T function.Inputs](asserts ...Assertion[T]) Assertion[T] {
-	return func(t *testing.T, s Scenario[T], outputs []client.Object) {
+	return func(t *testing.T, s *Scenario[T], outputs []client.Object) {
 		for i, assert := range asserts {
 			t.Run(fmt.Sprintf("assertion-%d", i), func(t *testing.T) {
 				assert(t, s, outputs)
@@ -97,7 +101,7 @@ func LoadSnapshots[T function.Inputs](t *testing.T, dir string) Assertion[T] {
 		return nil
 	})
 
-	return func(t *testing.T, s Scenario[T], outputs []client.Object) {
+	return func(t *testing.T, s *Scenario[T], outputs []client.Object) {
 		expected, ok := snapshots[s.Name]
 		if !ok {
 			return

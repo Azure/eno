@@ -18,7 +18,7 @@ func TestEvaluateBasics(t *testing.T) {
 	Evaluate(t, fn, Scenario[struct{}]{
 		Name:   "example-test",
 		Inputs: struct{}{},
-		Assertion: func(t *testing.T, scen Scenario[struct{}], outputs []client.Object) {
+		Assertion: func(t *testing.T, scen *Scenario[struct{}], outputs []client.Object) {
 			t.Logf("asserting on %d outputs", len(outputs))
 		},
 	})
@@ -35,10 +35,10 @@ func TestAssertionChain(t *testing.T) {
 		Name:   "example-test",
 		Inputs: struct{}{},
 		Assertion: AssertionChain(
-			func(t *testing.T, scen Scenario[struct{}], outputs []client.Object) {
+			func(t *testing.T, scen *Scenario[struct{}], outputs []client.Object) {
 				t.Logf("assertion 1")
 			},
-			func(t *testing.T, scen Scenario[struct{}], outputs []client.Object) {
+			func(t *testing.T, scen *Scenario[struct{}], outputs []client.Object) {
 				t.Logf("assertion 2")
 			},
 		),
@@ -54,7 +54,7 @@ func TestLoadScenarios(t *testing.T) {
 
 	var inputs []map[string]any
 	var lock sync.Mutex
-	assertion := func(t *testing.T, scen Scenario[map[string]any], outputs []client.Object) {
+	assertion := func(t *testing.T, scen *Scenario[map[string]any], outputs []client.Object) {
 		lock.Lock()
 		inputs = append(inputs, scen.Inputs)
 		lock.Unlock()
