@@ -197,10 +197,11 @@ var newResourceTests = []struct {
 			"metadata": {
 				"name": "foo",
 				"labels": {
+					"test-label": "should not be pruned",
 					"eno.azure.io/extra-label": "should be pruned"
 				},
 				"annotations": {
-					"foo": "bar",
+					"test-annotation": "should not be pruned",
 					"eno.azure.io/extra-annotation": "should be pruned",
 					"eno.azure.io/reconcile-interval": "10s"
 				}
@@ -214,8 +215,35 @@ var newResourceTests = []struct {
 					"kind":       "ConfigMap",
 					"metadata": map[string]any{
 						"name":        "foo",
-						"annotations": map[string]any{"foo": "bar"},
-						"labels":      map[string]any{},
+						"annotations": map[string]any{"test-annotation": "should not be pruned"},
+						"labels":      map[string]any{"test-label": "should not be pruned"},
+					},
+				},
+			}, r.Unstructured())
+		},
+	},
+	{
+		Name: "empty-metadata",
+		Manifest: `{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "foo",
+				"labels": {
+					"eno.azure.io/extra-label": "should be pruned"
+				},
+				"annotations": {
+					"eno.azure.io/extra-annotation": "should be pruned"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Resource) {
+			assert.Equal(t, &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name": "foo",
 					},
 				},
 			}, r.Unstructured())

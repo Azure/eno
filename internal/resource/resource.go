@@ -329,19 +329,20 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 	}
 	sort.Slice(res.ReadinessChecks, func(i, j int) bool { return res.ReadinessChecks[i].Name < res.ReadinessChecks[j].Name })
 
-	m := parsed.GetAnnotations()
-	maps.DeleteFunc(m, func(key string, value string) bool {
-		return strings.HasPrefix(key, "eno.azure.io/")
-	})
-	parsed.SetAnnotations(m)
-
-	m = parsed.GetLabels()
-	maps.DeleteFunc(m, func(key string, value string) bool {
-		return strings.HasPrefix(key, "eno.azure.io/")
-	})
-	parsed.SetLabels(m)
+	parsed.SetAnnotations(pruneMetadata(parsed.GetAnnotations()))
+	parsed.SetLabels(pruneMetadata(parsed.GetLabels()))
 
 	return res, nil
+}
+
+func pruneMetadata(m map[string]string) map[string]string {
+	maps.DeleteFunc(m, func(key string, value string) bool {
+		return strings.HasPrefix(key, "eno.azure.io/")
+	})
+	if len(m) == 0 {
+		m = nil
+	}
+	return m
 }
 
 // Less returns true when r < than.
