@@ -57,7 +57,10 @@ spec:
   - /bin/bash
   - -c
   - |
+    # Read inputs from stdin
     replica_count=\$(sed -n 's/.*"replicas":"\([^"]*\)".*/\1/p')
+
+    # Write the resulting KRM resource list to stdout
     echo '{
       "apiVersion":"config.kubernetes.io/v1",
       "kind":"ResourceList",
