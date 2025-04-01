@@ -1,0 +1,6 @@
+- metadata:
+    creationTimestamp: null
+    name: test-pod
+  spec:
+    containers: null
+  status: {}
