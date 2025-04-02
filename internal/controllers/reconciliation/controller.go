@@ -231,16 +231,9 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	}
 
 	// Compute a merge patch
-	var updated *unstructured.Unstructured
-	var typed bool
-	var err error
-	if resource.DisableMerge {
-		updated = resource.Unstructured()
-	} else {
-		updated, typed, err = resource.Merge(ctx, prev, current, c.discovery)
-		if err != nil {
-			return false, fmt.Errorf("performing three-way merge: %w", err)
-		}
+	updated, typed, err := resource.Merge(ctx, prev, current, c.discovery)
+	if err != nil {
+		return false, fmt.Errorf("performing three-way merge: %w", err)
 	}
 	if updated == nil {
 		logger.V(1).Info("skipping empty update")

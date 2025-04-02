@@ -61,7 +61,6 @@ type Resource struct {
 	ReadinessChecks   readiness.Checks
 	Patch             jsonpatch.Patch
 	DisableUpdates    bool
-	DisableMerge      bool
 	ReadinessGroup    int
 	Labels            map[string]string
 
@@ -299,9 +298,8 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 		res.ReconcileInterval = &metav1.Duration{Duration: reconcileInterval}
 	}
 
-	const updateModeKey = "eno.azure.io/update-mode"
-	res.DisableUpdates = anno[updateModeKey] == "disabled"
-	res.DisableMerge = anno[updateModeKey] == "replace"
+	const disableUpdatesKey = "eno.azure.io/disable-updates"
+	res.DisableUpdates = anno[disableUpdatesKey] == "true"
 
 	const readinessGroupKey = "eno.azure.io/readiness-group"
 	if str, ok := anno[readinessGroupKey]; ok {
