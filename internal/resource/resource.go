@@ -62,6 +62,7 @@ type Resource struct {
 	Patch             jsonpatch.Patch
 	DisableUpdates    bool
 	ReadinessGroup    int
+	Labels            map[string]string
 
 	// DefinedGroupKind is set on CRDs to represent the resource type they define.
 	DefinedGroupKind *schema.GroupKind
@@ -282,6 +283,7 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 		res.DefinedGroupKind.Kind, _, _ = unstructured.NestedString(parsed.Object, "spec", "names", "kind")
 	}
 
+	res.Labels = maps.Clone(parsed.GetLabels())
 	anno := parsed.GetAnnotations()
 	if anno == nil {
 		anno = map[string]string{}

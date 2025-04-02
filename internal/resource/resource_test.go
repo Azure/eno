@@ -249,6 +249,39 @@ var newResourceTests = []struct {
 			}, r.Unstructured())
 		},
 	},
+	{
+		Name: "labels",
+		Manifest: `{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "foo",
+				"labels": {
+					"test-label": "label-value",
+					"eno.azure.io/extra-label": "should be pruned from resource"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Resource) {
+			assert.Equal(t, &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name": "foo",
+						"labels": map[string]any{
+							"test-label": "label-value",
+						},
+					},
+				},
+			}, r.Unstructured())
+
+			assert.Equal(t, map[string]string{
+				"test-label":               "label-value",
+				"eno.azure.io/extra-label": "should be pruned from resource",
+			}, r.Labels)
+		},
+	},
 }
 
 func TestNewResource(t *testing.T) {
