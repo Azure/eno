@@ -37,6 +37,7 @@ var newResourceTests = []struct {
 					"eno.azure.io/readiness-group": "250",
 					"eno.azure.io/readiness": "true",
 					"eno.azure.io/readiness-test": "false",
+					"eno.azure.io/force": "true",
 					"eno.azure.io/disable-updates": "true"
 				}
 			}
@@ -52,6 +53,7 @@ var newResourceTests = []struct {
 				Kind:      "ConfigMap",
 			}, r.Ref)
 			assert.True(t, r.DisableUpdates)
+			assert.True(t, r.DisableMerge)
 			assert.Equal(t, int(250), r.ReadinessGroup)
 		},
 	},
@@ -69,6 +71,8 @@ var newResourceTests = []struct {
 		}`,
 		Assert: func(t *testing.T, r *Resource) {
 			assert.Equal(t, int(0), r.ReadinessGroup)
+			assert.False(t, r.DisableUpdates)
+			assert.False(t, r.DisableMerge)
 		},
 	},
 	{
