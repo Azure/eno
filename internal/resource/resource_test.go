@@ -189,6 +189,99 @@ var newResourceTests = []struct {
 			assert.Equal(t, &schema.GroupKind{Group: "", Kind: ""}, r.DefinedGroupKind)
 		},
 	},
+	{
+		Name: "extra-metadata",
+		Manifest: `{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "foo",
+				"labels": {
+					"test-label": "should not be pruned",
+					"eno.azure.io/extra-label": "should be pruned"
+				},
+				"annotations": {
+					"test-annotation": "should not be pruned",
+					"eno.azure.io/extra-annotation": "should be pruned",
+					"eno.azure.io/reconcile-interval": "10s"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Resource) {
+			assert.Equal(t, time.Second*10, r.ReconcileInterval.Duration)
+			assert.Equal(t, &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":        "foo",
+						"annotations": map[string]any{"test-annotation": "should not be pruned"},
+						"labels":      map[string]any{"test-label": "should not be pruned"},
+					},
+				},
+			}, r.Unstructured())
+		},
+	},
+	{
+		Name: "empty-metadata",
+		Manifest: `{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "foo",
+				"labels": {
+					"eno.azure.io/extra-label": "should be pruned"
+				},
+				"annotations": {
+					"eno.azure.io/extra-annotation": "should be pruned"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Resource) {
+			assert.Equal(t, &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name": "foo",
+					},
+				},
+			}, r.Unstructured())
+		},
+	},
+	{
+		Name: "labels",
+		Manifest: `{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "foo",
+				"labels": {
+					"test-label": "label-value",
+					"eno.azure.io/extra-label": "should be pruned from resource"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Resource) {
+			assert.Equal(t, &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name": "foo",
+						"labels": map[string]any{
+							"test-label": "label-value",
+						},
+					},
+				},
+			}, r.Unstructured())
+
+			assert.Equal(t, map[string]string{
+				"test-label":               "label-value",
+				"eno.azure.io/extra-label": "should be pruned from resource",
+			}, r.Labels)
+		},
+	},
 }
 
 func TestNewResource(t *testing.T) {
