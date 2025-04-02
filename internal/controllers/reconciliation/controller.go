@@ -40,6 +40,7 @@ type Options struct {
 
 	Timeout               time.Duration
 	ReadinessPollInterval time.Duration
+	MinReconcileInterval  time.Duration
 }
 
 type Controller struct {
@@ -50,6 +51,7 @@ type Controller struct {
 	readinessPollInterval time.Duration
 	upstreamClient        client.Client
 	discovery             *discovery.Cache
+	minReconcileInterval  time.Duration
 }
 
 func New(mgr ctrl.Manager, opts Options) error {
@@ -78,6 +80,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 		readinessPollInterval: opts.ReadinessPollInterval,
 		upstreamClient:        upstreamClient,
 		discovery:             disc,
+		minReconcileInterval:  opts.MinReconcileInterval,
 	}
 
 	return builder.TypedControllerManagedBy[resource.Request](mgr).
@@ -162,13 +165,8 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		current.GetDeletionTimestamp() != nil ||
 		(resource.Deleted(comp) && comp.ShouldOrphanResources()) // orphaning should be reflected on the status.
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
-	if ready == nil {
-		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
-	}
-	if resource != nil && !resource.Deleted(comp) && resource.ReconcileInterval != nil {
-		return ctrl.Result{RequeueAfter: wait.Jitter(resource.ReconcileInterval.Duration, 0.1)}, nil
-	}
-	return ctrl.Result{}, nil
+
+	return c.requeue(logger, comp, resource, ready)
 }
 
 func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composition, prev, resource *resource.Resource, current *unstructured.Unstructured) (bool, error) {
@@ -272,6 +270,23 @@ func (c *Controller) getCurrent(ctx context.Context, resource *resource.Resource
 		return nil, err
 	}
 	return current, nil
+}
+
+func (c *Controller) requeue(logger logr.Logger, comp *apiv1.Composition, resource *resource.Resource, ready *metav1.Time) (ctrl.Result, error) {
+	if ready == nil {
+		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
+	}
+
+	if resource == nil || resource.Deleted(comp) || resource.ReconcileInterval == nil {
+		return ctrl.Result{}, nil
+	}
+
+	interval := resource.ReconcileInterval.Duration
+	if interval < c.minReconcileInterval {
+		logger.V(1).Info("reconcile interval is too small - using default", "latency", interval, "default", c.minReconcileInterval)
+		interval = c.minReconcileInterval
+	}
+	return ctrl.Result{RequeueAfter: wait.Jitter(interval, 0.1)}, nil
 }
 
 func patchResourceState(deleted bool, ready *metav1.Time) flowcontrol.StatusPatchFn {
