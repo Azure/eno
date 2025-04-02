@@ -668,7 +668,7 @@ func TestDisableUpdates(t *testing.T) {
 					"namespace": "default",
 					"annotations": map[string]string{
 						"eno.azure.io/reconcile-interval": "10ms",
-						"eno.azure.io/update-mode":        "disabled",
+						"eno.azure.io/disable-updates":    "true",
 					},
 				},
 				"data": map[string]string{"foo": "bar"},
@@ -700,79 +700,6 @@ func TestDisableUpdates(t *testing.T) {
 	err := downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
 	require.NoError(t, err)
 	assert.Equal(t, "baz", obj.Data["foo"])
-}
-
-func TestUpdateModeReplace(t *testing.T) {
-	scheme := runtime.NewScheme()
-	corev1.SchemeBuilder.AddToScheme(scheme)
-	testv1.SchemeBuilder.AddToScheme(scheme)
-
-	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t)
-	upstream := mgr.GetClient()
-	downstream := mgr.DownstreamClient
-
-	// Register supporting controllers
-	registerControllers(t, mgr)
-	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
-		output := &krmv1.ResourceList{}
-		output.Items = []*unstructured.Unstructured{{
-			Object: map[string]any{
-				"apiVersion": "v1",
-				"kind":       "ConfigMap",
-				"metadata": map[string]any{
-					"name":      "test-obj",
-					"namespace": "default",
-					"annotations": map[string]string{
-						"eno.azure.io/update-mode": "replace",
-					},
-				},
-				"data": map[string]string{"foo": "bar"},
-			},
-		}}
-		return output, nil
-	})
-
-	// Test subject
-	setupTestSubject(t, mgr)
-	mgr.Start(t)
-	_, comp := writeGenericComposition(t, upstream)
-
-	// Wait for resource to be created
-	testutil.Eventually(t, func() bool {
-		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
-	})
-
-	initial := &corev1.ConfigMap{}
-	initial.SetName("test-obj")
-	initial.SetNamespace("default")
-	err := downstream.Get(ctx, client.ObjectKeyFromObject(initial), initial)
-	require.NoError(t, err)
-
-	// Update the service from outside of Eno
-	initial.Data["new-key"] = "baz"
-	require.NoError(t, downstream.Update(ctx, initial))
-
-	// Resynthesize
-	err = retry.RetryOnConflict(testutil.Backoff, func() error {
-		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Spec.SynthesisEnv = []apiv1.EnvVar{{Name: "anything", Value: "to advance the resource generation"}}
-		return upstream.Update(ctx, comp)
-	})
-	require.NoError(t, err)
-
-	testutil.Eventually(t, func() bool {
-		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == comp.Generation
-	})
-
-	// The external change should be removed AND the UID should not change
-	testutil.Eventually(t, func() bool {
-		current := &corev1.ConfigMap{}
-		downstream.Get(ctx, client.ObjectKeyFromObject(initial), current)
-		return current.UID == initial.UID && current.Data["new-key"] == ""
-	})
 }
 
 func TestOrphanedResources(t *testing.T) {
