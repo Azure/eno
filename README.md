@@ -1,41 +1,147 @@
 # Eno
 
-## What is Eno?
+Compose Kubernetes deployments.
 
-Eno is a new take on configuration management for Kubernetes.
+- 🎹 **Synthesize**: generate manifests dynamically in short-lived pods
+- ♻️ **Reconcile**: apply the generated configurations to one (or more!) clusters
+- 🏃‍➡️ **React**: track and aggregate the readiness state of managed resources
+ 
 
-- Generate configurations using short-lived pods, language-agnostic
-- Dynamically regenerate when input resources change (without writing a controller!)
-- Manage risk when updating many similar configurations
-- Define complex ordering relationships
-- Control any number of low-trust clusters from a single management cluster
-- Support high object cardinality (10s of thousands)
+## What can Eno do?
+
+- Magically regenerate configurations when their inputs change
+- Safely roll out changes that impact many instances of a configuration
+- Support deployments larger than apiserver's 1.5MB resource limit
+- Define complex ordering relationships between resources
+- Patch resources without taking full ownership
+- Use custom CEL expressions to determine the readiness of resources
+
+## Docs
+
+- [Synthesizers](./docs/synthesizer-api.md)
+- [Inputs](./docs/inputs.md)
+- [Ordering](./docs/ordering.md)
+- [Symphonies](./docs/symphony.md)
+- [Generated API Docs](./docs/api.md)
 
 ## Getting Started
+
+### 1. Install Eno
 
 ```bash
 export TAG=$(curl https://api.github.com/repos/Azure/eno/releases | jq -r '.[0].name')
 kubectl apply -f "https://github.com/Azure/eno/releases/download/${TAG}/manifest.yaml"
 ```
 
-Next, create a minimum viable Eno configuration to make sure everything works.
-This manifest will create a configmap called "some-config" in the default namespace.
+### 2. Create a Synthesizer
+
+Synthesizers reference a container image that implements a [KRM function](https://github.com/kubernetes-sigs/kustomize/blob/master/cmd/config/docs/api-conventions/functions-spec.md).
+This example uses a small bash script, but you will probably want to use `github.com/Azure/eno/pkg/function`.
 
 ```bash
-kubectl apply -f "https://raw.githubusercontent.com/Azure/eno/refs/heads/main/examples/minimal/example.yaml"
+kubectl apply -f - <<YAML
+apiVersion: eno.azure.io/v1
+kind: Synthesizer
+metadata:
+  name: getting-started
+  namespace: default
+spec:
+  image: docker.io/ubuntu:latest
+  refs:
+    - key: config
+      resource:
+        group: "" # core
+        version: v1
+        kind: ConfigMap
+  command:
+  - /bin/bash
+  - -c
+  - |
+    # Read inputs from stdin
+    replica_count=\$(sed -n 's/.*"replicas":"\([^"]*\)".*/\1/p')
 
-# The configmap should be created by Eno soon after
-kubectl get cm some-config -o=yaml
+    # Write the resulting KRM resource list to stdout
+    echo '{
+      "apiVersion":"config.kubernetes.io/v1",
+      "kind":"ResourceList",
+      "items":[
+        {
+          "apiVersion":"apps/v1",
+          "kind":"Deployment",
+          "metadata":{
+            "name":"my-app",
+            "namespace": "default"
+          },
+          "spec": {
+            "replicas": REPLICA_COUNT,
+            "selector": { "matchLabels": { "app": "getting-started" } },
+            "template": {
+              "metadata": { "labels": { "app": "getting-started" } },
+              "spec": {
+                "containers": [{ "name": "svc", "image": "nginx" }]
+              }
+            }
+          }
+        }
+      ]
+    }' | sed "s/REPLICA_COUNT/\$replica_count/g"
+YAML
 ```
 
-## Docs
+### 3. Create a Composition
 
-- [Synthesizer API](./docs/synthesizer-api.md)
-- [Inputs](./docs/inputs.md)
-- [Ordering](./docs/ordering.md)
-- [Symphonies](./docs/symphony.md)
-- [Advanced Synthesis](./docs/advanced-synthesis.md)
-- [Generated API Docs](./docs/api.md)
+Compositions bind a unique set of inputs to a synthesizer and manage the lifecycle of the resulting configuration.
+
+```bash
+kubectl apply -f - <<YAML
+  apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: my-first-config
+    namespace: default
+  data:
+    replicas: "1"
+---
+  apiVersion: eno.azure.io/v1
+  kind: Composition
+  metadata:
+    name: my-first-composition
+    namespace: default
+  spec:
+    synthesizer:
+      name: getting-started
+    bindings:
+      - key: config
+        resource:
+          name: my-first-config
+          namespace: default
+YAML
+```
+
+Eno will execute the synthesizer in a short-lived pod and create the resulting resource(s).
+
+```bash
+$ kubectl get composition
+NAME                   SYNTHESIZER       AGE   STATUS   ERROR
+my-first-composition   getting-started   0s    Ready
+
+$ kubectl get deploy my-app
+NAME     READY   UP-TO-DATE   AVAILABLE   AGE
+my-app   1/1     1            1           0s
+```
+
+### 4. Resynthesize
+
+Eno will automatically resynthesize the composition when its inputs change.
+
+```bash
+kubectl patch configmap my-first-config --patch '{"data":{"replicas":"2"}}'
+
+$ kubectl get deploy my-app
+NAME     READY   UP-TO-DATE   AVAILABLE   AGE
+my-app   2/2     2            2           2m
+```
+
 
 ## Contributing
 
