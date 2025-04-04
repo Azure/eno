@@ -37,28 +37,17 @@ func main[T Inputs](fn SynthFunc[T], ir *InputReader, ow *OutputWriter) error {
 
 	// Read the inputs
 	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		tagValue := field.Tag.Get("eno_key")
+		tagValue := t.Field(i).Tag.Get("eno_key")
 		if tagValue == "" {
 			continue
 		}
-		if v.Field(i).IsNil() {
-			v.Field(i).Set(reflect.New(field.Type.Elem()))
-		}
-		input := v.Field(i).Interface()
 
-		var obj client.Object
-		var custom bool
-		if o, ok := input.(client.Object); ok {
-			obj = o
-		} else if inputType, ok := customInputSourceTypes[v.Field(i).Type().String()]; ok {
-			obj = reflect.New(inputType.Elem()).Interface().(client.Object)
-			custom = true
-		} else {
-			return fmt.Errorf("input %s is not a known type", tagValue)
+		input, err := newInput(ir, v.Field(i))
+		if err != nil {
+			return err
 		}
 
-		err := ReadInput[client.Object](ir, tagValue, obj)
+		err = ReadInput(ir, tagValue, input.Object)
 		if err != nil {
 			ow.AddResult(&krmv1.Result{
 				Message:  fmt.Sprintf("error while reading input with key %q: %s", tagValue, err),
@@ -67,17 +56,7 @@ func main[T Inputs](fn SynthFunc[T], ir *InputReader, ow *OutputWriter) error {
 			return ow.Write()
 		}
 
-		if custom {
-			bind, ok := customInputBindings[v.Field(i).Type().String()]
-			if !ok {
-				return fmt.Errorf("no binding function for input %s", tagValue)
-			}
-			bound, err := bind(obj)
-			if err != nil {
-				return fmt.Errorf("error while binding custom input %s: %s", tagValue, err)
-			}
-			v.Field(i).Set(reflect.ValueOf(bound))
-		}
+		input.Finalize()
 	}
 
 	// Call the fn and handle errors through the KRM interface
@@ -112,4 +91,52 @@ func AddCustomInputType[Resource client.Object, Custom any](bind func(Resource) 
 	customInputBindings[str] = func(in any) (any, error) {
 		return bind(in.(Resource))
 	}
+}
+
+type input struct {
+	Object client.Object
+	bindFn func(any) (any, error)
+	field  reflect.Value
+}
+
+func newInput(ir *InputReader, field reflect.Value) (*input, error) {
+	i := &input{field: field}
+
+	// Allocate values for nil pointers
+	if field.IsNil() {
+		field.Set(reflect.New(field.Type().Elem()))
+	}
+
+	// Pass through client.Object types
+	fieldVal := field.Interface()
+	if o, ok := fieldVal.(client.Object); ok {
+		i.Object = o
+		return i, nil
+	}
+
+	// Resolve custom input types back to their binding functions
+	name := field.Type().String()
+	inputType, ok := customInputSourceTypes[name]
+	if !ok {
+		return nil, fmt.Errorf("custom input type %q has not been registered", name)
+	}
+
+	fieldVal = reflect.New(inputType.Elem()).Interface()
+	i.Object = fieldVal.(client.Object)
+	i.bindFn = customInputBindings[name]
+	return i, nil
+}
+
+func (i *input) Finalize() error {
+	if i.bindFn == nil {
+		return nil
+	}
+
+	bound, err := i.bindFn(i.Object)
+	if err != nil {
+		return fmt.Errorf("error while binding custom input of type %T: %s", i.Object, err)
+	}
+
+	i.field.Set(reflect.ValueOf(bound))
+	return nil
 }
