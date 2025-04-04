@@ -2,6 +2,7 @@ package functiontest
 
 import (
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -19,7 +20,9 @@ func TestEvaluateBasics(t *testing.T) {
 		Name:   "example-test",
 		Inputs: struct{}{},
 		Assertion: func(t *testing.T, scen *Scenario[struct{}], outputs []client.Object) {
-			t.Logf("asserting on %d outputs", len(outputs))
+			if len(outputs) != 1 {
+				t.Errorf("expected 1 output, got %d", len(outputs))
+			}
 		},
 	})
 }
@@ -31,18 +34,23 @@ func TestAssertionChain(t *testing.T) {
 		return []client.Object{output}, nil
 	}
 
+	calls := atomic.Int64{}
 	Evaluate(t, fn, Scenario[struct{}]{
 		Name:   "example-test",
 		Inputs: struct{}{},
 		Assertion: AssertionChain(
 			func(t *testing.T, scen *Scenario[struct{}], outputs []client.Object) {
-				t.Logf("assertion 1")
+				calls.Add(1)
 			},
 			func(t *testing.T, scen *Scenario[struct{}], outputs []client.Object) {
-				t.Logf("assertion 2")
+				calls.Add(1)
 			},
 		),
 	})
+
+	if calls.Load() != 2 {
+		t.Errorf("expected 2 calls, got %d", calls.Load())
+	}
 }
 
 func TestLoadScenarios(t *testing.T) {
@@ -62,6 +70,10 @@ func TestLoadScenarios(t *testing.T) {
 
 	scenarios := LoadScenarios(t, "fixtures", assertion)
 	Evaluate(t, fn, scenarios...)
+
+	if len(inputs) != 3 {
+		t.Fatalf("expected 3 inputs, got %d", len(inputs))
+	}
 }
 
 func TestLoadSnapshots(t *testing.T) {

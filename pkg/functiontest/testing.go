@@ -3,6 +3,7 @@ package functiontest
 import (
 	"bytes"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"testing"
@@ -35,7 +36,6 @@ func (s *Scenario[T]) Evaluate(t *testing.T, synth function.SynthFunc[T]) {
 func Evaluate[T function.Inputs](t *testing.T, synth function.SynthFunc[T], scenarios ...Scenario[T]) {
 	for _, s := range scenarios {
 		t.Run(s.Name, func(t *testing.T) {
-			t.Parallel()
 			s.Evaluate(t, synth)
 		})
 	}
@@ -64,6 +64,10 @@ func LoadScenarios[T any](t *testing.T, dir string, assertion Assertion[T]) []Sc
 		})
 		return nil
 	})
+
+	// Make sure tests aren't coupled to a particular execution order
+	rand.Shuffle(len(scenarios), func(i, j int) { scenarios[i], scenarios[j] = scenarios[j], scenarios[i] })
+
 	return scenarios
 }
 
