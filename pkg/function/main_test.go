@@ -38,6 +38,32 @@ func ExampleInputs() {
 	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"metadata":{"creationTimestamp":null,"name":"foobar\n"},"spec":{"containers":null},"status":{}}]}
 }
 
+func ExampleAddCustomInputType() {
+	type myType struct {
+		SecretKey string
+	}
+
+	AddCustomInputType(func(in *corev1.Secret) (*myType, error) {
+		return &myType{
+			SecretKey: string(in.Data["key"]),
+		}, nil
+	})
+
+	type exampleInputs struct {
+		CustomInput *myType `eno_key:"test-secret"`
+	}
+
+	fn := func(inputs exampleInputs) ([]client.Object, error) {
+		output := &corev1.Pod{}
+		output.Name = string(inputs.CustomInput.SecretKey)
+		return []client.Object{output}, nil
+	}
+
+	ir := newTestInputReader()
+	main(fn, ir, NewDefaultOutputWriter())
+	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"metadata":{"creationTimestamp":null,"name":"foobar\n"},"spec":{"containers":null},"status":{}}]}
+}
+
 func TestMain(t *testing.T) {
 	outBuf := &bytes.Buffer{}
 	ow := NewOutputWriter(outBuf, nil)
