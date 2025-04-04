@@ -16,27 +16,20 @@ import (
 
 // Scenario represents a test case for a synthesizer function.
 type Scenario[T function.Inputs] struct {
-	Name        string
-	Inputs      T
-	Assertion   Assertion[T]
-	ExpectError bool
-}
-
-func (s *Scenario[T]) Evaluate(t *testing.T, synth function.SynthFunc[T]) {
-	outputs, err := synth(s.Inputs)
-	if err != nil && !s.ExpectError {
-		t.Fatalf("unexpected error: %v", err)
-	} else if err == nil && s.ExpectError {
-		t.Fatal("expected error, got nil")
-	}
-	s.Assertion(t, s, outputs)
+	Name      string
+	Inputs    T
+	Assertion Assertion[T]
 }
 
 // Evaluate runs the synthesizer function with the provided scenarios and asserts on the outputs.
 func Evaluate[T function.Inputs](t *testing.T, synth function.SynthFunc[T], scenarios ...Scenario[T]) {
 	for _, s := range scenarios {
 		t.Run(s.Name, func(t *testing.T) {
-			s.Evaluate(t, synth)
+			outputs, err := synth(s.Inputs)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			s.Assertion(t, &s, outputs)
 		})
 	}
 }
