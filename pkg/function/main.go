@@ -116,12 +116,12 @@ func newInput(ir *InputReader, field reflect.Value) (*input, error) {
 
 	// Resolve custom input types back to their binding functions
 	name := field.Type().String()
-	inputType, ok := customInputSourceTypes[name]
+	inputSourceType, ok := customInputSourceTypes[name]
 	if !ok {
 		return nil, fmt.Errorf("custom input type %q has not been registered", name)
 	}
 
-	fieldVal = reflect.New(inputType.Elem()).Interface()
+	fieldVal = reflect.New(inputSourceType.Elem()).Interface()
 	i.Object = fieldVal.(client.Object)
 	i.bindFn = customInputBindings[name]
 	return i, nil
