@@ -18,10 +18,10 @@ Compose Kubernetes deployments.
 
 ## Docs
 
-- [Synthesizers](./docs/synthesizer-api.md)
-- [Inputs](./docs/inputs.md)
-- [Ordering](./docs/ordering.md)
-- [Symphonies](./docs/symphony.md)
+- [Reconciliation](./docs/reconciliation.md)
+- [Synthesis](./docs/synthesis.md)
+- [Symphony](./docs/symphony.md)
+- [Synthesizer API](./docs/synthesizer-api.md)
 - [Generated API Docs](./docs/api.md)
 
 ## Getting Started
