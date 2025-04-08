@@ -177,7 +177,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	}()
 
 	if resource.Deleted(comp) {
-		if current == nil || current.GetDeletionTimestamp() != nil || comp.ShouldOrphanResources() {
+		if current == nil || current.GetDeletionTimestamp() != nil {
 			return false, nil // already deleted - nothing to do
 		}
 

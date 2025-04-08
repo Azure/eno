@@ -387,3 +387,73 @@ func TestPatchDeletionForResourceWithReconciliationFromInput(t *testing.T) {
 	// Verify the configmap is not re-created.
 	require.Equal(t, uid, newUID)
 }
+
+func TestPatchDeleteOrphanedResources(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	cmName := "test-cm"
+	cmNamespace := "default"
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{
+			{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":                         cmName,
+						"namespace":                    cmNamespace,
+						"eno.azure.io/readiness-group": "1",
+					},
+					"data": map[string]string{"foo": "bar"},
+				},
+			},
+			{
+				Object: map[string]any{
+					"apiVersion": "eno.azure.io/v1",
+					"kind":       "Patch",
+					"metadata": map[string]any{
+						"name":      cmName,
+						"namespace": cmNamespace,
+						"annotations": map[string]string{
+							// This patch should be applied after the configmap is created.
+							"eno.azure.io/readiness-group": "2",
+						},
+					},
+					"patch": map[string]any{
+						"apiVersion": "v1",
+						"kind":       "ConfigMap",
+						"ops": []map[string]any{
+							{"op": "add", "path": "/metadata/deletionTimestamp", "value": "deleted"},
+						},
+					},
+				},
+			},
+		}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeComposition(t, upstream, true) // Set orphan to true
+
+	// Ensure the composition is created and reconciled.
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
+	})
+
+	// The resource should be deleted even the composition have orphan for deletion-strategy annotation.
+	cm := &corev1.ConfigMap{}
+	cm.Name = cmName
+	cm.Namespace = cmNamespace
+	testutil.Eventually(t, func() bool {
+		err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return errors.IsNotFound(err)
+	})
+}
