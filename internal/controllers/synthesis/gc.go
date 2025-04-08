@@ -36,9 +36,12 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	pod := &corev1.Pod{}
 	err := p.client.Get(ctx, req.NamespacedName, pod)
-	if err != nil || pod.DeletionTimestamp != nil {
-		logger.Error(err, "failed to get pod or pod is marked for deletion")
+	if err != nil {
+		logger.Error(err, "failed to get pod")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if pod.DeletionTimestamp != nil {
+		return ctrl.Result{}, nil
 	}
 	logger = logger.WithValues("podName", pod.Name, "podNamespace", pod.Namespace)
 

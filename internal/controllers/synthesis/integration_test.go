@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -242,5 +243,68 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 			return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration > initialGen
 		})
 		assert.NotEqual(t, comp.Status.CurrentSynthesis.ResourceSlices, initialSlices)
+	})
+}
+
+// TestDeadKubelet proves that we recover quickly when kubelet is not alive on the Ready node.
+func TestDeadKubelet(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	cli := mgr.GetClient()
+
+	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
+	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
+	require.NoError(t, NewPodGC(mgr.Manager, 0))
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "test-syn-image"
+	require.NoError(t, cli.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Finalizers = []string{"eno.azure.io/cleanup"}
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	// Pod should be created
+	pods := &corev1.PodList{}
+	testutil.Eventually(t, func() bool {
+		cli.List(ctx, pods)
+		return len(pods.Items) > 0
+	})
+	firstPod := pods.Items[0]
+
+	// Add finalizer so the pod can't be deleted during the test
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(&firstPod), &firstPod)
+		firstPod.Finalizers = []string{"eno.azure.io/never-delete"}
+		return cli.Update(ctx, &firstPod)
+	})
+	require.NoError(t, err)
+
+	// Update pod to simulate having been scheduled a long time ago
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(&firstPod), &firstPod)
+		firstPod.Status.Conditions = []corev1.PodCondition{{
+			Type:               corev1.PodScheduled,
+			Status:             corev1.ConditionTrue,
+			LastTransitionTime: metav1.NewTime(time.Now().Add(-time.Hour)),
+		}}
+		return cli.Status().Update(ctx, &firstPod)
+	})
+	require.NoError(t, err)
+
+	// Another pod should be created
+	testutil.Eventually(t, func() bool {
+		cli.List(ctx, pods)
+		for _, pod := range pods.Items {
+			if pod.UID != firstPod.UID {
+				return true
+			}
+		}
+		return false
 	})
 }

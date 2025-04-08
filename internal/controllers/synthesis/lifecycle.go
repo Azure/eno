@@ -57,6 +57,14 @@ func (c *podLifecycleController) newPodEventHandler() handler.TypedEventHandler[
 		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*corev1.Pod], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 		},
 		UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*corev1.Pod], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			if e.ObjectNew.DeletionTimestamp == nil || e.ObjectOld.DeletionTimestamp != nil || e.ObjectNew.Labels == nil {
+				return
+			}
+			nsn := types.NamespacedName{
+				Name:      e.ObjectNew.GetLabels()[compositionNameLabelKey],
+				Namespace: e.ObjectNew.GetLabels()[compositionNamespaceLabelKey],
+			}
+			q.Add(reconcile.Request{NamespacedName: nsn})
 		},
 		DeleteFunc: func(ctx context.Context, e event.TypedDeleteEvent[*corev1.Pod], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			if e.DeleteStateUnknown || e.Object.Labels == nil {
