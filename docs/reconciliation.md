@@ -84,7 +84,8 @@ annotations:
 
 ### Orphaning
 
-The `orphan` deletion strategy disables deletion, both when the composition is deleted and when the resource is removed by the synthesizer.
+The `orphan` deletion strategy disables deletion caused by composition deletion.
+The resource will still be deleted if it's not included in the latest synthesis, or if a `Patch` resource explicitly deletes it.
 
 ```yaml
 annotations:
