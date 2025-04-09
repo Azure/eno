@@ -702,7 +702,7 @@ func TestDisableUpdates(t *testing.T) {
 	assert.Equal(t, "baz", obj.Data["foo"])
 }
 
-func TestForceUpdates(t *testing.T) {
+func TestUpdateReplace(t *testing.T) {
 	scheme := runtime.NewScheme()
 	corev1.SchemeBuilder.AddToScheme(scheme)
 	testv1.SchemeBuilder.AddToScheme(scheme)
@@ -724,7 +724,7 @@ func TestForceUpdates(t *testing.T) {
 					"name":      "test-obj",
 					"namespace": "default",
 					"annotations": map[string]string{
-						"eno.azure.io/force": "true",
+						"eno.azure.io/replace": "true",
 					},
 				},
 				"data": map[string]string{"foo": "bar"},
@@ -750,9 +750,13 @@ func TestForceUpdates(t *testing.T) {
 	err := downstream.Get(ctx, client.ObjectKeyFromObject(initial), initial)
 	require.NoError(t, err)
 
-	// Update the service from outside of Eno
-	initial.Data["new-key"] = "baz"
-	require.NoError(t, downstream.Update(ctx, initial))
+	// Update the object from outside of Eno
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		downstream.Get(ctx, client.ObjectKeyFromObject(initial), initial)
+		initial.Data["new-key"] = "baz"
+		return downstream.Update(ctx, initial)
+	})
+	require.NoError(t, err)
 
 	// Resynthesize
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
@@ -772,6 +776,34 @@ func TestForceUpdates(t *testing.T) {
 		current := &corev1.ConfigMap{}
 		downstream.Get(ctx, client.ObjectKeyFromObject(initial), current)
 		return current.UID == initial.UID && current.Data["new-key"] == ""
+	})
+
+	// Do another update - this time only an annotation
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		downstream.Get(ctx, client.ObjectKeyFromObject(initial), initial)
+		initial.Annotations = map[string]string{"eno.azure.io/test": "false"}
+		return downstream.Update(ctx, initial)
+	})
+	require.NoError(t, err)
+
+	// Resynthesize
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Spec.SynthesisEnv = []apiv1.EnvVar{{Name: "also-anything", Value: "to advance the resource generation"}}
+		return upstream.Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == comp.Generation
+	})
+
+	// The external change should be removed AND the UID should not change
+	testutil.Eventually(t, func() bool {
+		current := &corev1.ConfigMap{}
+		downstream.Get(ctx, client.ObjectKeyFromObject(initial), current)
+		return current.UID == initial.UID && len(current.Annotations) == 0
 	})
 }
 

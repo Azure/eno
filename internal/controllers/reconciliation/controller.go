@@ -234,7 +234,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	var updated *unstructured.Unstructured
 	var typed bool
 	var err error
-	if resource.DisableMerge {
+	if resource.Replace {
 		updated = resource.Unstructured()
 	} else {
 		updated, typed, err = resource.Merge(ctx, prev, current, c.discovery)
