@@ -82,6 +82,17 @@ annotations:
   eno.azure.io/disable-updates: "true"
 ```
 
+### Replace
+
+Designating a resource to be replaced means that updates will not use 3-way merge,
+so any fields set by other clients will be overwritten by Eno.
+Useful for resources that logically have a single reader (e.g. CRDs).
+
+```yaml
+annotations:
+  eno.azure.io/replace: "true"
+```
+
 ### Orphaning
 
 The `orphan` deletion strategy disables deletion caused by composition deletion.
