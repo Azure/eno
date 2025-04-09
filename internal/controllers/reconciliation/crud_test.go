@@ -702,6 +702,111 @@ func TestDisableUpdates(t *testing.T) {
 	assert.Equal(t, "baz", obj.Data["foo"])
 }
 
+func TestUpdateReplace(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	// Register supporting controllers
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]string{
+						"eno.azure.io/replace": "true",
+					},
+				},
+				"data": map[string]string{"foo": "bar"},
+			},
+		}}
+		return output, nil
+	})
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	// Wait for resource to be created
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
+	})
+
+	initial := &corev1.ConfigMap{}
+	initial.SetName("test-obj")
+	initial.SetNamespace("default")
+	err := downstream.Get(ctx, client.ObjectKeyFromObject(initial), initial)
+	require.NoError(t, err)
+
+	// Update the object from outside of Eno
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		downstream.Get(ctx, client.ObjectKeyFromObject(initial), initial)
+		initial.Data["new-key"] = "baz"
+		return downstream.Update(ctx, initial)
+	})
+	require.NoError(t, err)
+
+	// Resynthesize
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Spec.SynthesisEnv = []apiv1.EnvVar{{Name: "anything", Value: "to advance the resource generation"}}
+		return upstream.Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == comp.Generation
+	})
+
+	// The external change should be removed AND the UID should not change
+	testutil.Eventually(t, func() bool {
+		current := &corev1.ConfigMap{}
+		downstream.Get(ctx, client.ObjectKeyFromObject(initial), current)
+		return current.UID == initial.UID && current.Data["new-key"] == ""
+	})
+
+	// Do another update - this time only an annotation
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		downstream.Get(ctx, client.ObjectKeyFromObject(initial), initial)
+		initial.Annotations = map[string]string{"eno.azure.io/test": "false"}
+		return downstream.Update(ctx, initial)
+	})
+	require.NoError(t, err)
+
+	// Resynthesize
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Spec.SynthesisEnv = []apiv1.EnvVar{{Name: "also-anything", Value: "to advance the resource generation"}}
+		return upstream.Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == comp.Generation
+	})
+
+	// The external change should be removed AND the UID should not change
+	testutil.Eventually(t, func() bool {
+		current := &corev1.ConfigMap{}
+		downstream.Get(ctx, client.ObjectKeyFromObject(initial), current)
+		return current.UID == initial.UID && len(current.Annotations) == 0
+	})
+}
+
 func TestOrphanedResources(t *testing.T) {
 	scheme := runtime.NewScheme()
 	corev1.SchemeBuilder.AddToScheme(scheme)
