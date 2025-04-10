@@ -50,10 +50,18 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 			Name:  "SYNTHESIS_UUID",
 			Value: comp.Status.InFlightSynthesis.UUID,
 		},
+		{
+			Name:  "IMAGE",
+			Value: syn.Spec.Image,
+		},
 	}
 
 	for _, ev := range filterEnv(env, comp.Spec.SynthesisEnv) {
 		env = append(env, corev1.EnvVar{Name: ev.Name, Value: ev.Value})
+	}
+
+	if syn.Spec.PodTimeout != nil {
+		pod.Spec.ActiveDeadlineSeconds = ptr.To(int64(syn.Spec.PodTimeout.Seconds()))
 	}
 
 	pod.Spec = corev1.PodSpec{

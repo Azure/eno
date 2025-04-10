@@ -26,6 +26,7 @@ require (
 	k8s.io/utils v0.0.0-20241210054802-24370beab758
 	sigs.k8s.io/controller-runtime v0.20.1
 	sigs.k8s.io/structured-merge-diff/v4 v4.5.0
+	sigs.k8s.io/yaml v1.4.0
 )
 
 require (
@@ -78,7 +79,6 @@ require (
 	k8s.io/apiextensions-apiserver v0.32.1 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
 	sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8 // indirect
-	sigs.k8s.io/yaml v1.4.0 // indirect
 )
 
 replace github.com/imdario/mergo => github.com/imdario/mergo v0.3.16

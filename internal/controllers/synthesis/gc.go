@@ -5,13 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -60,66 +57,12 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, p.deletePod(ctx, pod, logger)
 	}
 
-	// GC pods from deleted compositions
-	comp := &apiv1.Composition{}
-	comp.Name = pod.GetLabels()[compositionNameLabelKey]
-	comp.Namespace = pod.GetLabels()[compositionNamespaceLabelKey]
-	err = p.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisAge", synthesisAge(comp))
-	if errors.IsNotFound(err) || comp.DeletionTimestamp != nil {
-		logger = logger.WithValues("reason", "CompositionDeleted")
-		return ctrl.Result{}, p.deletePod(ctx, pod, logger)
-	}
-	if err != nil {
-		logger.Error(err, "failed to get composition resource")
-		return ctrl.Result{}, err
-	}
-
-	// GC pods from missing synthesizers
-	syn := &apiv1.Synthesizer{}
-	syn.Name = comp.Spec.Synthesizer.Name
-	err = p.client.Get(ctx, client.ObjectKeyFromObject(syn), syn)
-	logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
-	if errors.IsNotFound(err) {
-		logger = logger.WithValues("reason", "SynthesizerDeleted")
-		return ctrl.Result{}, p.deletePod(ctx, pod, logger)
-	}
-	if err != nil {
-		logger.Error(err, "failed to get synthesizer")
-		return ctrl.Result{}, err
-	}
-
-	// Ignore brand new pods since the pod/composition informer might not be in sync
-	const gracePeriod = time.Second
-	delta := gracePeriod - time.Since(pod.CreationTimestamp.Time)
-	if delta > 0 {
-		return ctrl.Result{RequeueAfter: delta}, nil
-	}
-
-	if syn := comp.Status.InFlightSynthesis; syn != nil {
-		if syn.Canceled != nil {
-			logger = logger.WithValues("reason", "Timeout")
-			return ctrl.Result{}, p.deletePod(ctx, pod, logger)
-		}
-
-		// A new synthesis has replaced the previous
-		if syn.UUID != pod.Labels[synthesisIDLabelKey] {
-			logger = logger.WithValues("reason", "Superseded")
-			return ctrl.Result{}, p.deletePod(ctx, pod, logger)
-		}
-
-		return ctrl.Result{RequeueAfter: time.Second}, nil // still active
-	}
-
-	// In-flight synthesis being swapped to current == synthesis completed
-	if syn := comp.Status.CurrentSynthesis; syn != nil && syn.UUID == pod.Labels[synthesisIDLabelKey] {
-		logger = logger.WithValues("reason", "Success")
+	if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+		logger = logger.WithValues("reason", pod.Status.Phase)
 		return ctrl.Result{}, p.deletePod(ctx, pod, logger)
 	}
 
-	// This condition should only be able to happen when the composition has been deleted
-	logger = logger.WithValues("reason", "Orphaned")
-	return ctrl.Result{}, p.deletePod(ctx, pod, logger)
+	return ctrl.Result{}, nil
 }
 
 func (p *podGarbageCollector) deletePod(ctx context.Context, pod *corev1.Pod, logger logr.Logger) error {
@@ -149,12 +92,4 @@ func timeWaitingForKubelet(pod *corev1.Pod, now time.Time) time.Duration {
 		return now.Sub(*scheduledTime)
 	}
 	return 0
-}
-
-func synthesisAge(comp *apiv1.Composition) *int64 {
-	syn := comp.Status.InFlightSynthesis
-	if syn == nil || syn.Initialized == nil {
-		return nil
-	}
-	return ptr.To(time.Since(syn.Initialized.Time).Milliseconds())
 }
