@@ -8,6 +8,7 @@ import (
 	"github.com/Azure/eno/internal/manager"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -34,12 +35,12 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	pod := &corev1.Pod{}
 	err := p.client.Get(ctx, req.NamespacedName, pod)
+	if errors.IsNotFound(err) || pod.DeletionTimestamp != nil {
+		return ctrl.Result{}, nil
+	}
 	if err != nil {
 		logger.Error(err, "failed to get pod")
-		return ctrl.Result{}, client.IgnoreNotFound(err)
-	}
-	if pod.DeletionTimestamp != nil {
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, err
 	}
 	logger = logger.WithValues("podName", pod.Name, "podNamespace", pod.Namespace)
 
