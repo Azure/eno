@@ -59,6 +59,10 @@ func NewController(mgr ctrl.Manager, concurrencyLimit int, cooldown, watchdogThr
 		cacheGracePeriod:  time.Second,
 		watchdogThreshold: watchdogThreshold,
 	}
+
+	// Non-leaders should report that all slots are available, not zero.
+	freeSynthesisSlots.Set(float64(concurrencyLimit))
+
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("schedulingController").
 		Watches(&apiv1.Composition{}, manager.SingleEventHandler()).
