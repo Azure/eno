@@ -201,7 +201,7 @@ func buildSimplifiedStatus(synth *apiv1.Synthesizer, comp *apiv1.Composition) *a
 		status.Status = "MissingInputs"
 		return status
 	}
-	if comp.InputsOutOfLockstep(synth) {
+	if apiv1.InputsOutOfLockstep(synth, comp.Status.InputRevisions) {
 		status.Status = "MismatchedInputs"
 	}
 

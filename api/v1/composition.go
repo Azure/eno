@@ -204,10 +204,10 @@ func (c *Composition) InputsExist(syn *Synthesizer) bool {
 // InputsOutOfLockstep returns true when one or more inputs that specify a revision do not match the others.
 // It also returns true if any revision is derived from a synthesizer generation
 // older than the provided synthesizer.
-func (c *Composition) InputsOutOfLockstep(synth *Synthesizer) bool {
+func InputsOutOfLockstep(synth *Synthesizer, revs []InputRevisions) bool {
 	// First, the the max revision across all bindings
 	var maxRevision *int
-	for _, rev := range c.Status.InputRevisions {
+	for _, rev := range revs {
 		if rev.SynthesizerGeneration != nil && *rev.SynthesizerGeneration < synth.Generation {
 			return true
 		}
@@ -227,7 +227,7 @@ func (c *Composition) InputsOutOfLockstep(synth *Synthesizer) bool {
 	}
 
 	// Now given the max, make sure all inputs with a revision match it
-	for _, rev := range c.Status.InputRevisions {
+	for _, rev := range revs {
 		if rev.Revision != nil && *maxRevision != *rev.Revision {
 			return true
 		}

@@ -325,7 +325,7 @@ func TestInputsInLockstep(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
-			result := tt.Input.InputsOutOfLockstep(&tt.Synth)
+			result :=InputsOutOfLockstep( &tt.Synth, tt.Input.Status.InputRevisions)
 			assert.Equal(t, tt.Expectation, result)
 		})
 	}
