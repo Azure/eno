@@ -124,7 +124,7 @@ func TestBulkSynthesizerUpdates(t *testing.T) {
 
 	synth, comp := writeGenericComposition(t, upstream)
 
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 50; i++ {
 		err := retry.RetryOnConflict(testutil.Backoff, func() error {
 			upstream.Get(ctx, client.ObjectKeyFromObject(synth), synth)
 			synth.Spec.Image = fmt.Sprintf("synth-%d", i)
@@ -136,6 +136,6 @@ func TestBulkSynthesizerUpdates(t *testing.T) {
 	testutil.Eventually(t, func() bool {
 		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		syn := comp.Status.CurrentSynthesis
-		return syn != nil && len(syn.Results) == 1 && syn.Results[0].Message == "synth-19"
+		return syn != nil && len(syn.Results) == 1 && syn.Results[0].Message == "synth-49"
 	})
 }

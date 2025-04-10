@@ -358,6 +358,8 @@ func WithFakeExecutor(t *testing.T, mgr *Manager, sh execution.SynthesizerHandle
 				env.CompositionNamespace = e.Value
 			case "SYNTHESIS_UUID":
 				env.SynthesisUUID = e.Value
+			case "IMAGE":
+				env.Image = e.Value
 			}
 		}
 
@@ -368,9 +370,7 @@ func WithFakeExecutor(t *testing.T, mgr *Manager, sh execution.SynthesizerHandle
 		}
 		err = e.Synthesize(ctx, env)
 		if err != nil {
-			// Returning an error from the synth would eventually result in a timeout.
-			// To avoid waiting that long in the tests we can just delete the pod after the first try.
-			return reconcile.Result{}, mgr.GetClient().Delete(ctx, pod)
+			return reconcile.Result{}, err
 		}
 
 		err = mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(pod), pod)
