@@ -106,7 +106,6 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	var inFlight int
 	var op *op
-	stuckReconciling.Reset()
 	for _, comp := range comps.Items {
 		comp := comp
 		if comp.Synthesizing() {
@@ -186,13 +185,17 @@ func (c *controller) dispatchOp(ctx context.Context, op *op) error {
 	return c.client.Status().Patch(ctx, op.Composition.DeepCopy(), client.RawPatch(types.JSONPatchType, patch))
 }
 
+// indexSynthesizers returns an indexed representation of the synthesizers and has the side effect of
+// resetting the stuckReconciling metric.
 func indexSynthesizers(synths []apiv1.Synthesizer) (byName map[string]apiv1.Synthesizer, epoch string) {
 	sort.Slice(synths, func(i, j int) bool { return synths[i].Name < synths[j].Name })
 	byName = map[string]apiv1.Synthesizer{}
 	h := fnv.New64()
+	stuckReconciling.Reset()
 	for _, synth := range synths {
 		byName[synth.Name] = synth
 		fmt.Fprintf(h, "%s:%d", synth.UID, synth.Generation)
+		stuckReconciling.WithLabelValues(synth.Name).Set(0)
 	}
 	return byName, hex.EncodeToString(h.Sum(nil))
 }
