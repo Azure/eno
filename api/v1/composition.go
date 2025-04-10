@@ -2,7 +2,6 @@ package v1
 
 import (
 	"fmt"
-	"slices"
 	"strconv"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -156,83 +155,6 @@ func (i *InputRevisions) Less(b InputRevisions) bool {
 		return true // effectively fall back to equality comparison if they aren't ints (shouldn't be possible)
 	}
 	return iInt < bInt
-}
-
-func (c *Composition) InputsExist(syn *Synthesizer) bool {
-	refs := map[string]struct{}{}
-	for _, ref := range syn.Spec.Refs {
-		refs[ref.Key] = struct{}{}
-	}
-
-	bound := map[string]struct{}{}
-	for _, binding := range c.Spec.Bindings {
-		if _, ok := refs[binding.Key]; !ok {
-			// Ignore missing resources if the synthesizer doesn't require them
-			// This is important for forwards compatibility- compositions can bind to refs that don't exist, but will in future synths
-			continue
-		}
-		found := slices.ContainsFunc(c.Status.InputRevisions, func(rev InputRevisions) bool {
-			return binding.Key == rev.Key
-		})
-		if !found {
-			return false
-		}
-		bound[binding.Key] = struct{}{}
-	}
-
-	for _, ref := range syn.Spec.Refs {
-		// Handle missing resources for implied bindings
-		if ref.Resource.Name != "" {
-			found := slices.ContainsFunc(c.Status.InputRevisions, func(rev InputRevisions) bool {
-				return ref.Key == rev.Key
-			})
-			if !found {
-				return false
-			}
-			continue
-		}
-
-		// Every ref must be bound
-		if _, ok := bound[ref.Key]; !ok {
-			return false
-		}
-	}
-
-	return true
-}
-
-// InputsOutOfLockstep returns true when one or more inputs that specify a revision do not match the others.
-// It also returns true if any revision is derived from a synthesizer generation
-// older than the provided synthesizer.
-func InputsOutOfLockstep(synth *Synthesizer, revs []InputRevisions) bool {
-	// First, the the max revision across all bindings
-	var maxRevision *int
-	for _, rev := range revs {
-		if rev.SynthesizerGeneration != nil && *rev.SynthesizerGeneration < synth.Generation {
-			return true
-		}
-		if rev.Revision == nil {
-			continue
-		}
-		if maxRevision == nil {
-			maxRevision = rev.Revision
-			continue
-		}
-		if *rev.Revision > *maxRevision {
-			maxRevision = rev.Revision
-		}
-	}
-	if maxRevision == nil {
-		return false // no inputs declare a revision, so we should assume they're in sync
-	}
-
-	// Now given the max, make sure all inputs with a revision match it
-	for _, rev := range revs {
-		if rev.Revision != nil && *maxRevision != *rev.Revision {
-			return true
-		}
-	}
-	return false
 }
 
 func (s *CompositionStatus) GetCurrentSynthesisUUID() string {

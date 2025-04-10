@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/inputs"
 	"github.com/Azure/eno/internal/manager"
 )
 
@@ -197,11 +198,11 @@ func buildSimplifiedStatus(synth *apiv1.Synthesizer, comp *apiv1.Composition) *a
 		return status
 	}
 
-	if !comp.InputsExist(synth) {
+	if !inputs.InputsExist(synth, comp) {
 		status.Status = "MissingInputs"
 		return status
 	}
-	if apiv1.InputsOutOfLockstep(synth, comp.Status.InputRevisions) {
+	if inputs.InputsOutOfLockstep(synth, comp.Status.InputRevisions) {
 		status.Status = "MismatchedInputs"
 	}
 
