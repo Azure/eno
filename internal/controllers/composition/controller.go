@@ -43,7 +43,7 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisID", comp.Status.GetCurrentSynthesisUUID())
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisUUID", comp.Status.GetCurrentSynthesisUUID())
 
 	if comp.DeletionTimestamp != nil {
 		return c.reconcileDeletedComposition(ctx, comp)
@@ -123,7 +123,7 @@ func (c *compositionController) reconcileDeletedComposition(ctx context.Context,
 				logger.Error(err, "failed to update current composition generation")
 				return ctrl.Result{}, err
 			}
-			logger.V(0).Info("updated composition status to reflect deletion", "synthesisID", comp.Status.CurrentSynthesis.UUID)
+			logger.V(0).Info("updated composition status to reflect deletion", "synthesisUUID", comp.Status.CurrentSynthesis.UUID)
 			return ctrl.Result{}, nil
 		}
 

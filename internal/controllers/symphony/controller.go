@@ -43,7 +43,7 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 		logger.Error(err, "failed to get symphony")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	logger = logger.WithValues("symphonyName", symph.Name, "symphonyNamespace", symph.Namespace)
+	logger = logger.WithValues("symphonyName", symph.Name, "symphonyNamespace", symph.Namespace, "symphonyGeneration", symph.Generation)
 	ctx = logr.NewContext(ctx, logger)
 
 	if controllerutil.AddFinalizer(symph, "eno.azure.io/cleanup") {

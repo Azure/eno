@@ -76,9 +76,12 @@ func (c *cleanupController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	slice := &apiv1.ResourceSlice{}
 	err := c.client.Get(ctx, req.NamespacedName, slice)
+	if errors.IsNotFound(err) {
+		return ctrl.Result{}, nil
+	}
 	if err != nil {
 		logger.Error(err, "failed to get resource slice")
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		return ctrl.Result{}, err
 	}
 	logger = logger.WithValues("synthesisUUID", slice.Spec.SynthesisUUID)
 

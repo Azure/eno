@@ -107,19 +107,18 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		logger.Error(err, "failed to get composition")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	logger = logger.WithValues("compositionGeneration", comp.Generation)
+	synthesisUUID := comp.Status.GetCurrentSynthesisUUID()
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisUUID", synthesisUUID)
 
 	if comp.Status.CurrentSynthesis == nil {
 		return ctrl.Result{}, nil // nothing to do
 	}
-	logger = logger.WithValues("synthesizerName", comp.Spec.Synthesizer.Name,
-		"synthesizerGeneration", comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration,
-		"synthesisID", comp.Status.GetCurrentSynthesisUUID())
+	logger = logger.WithValues("synthesizerName", comp.Spec.Synthesizer.Name, "synthesizerGeneration", comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration, "synthesisUUID", comp.Status.GetCurrentSynthesisUUID())
 	ctx = logr.NewContext(ctx, logger)
 
 	// Find the current and (optionally) previous desired states in the cache
 	var prev *resource.Resource
-	resource, visible, exists := c.resourceClient.Get(ctx, comp.Status.GetCurrentSynthesisUUID(), req.Resource)
+	resource, visible, exists := c.resourceClient.Get(ctx, synthesisUUID, req.Resource)
 	if !exists || !visible {
 		return ctrl.Result{}, nil
 	}
