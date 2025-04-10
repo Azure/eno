@@ -15,7 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func TestPodGCMissingSynthesis(t *testing.T) {
+func TestPodGCCompleted(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
@@ -26,17 +26,22 @@ func TestPodGCMissingSynthesis(t *testing.T) {
 	synth := &apiv1.Synthesizer{}
 	synth.Name = "test-syn"
 	synth.Spec.Image = "test-syn-image"
-	require.NoError(t, cli.Create(ctx, synth))
 
 	comp := &apiv1.Composition{}
 	comp.Name = "test-comp"
 	comp.Namespace = "default"
 	comp.Spec.Synthesizer.Name = synth.Name
-	require.NoError(t, cli.Create(ctx, comp))
-
 	comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "anything"}
+
 	pod := newPod(minimalTestConfig, comp, synth)
 	require.NoError(t, cli.Create(ctx, pod))
+
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(pod), pod)
+		pod.Status.Phase = corev1.PodSucceeded
+		return cli.Status().Update(ctx, pod)
+	})
+	require.NoError(t, err)
 
 	testutil.Eventually(t, func() bool {
 		return errors.IsNotFound(mgr.GetAPIReader().Get(ctx, client.ObjectKeyFromObject(pod), pod))

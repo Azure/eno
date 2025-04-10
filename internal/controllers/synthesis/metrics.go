@@ -12,15 +12,8 @@ var (
 			Help: "Initiated synthesis operations",
 		},
 	)
-
-	synthesPodRecreations = prometheus.NewCounter(
-		prometheus.CounterOpts{
-			Name: "eno_synthesis_pod_recreations_total",
-			Help: "Pods deleted due to timeout",
-		},
-	)
 )
 
 func init() {
-	metrics.Registry.MustRegister(sytheses, synthesPodRecreations)
+	metrics.Registry.MustRegister(sytheses)
 }

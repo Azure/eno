@@ -187,6 +187,13 @@ func (s *statusSnapshot) GetReconciled(comp *apiv1.Composition, now *metav1.Time
 		}
 	}
 
+	if initialized := comp.Status.CurrentSynthesis.Initialized; initialized != nil {
+		latency := now.Sub(initialized.Time)
+		if latency > 0 {
+			logger = logger.WithValues("synthesisLatency", latency.Milliseconds())
+		}
+	}
+
 	logger.V(0).Info("composition was reconciled")
 	return now
 }

@@ -130,7 +130,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("creating pod: %w", err)
 	}
-	logger.V(0).Info("created synthesizer pod", "podName", pod.Name)
+	logger.V(0).Info("created synthesizer pod", "podName", pod.Name, "image", syn.Spec.Image)
 	sytheses.Inc()
 
 	return ctrl.Result{}, nil

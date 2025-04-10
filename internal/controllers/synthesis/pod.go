@@ -50,6 +50,10 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 			Name:  "SYNTHESIS_UUID",
 			Value: comp.Status.InFlightSynthesis.UUID,
 		},
+		{
+			Name:  "IMAGE",
+			Value: syn.Spec.Image,
+		},
 	}
 
 	for _, ev := range filterEnv(env, comp.Spec.SynthesisEnv) {
@@ -57,8 +61,9 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 	}
 
 	pod.Spec = corev1.PodSpec{
-		ServiceAccountName: cfg.PodServiceAccount,
-		RestartPolicy:      corev1.RestartPolicyOnFailure,
+		ServiceAccountName:            cfg.PodServiceAccount,
+		RestartPolicy:                 corev1.RestartPolicyOnFailure,
+		TerminationGracePeriodSeconds: ptr.To(int64(0)),
 		Affinity: &corev1.Affinity{
 			PodAntiAffinity: &corev1.PodAntiAffinity{
 				PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{{
@@ -115,6 +120,10 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 				},
 			},
 		}},
+	}
+
+	if syn.Spec.PodTimeout != nil {
+		pod.Spec.ActiveDeadlineSeconds = ptr.To(int64(syn.Spec.PodTimeout.Seconds()))
 	}
 
 	if cfg.TaintTolerationKey != "" {
