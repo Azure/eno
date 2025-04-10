@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -64,7 +65,7 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 	comp.Name = pod.GetLabels()[compositionNameLabelKey]
 	comp.Namespace = pod.GetLabels()[compositionNamespaceLabelKey]
 	err = p.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation)
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisAge", synthesisAge(comp))
 	if errors.IsNotFound(err) || comp.DeletionTimestamp != nil {
 		logger = logger.WithValues("reason", "CompositionDeleted")
 		return ctrl.Result{}, p.deletePod(ctx, pod, logger)
@@ -122,9 +123,6 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 }
 
 func (p *podGarbageCollector) deletePod(ctx context.Context, pod *corev1.Pod, logger logr.Logger) error {
-	if exitTS := containerExitedTime(pod); exitTS != nil {
-		logger = logger.WithValues("latency", exitTS.Sub(pod.CreationTimestamp.Time))
-	}
 	if len(pod.Status.ContainerStatuses) > 0 {
 		logger = logger.WithValues("restarts", pod.Status.ContainerStatuses[0].RestartCount)
 	}
@@ -132,7 +130,7 @@ func (p *podGarbageCollector) deletePod(ctx context.Context, pod *corev1.Pod, lo
 	if err != nil {
 		return fmt.Errorf("deleting pod: %w", err)
 	}
-	logger.Info("deleted synthesizer pod")
+	logger.Info("deleted synthesizer pod", "latency", time.Since(pod.CreationTimestamp.Time).Milliseconds())
 	return nil
 }
 
@@ -153,11 +151,10 @@ func timeWaitingForKubelet(pod *corev1.Pod, now time.Time) time.Duration {
 	return 0
 }
 
-func containerExitedTime(pod *corev1.Pod) (ts *time.Time) {
-	for _, cont := range pod.Status.ContainerStatuses {
-		if state := cont.LastTerminationState.Terminated; state != nil && (ts == nil || state.FinishedAt.Time.After(*ts)) {
-			ts = &state.FinishedAt.Time
-		}
+func synthesisAge(comp *apiv1.Composition) *int64 {
+	syn := comp.Status.InFlightSynthesis
+	if syn == nil || syn.Initialized == nil {
+		return nil
 	}
-	return ts
+	return ptr.To(time.Since(syn.Initialized.Time).Milliseconds())
 }
