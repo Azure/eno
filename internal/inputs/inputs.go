@@ -17,7 +17,6 @@ func Exist(syn *apiv1.Synthesizer, c *apiv1.Composition) bool {
 	for _, binding := range c.Spec.Bindings {
 		if _, ok := refs[binding.Key]; !ok {
 			// Ignore missing resources if the synthesizer doesn't require them
-			// This is important for forwards compatibility- compositions can bind to refs that don't exist, but will in future synths
 			continue
 		}
 		found := slices.ContainsFunc(c.Status.InputRevisions, func(rev apiv1.InputRevisions) bool {
@@ -51,8 +50,7 @@ func Exist(syn *apiv1.Synthesizer, c *apiv1.Composition) bool {
 }
 
 // OutOfLockstep returns true when one or more inputs that specify a revision do not match the others.
-// It also returns true if any revision is derived from a synthesizer generation
-// older than the provided synthesizer.
+// It also returns true if any revision is derived from a synthesizer generation older than the provided synthesizer.
 func OutOfLockstep(synth *apiv1.Synthesizer, revs []apiv1.InputRevisions) bool {
 	// First, the the max revision across all bindings
 	var maxRevision *int

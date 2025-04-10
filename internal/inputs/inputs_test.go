@@ -182,6 +182,29 @@ func TestExist(t *testing.T) {
 			},
 			Expectation: true,
 		},
+		{
+			Name: "Bound but missing",
+			Composition: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{
+						{Key: "key1"},
+					},
+				},
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Key: "key2"},
+					},
+				},
+			},
+			Synthesizer: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "key1"},
+					},
+				},
+			},
+			Expectation: false,
+		},
 	}
 
 	for _, tt := range tests {
