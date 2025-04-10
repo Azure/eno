@@ -9,148 +9,7 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-func TestInputsInLockstep(t *testing.T) {
-	revision1 := 1
-	revision2 := 2
-
-	tests := []struct {
-		Name        string
-		Input       apiv1.Composition
-		Synth       apiv1.Synthesizer
-		Expectation bool
-	}{
-		{
-			Name: "No revisions",
-			Input: apiv1.Composition{
-				Status: apiv1.CompositionStatus{
-					InputRevisions: []apiv1.InputRevisions{},
-				},
-			},
-			Expectation: false,
-		},
-		{
-			Name: "All nil revisions",
-			Input: apiv1.Composition{
-				Status: apiv1.CompositionStatus{
-					InputRevisions: []apiv1.InputRevisions{
-						{Revision: nil, ResourceVersion: "1"},
-						{Revision: nil, ResourceVersion: "2"},
-					},
-				},
-			},
-			Expectation: false,
-		},
-		{
-			Name: "One lagging behind",
-			Input: apiv1.Composition{
-				Status: apiv1.CompositionStatus{
-					InputRevisions: []apiv1.InputRevisions{
-						{Revision: &revision1, ResourceVersion: "1"},
-						{Revision: &revision2, ResourceVersion: "1"},
-						{Revision: &revision1, ResourceVersion: "1"},
-					},
-				},
-			},
-			Expectation: true,
-		},
-		{
-			Name: "Mixed nil and non-nil revisions",
-			Input: apiv1.Composition{
-				Status: apiv1.CompositionStatus{
-					InputRevisions: []apiv1.InputRevisions{
-						{Revision: &revision2, ResourceVersion: "1"},
-						{Revision: nil, ResourceVersion: "1"},
-						{Revision: &revision1, ResourceVersion: "1"},
-					},
-				},
-			},
-			Expectation: true,
-		},
-		{
-			Name: "One matching, one nil revision",
-			Input: apiv1.Composition{
-				Status: apiv1.CompositionStatus{
-					InputRevisions: []apiv1.InputRevisions{
-						{Revision: &revision1, ResourceVersion: "1"},
-						{Revision: &revision1, ResourceVersion: "1"},
-						{Revision: nil, ResourceVersion: "1"},
-					},
-				},
-			},
-			Expectation: false,
-		},
-		{
-			Name: "All revisions the same",
-			Input: apiv1.Composition{
-				Status: apiv1.CompositionStatus{
-					InputRevisions: []apiv1.InputRevisions{
-						{Revision: &revision1, ResourceVersion: "1"},
-						{Revision: &revision1, ResourceVersion: "2"},
-						{Revision: &revision1, ResourceVersion: "3"},
-					},
-				},
-			},
-			Expectation: false,
-		},
-		{
-			Name: "Lagging behind synth",
-			Input: apiv1.Composition{
-				Status: apiv1.CompositionStatus{
-					InputRevisions: []apiv1.InputRevisions{{
-						SynthesizerGeneration: ptr.To(int64(122)),
-					}},
-				},
-			},
-			Synth: apiv1.Synthesizer{
-				ObjectMeta: metav1.ObjectMeta{
-					Generation: 123,
-				},
-			},
-			Expectation: true,
-		},
-		{
-			Name: "At pace with synth",
-			Input: apiv1.Composition{
-				Status: apiv1.CompositionStatus{
-					InputRevisions: []apiv1.InputRevisions{{
-						SynthesizerGeneration: ptr.To(int64(123)),
-					}},
-				},
-			},
-			Synth: apiv1.Synthesizer{
-				ObjectMeta: metav1.ObjectMeta{
-					Generation: 123,
-				},
-			},
-			Expectation: false,
-		},
-		{
-			Name: "Ahead of synth",
-			Input: apiv1.Composition{
-				Status: apiv1.CompositionStatus{
-					InputRevisions: []apiv1.InputRevisions{{
-						SynthesizerGeneration: ptr.To(int64(124)),
-					}},
-				},
-			},
-			Synth: apiv1.Synthesizer{
-				ObjectMeta: metav1.ObjectMeta{
-					Generation: 123,
-				},
-			},
-			Expectation: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.Name, func(t *testing.T) {
-			result := InputsOutOfLockstep(&tt.Synth, tt.Input.Status.InputRevisions)
-			assert.Equal(t, tt.Expectation, result)
-		})
-	}
-}
-
-func TestInputsExist(t *testing.T) {
+func TestExist(t *testing.T) {
 	// GPT generated - beware!!!
 	tests := []struct {
 		Name        string
@@ -327,7 +186,148 @@ func TestInputsExist(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
-			result := InputsExist(&tt.Synthesizer, &tt.Composition)
+			result := Exist(&tt.Synthesizer, &tt.Composition)
+			assert.Equal(t, tt.Expectation, result)
+		})
+	}
+}
+
+func TestOutOfLockstep(t *testing.T) {
+	revision1 := 1
+	revision2 := 2
+
+	tests := []struct {
+		Name        string
+		Input       apiv1.Composition
+		Synth       apiv1.Synthesizer
+		Expectation bool
+	}{
+		{
+			Name: "No revisions",
+			Input: apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{},
+				},
+			},
+			Expectation: false,
+		},
+		{
+			Name: "All nil revisions",
+			Input: apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Revision: nil, ResourceVersion: "1"},
+						{Revision: nil, ResourceVersion: "2"},
+					},
+				},
+			},
+			Expectation: false,
+		},
+		{
+			Name: "One lagging behind",
+			Input: apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Revision: &revision1, ResourceVersion: "1"},
+						{Revision: &revision2, ResourceVersion: "1"},
+						{Revision: &revision1, ResourceVersion: "1"},
+					},
+				},
+			},
+			Expectation: true,
+		},
+		{
+			Name: "Mixed nil and non-nil revisions",
+			Input: apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Revision: &revision2, ResourceVersion: "1"},
+						{Revision: nil, ResourceVersion: "1"},
+						{Revision: &revision1, ResourceVersion: "1"},
+					},
+				},
+			},
+			Expectation: true,
+		},
+		{
+			Name: "One matching, one nil revision",
+			Input: apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Revision: &revision1, ResourceVersion: "1"},
+						{Revision: &revision1, ResourceVersion: "1"},
+						{Revision: nil, ResourceVersion: "1"},
+					},
+				},
+			},
+			Expectation: false,
+		},
+		{
+			Name: "All revisions the same",
+			Input: apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Revision: &revision1, ResourceVersion: "1"},
+						{Revision: &revision1, ResourceVersion: "2"},
+						{Revision: &revision1, ResourceVersion: "3"},
+					},
+				},
+			},
+			Expectation: false,
+		},
+		{
+			Name: "Lagging behind synth",
+			Input: apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{{
+						SynthesizerGeneration: ptr.To(int64(122)),
+					}},
+				},
+			},
+			Synth: apiv1.Synthesizer{
+				ObjectMeta: metav1.ObjectMeta{
+					Generation: 123,
+				},
+			},
+			Expectation: true,
+		},
+		{
+			Name: "At pace with synth",
+			Input: apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{{
+						SynthesizerGeneration: ptr.To(int64(123)),
+					}},
+				},
+			},
+			Synth: apiv1.Synthesizer{
+				ObjectMeta: metav1.ObjectMeta{
+					Generation: 123,
+				},
+			},
+			Expectation: false,
+		},
+		{
+			Name: "Ahead of synth",
+			Input: apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{{
+						SynthesizerGeneration: ptr.To(int64(124)),
+					}},
+				},
+			},
+			Synth: apiv1.Synthesizer{
+				ObjectMeta: metav1.ObjectMeta{
+					Generation: 123,
+				},
+			},
+			Expectation: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.Name, func(t *testing.T) {
+			result := OutOfLockstep(&tt.Synth, tt.Input.Status.InputRevisions)
 			assert.Equal(t, tt.Expectation, result)
 		})
 	}

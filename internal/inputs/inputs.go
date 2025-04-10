@@ -6,7 +6,8 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 )
 
-func InputsExist(syn *apiv1.Synthesizer, c *apiv1.Composition) bool {
+// Exist returns true when all of the inputs required by a synthesizer are represented by the given composition's status.
+func Exist(syn *apiv1.Synthesizer, c *apiv1.Composition) bool {
 	refs := map[string]struct{}{}
 	for _, ref := range syn.Spec.Refs {
 		refs[ref.Key] = struct{}{}
@@ -49,10 +50,10 @@ func InputsExist(syn *apiv1.Synthesizer, c *apiv1.Composition) bool {
 	return true
 }
 
-// InputsOutOfLockstep returns true when one or more inputs that specify a revision do not match the others.
+// OutOfLockstep returns true when one or more inputs that specify a revision do not match the others.
 // It also returns true if any revision is derived from a synthesizer generation
 // older than the provided synthesizer.
-func InputsOutOfLockstep(synth *apiv1.Synthesizer, revs []apiv1.InputRevisions) bool {
+func OutOfLockstep(synth *apiv1.Synthesizer, revs []apiv1.InputRevisions) bool {
 	// First, the the max revision across all bindings
 	var maxRevision *int
 	for _, rev := range revs {
