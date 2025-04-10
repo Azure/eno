@@ -9,6 +9,7 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/inputs"
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -60,7 +61,7 @@ func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition, nextCooldownSlot t
 
 func classifyOp(synth *apiv1.Synthesizer, comp *apiv1.Composition) (opReason, bool) {
 	switch {
-	case comp.DeletionTimestamp != nil || !comp.InputsExist(synth) || comp.InputsOutOfLockstep(synth) || !controllerutil.ContainsFinalizer(comp, "eno.azure.io/cleanup"):
+	case comp.DeletionTimestamp != nil || !inputs.Exist(synth, comp) || inputs.OutOfLockstep(synth, comp.Status.InputRevisions) || !controllerutil.ContainsFinalizer(comp, "eno.azure.io/cleanup"):
 		return 0, false
 
 	case (comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil) && comp.Status.InFlightSynthesis == nil:
