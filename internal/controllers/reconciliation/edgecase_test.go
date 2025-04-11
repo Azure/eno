@@ -558,3 +558,27 @@ func TestMissingInputBinding(t *testing.T) {
 		return err == nil && comp.Status.Simplified != nil && comp.Status.Simplified.Status == "MissingInputs"
 	})
 }
+
+// TestSynthesisTimeout proves that synthesis pods will eventually time out and be recreated.
+func TestSynthesisTimeout(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeTerminalErrorExecutor(t, mgr)
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	writeGenericComposition(t, upstream)
+
+	seenPods := map[string]struct{}{}
+	testutil.Eventually(t, func() bool {
+		pods := &corev1.PodList{}
+		upstream.List(ctx, pods)
+		for _, pod := range pods.Items {
+			seenPods[pod.Name] = struct{}{}
+		}
+		return len(seenPods) > 1
+	})
+}

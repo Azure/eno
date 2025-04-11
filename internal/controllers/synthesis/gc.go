@@ -51,6 +51,11 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, nil
 	}
 
+	if pod.Status.Phase == corev1.PodFailed {
+		logger = logger.WithValues("reason", pod.Status.Phase)
+		return ctrl.Result{}, p.deletePod(ctx, pod, logger)
+	}
+
 	// Avoid waiting for the lease to expire for broken nodes
 	if delta := timeWaitingForKubelet(pod, time.Now()); delta > 0 {
 		if delta < p.creationTimeout {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -368,9 +369,7 @@ func WithFakeExecutor(t *testing.T, mgr *Manager, sh execution.SynthesizerHandle
 		}
 		err = e.Synthesize(ctx, env)
 		if err != nil {
-			// Returning an error from the synth would eventually result in a timeout.
-			// To avoid waiting that long in the tests we can just delete the pod after the first try.
-			return reconcile.Result{}, mgr.GetClient().Delete(ctx, pod)
+			return reconcile.Result{}, err
 		}
 
 		err = mgr.GetClient().Get(ctx, client.ObjectKeyFromObject(pod), pod)
@@ -384,6 +383,31 @@ func WithFakeExecutor(t *testing.T, mgr *Manager, sh execution.SynthesizerHandle
 		}
 
 		return reconcile.Result{}, nil
+	})
+
+	_, err := ctrl.NewControllerManagedBy(mgr.Manager).
+		For(&corev1.Pod{}).
+		Build(podCtrl)
+	require.NoError(t, err)
+}
+
+// WithFakeTerminalErrorExecutor simulates terminal pod failure e.g. ActiveDeadlineSeconds is exceeded.
+func WithFakeTerminalErrorExecutor(t *testing.T, mgr *Manager) {
+	cli := mgr.GetAPIReader()
+	podCtrl := reconcile.Func(func(ctx context.Context, r reconcile.Request) (reconcile.Result, error) {
+		pod := &corev1.Pod{}
+		err := cli.Get(ctx, r.NamespacedName, pod)
+		if err != nil {
+			return reconcile.Result{}, client.IgnoreNotFound(err)
+		}
+		if pod.DeletionTimestamp != nil {
+			return reconcile.Result{}, nil
+		}
+
+		time.Sleep(time.Duration(rand.IntN(250)) * time.Millisecond)
+		pod.Status.Phase = corev1.PodFailed
+		err = mgr.GetClient().Status().Update(ctx, pod)
+		return reconcile.Result{}, err
 	})
 
 	_, err := ctrl.NewControllerManagedBy(mgr.Manager).
