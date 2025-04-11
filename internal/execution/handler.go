@@ -15,6 +15,7 @@ type Env struct {
 	CompositionName      string
 	CompositionNamespace string
 	SynthesisUUID        string
+	Image                string
 }
 
 func LoadEnv() *Env {
@@ -22,6 +23,7 @@ func LoadEnv() *Env {
 		CompositionName:      os.Getenv("COMPOSITION_NAME"),
 		CompositionNamespace: os.Getenv("COMPOSITION_NAMESPACE"),
 		SynthesisUUID:        os.Getenv("SYNTHESIS_UUID"),
+		Image:                os.Getenv("IMAGE"),
 	}
 }
 
