@@ -81,17 +81,20 @@ func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, s
 	revs := []apiv1.InputRevisions{}
 	for _, r := range syn.Spec.Refs {
 		key := r.Key
-		b, ok := bindings[key]
-		if !ok {
-			return nil, nil, fmt.Errorf("input %q is referenced, but not bound", key)
-		}
 
 		// Get the resource
 		start := time.Now()
 		obj := &unstructured.Unstructured{}
 		obj.SetGroupVersionKind(schema.GroupVersionKind{Group: r.Resource.Group, Version: r.Resource.Version, Kind: r.Resource.Kind})
-		obj.SetName(b.Resource.Name)
-		obj.SetNamespace(b.Resource.Namespace)
+		b, ok := bindings[key]
+		if ok {
+			obj.SetName(b.Resource.Name)
+			obj.SetNamespace(b.Resource.Namespace)
+		} else {
+			obj.SetName(r.Resource.Name)
+			obj.SetNamespace(r.Resource.Namespace)
+		}
+
 		err := e.Reader.Get(ctx, client.ObjectKeyFromObject(obj), obj)
 		if err != nil {
 			return nil, nil, fmt.Errorf("getting resource for ref %q: %w", key, err)
