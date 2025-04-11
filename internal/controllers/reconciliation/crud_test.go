@@ -937,3 +937,50 @@ func TestResourceDefaulting(t *testing.T) {
 		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == comp.Generation
 	})
 }
+
+func TestImplicitBindings(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Results = []*krmv1.Result{{Message: input.Items[0].GetName()}}
+		return output, nil
+	})
+
+	registerControllers(t, mgr)
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	input := &corev1.ConfigMap{}
+	input.Name = "test-obj"
+	input.Namespace = "default"
+	require.NoError(t, upstream.Create(ctx, input))
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "create"
+	syn.Spec.Refs = []apiv1.Ref{{
+		Key: "test-ref",
+		Resource: apiv1.ResourceRef{
+			Kind:      "ConfigMap",
+			Version:   "v1",
+			Name:      input.Name,
+			Namespace: input.Namespace,
+		},
+	}}
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		syn := comp.Status.CurrentSynthesis
+		return err == nil && syn != nil && syn.Synthesized != nil && syn.Results[0].Message == input.Name
+	})
+}
