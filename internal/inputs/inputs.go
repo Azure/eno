@@ -8,44 +8,14 @@ import (
 
 // Exist returns true when all of the inputs required by a synthesizer are represented by the given composition's status.
 func Exist(syn *apiv1.Synthesizer, c *apiv1.Composition) bool {
-	refs := map[string]struct{}{}
 	for _, ref := range syn.Spec.Refs {
-		refs[ref.Key] = struct{}{}
-	}
-
-	bound := map[string]struct{}{}
-	for _, binding := range c.Spec.Bindings {
-		if _, ok := refs[binding.Key]; !ok {
-			// Ignore missing resources if the synthesizer doesn't require them
-			continue
-		}
-		found := slices.ContainsFunc(c.Status.InputRevisions, func(rev apiv1.InputRevisions) bool {
-			return binding.Key == rev.Key
+		found := slices.ContainsFunc(c.Status.InputRevisions, func(current apiv1.InputRevisions) bool {
+			return ref.Key == current.Key
 		})
 		if !found {
 			return false
 		}
-		bound[binding.Key] = struct{}{}
 	}
-
-	for _, ref := range syn.Spec.Refs {
-		// Handle missing resources for implied bindings
-		if ref.Resource.Name != "" {
-			found := slices.ContainsFunc(c.Status.InputRevisions, func(rev apiv1.InputRevisions) bool {
-				return ref.Key == rev.Key
-			})
-			if !found {
-				return false
-			}
-			continue
-		}
-
-		// Every ref must be bound
-		if _, ok := bound[ref.Key]; !ok {
-			return false
-		}
-	}
-
 	return true
 }
 
