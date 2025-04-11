@@ -232,16 +232,6 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 }
 
 func skipSynthesis(comp *apiv1.Composition, syn *apiv1.Synthesizer, env *Env) (string, bool) {
-	if comp.DeletionTimestamp != nil {
-		return "CompositionDeleted", true
-	}
-	if syn.DeletionTimestamp != nil {
-		return "SynthesizerDeleted", true
-	}
-	if env.Image != "" && env.Image != syn.Spec.Image {
-		return "ImageMismatch", true
-	}
-
 	synthesis := comp.Status.InFlightSynthesis
 	if synthesis == nil {
 		return "MissingSynthesis", true
@@ -254,6 +244,9 @@ func skipSynthesis(comp *apiv1.Composition, syn *apiv1.Synthesizer, env *Env) (s
 	}
 	if inputs.OutOfLockstep(syn, synthesis.InputRevisions) {
 		return "InputsOutOfLockstep", true
+	}
+	if env.Image != "" && env.Image != syn.Spec.Image {
+		return "ImageMismatch", true
 	}
 	return "", false
 }
