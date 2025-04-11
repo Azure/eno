@@ -96,6 +96,12 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{RequeueAfter: delta}, nil
 	}
 
+	// The image tag must match the current synthesizer, otherwise other properties (e.g. refs) may be incorrect
+	if img := findContainerImage(pod); img != "" && img != syn.Spec.Image {
+		logger = logger.WithValues("reason", "ImageChanged")
+		return ctrl.Result{}, p.deletePod(ctx, pod, logger)
+	}
+
 	if syn := comp.Status.InFlightSynthesis; syn != nil {
 		if syn.Canceled != nil {
 			logger = logger.WithValues("reason", "Timeout")

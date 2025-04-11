@@ -50,6 +50,10 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 			Name:  "SYNTHESIS_UUID",
 			Value: comp.Status.InFlightSynthesis.UUID,
 		},
+		{
+			Name:  "IMAGE",
+			Value: syn.Spec.Image,
+		},
 	}
 
 	for _, ev := range filterEnv(env, comp.Spec.SynthesisEnv) {
@@ -199,4 +203,13 @@ func filterEnv(filter []corev1.EnvVar, env []apiv1.EnvVar) []apiv1.EnvVar {
 		res = append(res, ev)
 	}
 	return res
+}
+
+func findContainerImage(pod *corev1.Pod) string {
+	for _, c := range pod.Spec.Containers {
+		if c.Name == "executor" {
+			return c.Image
+		}
+	}
+	return ""
 }

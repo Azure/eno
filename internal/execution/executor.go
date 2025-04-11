@@ -6,6 +6,7 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/inputs"
 	"github.com/Azure/eno/internal/resource"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/go-logr/logr"
@@ -36,16 +37,17 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 	if err != nil {
 		return fmt.Errorf("fetching composition: %w", err)
 	}
-	if reason, skip := skipSynthesis(comp, env); skip {
-		logger.V(0).Info("synthesis is no longer relevant - skipping", "reason", reason)
-		return nil
-	}
 
 	syn := &apiv1.Synthesizer{}
 	syn.Name = comp.Spec.Synthesizer.Name
 	err = e.Reader.Get(ctx, client.ObjectKeyFromObject(syn), syn)
 	if err != nil {
 		return fmt.Errorf("fetching synthesizer: %w", err)
+	}
+
+	if reason, skip := skipSynthesis(comp, syn, env); skip {
+		logger.V(0).Info("synthesis is no longer relevant - skipping", "reason", reason)
+		return nil
 	}
 
 	input, revs, err := e.buildPodInput(ctx, comp, syn)
@@ -195,10 +197,6 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 		if err != nil {
 			return err
 		}
-		if reason, skip := skipSynthesis(comp, env); skip {
-			logger.V(0).Info("synthesis is no longer relevant - discarding its output", "reason", reason)
-			return nil
-		}
 
 		now := metav1.Now()
 		comp.Status.InFlightSynthesis.Synthesized = &now
@@ -211,6 +209,11 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 				Severity: result.Severity,
 				Tags:     result.Tags,
 			})
+		}
+
+		if reason, skip := skipSynthesis(comp, syn, env); skip {
+			logger.V(0).Info("synthesis is no longer relevant - discarding its output", "reason", reason)
+			return nil
 		}
 
 		// Swap pending->current->previous syntheses
@@ -228,13 +231,29 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 	})
 }
 
-func skipSynthesis(comp *apiv1.Composition, env *Env) (string, bool) {
+func skipSynthesis(comp *apiv1.Composition, syn *apiv1.Synthesizer, env *Env) (string, bool) {
+	if comp.DeletionTimestamp != nil {
+		return "CompositionDeleted", true
+	}
+	if syn.DeletionTimestamp != nil {
+		return "SynthesizerDeleted", true
+	}
+	if env.Image != "" && env.Image != syn.Spec.Image {
+		return "ImageMismatch", true
+	}
+
 	synthesis := comp.Status.InFlightSynthesis
 	if synthesis == nil {
 		return "MissingSynthesis", true
 	}
 	if synthesis.UUID != env.SynthesisUUID {
 		return "UUIDMismatch", true
+	}
+	if synthesis.Canceled != nil {
+		return "SynthesisCanceled", true
+	}
+	if inputs.OutOfLockstep(syn, synthesis.InputRevisions) {
+		return "InputsOutOfLockstep", true
 	}
 	return "", false
 }

@@ -358,6 +358,8 @@ func WithFakeExecutor(t *testing.T, mgr *Manager, sh execution.SynthesizerHandle
 				env.CompositionNamespace = e.Value
 			case "SYNTHESIS_UUID":
 				env.SynthesisUUID = e.Value
+			case "IMAGE":
+				env.Image = e.Value
 			}
 		}
 
