@@ -148,6 +148,16 @@ func TestTimeoutCancelation(t *testing.T) {
 
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 	assert.NotNil(t, comp.Status.InFlightSynthesis.Canceled)
+
+	res, err = c.Reconcile(ctx, req) // status update
+	require.NoError(t, err)
+	assert.Zero(t, res.RequeueAfter)
+
+	// Idempotence check
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	c.client = testutil.NewReadOnlyClient(t, comp, synth)
+	res, err = c.Reconcile(ctx, req)
+	assert.NoError(t, err)
 }
 
 func TestSimplifiedStatus(t *testing.T) {

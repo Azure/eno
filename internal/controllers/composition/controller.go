@@ -87,7 +87,7 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Enforce the synthesis timeout period
-	if syn := comp.Status.InFlightSynthesis; syn != nil && syn.Initialized != nil && synth.Spec.PodTimeout != nil {
+	if syn := comp.Status.InFlightSynthesis; syn != nil && syn.Canceled == nil && syn.Initialized != nil && synth.Spec.PodTimeout != nil {
 		delta := time.Until(syn.Initialized.Time.Add(synth.Spec.PodTimeout.Duration))
 		if delta > 0 {
 			return ctrl.Result{RequeueAfter: delta}, nil
