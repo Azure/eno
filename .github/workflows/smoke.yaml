@@ -10,7 +10,16 @@ on:
 
 jobs:
   test:
+    name: ${{ matrix.config.name }}
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        config:
+          - name: Default
+            disable_ssa: false
+          - name: Disable SSA
+            disable_ssa: true
+
     steps:
       - uses: actions/checkout@v4
 
@@ -31,6 +40,8 @@ jobs:
           done
 
       - name: Build images
+        env:
+          DISABLE_SSA: ${{ matrix.config.disable_ssa }}
         run: |
           set -e
           export REGISTRY=localhost
