@@ -58,24 +58,25 @@ func writeComposition(t *testing.T, client client.Client, orphan bool) (*apiv1.S
 }
 
 func setupTestSubject(t *testing.T, mgr *testutil.Manager) {
-	rswb := flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager)
+	setupTestSubjectForOptions(t, mgr, Options{
+		Manager:               mgr.Manager,
+		Timeout:               time.Minute,
+		ReadinessPollInterval: time.Hour,
+	})
+}
+
+func setupTestSubjectForOptions(t *testing.T, mgr *testutil.Manager, opts Options) {
+	opts.WriteBuffer = flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager)
 
 	var cache resource.Cache
 	rateLimiter := workqueue.DefaultTypedItemBasedRateLimiter[resource.Request]()
 	queue := workqueue.NewTypedRateLimitingQueue(rateLimiter)
 	cache.SetQueue(queue)
 
-	downstream := rest.CopyConfig(mgr.DownstreamRestConfig)
-	downstream.QPS = 200 // minimal throttling for the tests
+	opts.Downstream = rest.CopyConfig(mgr.DownstreamRestConfig)
+	opts.Downstream.QPS = 200 // minimal throttling for the tests
 
-	err := New(mgr.Manager, Options{
-		Manager:               mgr.Manager,
-		WriteBuffer:           rswb,
-		Downstream:            downstream,
-		DiscoveryRPS:          5,
-		Timeout:               time.Minute,
-		ReadinessPollInterval: time.Hour,
-	})
+	err := New(mgr.Manager, opts)
 	require.NoError(t, err)
 }
 

@@ -22,5 +22,6 @@ done
 wait
 
 # Deploy!
+export DISABLE_SSA="${DISABLE_SSA:-false}"
 cat "$(dirname "$0")/deploy.yaml" | envsubst | kubectl apply -f - -f ./api/v1/config/crd
 echo "Success! You're running tag: $TAG"
