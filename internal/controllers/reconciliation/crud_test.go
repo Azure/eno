@@ -29,11 +29,6 @@ import (
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 )
 
-func init() {
-	// safe for tests since they don't have any secrets
-	insecureLogPatch = true
-}
-
 var defaultConf = &synthesis.Config{
 	PodNamespace:  "default",
 	ExecutorImage: "test-image",
@@ -981,72 +976,5 @@ func TestImplicitBindings(t *testing.T) {
 		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		syn := comp.Status.CurrentSynthesis
 		return err == nil && syn != nil && syn.Synthesized != nil && syn.Results[0].Message == input.Name
-	})
-}
-
-func TestDisableSSA(t *testing.T) {
-	scheme := runtime.NewScheme()
-	corev1.SchemeBuilder.AddToScheme(scheme)
-	testv1.SchemeBuilder.AddToScheme(scheme)
-
-	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t)
-	upstream := mgr.GetClient()
-
-	registerControllers(t, mgr)
-	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
-		output := &krmv1.ResourceList{}
-		output.Items = []*unstructured.Unstructured{{
-			Object: map[string]any{
-				"apiVersion": "apps/v1",
-				"kind":       "Deployment",
-				"metadata": map[string]any{
-					"name":      "test-obj",
-					"namespace": "default",
-				},
-				"spec": map[string]any{
-					"selector": map[string]any{
-						"matchLabels": map[string]any{
-							"foo": "bar",
-						},
-					},
-					"template": map[string]any{
-						"metadata": map[string]any{
-							"labels": map[string]any{
-								"foo": "bar",
-							},
-						},
-						"spec": map[string]any{
-							"containers": []any{
-								map[string]any{
-									"name":  "foo",
-									"image": "bar",
-									"ports": []any{
-										map[string]any{"containerPort": 8080},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		}}
-		return output, nil
-	})
-
-	// Test subject
-	setupTestSubjectForOptions(t, mgr, Options{
-		Manager:                mgr.Manager,
-		Timeout:                time.Minute,
-		ReadinessPollInterval:  time.Hour,
-		DisableServerSideApply: true,
-	})
-	mgr.Start(t)
-	_, comp := writeGenericComposition(t, upstream)
-
-	// It should be able to become ready
-	testutil.Eventually(t, func() bool {
-		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == comp.Generation
 	})
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -27,8 +26,6 @@ import (
 	"github.com/Azure/eno/internal/resource"
 	"github.com/go-logr/logr"
 )
-
-var insecureLogPatch = os.Getenv("INSECURE_LOG_PATCH") == "true"
 
 type Options struct {
 	Manager     ctrl.Manager
@@ -188,7 +185,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		return false, nil
 	}
 
-	// Create the resource when it doesn't exist
+	// Create the resource when it doesn't exist, should exist, and wouldn't be created later by server-side apply
 	if current == nil && (res.DisableUpdates || res.Replace || c.disableSSA) {
 		reconciliationActions.WithLabelValues("create").Inc()
 		err := c.upstreamClient.Create(ctx, res.Unstructured())
@@ -268,6 +265,10 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 
 func (c *Controller) update(ctx context.Context, resource *resource.Resource, current *unstructured.Unstructured, dryrun bool) (updated *unstructured.Unstructured, err error) {
 	updated = resource.Unstructured()
+
+	if current != nil {
+		updated.SetResourceVersion(current.GetResourceVersion())
+	}
 
 	if resource.Replace {
 		opts := []client.UpdateOption{}

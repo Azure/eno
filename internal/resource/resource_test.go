@@ -2,6 +2,8 @@ package resource
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"sort"
 	"testing"
 	"time"
@@ -9,8 +11,13 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/envtest"
 )
 
 var newResourceTests = []struct {
@@ -316,4 +323,219 @@ func TestResourceOrdering(t *testing.T) {
 		{ManifestHash: []byte("b")},
 		{ManifestHash: []byte("c")},
 	}, resources)
+}
+
+func TestManagedFields(t *testing.T) {
+	current := []metav1.ManagedFieldsEntry{
+		{
+			Manager:   "something-else",
+			Operation: "Update",
+		},
+		{
+			Manager:   "another-thing",
+			Operation: "Update",
+		},
+		{
+			Manager:   "eno",
+			Operation: "Update",
+		},
+	}
+	expected := []metav1.ManagedFieldsEntry{{
+		Manager:   "eno",
+		Operation: "Apply",
+	}}
+
+	merged := MergeEnoManagedFields(current, expected)
+	assert.Equal(t, []metav1.ManagedFieldsEntry{
+		{
+			Manager:   "eno",
+			Operation: "Apply",
+		},
+		{
+			Manager:   "something-else",
+			Operation: "Update",
+		},
+		{
+			Manager:   "another-thing",
+			Operation: "Update",
+		},
+	}, merged)
+
+	assert.False(t, CompareEnoManagedFields(current, expected))
+	assert.False(t, CompareEnoManagedFields(current, merged))
+	assert.True(t, CompareEnoManagedFields(expected, merged))
+	assert.False(t, CompareEnoManagedFields(merged, nil))
+	assert.False(t, CompareEnoManagedFields(nil, merged))
+	assert.True(t, CompareEnoManagedFields(nil, nil))
+	assert.True(t, CompareEnoManagedFields(merged, merged))
+}
+
+func TestComparisons(t *testing.T) {
+	env := &envtest.Environment{}
+	t.Cleanup(func() {
+		err := env.Stop()
+		if err != nil {
+			panic(err)
+		}
+	})
+
+	var cfg *rest.Config
+	var err error
+	for i := 0; i < 2; i++ {
+		cfg, err = env.Start()
+		if err != nil {
+			t.Logf("failed to start test environment: %s", err)
+			continue
+		}
+		break
+	}
+	require.NoError(t, err)
+
+	cli, err := client.New(cfg, client.Options{})
+	require.NoError(t, err)
+
+	tests := []struct {
+		Resource  map[string]any
+		Mutations []map[string]any
+	}{
+		{
+			Resource: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Service",
+				"metadata": map[string]any{
+					"name":      "test",
+					"namespace": "default",
+				},
+				"spec": map[string]any{
+					"ports": []any{
+						map[string]any{
+							"name":       "http",
+							"port":       int64(80),
+							"targetPort": int64(8080),
+						},
+					},
+					"selector": map[string]any{
+						"app": "simple",
+					},
+				},
+			},
+			Mutations: []map[string]any{
+				{"op": "replace", "path": "/spec/ports/0/name", "value": "modified"},
+			},
+		},
+		{
+			Resource: map[string]any{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata": map[string]any{
+					"name":      "test",
+					"namespace": "default",
+				},
+				"spec": map[string]any{
+					"selector": map[string]any{
+						"matchLabels": map[string]any{
+							"app": "simple",
+						},
+					},
+					"template": map[string]any{
+						"metadata": map[string]any{
+							"labels": map[string]any{
+								"app": "simple",
+							},
+						},
+						"spec": map[string]any{
+							"containers": []any{
+								map[string]any{
+									"name":  "simple",
+									"image": "nginx:latest",
+									"ports": []any{
+										map[string]any{
+											"name":          "http",
+											"containerPort": int64(80),
+										},
+									},
+									"resources": map[string]any{
+										"limits": map[string]any{
+											"cpu":    int64(1),
+											"memory": "2048Ki",
+										},
+										"requests": map[string]any{
+											"cpu":    "100m",
+											"memory": "1Mi",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			Mutations: []map[string]any{
+				{"op": "replace", "path": "/spec/template/spec/containers/0/name", "value": "updated"},
+			},
+		},
+		{
+			Resource: map[string]any{
+				"apiVersion": "policy/v1",
+				"kind":       "PodDisruptionBudget", // only PDBs set patch strategy == replace
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+				"spec": map[string]any{
+					"maxUnavailable": int64(1),
+					"selector": map[string]any{
+						"matchLabels": map[string]any{"app": "foobar"},
+					},
+				},
+			},
+			Mutations: []map[string]any{
+				{"op": "replace", "path": "/spec/maxUnavailable", "value": int64(2)},
+			},
+		},
+	}
+
+	ctx := context.Background()
+	assert.True(t, Compare(nil, nil))
+	for _, tc := range tests {
+		u := &unstructured.Unstructured{Object: tc.Resource}
+		name := fmt.Sprintf("%s/%s", u.GetKind(), u.GetName())
+		t.Run(name, func(t *testing.T) {
+			// Create the resource
+			initial := u.DeepCopy()
+			require.NoError(t, cli.Patch(ctx, initial, client.Apply, client.ForceOwnership, client.FieldOwner("eno")))
+			assert.False(t, Compare(initial, nil))
+			assert.False(t, Compare(nil, initial))
+			assert.True(t, Compare(initial, initial))
+
+			// Dry-run'ing a server-side apply should not change anything
+			dryRun := u.DeepCopy()
+			require.NoError(t, cli.Patch(ctx, dryRun, client.Apply, client.DryRunAll, client.ForceOwnership, client.FieldOwner("eno")))
+			assert.True(t, Compare(initial, dryRun))
+			assert.True(t, Compare(dryRun, initial))
+			assert.True(t, Compare(dryRun, dryRun))
+
+			// Removing the managed fields should always cause comparison to fail
+			dryRun.SetManagedFields(nil)
+			assert.False(t, Compare(initial, dryRun))
+			assert.False(t, Compare(dryRun, initial))
+			assert.True(t, Compare(dryRun, dryRun))
+
+			// Applying the mutation should cause comparison to fail
+			patch, err := json.Marshal(&tc.Mutations)
+			require.NoError(t, err)
+			require.NoError(t, cli.Patch(ctx, u.DeepCopy(), client.RawPatch(types.JSONPatchType, patch)))
+
+			mutated := u.DeepCopy()
+			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(mutated), mutated))
+
+			js, _ := mutated.MarshalJSON()
+			t.Logf("mutated json: %s", js)
+
+			afterMutation := u.DeepCopy()
+			require.NoError(t, cli.Patch(ctx, afterMutation, client.Apply, client.DryRunAll, client.ForceOwnership, client.FieldOwner("eno")))
+			assert.False(t, Compare(mutated, afterMutation))
+			assert.False(t, Compare(afterMutation, mutated))
+		})
+	}
 }
