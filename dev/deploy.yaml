@@ -90,7 +90,6 @@ spec:
         args:
         - --leader-election
         - --leader-election-id=reconciler
-        - --disable-ssa=$DISABLE_SSA
         env:
           - name: POD_NAMESPACE
             valueFrom:
