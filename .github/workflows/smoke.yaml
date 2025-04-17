@@ -19,7 +19,6 @@ jobs:
 
       - name: Wait for apiserver
         run: |
-          # Wait for apiserver to be ready
           kind export kubeconfig --name chart-testing
           while true; do
               kubectl api-resources
@@ -51,5 +50,5 @@ jobs:
           done
 
       - name: Run tests
-        timeout-minutes: 5
+        timeout-minutes: 3
         run: ./hack/smoke-test.sh
