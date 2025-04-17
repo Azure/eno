@@ -11,8 +11,6 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    env:
-      APISERVER_VERSION: 1.28.x
     steps:
       - uses: actions/checkout@v4
 
@@ -23,7 +21,7 @@ jobs:
 
       - name: Download kubebuilder assets
         run: |
-          echo "KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path $APISERVER_VERSION)" >> $GITHUB_ENV
+          echo "KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path)" >> $GITHUB_ENV
 
       - name: Run tests
         run: go test -v ./...
