@@ -10,6 +10,7 @@ on:
 
 jobs:
   test:
+    name: Apply Examples
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,21 +30,26 @@ jobs:
               fi
           done
 
-      - name: Build images
+      - name: Build Eno images
+        env:
+          REGISTRY: localhost
+          SKIP_PUSH: "yes"
         run: |
-          set -e
-          export REGISTRY=localhost
-          export SKIP_PUSH=yes
-
           echo "--- building eno..."
           ./dev/build.sh
 
+      - name: Build Example images
+        env:
+          REGISTRY: localhost
+          SKIP_PUSH: "yes"
+        run: |
           for i in ./examples/*/build.sh; do
             echo "--- running $i..."
             $i
           done
 
-          # Copy images to kind
+      - name: Load images into Kind cluster
+        run: |
           for image in $(docker images --format "{{.Repository}}:{{.Tag}}" | grep localhost); do
             echo "--- pushing $image"
             kind load docker-image --name chart-testing $image
