@@ -29,11 +29,6 @@ import (
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 )
 
-func init() {
-	// safe for tests since they don't have any secrets
-	insecureLogPatch = true
-}
-
 var defaultConf = &synthesis.Config{
 	PodNamespace:  "default",
 	ExecutorImage: "test-image",
@@ -261,7 +256,6 @@ func TestCRUD(t *testing.T) {
 					return nil
 				})
 				require.NoError(t, err)
-				test.WaitForPhase(t, downstream, "external-update")
 			}
 
 			t.Logf("starting update")

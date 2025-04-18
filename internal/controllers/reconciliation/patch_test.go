@@ -406,9 +406,11 @@ func TestPatchDeleteOrphanedResources(t *testing.T) {
 					"apiVersion": "v1",
 					"kind":       "ConfigMap",
 					"metadata": map[string]any{
-						"name":                         cmName,
-						"namespace":                    cmNamespace,
-						"eno.azure.io/readiness-group": "1",
+						"name":      cmName,
+						"namespace": cmNamespace,
+						"annotations": map[string]string{
+							"eno.azure.io/readiness-group": "1",
+						},
 					},
 					"data": map[string]string{"foo": "bar"},
 				},
