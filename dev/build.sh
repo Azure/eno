@@ -12,14 +12,15 @@ export TAG="$(date +%s)"
 function build() {
     cmd=$(basename $1)
     docker build -t "$REGISTRY/$cmd:$TAG" -f "$f/Dockerfile" .
-    [[ -z "${SKIP_PUSH}" ]] && docker push "$REGISTRY/$cmd:$TAG"
+    if [[ -z "${SKIP_PUSH}" ]]; then
+        docker push "$REGISTRY/$cmd:$TAG"
+    fi
 }
 
 # Build!
 for f in docker/*; do
-    build $f &
+    build $f
 done
-wait
 
 # Deploy!
 cat "$(dirname "$0")/deploy.yaml" | envsubst | kubectl apply -f - -f ./api/v1/config/crd
