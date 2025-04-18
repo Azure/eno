@@ -75,7 +75,7 @@ annotations:
 
 ### Replace
 
-Designating a resource to be replaced means that updates will use the normaly update endpoint instead of server-side apply.
+Designating a resource to be replaced means that updates will use the normal update endpoint instead of server-side apply.
 Like `kubectl replace`, any fields not managed by Eno will be removed.
 Useful for resources that logically have a single reader (e.g. CRDs).
 
