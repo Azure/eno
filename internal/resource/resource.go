@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"hash/fnv"
 	"maps"
+	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,11 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	smdschema "sigs.k8s.io/structured-merge-diff/v4/schema"
-	"sigs.k8s.io/structured-merge-diff/v4/typed"
-	"sigs.k8s.io/structured-merge-diff/v4/value"
 )
 
 var patchGVK = schema.GroupVersionKind{
@@ -68,7 +66,7 @@ type Resource struct {
 	// DefinedGroupKind is set on CRDs to represent the resource type they define.
 	DefinedGroupKind *schema.GroupKind
 
-	value            value.Value
+	parsed           *unstructured.Unstructured
 	latestKnownState atomic.Pointer[apiv1.ResourceState]
 }
 
@@ -76,9 +74,7 @@ func (r *Resource) Deleted(comp *apiv1.Composition) bool {
 	return (comp.DeletionTimestamp != nil && !comp.ShouldOrphanResources()) || r.ManifestDeleted || (r.Patch != nil && r.patchSetsDeletionTimestamp())
 }
 
-func (r *Resource) Unstructured() *unstructured.Unstructured {
-	return &unstructured.Unstructured{Object: r.value.Unstructured().(map[string]any)}
-}
+func (r *Resource) Unstructured() *unstructured.Unstructured { return r.parsed.DeepCopy() }
 
 func (r *Resource) State() *apiv1.ResourceState { return r.latestKnownState.Load() }
 
@@ -128,93 +124,6 @@ func (r *Resource) patchSetsDeletionTimestamp() bool {
 	return dt != ""
 }
 
-type SchemaGetter interface {
-	Get(ctx context.Context, gvk schema.GroupVersionKind) (typeref *smdschema.TypeRef, schem *smdschema.Schema, err error)
-}
-
-// Merge performs a three-way merge between the resource, it's old/previous Resource, and the current state.
-// Falls back to a non-structured three-way merge if the SchemaGetter returns a nil TypeRef.
-func (r *Resource) Merge(ctx context.Context, old *Resource, current *unstructured.Unstructured, sg SchemaGetter) (*unstructured.Unstructured, bool /* typed */, error) {
-	typeref, schem, err := sg.Get(ctx, r.GVK)
-	if err != nil {
-		return nil, false, fmt.Errorf("looking up schema: %w", err)
-	}
-
-	// Naive three-way merge for unknown types
-	if typeref == nil {
-		currentJS, err := current.MarshalJSON()
-		if err != nil {
-			return nil, false, fmt.Errorf("encoding current state: %w", err)
-		}
-
-		var prevJS []byte
-		if old != nil {
-			prevJS, err = old.Unstructured().MarshalJSON()
-			if err != nil {
-				return nil, false, fmt.Errorf("encoding old state: %w", err)
-			}
-		}
-
-		expectedJS, err := r.Unstructured().MarshalJSON()
-		if err != nil {
-			return nil, false, fmt.Errorf("encoding expected state: %w", err)
-		}
-
-		patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(prevJS, expectedJS, currentJS)
-		if err != nil {
-			return nil, false, fmt.Errorf("building merge patch: %w", err)
-		}
-		patchedJSON, err := jsonpatch.MergePatch(currentJS, patch)
-		if err != nil {
-			return nil, false, fmt.Errorf("applying merge patch: %w", err)
-		}
-
-		patched := &unstructured.Unstructured{}
-		err = patched.UnmarshalJSON(patchedJSON)
-		if err != nil {
-			return nil, false, fmt.Errorf("parsing patched resource: %w", err)
-		}
-
-		if equality.Semantic.DeepEqual(current, patched) {
-			return nil, false, nil
-		}
-		return patched, false, nil
-	}
-
-	// Convert to SMD values
-	currentVal := value.NewValueInterface(current.Object)
-	typedNew := typed.AsTypedUnvalidated(r.value, schem, *typeref)
-	typedCurrent := typed.AsTypedUnvalidated(currentVal, schem, *typeref)
-
-	// Merge properties that are set in the new state onto the current state
-	merged, err := typedCurrent.Merge(typedNew)
-	if err != nil {
-		return nil, false, fmt.Errorf("merging new state into current: %w", err)
-	}
-
-	// Prune properties that were present in the old state but not the new
-	if old != nil {
-		typedOld, err := typed.AsTyped(old.value, schem, *typeref)
-		if err != nil {
-			return nil, false, fmt.Errorf("converting old version to typed: %w", err)
-		}
-		toOld, err := typedOld.Compare(typedNew)
-		if err != nil {
-			return nil, false, fmt.Errorf("comparing new and old states: %w", err)
-		}
-		merged = merged.RemoveItems(toOld.Removed)
-	}
-
-	// Bail out if no changes are required
-	cmp, err := merged.Compare(typedCurrent)
-	if err == nil && cmp.IsSame() {
-		return nil, true, nil // no changes
-	}
-
-	copy := &unstructured.Unstructured{Object: merged.AsValue().Unstructured().(map[string]any)}
-	return copy, true, nil
-}
-
 func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*Resource, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 	resource := slice.Spec.Resources[index]
@@ -234,6 +143,7 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 	res.ManifestHash = hash.Sum(nil)
 
 	parsed := &unstructured.Unstructured{}
+	res.parsed = parsed
 	err := parsed.UnmarshalJSON([]byte(resource.Manifest))
 	if err != nil {
 		return nil, fmt.Errorf("invalid json: %w", err)
@@ -247,7 +157,6 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 		parsed.SetCreationTimestamp(metav1.Time{})
 	}
 
-	res.value = value.NewValueInterface(parsed.Object)
 	gvk := parsed.GroupVersionKind()
 	res.GVK = gvk
 	res.Ref.Name = parsed.GetName()
@@ -375,4 +284,66 @@ func NewInputRevisions(obj client.Object, refKey string) *apiv1.InputRevisions {
 		ir.SynthesizerGeneration = &rev
 	}
 	return &ir
+}
+
+// MergeEnoManagedFields merges Eno managed fields from the overrides slice onto the current.
+// All non-Eno managed fields from the current slice are preserved.
+func MergeEnoManagedFields(current, overrides []metav1.ManagedFieldsEntry) (copy []metav1.ManagedFieldsEntry) {
+	for _, cur := range overrides {
+		if cur.Manager == "eno" {
+			copy = append(copy, cur)
+			break
+		}
+	}
+	for _, cur := range current {
+		if cur.Manager != "eno" {
+			copy = append(copy, cur)
+		}
+	}
+	return
+}
+
+// CompareEnoManagedFields returns true when the Eno managed fields in both slices are equal.
+func CompareEnoManagedFields(a, b []metav1.ManagedFieldsEntry) bool {
+	cmp := func(cur metav1.ManagedFieldsEntry) bool { return cur.Manager == "eno" }
+	ai := slices.IndexFunc(a, cmp)
+	ab := slices.IndexFunc(b, cmp)
+	if ai == -1 && ab == -1 {
+		return true
+	}
+	if ai == -1 || ab == -1 {
+		return false
+	}
+	return reflect.DeepEqual(a[ai], b[ab])
+}
+
+// Compare compares two unstructured resources while ignoring:
+// - Managed field metadata not controlled by Eno
+// - Resource version
+// - Generation
+// - Status
+//
+// This should only be used to compare canonical apiserver representations of the resource
+// i.e. the unmodified response from gets or patch/update dryruns.
+func Compare(a, b *unstructured.Unstructured) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	if !CompareEnoManagedFields(a.GetManagedFields(), b.GetManagedFields()) {
+		return false
+	}
+	return reflect.DeepEqual(stripInsignificantFields(a), stripInsignificantFields(b))
+}
+
+func stripInsignificantFields(u *unstructured.Unstructured) *unstructured.Unstructured {
+	u = u.DeepCopy()
+	u.SetManagedFields(nil)
+	u.SetUID(types.UID(""))
+	u.SetResourceVersion("")
+	u.SetGeneration(0)
+	delete(u.Object, "status")
+	return u
 }

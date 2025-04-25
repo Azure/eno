@@ -2,21 +2,22 @@ package resource
 
 import (
 	"context"
-	"os"
+	"encoding/json"
+	"fmt"
 	"sort"
 	"testing"
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	openapi_v2 "github.com/google/gnostic-models/openapiv2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/encoding/protojson"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/kube-openapi/pkg/schemaconv"
-	"k8s.io/kube-openapi/pkg/util/proto"
-	smdschema "sigs.k8s.io/structured-merge-diff/v4/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/envtest"
 )
 
 var newResourceTests = []struct {
@@ -303,150 +304,6 @@ func TestNewResource(t *testing.T) {
 	}
 }
 
-func TestMergeBasics(t *testing.T) {
-	testMergeBasics(t, "io.k8s.api.apps.v1.Deployment")
-}
-
-func TestMergeBasicsNoSchema(t *testing.T) {
-	testMergeBasics(t, "")
-}
-
-func testMergeBasics(t *testing.T, schemaName string) {
-	t.Helper()
-	ctx := context.Background()
-
-	sg := newTestSchemaGetter(t, schemaName)
-
-	newSlice := &apiv1.ResourceSlice{
-		Spec: apiv1.ResourceSliceSpec{
-			Resources: []apiv1.Manifest{{
-				Manifest: `{
-				  "apiVersion": "apps/v1",
-				  "kind": "Deployment",
-				  "metadata": {
-				    "name": "foo"
-				  },
-				  "spec": {
-				    "replicas": 2,
-					"template": {
-					  "spec": {
-					    "serviceAccountName": "updated"
-					  }
-				    }
-				  }
-				}`,
-			}},
-		},
-	}
-	newState, err := NewResource(ctx, newSlice, 0)
-	require.NoError(t, err)
-
-	oldSlice := &apiv1.ResourceSlice{
-		Spec: apiv1.ResourceSliceSpec{
-			Resources: []apiv1.Manifest{{
-				Manifest: `{
-				  "apiVersion": "apps/v1",
-				  "kind": "Deployment",
-				  "metadata": {
-				    "name": "foo"
-				  },
-				  "spec": {
-				    "strategy": {
-						"type": "RollingUpdate"
-				    },
-					"template": {
-					  "spec": {
-					    "serviceAccountName": "original"
-					  }
-				    }
-				  }
-				}`,
-			}},
-		},
-	}
-	oldState, err := NewResource(ctx, oldSlice, 0)
-	require.NoError(t, err)
-
-	current := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "apps/v1",
-		"kind":       "Deployment",
-		"metadata":   map[string]any{"name": "foo", "resourceVersion": "1"},
-		"spec": map[string]any{
-			"selector": map[string]any{
-				"matchLabels": map[string]any{"foo": "bar"},
-			},
-			"strategy": map[string]any{"type": "RollingUpdate"},
-			"template": map[string]any{
-				"spec": map[string]any{
-					"serviceAccountName": "original",
-				},
-			},
-		},
-	}}
-
-	expected := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "apps/v1",
-		"kind":       "Deployment",
-		"metadata":   map[string]any{"name": "foo", "resourceVersion": "1"},
-		"spec": map[string]any{
-			"replicas": int64(2),
-			"selector": map[string]any{
-				"matchLabels": map[string]any{"foo": "bar"},
-			},
-			"template": map[string]any{
-				"spec": map[string]any{
-					"serviceAccountName": "updated",
-				},
-			},
-		},
-	}}
-
-	// Apply changes
-	merged, typed, err := newState.Merge(ctx, oldState, current, sg)
-	require.NoError(t, err)
-	assert.Equal(t, schemaName != "", typed)
-	require.Equal(t, expected, merged)
-
-	expectedWithoutOldState := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "apps/v1",
-		"kind":       "Deployment",
-		"metadata":   map[string]any{"name": "foo", "resourceVersion": "1"},
-		"spec": map[string]any{
-			"replicas": int64(2),
-			"strategy": map[string]any{
-				"type": "RollingUpdate",
-			},
-			"selector": map[string]any{
-				"matchLabels": map[string]any{"foo": "bar"},
-			},
-			"template": map[string]any{
-				"spec": map[string]any{
-					"serviceAccountName": "updated",
-				},
-			},
-		},
-	}}
-
-	// Supports nil oldState
-	merged, typed, err = newState.Merge(ctx, nil, current, sg)
-	require.NoError(t, err)
-	assert.Equal(t, schemaName != "", typed)
-	require.Equal(t, expectedWithoutOldState, merged)
-
-	// Check idempotence
-	expected.SetResourceVersion("2")                                            // ignore resource version change
-	expected.Object["status"] = map[string]any{"availableReplicas": float64(2)} // ignore status change
-	merged, typed, err = newState.Merge(ctx, oldState, expected, sg)
-	require.NoError(t, err)
-	assert.Equal(t, schemaName != "", typed)
-
-	if schemaName == "" {
-		assert.NotNil(t, merged)
-	} else {
-		assert.Nil(t, merged)
-	}
-}
-
 func TestResourceOrdering(t *testing.T) {
 	resources := []*Resource{
 		{ManifestHash: []byte("a")},
@@ -468,31 +325,217 @@ func TestResourceOrdering(t *testing.T) {
 	}, resources)
 }
 
-type testSchemaGetter struct {
-	name   string
-	schema *smdschema.Schema
-}
-
-func (t *testSchemaGetter) Get(ctx context.Context, gvk schema.GroupVersionKind) (typeref *smdschema.TypeRef, schem *smdschema.Schema, err error) {
-	if t.name == "" {
-		return nil, nil, nil
+func TestManagedFields(t *testing.T) {
+	current := []metav1.ManagedFieldsEntry{
+		{
+			Manager:   "something-else",
+			Operation: "Update",
+		},
+		{
+			Manager:   "another-thing",
+			Operation: "Update",
+		},
+		{
+			Manager:   "eno",
+			Operation: "Update",
+		},
 	}
-	return &smdschema.TypeRef{NamedType: &t.name}, t.schema, nil
+	expected := []metav1.ManagedFieldsEntry{{
+		Manager:   "eno",
+		Operation: "Apply",
+	}}
+
+	merged := MergeEnoManagedFields(current, expected)
+	assert.Equal(t, []metav1.ManagedFieldsEntry{
+		{
+			Manager:   "eno",
+			Operation: "Apply",
+		},
+		{
+			Manager:   "something-else",
+			Operation: "Update",
+		},
+		{
+			Manager:   "another-thing",
+			Operation: "Update",
+		},
+	}, merged)
+
+	assert.False(t, CompareEnoManagedFields(current, expected))
+	assert.False(t, CompareEnoManagedFields(current, merged))
+	assert.True(t, CompareEnoManagedFields(expected, merged))
+	assert.False(t, CompareEnoManagedFields(merged, nil))
+	assert.False(t, CompareEnoManagedFields(nil, merged))
+	assert.True(t, CompareEnoManagedFields(nil, nil))
+	assert.True(t, CompareEnoManagedFields(merged, merged))
 }
 
-func newTestSchemaGetter(t *testing.T, name string) *testSchemaGetter {
-	oapiJS, err := os.ReadFile("fixtures/openapi.json")
+func TestComparisons(t *testing.T) {
+	env := &envtest.Environment{}
+	t.Cleanup(func() {
+		err := env.Stop()
+		if err != nil {
+			panic(err)
+		}
+	})
+
+	var cfg *rest.Config
+	var err error
+	for i := 0; i < 2; i++ {
+		cfg, err = env.Start()
+		if err != nil {
+			t.Logf("failed to start test environment: %s", err)
+			continue
+		}
+		break
+	}
 	require.NoError(t, err)
 
-	doc := &openapi_v2.Document{}
-	err = protojson.Unmarshal(oapiJS, doc)
+	cli, err := client.New(cfg, client.Options{})
 	require.NoError(t, err)
 
-	models, err := proto.NewOpenAPIData(doc)
-	require.NoError(t, err)
+	tests := []struct {
+		Resource  map[string]any
+		Mutations []map[string]any
+	}{
+		{
+			Resource: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Service",
+				"metadata": map[string]any{
+					"name":      "test",
+					"namespace": "default",
+				},
+				"spec": map[string]any{
+					"ports": []any{
+						map[string]any{
+							"name":       "http",
+							"port":       int64(80),
+							"targetPort": int64(8080),
+						},
+					},
+					"selector": map[string]any{
+						"app": "simple",
+					},
+				},
+			},
+			Mutations: []map[string]any{
+				{"op": "replace", "path": "/spec/ports/0/name", "value": "modified"},
+			},
+		},
+		{
+			Resource: map[string]any{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata": map[string]any{
+					"name":      "test",
+					"namespace": "default",
+				},
+				"spec": map[string]any{
+					"selector": map[string]any{
+						"matchLabels": map[string]any{
+							"app": "simple",
+						},
+					},
+					"template": map[string]any{
+						"metadata": map[string]any{
+							"labels": map[string]any{
+								"app": "simple",
+							},
+						},
+						"spec": map[string]any{
+							"containers": []any{
+								map[string]any{
+									"name":  "simple",
+									"image": "nginx:latest",
+									"ports": []any{
+										map[string]any{
+											"name":          "http",
+											"containerPort": int64(80),
+										},
+									},
+									"resources": map[string]any{
+										"limits": map[string]any{
+											"cpu":    int64(1),
+											"memory": "2048Ki",
+										},
+										"requests": map[string]any{
+											"cpu":    "100m",
+											"memory": "1Mi",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			Mutations: []map[string]any{
+				{"op": "replace", "path": "/spec/template/spec/containers/0/name", "value": "updated"},
+			},
+		},
+		{
+			Resource: map[string]any{
+				"apiVersion": "policy/v1",
+				"kind":       "PodDisruptionBudget", // only PDBs set patch strategy == replace
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+				"spec": map[string]any{
+					"maxUnavailable": int64(1),
+					"selector": map[string]any{
+						"matchLabels": map[string]any{"app": "foobar"},
+					},
+				},
+			},
+			Mutations: []map[string]any{
+				{"op": "replace", "path": "/spec/maxUnavailable", "value": int64(2)},
+			},
+		},
+	}
 
-	schem, err := schemaconv.ToSchema(models)
-	require.NoError(t, err)
+	ctx := context.Background()
+	assert.True(t, Compare(nil, nil))
+	for _, tc := range tests {
+		u := &unstructured.Unstructured{Object: tc.Resource}
+		name := fmt.Sprintf("%s/%s", u.GetKind(), u.GetName())
+		t.Run(name, func(t *testing.T) {
+			// Create the resource
+			initial := u.DeepCopy()
+			require.NoError(t, cli.Patch(ctx, initial, client.Apply, client.ForceOwnership, client.FieldOwner("eno")))
+			assert.False(t, Compare(initial, nil))
+			assert.False(t, Compare(nil, initial))
+			assert.True(t, Compare(initial, initial))
 
-	return &testSchemaGetter{schema: schem, name: name}
+			// Dry-run'ing a server-side apply should not change anything
+			dryRun := u.DeepCopy()
+			require.NoError(t, cli.Patch(ctx, dryRun, client.Apply, client.DryRunAll, client.ForceOwnership, client.FieldOwner("eno")))
+			assert.True(t, Compare(initial, dryRun))
+			assert.True(t, Compare(dryRun, initial))
+			assert.True(t, Compare(dryRun, dryRun))
+
+			// Removing the managed fields should always cause comparison to fail
+			dryRun.SetManagedFields(nil)
+			assert.False(t, Compare(initial, dryRun))
+			assert.False(t, Compare(dryRun, initial))
+			assert.True(t, Compare(dryRun, dryRun))
+
+			// Applying the mutation should cause comparison to fail
+			patch, err := json.Marshal(&tc.Mutations)
+			require.NoError(t, err)
+			require.NoError(t, cli.Patch(ctx, u.DeepCopy(), client.RawPatch(types.JSONPatchType, patch)))
+
+			mutated := u.DeepCopy()
+			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(mutated), mutated))
+
+			js, _ := mutated.MarshalJSON()
+			t.Logf("mutated json: %s", js)
+
+			afterMutation := u.DeepCopy()
+			require.NoError(t, cli.Patch(ctx, afterMutation, client.Apply, client.DryRunAll, client.ForceOwnership, client.FieldOwner("eno")))
+			assert.False(t, Compare(mutated, afterMutation))
+			assert.False(t, Compare(afterMutation, mutated))
+		})
+	}
 }

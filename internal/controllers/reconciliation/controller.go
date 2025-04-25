@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -22,21 +21,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/discovery"
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/Azure/eno/internal/resource"
 	"github.com/go-logr/logr"
 )
 
-var insecureLogPatch = os.Getenv("INSECURE_LOG_PATCH") == "true"
-
 type Options struct {
 	Manager     ctrl.Manager
 	WriteBuffer *flowcontrol.ResourceSliceWriteBuffer
 	Downstream  *rest.Config
 
-	DiscoveryRPS float32
+	DisableServerSideApply bool
 
 	Timeout               time.Duration
 	ReadinessPollInterval time.Duration
@@ -50,8 +46,8 @@ type Controller struct {
 	timeout               time.Duration
 	readinessPollInterval time.Duration
 	upstreamClient        client.Client
-	discovery             *discovery.Cache
 	minReconcileInterval  time.Duration
+	disableSSA            bool
 }
 
 func New(mgr ctrl.Manager, opts Options) error {
@@ -67,11 +63,6 @@ func New(mgr ctrl.Manager, opts Options) error {
 		return err
 	}
 
-	disc, err := discovery.NewCache(opts.Downstream, opts.DiscoveryRPS)
-	if err != nil {
-		return err
-	}
-
 	c := &Controller{
 		client:                opts.Manager.GetClient(),
 		writeBuffer:           opts.WriteBuffer,
@@ -79,8 +70,8 @@ func New(mgr ctrl.Manager, opts Options) error {
 		timeout:               opts.Timeout,
 		readinessPollInterval: opts.ReadinessPollInterval,
 		upstreamClient:        upstreamClient,
-		discovery:             disc,
 		minReconcileInterval:  opts.MinReconcileInterval,
+		disableSSA:            opts.DisableServerSideApply,
 	}
 
 	return builder.TypedControllerManagedBy[resource.Request](mgr).
@@ -168,14 +159,14 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	return c.requeue(logger, comp, resource, ready)
 }
 
-func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composition, prev, resource *resource.Resource, current *unstructured.Unstructured) (bool, error) {
+func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composition, prev, res *resource.Resource, current *unstructured.Unstructured) (bool, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 	start := time.Now()
 	defer func() {
 		reconciliationLatency.Observe(float64(time.Since(start).Milliseconds()))
 	}()
 
-	if resource.Deleted(comp) {
+	if res.Deleted(comp) {
 		if current == nil || current.GetDeletionTimestamp() != nil {
 			return false, nil // already deleted - nothing to do
 		}
@@ -189,15 +180,15 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		return true, nil
 	}
 
-	if resource.Patch != nil && current == nil {
+	if res.Patch != nil && current == nil {
 		logger.V(1).Info("resource doesn't exist - skipping patch")
 		return false, nil
 	}
 
-	// Create the resource when it doesn't exist
-	if current == nil {
+	// Create the resource when it doesn't exist, should exist, and wouldn't be created later by server-side apply
+	if current == nil && (res.DisableUpdates || res.Replace || c.disableSSA) {
 		reconciliationActions.WithLabelValues("create").Inc()
-		err := c.upstreamClient.Create(ctx, resource.Unstructured())
+		err := c.upstreamClient.Create(ctx, res.Unstructured())
 		if err != nil {
 			return false, fmt.Errorf("creating resource: %w", err)
 		}
@@ -205,16 +196,16 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		return true, nil
 	}
 
-	if resource.DisableUpdates {
+	if res.DisableUpdates {
 		return false, nil
 	}
 
 	// Apply Eno patches
-	if resource.Patch != nil {
-		if !resource.NeedsToBePatched(current) {
+	if res.Patch != nil {
+		if !res.NeedsToBePatched(current) {
 			return false, nil
 		}
-		patch, err := json.Marshal(&resource.Patch)
+		patch, err := json.Marshal(&res.Patch)
 		if err != nil {
 			return false, fmt.Errorf("encoding json patch: %w", err)
 		}
@@ -229,40 +220,80 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		return true, nil
 	}
 
-	// Compute a merge patch
-	var updated *unstructured.Unstructured
-	var typed bool
-	var err error
-	if resource.Replace {
-		updated = resource.Unstructured()
-	} else {
-		updated, typed, err = resource.Merge(ctx, prev, current, c.discovery)
-		if err != nil {
-			return false, fmt.Errorf("performing three-way merge: %w", err)
-		}
+	// Dry-run the update to see if it's needed
+	dryRun, err := c.update(ctx, res, current, true)
+	if err != nil {
+		return false, fmt.Errorf("dry-run applying update: %w", err)
 	}
-	if updated == nil {
-		logger.V(1).Info("skipping empty update")
-		return false, nil
-	}
-	if insecureLogPatch {
-		js, _ := updated.MarshalJSON()
-		logger.V(1).Info("INSECURE logging patch", "update", string(js))
+	if resource.Compare(dryRun, current) {
+		return false, nil // in sync
 	}
 
-	reconciliationActions.WithLabelValues("patch").Inc()
-	err = c.upstreamClient.Update(ctx, updated)
+	// When using server side apply, make sure we haven't lost any managedFields metadata.
+	// Eno should always remove fields that are no longer set by the synthesizer, even if another client messed with managedFields.
+	if current != nil && prev != nil && !c.disableSSA && !res.Replace {
+		dryRunPrev := prev.Unstructured()
+		err = c.upstreamClient.Patch(ctx, dryRunPrev, client.Apply, client.ForceOwnership, client.FieldOwner("eno"), client.DryRunAll)
+		if err != nil {
+			return false, fmt.Errorf("getting managed fields values for previous version: %w", err)
+		}
+		if !resource.CompareEnoManagedFields(dryRunPrev.GetManagedFields(), current.GetManagedFields()) && !resource.CompareEnoManagedFields(dryRun.GetManagedFields(), current.GetManagedFields()) {
+			all := resource.MergeEnoManagedFields(current.GetManagedFields(), dryRunPrev.GetManagedFields())
+			current.SetManagedFields(all)
+			err := c.upstreamClient.Update(ctx, current, client.FieldOwner("eno"))
+			if err != nil {
+				return false, fmt.Errorf("updating managed fields metadata: %w", err)
+			}
+			logger.V(0).Info("corrected drift in managed fields metadata")
+			return true, nil
+		}
+	}
+
+	// Do the actual non-dryrun update
+	reconciliationActions.WithLabelValues("apply").Inc()
+	updated, err := c.update(ctx, res, current, false)
 	if err != nil {
 		return false, fmt.Errorf("applying update: %w", err)
 	}
-
-	if updated.GetResourceVersion() == current.GetResourceVersion() {
-		logger.V(0).Info("updated resource but it did not change", "resourceVersion", updated.GetResourceVersion(), "typedMerge", typed)
+	if current == nil || updated.GetResourceVersion() == current.GetResourceVersion() {
+		logger.V(0).Info("resource didn't change after update")
 		return false, nil
 	}
-
-	logger.V(0).Info("updated resource", "resourceVersion", updated.GetResourceVersion(), "previousResourceVersion", current.GetResourceVersion(), "typedMerge", typed)
+	logger.V(0).Info("applied resource", "resourceVersion", updated.GetResourceVersion())
 	return true, nil
+}
+
+func (c *Controller) update(ctx context.Context, resource *resource.Resource, current *unstructured.Unstructured, dryrun bool) (updated *unstructured.Unstructured, err error) {
+	updated = resource.Unstructured()
+
+	if current != nil {
+		updated.SetResourceVersion(current.GetResourceVersion())
+	}
+
+	if resource.Replace {
+		opts := []client.UpdateOption{}
+		if dryrun {
+			opts = append(opts, client.DryRunAll)
+		}
+		err = c.upstreamClient.Update(ctx, updated, opts...)
+		return
+	}
+
+	opts := []client.PatchOption{}
+	if dryrun {
+		opts = append(opts, client.DryRunAll)
+	}
+
+	var patch client.Patch
+	if c.disableSSA {
+		patch = client.MergeFrom(current)
+	} else {
+		patch = client.Apply
+		opts = append(opts, client.ForceOwnership, client.FieldOwner("eno"))
+	}
+
+	err = c.upstreamClient.Patch(ctx, updated, patch, opts...)
+	return
 }
 
 func (c *Controller) getCurrent(ctx context.Context, resource *resource.Resource) (*unstructured.Unstructured, error) {

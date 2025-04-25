@@ -5,22 +5,13 @@ Once a composition has been synthesized, the resulting resources are reconciled 
 
 ## Merge Semantics
 
-Eno uses the [structured-merge-diff](https://pkg.go.dev/sigs.k8s.io/structured-merge-diff) package to merge the expected and actual states of each resource using rules defined by its schema.
+By default, Eno uses [server-side apply](https://kubernetes.io/docs/reference/using-api/server-side-apply/) to create and update resources it manages.
 
 Any property set by the synthesizer will be applied during reconciliation, even if it means overwriting changes made by another client.
 Other clients can safely populate fields _not_ managed by Eno - unmanaged fields are not modified.
+This is the standard behavior of server-side apply with `--force-conflicts=true`.
 
-### Schema Caching
-
-Eno uses a cached representation of type schema.
-Only unknown `apiVersion` strings will cause the cache to be invalidated,
-so it's possible that new fields added without incrementing the apiVersion will not be merged correctly.
-
-### Unknown Fields
-
-Any fields that are not present in the schema will still be diff'd and included in updates.
-This also applies to resources that (somehow) don't have a corresponding OpenAPI schema.
-
+> Client-side patching is supported by setting `--disable-ssa`. But beware that Eno can only add and update fields. Fields no longer returned from the synthesizer will not be removed.
 
 ## Opacity
 
@@ -84,8 +75,8 @@ annotations:
 
 ### Replace
 
-Designating a resource to be replaced means that updates will not use 3-way merge,
-so any fields set by other clients will be overwritten by Eno.
+Designating a resource to be replaced means that updates will use the normal update endpoint instead of server-side apply.
+Like `kubectl replace`, any fields not managed by Eno will be removed.
 Useful for resources that logically have a single reader (e.g. CRDs).
 
 ```yaml
