@@ -79,6 +79,12 @@ func NewReadOnlyClient(t testing.TB, objs ...runtime.Object) client.Client {
 		Delete: func(ctx context.Context, client client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
 			return errors.New("no writes allowed")
 		},
+		SubResourceUpdate: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+			return errors.New("no writes allowed")
+		},
+		SubResourcePatch: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+			return errors.New("no writes allowed")
+		},
 	})
 
 	return builder.Build()
