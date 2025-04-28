@@ -14,4 +14,4 @@ FROM gcr.io/distroless/static
 USER 65532:65532
 
 COPY --from=builder /app/helm-shim /bin/synthesize
-COPY examples/helm-shim/chart /chart
+COPY examples/03-helm-shim/chart /chart
