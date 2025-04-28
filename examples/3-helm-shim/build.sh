@@ -10,7 +10,7 @@ fi
 TAG="$(date +%s)"
 export IMAGE="$REGISTRY/example-helm-shim:$TAG"
 
-docker build --quiet -t ${IMAGE} -f "examples/helm-shim/Dockerfile" .
+docker build --quiet -t ${IMAGE} -f "examples/3-helm-shim/Dockerfile" .
 [[ -z "${SKIP_PUSH}" ]] && docker push ${IMAGE}
 
 kubectl apply -f - <<YAML
