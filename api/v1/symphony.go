@@ -42,11 +42,10 @@ type SymphonySpec struct {
 }
 
 type SymphonyStatus struct {
-	ObservedGeneration int64            `json:"observedGeneration,omitempty"`
-	Synthesized        *metav1.Time     `json:"synthesized,omitempty"`
-	Reconciled         *metav1.Time     `json:"reconciled,omitempty"`
-	Ready              *metav1.Time     `json:"ready,omitempty"`
-	Synthesizers       []SynthesizerRef `json:"synthesizers,omitempty"` // deprecated
+	ObservedGeneration int64        `json:"observedGeneration,omitempty"`
+	Synthesized        *metav1.Time `json:"synthesized,omitempty"`
+	Reconciled         *metav1.Time `json:"reconciled,omitempty"`
+	Ready              *metav1.Time `json:"ready,omitempty"`
 }
 
 type Variation struct {

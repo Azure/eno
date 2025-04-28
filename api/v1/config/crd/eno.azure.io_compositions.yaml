@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.17.2
+    controller-gen.kubebuilder.io/version: v0.17.1
   name: compositions.eno.azure.io
 spec:
   group: eno.azure.io
@@ -335,9 +335,6 @@ spec:
                       type: integer
                   type: object
                 type: array
-              pendingResynthesis:
-                format: date-time
-                type: string
               previousSynthesis:
                 description: |-
                   A synthesis is the result of synthesizing a composition.

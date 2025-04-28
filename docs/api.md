@@ -96,7 +96,6 @@ _Appears in:_
 | `currentSynthesis` _[Synthesis](#synthesis)_ |  |  |  |
 | `previousSynthesis` _[Synthesis](#synthesis)_ |  |  |  |
 | `inputRevisions` _[InputRevisions](#inputrevisions) array_ |  |  |  |
-| `pendingResynthesis` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ |  |  |  |
 
 
 #### EnvVar
@@ -320,7 +319,6 @@ _Appears in:_
 | `synthesized` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ |  |  |  |
 | `reconciled` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ |  |  |  |
 | `ready` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#time-v1-meta)_ |  |  |  |
-| `synthesizers` _[SynthesizerRef](#synthesizerref) array_ |  |  |  |
 
 
 #### Synthesis
@@ -385,7 +383,6 @@ to return a set of Kubernetes resources. Essentially they generate the desired s
 
 _Appears in:_
 - [CompositionSpec](#compositionspec)
-- [SymphonyStatus](#symphonystatus)
 - [Variation](#variation)
 
 | Field | Description | Default | Validation |
