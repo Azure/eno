@@ -8,20 +8,20 @@ if [[ -z "${REGISTRY}" ]]; then
 fi
 
 TAG="$(date +%s)"
-export IMAGE="$REGISTRY/example-go-synthesizer:$TAG"
+export IMAGE="$REGISTRY/example-helm-shim:$TAG"
 
-docker build --quiet -t ${IMAGE} -f "examples/2-go-synthesizer/Dockerfile" .
+docker build --quiet -t ${IMAGE} -f "examples/03-helm-shim/Dockerfile" .
 [[ -z "${SKIP_PUSH}" ]] && docker push ${IMAGE}
 
 kubectl apply -f - <<YAML
     apiVersion: eno.azure.io/v1
     kind: Synthesizer
     metadata:
-      name: go-synth-example
+      name: helm-shim-example
     spec:
       image: $IMAGE
       refs:
-        - key: example-input
+        - key: myinput
           resource:
             group: "" # core
             version: "v1"
