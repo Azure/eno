@@ -1,0 +1,36 @@
+apiVersion: eno.azure.io/v1
+kind: Synthesizer
+metadata:
+  name: minimal-example
+spec:
+  image: docker.io/ubuntu:latest
+  command:
+  - /bin/bash
+  - -c
+  - |
+    echo '
+      {
+        "apiVersion":"config.kubernetes.io/v1",
+        "kind":"ResourceList",
+        "items":[
+          {
+            "apiVersion":"v1",
+            "data":{"someKey":"someVal"},
+            "kind":"ConfigMap",
+            "metadata":{
+              "name":"some-config",
+              "namespace": "default"
+            }
+          }
+        ]
+      }'
+---
+
+apiVersion: eno.azure.io/v1
+kind: Composition
+metadata:
+  name: minimal-example
+  namespace: default
+spec:
+  synthesizer:
+    name: minimal-example

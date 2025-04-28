@@ -1,8 +1,9 @@
+# Modify the synthesizer to set the "status" key to some other value - the composition will never become ready.
+
 apiVersion: eno.azure.io/v1
 kind: Synthesizer
 metadata:
-  name: minimal-example
-  namespace: default
+  name: readiness-example
 spec:
   image: docker.io/ubuntu:latest
   command:
@@ -16,11 +17,14 @@ spec:
         "items":[
           {
             "apiVersion":"v1",
-            "data":{"someKey":"someVal"},
+            "data":{"status":"Ready"},
             "kind":"ConfigMap",
             "metadata":{
-              "name":"some-config",
-              "namespace": "default"
+              "name":"readiness-example",
+              "namespace": "default",
+              "annotations": {
+                "eno.azure.io/readiness": "self.data.status == \"Ready\""
+              }
             }
           }
         ]
@@ -30,8 +34,8 @@ spec:
 apiVersion: eno.azure.io/v1
 kind: Composition
 metadata:
-  name: minimal-example
+  name: readiness-example
   namespace: default
 spec:
   synthesizer:
-    name: minimal-example
+    name: readiness-example

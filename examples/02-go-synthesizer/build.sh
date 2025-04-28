@@ -10,7 +10,7 @@ fi
 TAG="$(date +%s)"
 export IMAGE="$REGISTRY/example-go-synthesizer:$TAG"
 
-docker build --quiet -t ${IMAGE} -f "examples/go-synthesizer/Dockerfile" .
+docker build --quiet -t ${IMAGE} -f "examples/02-go-synthesizer/Dockerfile" .
 [[ -z "${SKIP_PUSH}" ]] && docker push ${IMAGE}
 
 kubectl apply -f - <<YAML

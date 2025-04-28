@@ -1,0 +1,71 @@
+# Editing the configmap's "replicas" value will not cause resynthesis of the deployment because the composition sets eno.azure.io/ignore-side-effects.
+
+apiVersion: eno.azure.io/v1
+kind: Synthesizer
+metadata:
+  name: ignore-side-effects-example
+  namespace: default
+spec:
+  image: docker.io/ubuntu:latest
+  refs:
+    - key: config
+      resource:
+        group: "" # core
+        version: v1
+        kind: ConfigMap
+  command:
+  - /bin/bash
+  - -c
+  - |
+    replica_count=$(sed -n 's/.*"replicas":"\([^"]*\)".*/\1/p')
+
+    echo '{
+      "apiVersion":"config.kubernetes.io/v1",
+      "kind":"ResourceList",
+      "items":[
+        {
+          "apiVersion":"apps/v1",
+          "kind":"Deployment",
+          "metadata":{
+            "name":"my-app",
+            "namespace": "default"
+          },
+          "spec": {
+            "replicas": REPLICA_COUNT,
+            "selector": { "matchLabels": { "app": "getting-started" } },
+            "template": {
+              "metadata": { "labels": { "app": "getting-started" } },
+              "spec": {
+                "containers": [{ "name": "svc", "image": "nginx" }]
+              }
+            }
+          }
+        }
+      ]
+    }' | sed "s/REPLICA_COUNT/$replica_count/g"
+---
+
+  apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: ignore-side-effects-config
+    namespace: default
+  data:
+    replicas: "1"
+---
+
+  apiVersion: eno.azure.io/v1
+  kind: Composition
+  metadata:
+    name: ignore-side-effects-example
+    namespace: default
+    annotations:
+      eno.azure.io/ignore-side-effects: "true"
+  spec:
+    synthesizer:
+      name: ignore-side-effects-example
+    bindings:
+      - key: config
+        resource:
+          name: ignore-side-effects-config
+          namespace: default

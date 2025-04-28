@@ -4,6 +4,6 @@ toolchain go1.23.5
 
 use (
 	.
-	./examples/helm-shim
+	./examples/03-helm-shim
 	./pkg/helmshim
 )

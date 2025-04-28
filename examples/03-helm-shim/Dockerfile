@@ -6,7 +6,7 @@ ADD go.sum .
 RUN --mount=type=cache,target=/root/.cache/go-build go mod download
 
 COPY . .
-RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 go build -ldflags="-s -w" ./examples/helm-shim
+RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 go build -o helm-shim ./examples/03-helm-shim
 
 FROM gcr.io/distroless/static
 
@@ -14,4 +14,4 @@ FROM gcr.io/distroless/static
 USER 65532:65532
 
 COPY --from=builder /app/helm-shim /bin/synthesize
-COPY examples/helm-shim/chart /chart
+COPY examples/03-helm-shim/chart /chart
