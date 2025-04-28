@@ -6,7 +6,7 @@ ADD go.sum .
 RUN --mount=type=cache,target=/root/.cache/go-build go mod download
 
 COPY . .
-RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 go build -ldflags="-s -w" ./examples/helm-shim
+RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 go build -ldflags="-s -w" ./examples/03-helm-shim
 
 FROM gcr.io/distroless/static
 
