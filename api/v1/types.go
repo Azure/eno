@@ -7,7 +7,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
 
-//go:generate controller-gen object crd rbac:roleName=resourceprovider paths=./...
+//go:generate go run sigs.k8s.io/controller-tools/cmd/controller-gen object crd rbac:roleName=resourceprovider paths=./...
 
 // Requires https://github.com/elastic/crd-ref-docs
 //
