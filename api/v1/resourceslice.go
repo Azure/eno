@@ -20,10 +20,8 @@ type ResourceSlice struct {
 }
 
 type ResourceSliceSpec struct {
-	CompositionGeneration int64      `json:"compositionGeneration,omitempty"` // deprecated
-	SynthesisUUID         string     `json:"synthesisUUID,omitempty"`
-	Attempt               int        `json:"attempt,omitempty"` // deprecated
-	Resources             []Manifest `json:"resources,omitempty"`
+	SynthesisUUID string     `json:"synthesisUUID,omitempty"`
+	Resources     []Manifest `json:"resources,omitempty"`
 }
 
 type Manifest struct {

@@ -77,9 +77,7 @@ func Slice(comp *apiv1.Composition, previous []*apiv1.ResourceSlice, outputs []*
 			}}
 			if comp.Status.CurrentSynthesis != nil {
 				slice.Spec.SynthesisUUID = comp.Status.CurrentSynthesis.UUID
-				slice.Spec.Attempt = comp.Status.CurrentSynthesis.Attempts
 			}
-			slice.Spec.CompositionGeneration = comp.Generation
 			slices = append(slices, slice)
 		}
 		sliceBytes += len(manifest.Manifest)

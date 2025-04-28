@@ -574,7 +574,6 @@ func TestMidSynthesisDeletion(t *testing.T) {
 	rs.GenerateName = "test-"
 	rs.Namespace = "default"
 	rs.Finalizers = []string{"eno.azure.io/cleanup"}
-	rs.Spec.CompositionGeneration = comp.Generation
 	rs.Spec.Resources = []apiv1.Manifest{{
 		Manifest: `{ "apiVersion": "v1", "kind": "ConfigMap", "metadata": { "name": "test-obj", "namespace": "default" }}`,
 	}}
