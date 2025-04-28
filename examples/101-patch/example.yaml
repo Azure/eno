@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: patch-example
+  namespace: default
+data:
+  value: "Initial Value"
+---
+
+apiVersion: eno.azure.io/v1
+kind: Synthesizer
+metadata:
+  name: patch-example
+spec:
+  image: docker.io/ubuntu:latest
+  command:
+  - /bin/bash
+  - -c
+  - |
+    echo '
+      {
+        "apiVersion":"config.kubernetes.io/v1",
+        "kind":"ResourceList",
+        "items":[
+          {
+            "apiVersion":"eno.azure.io/v1",
+            "kind":"Patch",
+            "metadata":{
+              "name":"patch-example",
+              "namespace": "default"
+            },
+            "patch": {
+              "apiVersion": "v1",
+              "kind": "ConfigMap",
+              "ops": [{
+                "op": "replace",
+                "path": "/data/value",
+                "value": "Patched Value"
+              }]
+            }
+          }
+        ]
+      }'
+---
+
+apiVersion: eno.azure.io/v1
+kind: Composition
+metadata:
+  name: patch-example
+  namespace: default
+spec:
+  synthesizer:
+    name: patch-example

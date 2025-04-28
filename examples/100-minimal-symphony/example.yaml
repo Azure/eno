@@ -47,7 +47,7 @@ spec:
             "apiVersion":"v1",
             "kind":"ConfigMap",
             "metadata":{
-              "name":"configmap-from-synth-1",
+              "name":"configmap-from-synth-2",
               "namespace": "default"
             }
           }
