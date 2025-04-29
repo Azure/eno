@@ -1,0 +1,7 @@
+apiVersion: eno.azure.io/v1
+kind: Composition
+metadata:
+  name: crd-example
+spec:
+  synthesizer:
+    name: crd-example
