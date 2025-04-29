@@ -12,6 +12,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+var Scheme = runtime.NewScheme()
+
 type OutputWriter struct {
 	outputs   []*unstructured.Unstructured
 	results   []*krmv1.Result
@@ -49,6 +51,17 @@ func (w *OutputWriter) Add(outs ...client.Object) error {
 		if o == nil {
 			continue
 		}
+
+		// Resolve GVK if needed
+		if o.GetObjectKind().GroupVersionKind().Empty() {
+			gvks, _, err := Scheme.ObjectKinds(o)
+			if err != nil || len(gvks) == 0 {
+				return fmt.Errorf("unable to determine GVK for object %s: %w", o.GetName(), err)
+			}
+			o.GetObjectKind().SetGroupVersionKind(gvks[0])
+		}
+
+		// Encode
 		obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
 		if err != nil {
 			return fmt.Errorf(

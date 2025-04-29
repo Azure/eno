@@ -1,0 +1,13 @@
+apiVersion: myapi.myapp.io/v1
+kind: Example
+metadata:
+  name: example
+  namespace: default
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: example
+  namespace: default
