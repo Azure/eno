@@ -24,7 +24,7 @@ func TestOutputWriter(t *testing.T) {
 	assert.Equal(t, 0, out.Len())
 
 	require.NoError(t, w.Write())
-	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[{\"metadata\":{\"creationTimestamp\":null,\"name\":\"test-cm\"}}],\"results\":[{\"message\":\"test message\",\"severity\":\"error\"}]}\n", out.String())
+	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[{\"apiVersion\":\"v1\",\"kind\":\"ConfigMap\",\"metadata\":{\"creationTimestamp\":null,\"name\":\"test-cm\"}}],\"results\":[{\"message\":\"test message\",\"severity\":\"error\"}]}\n", out.String())
 
 	require.Error(t, w.Add(nil))
 }
@@ -40,5 +40,5 @@ func TestOutputWriterMunge(t *testing.T) {
 
 	require.NoError(t, w.Add(cm))
 	require.NoError(t, w.Write())
-	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[{\"data\":{\"extra-val\":\"value from munge function\"},\"metadata\":{\"creationTimestamp\":null,\"name\":\"test-cm\"}}]}\n", out.String())
+	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[{\"apiVersion\":\"v1\",\"data\":{\"extra-val\":\"value from munge function\"},\"kind\":\"ConfigMap\",\"metadata\":{\"creationTimestamp\":null,\"name\":\"test-cm\"}}]}\n", out.String())
 }

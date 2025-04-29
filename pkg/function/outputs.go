@@ -9,10 +9,11 @@ import (
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/kubectl/pkg/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-var Scheme = runtime.NewScheme()
+var Scheme = scheme.Scheme
 
 type OutputWriter struct {
 	outputs   []*unstructured.Unstructured
