@@ -122,7 +122,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 
 	// Fetch the current resource
 	current, err := c.getCurrent(ctx, resource)
-	if client.IgnoreNotFound(err) != nil && !isErrMissingNS(err) {
+	if client.IgnoreNotFound(err) != nil && !isErrMissingNS(err) && !isErrNoKindMatch(err) {
 		logger.Error(err, "failed to get current state")
 		return ctrl.Result{}, err
 	}
@@ -348,4 +348,11 @@ func isErrMissingNS(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "an empty namespace may not be set")
+}
+
+func isErrNoKindMatch(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "no matches for kind")
 }
