@@ -486,3 +486,43 @@ func TestMissingInputBinding(t *testing.T) {
 		return err == nil && comp.Status.Simplified != nil && comp.Status.Simplified.Status == "MissingInputs"
 	})
 }
+
+// TestDeletingUnknownKind proves that compositions can be deleted even if a CR was never successfully
+// created due to its kind not being registered.
+func TestDeletingUnknownKind(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "myapi.myapp.io/v1",
+				"kind":       "DoesNotExist",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	// Wait for synthesis
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil
+	})
+
+	// It should eventually delete successfully
+	require.NoError(t, upstream.Delete(ctx, comp))
+	testutil.Eventually(t, func() bool {
+		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	})
+}
