@@ -63,7 +63,7 @@ func TestBasics(t *testing.T) {
 			}
 			return &krmv1.ResourceList{
 				Items:   []*unstructured.Unstructured{out},
-				Results: []*krmv1.Result{{Message: "foo", Severity: "error"}},
+				Results: []*krmv1.Result{{Message: "foo", Severity: "warning"}},
 			}, nil
 		},
 	}
@@ -389,7 +389,7 @@ func TestUUIDMismatch(t *testing.T) {
 			}
 			return &krmv1.ResourceList{
 				Items:   []*unstructured.Unstructured{out},
-				Results: []*krmv1.Result{{Message: "foo", Severity: "error"}},
+				Results: []*krmv1.Result{{Message: "foo", Severity: "warning"}},
 			}, nil
 		},
 	}
@@ -450,7 +450,7 @@ func TestSynthesisCanceled(t *testing.T) {
 			}
 			return &krmv1.ResourceList{
 				Items:   []*unstructured.Unstructured{out},
-				Results: []*krmv1.Result{{Message: "foo", Severity: "error"}},
+				Results: []*krmv1.Result{{Message: "foo", Severity: "warning"}},
 			}, nil
 		},
 	}
@@ -524,7 +524,7 @@ func TestCompletionMismatchDuringSynthesis(t *testing.T) {
 			}
 			return &krmv1.ResourceList{
 				Items:   []*unstructured.Unstructured{out},
-				Results: []*krmv1.Result{{Message: "foo", Severity: "error"}},
+				Results: []*krmv1.Result{{Message: "foo", Severity: "warning"}},
 			}, nil
 		},
 	}
@@ -599,7 +599,7 @@ func TestDeleteResource(t *testing.T) {
 			}
 			return &krmv1.ResourceList{
 				Items:   []*unstructured.Unstructured{out, out2},
-				Results: []*krmv1.Result{{Message: "foo", Severity: "error"}},
+				Results: []*krmv1.Result{{Message: "foo", Severity: "warning"}},
 			}, nil
 		},
 	}
@@ -622,7 +622,7 @@ func TestDeleteResource(t *testing.T) {
 		}
 		return &krmv1.ResourceList{
 			Items:   []*unstructured.Unstructured{out},
-			Results: []*krmv1.Result{{Message: "foo", Severity: "error"}},
+			Results: []*krmv1.Result{{Message: "foo", Severity: "warning"}},
 		}, nil
 	}
 
@@ -654,4 +654,72 @@ func TestDeleteResource(t *testing.T) {
 
 	assert.NotEqual(t, -1, deletedIdx)
 	assert.Equal(t, rs.Spec.Resources[deletedIdx].Deleted, true)
+}
+
+func TestError(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	require.NoError(t, apiv1.SchemeBuilder.AddToScheme(scheme))
+
+	cli := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&apiv1.ResourceSlice{}, &apiv1.Composition{}).
+		Build()
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-synth"
+	err := cli.Create(ctx, syn)
+	require.NoError(t, err)
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	err = cli.Create(ctx, comp)
+	require.NoError(t, err)
+
+	comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+	err = cli.Status().Update(ctx, comp)
+	require.NoError(t, err)
+
+	e := &Executor{
+		Reader: cli,
+		Writer: cli,
+		Handler: func(ctx context.Context, s *apiv1.Synthesizer, rl *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+			out := &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "test",
+						"namespace": "default",
+					},
+					"data": map[string]any{"foo": "bar"},
+				},
+			}
+			return &krmv1.ResourceList{
+				Items:   []*unstructured.Unstructured{out},
+				Results: []*krmv1.Result{{Message: "foo", Severity: "error"}},
+			}, nil
+		},
+	}
+	env := &Env{
+		CompositionName:      comp.Name,
+		CompositionNamespace: comp.Namespace,
+		SynthesisUUID:        comp.Status.InFlightSynthesis.UUID,
+	}
+
+	err = e.Synthesize(ctx, env)
+	require.Error(t, err)
+
+	err = e.Synthesize(ctx, env)
+	require.Error(t, err)
+
+	err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+	require.NoError(t, err)
+	assert.Nil(t, comp.Status.CurrentSynthesis)
+	assert.NotNil(t, comp.Status.InFlightSynthesis.Synthesized)
+	assert.Len(t, comp.Status.InFlightSynthesis.ResourceSlices, 0)
+	require.Len(t, comp.Status.InFlightSynthesis.Results, 1)
+	assert.Equal(t, "foo", comp.Status.InFlightSynthesis.Results[0].Message)
 }
