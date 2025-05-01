@@ -526,3 +526,43 @@ func TestDeletingUnknownKind(t *testing.T) {
 		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 	})
 }
+
+// TestSynthesisErrorResult proves that synthesizers that return error results while exiting 0 are retried.
+func TestSynthesisErrorResult(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+
+	var calls atomic.Int32
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		if calls.Add(1) < 2 {
+			output.Results = []*krmv1.Result{{
+				Message:  "test error",
+				Severity: krmv1.ResultSeverityError,
+			}}
+		}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.InFlightSynthesis == nil
+	})
+}

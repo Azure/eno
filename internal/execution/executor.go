@@ -59,13 +59,22 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 	if err != nil {
 		return fmt.Errorf("executing synthesizer: %w", err)
 	}
+	resultErr := findResultError(output)
 
-	sliceRefs, err := e.writeSlices(ctx, comp, output)
+	var sliceRefs []*apiv1.ResourceSliceRef
+	if resultErr == nil {
+		sliceRefs, err = e.writeSlices(ctx, comp, output)
+		if err != nil {
+			return err
+		}
+	}
+
+	err = e.updateComposition(ctx, env, comp, syn, sliceRefs, revs, output)
 	if err != nil {
 		return err
 	}
 
-	return e.updateComposition(ctx, env, comp, syn, sliceRefs, revs, output)
+	return resultErr
 }
 
 func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, syn *apiv1.Synthesizer) (*krmv1.ResourceList, []apiv1.InputRevisions, error) {
@@ -206,6 +215,7 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 		comp.Status.InFlightSynthesis.ResourceSlices = refs
 		comp.Status.InFlightSynthesis.ObservedSynthesizerGeneration = syn.Generation
 		comp.Status.InFlightSynthesis.InputRevisions = revs
+		comp.Status.InFlightSynthesis.Results = nil
 		for _, result := range rl.Results {
 			comp.Status.InFlightSynthesis.Results = append(comp.Status.InFlightSynthesis.Results, apiv1.Result{
 				Message:  result.Message,
@@ -220,9 +230,11 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 		}
 
 		// Swap pending->current->previous syntheses
-		comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
-		comp.Status.CurrentSynthesis = comp.Status.InFlightSynthesis
-		comp.Status.InFlightSynthesis = nil
+		if findResultError(rl) == nil {
+			comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
+			comp.Status.CurrentSynthesis = comp.Status.InFlightSynthesis
+			comp.Status.InFlightSynthesis = nil
+		}
 
 		err = e.Writer.Status().Update(ctx, comp)
 		if err != nil {
@@ -252,4 +264,16 @@ func skipSynthesis(comp *apiv1.Composition, syn *apiv1.Synthesizer, env *Env) (s
 		return "ImageMismatch", true
 	}
 	return "", false
+}
+
+func findResultError(rl *krmv1.ResourceList) error {
+	if rl == nil {
+		return nil
+	}
+	for _, res := range rl.Results {
+		if res.Severity == krmv1.ResultSeverityError {
+			return fmt.Errorf("result: %s", res.Message)
+		}
+	}
+	return nil
 }
