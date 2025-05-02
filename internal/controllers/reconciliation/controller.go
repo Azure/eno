@@ -278,6 +278,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		logger = logger.WithValues("oldResourceVersion", current.GetResourceVersion())
 	}
 	logger.V(0).Info("applied resource", "resourceVersion", updated.GetResourceVersion(), "dryRunResourceVersion", dryRun.GetResourceVersion())
+
 	return true, nil
 }
 
@@ -309,6 +310,9 @@ func (c *Controller) update(ctx context.Context, resource *resource.Resource, cu
 		patch = client.Apply
 		opts = append(opts, client.ForceOwnership, client.FieldOwner("eno"))
 	}
+
+	js, _ := patch.Data(updated)
+	println("TODO PATCH", string(js))
 
 	err = c.upstreamClient.Patch(ctx, updated, patch, opts...)
 	return
