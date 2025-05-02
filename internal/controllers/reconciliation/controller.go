@@ -231,15 +231,30 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 
 	// When using server side apply, make sure we haven't lost any managedFields metadata.
 	// Eno should always remove fields that are no longer set by the synthesizer, even if another client messed with managedFields.
-	if current != nil && prev != nil && !c.disableSSA && !res.Replace {
-		dryRunPrev := prev.Unstructured()
-		err = c.upstreamClient.Patch(ctx, dryRunPrev, client.Apply, client.ForceOwnership, client.FieldOwner("eno"), client.DryRunAll)
-		if err != nil {
-			return false, fmt.Errorf("getting managed fields values for previous version: %w", err)
+	if current != nil && !c.disableSSA && !res.Replace {
+		var dryRunPrev *unstructured.Unstructured
+		if prev != nil {
+			dryRunPrev = prev.Unstructured()
+			err = c.upstreamClient.Patch(ctx, dryRunPrev, client.Apply, client.ForceOwnership, client.FieldOwner("eno"), client.DryRunAll)
+			if err != nil {
+				return false, fmt.Errorf("getting managed fields values for previous version: %w", err)
+			}
 		}
-		if !resource.CompareEnoManagedFields(dryRunPrev.GetManagedFields(), current.GetManagedFields()) && !resource.CompareEnoManagedFields(dryRun.GetManagedFields(), current.GetManagedFields()) {
-			all := resource.MergeEnoManagedFields(current.GetManagedFields(), dryRunPrev.GetManagedFields())
-			current.SetManagedFields(all)
+
+		outOfSyncWithPrevious := dryRunPrev != nil && !resource.CompareEnoManagedFields(dryRunPrev.GetManagedFields(), current.GetManagedFields())
+		outOfSyncWithCurrent := !resource.CompareEnoManagedFields(dryRun.GetManagedFields(), current.GetManagedFields())
+
+		if (outOfSyncWithPrevious && outOfSyncWithCurrent) || (outOfSyncWithCurrent && dryRunPrev == nil) {
+			if dryRunPrev == nil {
+				current.SetManagedFields(
+					resource.MergeEnoManagedFields(
+						current.GetManagedFields(), dryRun.GetManagedFields()))
+			} else {
+				current.SetManagedFields(
+					resource.MergeEnoManagedFields(
+						current.GetManagedFields(), dryRunPrev.GetManagedFields()))
+			}
+
 			err := c.upstreamClient.Update(ctx, current, client.FieldOwner("eno"))
 			if err != nil {
 				return false, fmt.Errorf("updating managed fields metadata: %w", err)
@@ -255,11 +270,14 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	if err != nil {
 		return false, fmt.Errorf("applying update: %w", err)
 	}
-	if current == nil || updated.GetResourceVersion() == current.GetResourceVersion() {
+	if current != nil && updated.GetResourceVersion() == current.GetResourceVersion() {
 		logger.V(0).Info("resource didn't change after update")
 		return false, nil
 	}
-	logger.V(0).Info("applied resource", "resourceVersion", updated.GetResourceVersion())
+	if current != nil {
+		logger = logger.WithValues("oldResourceVersion", current.GetResourceVersion())
+	}
+	logger.V(0).Info("applied resource", "resourceVersion", updated.GetResourceVersion(), "dryRunResourceVersion", dryRun.GetResourceVersion())
 	return true, nil
 }
 
