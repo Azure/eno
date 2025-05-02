@@ -20,3 +20,11 @@ docker-build-eno-reconciler:
 		--file docker/$(ENO_RECONCILER_IMAGE_NAME)/Dockerfile \
 		--tag $(REGISTRY)/$(ENO_RECONCILER_IMAGE_NAME):$(ENO_RECONCILER_IMAGE_VERSION) .
 	docker push $(REGISTRY)/$(ENO_RECONCILER_IMAGE_NAME):$(ENO_RECONCILER_IMAGE_VERSION)
+
+.PHONY: dev
+dev:
+	./hack/dev.sh
+
+.PHONY: smoke-test
+smoke-test:
+	./hack/smoke-test.sh

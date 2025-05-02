@@ -36,7 +36,7 @@ jobs:
           SKIP_PUSH: "yes"
         run: |
           echo "--- building eno..."
-          ./dev/build.sh
+          ./hack/dev.sh
 
       - name: Build Example images
         env:
