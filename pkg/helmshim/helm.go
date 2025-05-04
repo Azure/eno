@@ -2,6 +2,7 @@ package helmshim
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -30,6 +31,19 @@ func MustRenderChart(opts ...RenderOption) {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)
 	}
+}
+
+// isNullObject checks if the given unstructured object is equivalent to an empty K8S object.
+// This is used when then input helm chart includes an empty target (for example: empty yaml file with comments).
+func isNullObject(o *unstructured.Unstructured) bool {
+	if o == nil {
+		return true
+	}
+	b, err := json.Marshal(o)
+	if err != nil {
+		return false
+	}
+	return string(b) == "null"
 }
 
 func RenderChart(opts ...RenderOption) error {
@@ -94,7 +108,12 @@ func RenderChart(opts ...RenderOption) error {
 		} else if err != nil {
 			return errors.Join(ErrCannotParseChart, err)
 		}
-		o.Writer.Add(m)
+		if isNullObject(m) {
+			continue
+		}
+		if err := o.Writer.Add(m); err != nil {
+			return fmt.Errorf("adding object %s to output writer: %w", m, err)
+		}
 	}
 
 	if usingDefaultWriter {
