@@ -39,6 +39,10 @@ func isNullObject(o *unstructured.Unstructured) bool {
 	if o == nil {
 		return true
 	}
+	if len(o.Object) > 0 {
+		// if the object has any fields, it is not null
+		return false
+	}
 	b, err := json.Marshal(o)
 	if err != nil {
 		return false
