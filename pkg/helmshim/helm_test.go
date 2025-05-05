@@ -7,7 +7,51 @@ import (
 	"github.com/Azure/eno/pkg/function"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
+
+func TestIsNullOrEmptyObject(t *testing.T) {
+	cases := []struct {
+		name string
+		o    *unstructured.Unstructured
+		want bool
+	}{
+		{
+			name: "nil object",
+			o:    nil,
+			want: true,
+		},
+		{
+			name: "empty object with nil object map",
+			o:    &unstructured.Unstructured{},
+			want: true,
+		},
+		{
+			name: "empty object",
+			o: &unstructured.Unstructured{
+				Object: map[string]any{},
+			},
+			want: true,
+		},
+		{
+			name: "non-empty object",
+			o: &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+				},
+			},
+			want: false,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := isNullOrEmptyObject(c.o)
+			assert.Equal(t, c.want, got)
+		})
+	}
+}
 
 func TestRenderChart(t *testing.T) {
 	output := bytes.NewBuffer(nil)

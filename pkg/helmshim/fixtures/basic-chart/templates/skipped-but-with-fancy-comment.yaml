@@ -1,0 +1,9 @@
+# This comment forces the file to be included in the rendered output :)
+{{- if false }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: another-config-map
+data:
+  some: "value"
+{{- end }}
