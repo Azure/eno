@@ -33,9 +33,9 @@ func MustRenderChart(opts ...RenderOption) {
 	}
 }
 
-// isNullObject checks if the given unstructured object is equivalent to an empty K8S object.
+// isNullOrEmptyObject checks if the given unstructured object is equivalent to an empty K8S object.
 // This is used when then input helm chart includes an empty target (for example: empty yaml file with comments).
-func isNullObject(o *unstructured.Unstructured) bool {
+func isNullOrEmptyObject(o *unstructured.Unstructured) bool {
 	if o == nil {
 		return true
 	}
@@ -47,7 +47,7 @@ func isNullObject(o *unstructured.Unstructured) bool {
 	if err != nil {
 		return false
 	}
-	return string(b) == "null"
+	return string(b) == "null" || string(b) == "{}"
 }
 
 func RenderChart(opts ...RenderOption) error {
@@ -112,7 +112,7 @@ func RenderChart(opts ...RenderOption) error {
 		} else if err != nil {
 			return errors.Join(ErrCannotParseChart, err)
 		}
-		if isNullObject(m) {
+		if isNullOrEmptyObject(m) {
 			continue
 		}
 		if err := o.Writer.Add(m); err != nil {

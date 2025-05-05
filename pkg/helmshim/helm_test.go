@@ -10,7 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-func TestIsNullObject(t *testing.T) {
+func TestIsNullOrEmptyObject(t *testing.T) {
 	cases := []struct {
 		name string
 		o    *unstructured.Unstructured
@@ -22,8 +22,15 @@ func TestIsNullObject(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "empty object",
+			name: "empty object with nil object map",
 			o:    &unstructured.Unstructured{},
+			want: true,
+		},
+		{
+			name: "empty object",
+			o: &unstructured.Unstructured{
+				Object: map[string]any{},
+			},
 			want: true,
 		},
 		{
@@ -40,7 +47,7 @@ func TestIsNullObject(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := isNullObject(c.o)
+			got := isNullOrEmptyObject(c.o)
 			assert.Equal(t, c.want, got)
 		})
 	}
