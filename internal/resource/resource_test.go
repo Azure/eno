@@ -39,6 +39,7 @@ var newResourceTests = []struct {
 					"eno.azure.io/readiness": "true",
 					"eno.azure.io/readiness-test": "false",
 					"eno.azure.io/replace": "true",
+					"eno.azure.io/disable-managed-fields-reconciliation": "true",
 					"eno.azure.io/disable-updates": "true"
 				}
 			}
@@ -56,6 +57,7 @@ var newResourceTests = []struct {
 			assert.True(t, r.DisableUpdates)
 			assert.True(t, r.Replace)
 			assert.Equal(t, int(250), r.ReadinessGroup)
+			assert.True(t, r.DisableManagedFieldsReconciliation)
 		},
 	},
 	{
