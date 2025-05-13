@@ -94,6 +94,21 @@ annotations:
   eno.azure.io/deletion-strategy: orphan
 ```
 
+### Managed Fields Reconciliation
+
+> WARNING:
+>
+> You probably don't want to use this feature!
+
+Eno will reconcile the `managedFields` metadata before applying changes in order to avoid overlooking properties that exist in the resource, are no longer set by the synthesizer, and aren't reflected by `managedFields`.
+
+In some obscure cases it might be necessary to disable this reconciliation process to avoid racing against other controllers that purposefully tamper with `managedFields`.
+
+```yaml
+annotations:
+  eno.azure.io/disable-managed-fields-reconciliation: "true"
+```
+
 
 ## Meta Resources
 

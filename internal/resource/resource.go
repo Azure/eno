@@ -63,6 +63,8 @@ type Resource struct {
 	ReadinessGroup    int
 	Labels            map[string]string
 
+	DisableManagedFieldsReconciliation bool
+
 	// DefinedGroupKind is set on CRDs to represent the resource type they define.
 	DefinedGroupKind *schema.GroupKind
 
@@ -213,6 +215,9 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 
 	const replaceKey = "eno.azure.io/replace"
 	res.Replace = anno[replaceKey] == "true"
+
+	const dmfrKey = "eno.azure.io/disable-managed-fields-reconciliation"
+	res.DisableManagedFieldsReconciliation = anno[dmfrKey] == "true"
 
 	const readinessGroupKey = "eno.azure.io/readiness-group"
 	if str, ok := anno[readinessGroupKey]; ok {
