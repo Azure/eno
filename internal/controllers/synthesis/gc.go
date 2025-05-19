@@ -135,6 +135,18 @@ func (p *podGarbageCollector) deletePod(ctx context.Context, pod *corev1.Pod, lo
 	if len(pod.Status.ContainerStatuses) > 0 {
 		logger = logger.WithValues("restarts", pod.Status.ContainerStatuses[0].RestartCount)
 	}
+
+	// Check for image pull errors before deleting the pod
+	if errMsg, hasError := checkImagePullError(pod); hasError {
+		logger.Info("detected image pull error in synthesizer pod", "errorMessage", errMsg)
+
+		// Try to update the composition with the error message
+		if err := p.updateCompositionWithImagePullError(ctx, pod, errMsg, logger); err != nil {
+			logger.Error(err, "failed to update composition with image pull error")
+			// Continue with pod deletion even if the composition update fails
+		}
+	}
+
 	err := p.client.Delete(ctx, pod, &client.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &pod.UID, ResourceVersion: &pod.ResourceVersion}})
 	if err != nil {
 		return fmt.Errorf("deleting pod: %w", err)
@@ -166,4 +178,68 @@ func synthesisAge(comp *apiv1.Composition) *int64 {
 		return nil
 	}
 	return ptr.To(time.Since(syn.Initialized.Time).Milliseconds())
+}
+
+// checkImagePullError checks if the pod has any container status with an image pull error.
+// It returns the error message and a boolean indicating if an error was found.
+func checkImagePullError(pod *corev1.Pod) (string, bool) {
+	// Check all container statuses (both init containers and regular containers)
+	for _, status := range append(pod.Status.InitContainerStatuses, pod.Status.ContainerStatuses...) {
+		if status.State.Waiting != nil {
+			reason := status.State.Waiting.Reason
+			// Check for common image pull error reasons
+			if reason == "ErrImagePull" || reason == "ImagePullBackOff" || reason == "InvalidImageName" {
+				msg := status.State.Waiting.Message
+				if msg == "" {
+					msg = fmt.Sprintf("Container %s failed to pull image: %s", status.Name, reason)
+				}
+				return msg, true
+			}
+		}
+	}
+	return "", false
+}
+
+// updateCompositionWithImagePullError updates the composition with the image pull error message.
+// It adds a result with severity "error" to the InFlightSynthesis.Results array.
+func (p *podGarbageCollector) updateCompositionWithImagePullError(ctx context.Context, pod *corev1.Pod, errMsg string, logger logr.Logger) error {
+	if pod.Labels == nil {
+		return fmt.Errorf("pod has no labels")
+	}
+
+	compName := pod.Labels[compositionNameLabelKey]
+	compNamespace := pod.Labels[compositionNamespaceLabelKey]
+	synthUUID := pod.Labels[synthesisIDLabelKey]
+	
+	if compName == "" || compNamespace == "" || synthUUID == "" {
+		return fmt.Errorf("pod is missing required labels")
+	}
+
+	// Get the composition
+	comp := &apiv1.Composition{}
+	comp.Name = compName
+	comp.Namespace = compNamespace
+	err := p.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+	if err != nil {
+		return fmt.Errorf("fetching composition: %w", err)
+	}
+
+	// Ensure this is for the current in-flight synthesis
+	if comp.Status.InFlightSynthesis == nil || comp.Status.InFlightSynthesis.UUID != synthUUID {
+		return fmt.Errorf("composition no longer refers to this synthesis")
+	}
+
+	// Create a copy for patching
+	original := comp.DeepCopy()
+	
+	// Add the error to the synthesis results
+	formattedError := fmt.Sprintf("Failed to pull synthesizer image: %s", errMsg)
+	comp.Status.InFlightSynthesis.Results = append(comp.Status.InFlightSynthesis.Results, apiv1.Result{
+		Message:  formattedError,
+		Severity: "error",
+		Tags:     map[string]string{"source": "image-pull"},
+	})
+	
+	// Update the composition status
+	return p.client.Status().Patch(ctx, comp, client.MergeFrom(original))
 }
