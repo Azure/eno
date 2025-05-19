@@ -48,6 +48,16 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, nil
 	}
 	logger = logger.WithValues("podName", pod.Name, "podNamespace", pod.Namespace)
+	
+	// Check for image pull errors early in the reconciliation process
+	if errMsg, hasError := checkImagePullError(pod); hasError {
+		if err := p.updateCompositionWithImagePullError(ctx, pod, errMsg, logger); err != nil {
+			logger.Error(err, "failed to update composition with image pull error")
+			// Continue with reconciliation even if the composition update fails
+		} else {
+			logger.Info("detected image pull error in synthesizer pod", "errorMessage", errMsg)
+		}
+	}
 
 	if pod.Labels == nil {
 		logger.V(0).Info("saw a pod without any labels - this shouldn't be possible!")
@@ -134,17 +144,6 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 func (p *podGarbageCollector) deletePod(ctx context.Context, pod *corev1.Pod, logger logr.Logger) error {
 	if len(pod.Status.ContainerStatuses) > 0 {
 		logger = logger.WithValues("restarts", pod.Status.ContainerStatuses[0].RestartCount)
-	}
-
-	// Check for image pull errors before deleting the pod
-	if errMsg, hasError := checkImagePullError(pod); hasError {
-		logger.Info("detected image pull error in synthesizer pod", "errorMessage", errMsg)
-
-		// Try to update the composition with the error message
-		if err := p.updateCompositionWithImagePullError(ctx, pod, errMsg, logger); err != nil {
-			logger.Error(err, "failed to update composition with image pull error")
-			// Continue with pod deletion even if the composition update fails
-		}
 	}
 
 	err := p.client.Delete(ctx, pod, &client.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &pod.UID, ResourceVersion: &pod.ResourceVersion}})
@@ -234,6 +233,15 @@ func (p *podGarbageCollector) updateCompositionWithImagePullError(ctx context.Co
 	
 	// Add the error to the synthesis results
 	formattedError := fmt.Sprintf("Failed to pull synthesizer image: %s", errMsg)
+	
+	// Check if we already have this error in the results to avoid duplicates
+	for _, result := range comp.Status.InFlightSynthesis.Results {
+		if result.Message == formattedError && result.Severity == "error" {
+			// We already have this error, no need to add it again
+			return nil
+		}
+	}
+	
 	comp.Status.InFlightSynthesis.Results = append(comp.Status.InFlightSynthesis.Results, apiv1.Result{
 		Message:  formattedError,
 		Severity: "error",
