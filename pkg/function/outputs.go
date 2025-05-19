@@ -15,6 +15,11 @@ import (
 
 var Scheme = scheme.Scheme
 
+type Writer interface {
+	Add(outs ...client.Object) error
+	Write() error
+}
+
 type OutputWriter struct {
 	outputs   []*unstructured.Unstructured
 	results   []*krmv1.Result

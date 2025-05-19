@@ -127,7 +127,7 @@ func RenderChart(opts ...RenderOption) error {
 	return nil
 }
 
-func inputsToValues(i *function.InputReader) (map[string]any, error) {
+func inputsToValues(i function.Reader) (map[string]any, error) {
 	m := map[string]any{}
 	for k, o := range i.All() {
 		m[k] = o.Object

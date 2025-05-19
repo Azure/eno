@@ -9,7 +9,7 @@ import (
 	"helm.sh/helm/v3/pkg/chart/loader"
 )
 
-type ValuesFunc func(*function.InputReader) (map[string]any, error)
+type ValuesFunc func(function.Reader) (map[string]any, error)
 
 // ChartLoader is the function for loading a helm chart.
 type ChartLoader func() (*chart.Chart, error)
@@ -22,8 +22,8 @@ type options struct {
 	Action      *action.Install
 	ValuesFunc  ValuesFunc
 	ChartLoader ChartLoader
-	Reader      *function.InputReader
-	Writer      *function.OutputWriter
+	Reader      function.Reader
+	Writer      function.Writer
 }
 
 type RenderOption func(*options)
@@ -70,7 +70,7 @@ func WithChartLoader(cl ChartLoader) RenderOption {
 	})
 }
 
-func WithInputReader(r *function.InputReader) RenderOption {
+func WithInputReader(r function.Reader) RenderOption {
 	return RenderOption(func(o *options) {
 		if o == nil {
 			return
@@ -79,7 +79,7 @@ func WithInputReader(r *function.InputReader) RenderOption {
 	})
 }
 
-func WithOutputWriter(w *function.OutputWriter) RenderOption {
+func WithOutputWriter(w function.Writer) RenderOption {
 	return RenderOption(func(o *options) {
 		if o == nil {
 			return

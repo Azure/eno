@@ -13,6 +13,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+type Reader interface {
+	All() map[string]*unstructured.Unstructured
+}
+
 type InputReader struct {
 	resources *krmv1.ResourceList
 }
@@ -32,9 +36,9 @@ func NewInputReader(r io.Reader) (*InputReader, error) {
 	}, nil
 }
 
-func ReadInput[T client.Object](ir *InputReader, key string, out T) error {
+func ReadInput[T client.Object](ir Reader, key string, out T) error {
 	var found bool
-	for _, i := range ir.resources.Items {
+	for _, i := range ir.All() {
 		i := i
 		if getKey(i) == key {
 			err := runtime.DefaultUnstructuredConverter.FromUnstructured(i.Object, out)
