@@ -155,3 +155,107 @@ func TestTimeWaitingForKubelet(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckImagePullError(t *testing.T) {
+	tests := []struct {
+		name           string
+		pod            *corev1.Pod
+		expectedError  string
+		expectedResult bool
+	}{
+		{
+			name: "no image pull error",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					ContainerStatuses: []corev1.ContainerStatus{
+						{
+							Name: "container1",
+							State: corev1.ContainerState{
+								Running: &corev1.ContainerStateRunning{},
+							},
+						},
+					},
+				},
+			},
+			expectedError:  "",
+			expectedResult: false,
+		},
+		{
+			name: "with image pull error",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					ContainerStatuses: []corev1.ContainerStatus{
+						{
+							Name: "container1",
+							State: corev1.ContainerState{
+								Waiting: &corev1.ContainerStateWaiting{
+									Reason:  "ErrImagePull",
+									Message: "failed to pull image: rpc error: code = Unknown desc = error pulling image",
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedError:  "failed to pull image: rpc error: code = Unknown desc = error pulling image",
+			expectedResult: true,
+		},
+		{
+			name: "with image pull backoff error",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					ContainerStatuses: []corev1.ContainerStatus{
+						{
+							Name: "container1",
+							State: corev1.ContainerState{
+								Waiting: &corev1.ContainerStateWaiting{
+									Reason: "ImagePullBackOff",
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedError:  "Container container1 failed to pull image: ImagePullBackOff",
+			expectedResult: true,
+		},
+		{
+			name: "with init container image pull error",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					InitContainerStatuses: []corev1.ContainerStatus{
+						{
+							Name: "init-container",
+							State: corev1.ContainerState{
+								Waiting: &corev1.ContainerStateWaiting{
+									Reason:  "ErrImagePull",
+									Message: "failed to pull init container image",
+								},
+							},
+						},
+					},
+					ContainerStatuses: []corev1.ContainerStatus{
+						{
+							Name: "container1",
+							State: corev1.ContainerState{
+								Waiting: &corev1.ContainerStateWaiting{
+									Reason: "PodInitializing",
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedError:  "failed to pull init container image",
+			expectedResult: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errorMsg, hasError := checkImagePullError(tt.pod)
+			assert.Equal(t, tt.expectedResult, hasError)
+			assert.Equal(t, tt.expectedError, errorMsg)
+		})
+	}
+}
