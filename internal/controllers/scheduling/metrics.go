@@ -40,3 +40,26 @@ func missedReconciliation(comp *apiv1.Composition, threshold time.Duration) bool
 	syn := comp.Status.CurrentSynthesis
 	return comp.DeletionTimestamp == nil && syn != nil && syn.Reconciled == nil && syn.Initialized != nil && time.Since(syn.Initialized.Time) > threshold
 }
+
+// isSynthStatusChanged checks if the status of a synthesizer has changed
+func isSynthStatusChanged(old, new *apiv1.Synthesizer) bool {
+	if len(old.Status.Conditions) != len(new.Status.Conditions) {
+		return true
+	}
+
+	for i, oldCond := range old.Status.Conditions {
+		if i >= len(new.Status.Conditions) {
+			return true
+		}
+		newCond := new.Status.Conditions[i]
+		
+		if oldCond.Type != newCond.Type || 
+			oldCond.Status != newCond.Status || 
+			oldCond.Reason != newCond.Reason || 
+			oldCond.Message != newCond.Message {
+			return true
+		}
+	}
+	
+	return false
+}
