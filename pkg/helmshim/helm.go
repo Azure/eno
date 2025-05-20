@@ -51,9 +51,9 @@ func isNullOrEmptyObject(o *unstructured.Unstructured) bool {
 	return string(b) == "null" || string(b) == "{}"
 }
 
-// Synth produced a SynthFunc that 1) uses inputs as a values func rather than input reader 2) a writer that saves the objects to a slice rather than serializing
 type ValuesFunc[T function.Inputs] func(inputs T) (map[string]any, error)
 
+// Synth produced a SynthFunc that 1) uses inputs as a values func rather than input reader 2) a writer that saves the objects to a slice rather than serializing
 func Synth[T function.Inputs](values ValuesFunc[T], opts ...RenderOption) function.SynthFunc[T] {
 
 	return func(inputs T) ([]client.Object, error) {
@@ -117,6 +117,7 @@ func Synth[T function.Inputs](values ValuesFunc[T], opts ...RenderOption) functi
 	}
 }
 
+// Deprecated: Use Synth directly
 func RenderChart(opts ...RenderOption) error {
 	// prepare default reader and writer
 	o := &options{ValuesFunc: inputsToValues}

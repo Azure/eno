@@ -104,3 +104,17 @@ func TestRenderChartWithHelmHook(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[{\"apiVersion\":\"somegroup.io/v9001\",\"kind\":\"ATypeNotKnownByTheScheme\",\"metadata\":{\"name\":\"foo\"}},{\"apiVersion\":\"v1\",\"data\":{\"some\":\"value\"},\"kind\":\"ConfigMap\",\"metadata\":{\"annotations\":{\"helm.sh/hook\":\"post-install,post-upgrade\",\"helm.sh/hook-delete-policy\":\"before-hook-creation\",\"helm.sh/hook-weight\":\"1\"},\"name\":\"my-test-cm\"}}]}\n", output.String())
 }
+
+func TestSynth(t *testing.T) {
+
+	type sillyinputs struct{}
+	synth := Synth[sillyinputs](func(sillyinputs) (map[string]any, error) {
+		return map[string]any{"name": "my-test-cm"}, nil
+	}, WithChartPath("fixtures/basic-chart"))
+	objects, err := synth(sillyinputs{})
+	require.NoError(t, err)
+	require.Len(t, objects, 2)
+	require.Equal(t, "ConfigMap", objects[0].GetObjectKind().GroupVersionKind().Kind)
+	require.Equal(t, "my-test-cm", objects[0].GetName(), "test-cm")
+	require.Equal(t, "ATypeNotKnownByTheScheme", objects[1].GetObjectKind().GroupVersionKind().Kind)
+}
