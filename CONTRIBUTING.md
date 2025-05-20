@@ -51,7 +51,6 @@ The following controllers form the core of the system:
 
 - Go 1.23+
 - Kubernetes environment for testing (can use kind, minikube, etc.)
-- Controller-runtime test environment binaries
 
 ### Setup Environment
 
@@ -65,31 +64,18 @@ This will download the controller-runtime test environment binaries needed for r
 
 ### Running Tests
 
-Standard tests:
+Run all tests with extended timeout:
+```bash
+make test
+```
+
+Or run specific tests:
 ```bash
 go test -v ./...
-```
 
-Reconciliation controller tests (with increased timeout):
-```bash
-make test-reconciliation
-```
 
-### Testing Different Kubernetes Versions
 
-Eno supports compatibility testing against different Kubernetes versions:
 
-```bash
-DOWNSTREAM_VERSION_MINOR=<version> DOWNSTREAM_KUBEBUILDER_ASSETS=<path> UPSTREAM_KUBEBUILDER_ASSETS=<path> go test ./internal/controllers/reconciliation
-```
-
-## Pull Request Process
-
-1. Fork the repository and create a branch for your changes
-2. Make focused, minimal changes that address a specific issue or feature
-3. Add or update tests as necessary
-4. Ensure all tests pass
-5. Submit a pull request
 
 ## Additional Resources
 

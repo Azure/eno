@@ -24,10 +24,10 @@ docker-build-eno-reconciler:
 		--tag $(REGISTRY)/$(ENO_RECONCILER_IMAGE_NAME):$(ENO_RECONCILER_IMAGE_VERSION) .
 	docker push $(REGISTRY)/$(ENO_RECONCILER_IMAGE_NAME):$(ENO_RECONCILER_IMAGE_VERSION)
 
-# Run tests with increased timeout for the reconciliation controller
-.PHONY: test-reconciliation
-test-reconciliation:
-	go test -v -timeout $(RECONCILIATION_TEST_TIMEOUT) ./internal/controllers/reconciliation
+# Run tests with increased timeout for all test packages
+.PHONY: test
+test:
+	go test -v -timeout $(RECONCILIATION_TEST_TIMEOUT) ./...
 
 # Setup controller-runtime test environment binaries
 .PHONY: setup-testenv
