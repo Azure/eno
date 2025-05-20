@@ -108,7 +108,7 @@ func TestRenderChartWithHelmHook(t *testing.T) {
 func TestSynth(t *testing.T) {
 
 	type sillyinputs struct{}
-	synth := Synth[sillyinputs](func(sillyinputs) (map[string]any, error) {
+	synth := Synth(func(sillyinputs) (map[string]any, error) {
 		return map[string]any{"name": "my-test-cm"}, nil
 	}, WithChartPath("fixtures/basic-chart"))
 	objects, err := synth(sillyinputs{})

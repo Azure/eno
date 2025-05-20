@@ -1,13 +1,17 @@
 package main
 
 import (
+	"github.com/Azure/eno/pkg/function"
 	"github.com/Azure/eno/pkg/helmshim"
 )
 
+type enoInputs struct{}
+
 func main() {
 	// The Helm shim sets sane defaults, see helmshim.With* for overrides.
-	//
-	// WithValuesFunc is particularly useful in cases where there is not a 1:1 mapping
-	// between input resources and Helm values.
-	helmshim.MustRenderChart()
+
+	synth := helmshim.Synth(func(enoInputs) (map[string]any, error) {
+		return map[string]any{}, nil
+	})
+	function.Main(synth)
 }
