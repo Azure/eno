@@ -72,12 +72,4 @@ make test
 Or run specific tests:
 ```bash
 go test -v ./...
-
-
-
-
-
-## Additional Resources
-
-- [API Documentation](./docs/api.md) - Reference for the API objects
-- [README.md](./README.md) - Project overview and getting started guide
+```
