@@ -9,6 +9,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -37,6 +38,9 @@ type Options struct {
 	Timeout               time.Duration
 	ReadinessPollInterval time.Duration
 	MinReconcileInterval  time.Duration
+	
+	// ResourceSelector filters which resources within compositions should be reconciled
+	ResourceSelector labels.Selector
 }
 
 type Controller struct {
@@ -48,6 +52,7 @@ type Controller struct {
 	upstreamClient        client.Client
 	minReconcileInterval  time.Duration
 	disableSSA            bool
+	resourceSelector      labels.Selector
 }
 
 func New(mgr ctrl.Manager, opts Options) error {
@@ -72,6 +77,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 		upstreamClient:        upstreamClient,
 		minReconcileInterval:  opts.MinReconcileInterval,
 		disableSSA:            opts.DisableServerSideApply,
+		resourceSelector:      opts.ResourceSelector,
 	}
 
 	return builder.TypedControllerManagedBy[resource.Request](mgr).
@@ -113,6 +119,17 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	if !exists || !visible {
 		return ctrl.Result{}, nil
 	}
+	
+	// Skip resources that don't match the label selector
+	if c.resourceSelector != nil && !c.resourceSelector.Matches(labels.Set(resource.Labels)) {
+		logger.V(3).Info("skipping resource due to label selector mismatch", 
+			"resourceKind", resource.Ref.Kind, 
+			"resourceName", resource.Ref.Name, 
+			"resourceNamespace", resource.Ref.Namespace,
+			"labels", resource.Labels)
+		return ctrl.Result{}, nil
+	}
+	
 	logger = logger.WithValues("resourceKind", resource.Ref.Kind, "resourceName", resource.Ref.Name, "resourceNamespace", resource.Ref.Namespace)
 	ctx = logr.NewContext(ctx, logger)
 

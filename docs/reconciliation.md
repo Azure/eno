@@ -2,6 +2,25 @@
 
 Once a composition has been synthesized, the resulting resources are reconciled with a running k8s cluster by the `eno-reconciler` process.
 
+## Resource Selectors
+
+The `eno-reconciler` process can be configured to reconcile only a subset of resources:
+
+- `--composition-label-selector`: Limits which compositions will be reconciled based on their labels
+- `--composition-namespace`: Limits which compositions will be reconciled based on their namespace
+- `--resource-label-selector`: Limits which resources within compositions will be reconciled based on their labels
+
+Using resource label selectors allows running multiple `eno-reconciler` processes to handle different subsets of resources from the same compositions. This is useful for dividing responsibilities between reconcilers or implementing specialized reconcilers for certain types of resources.
+
+```yaml
+# Resource with a label that can be selected by a reconciler
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: example
+  labels:
+    reconciler: group-a  # Label used for selecting by a specific reconciler
+```
 
 ## Merge Semantics
 
