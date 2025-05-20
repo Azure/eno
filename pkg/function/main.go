@@ -131,7 +131,6 @@ type input struct {
 	// Object is the raw Kubernetes object read from the input ResourceList
 	Object client.Object
 	bindFn func(any) (any, error)
-	// field is the reflect.Value representing the target field in the inputs struct
 	field reflect.Value
 }
 
