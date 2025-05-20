@@ -9,9 +9,11 @@ import (
 	"os"
 
 	"github.com/Azure/eno/pkg/function"
+	"github.com/Azure/eno/pkg/helmshim"
 	"helm.sh/helm/v3/pkg/action"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/yaml"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var (
@@ -48,6 +50,36 @@ func isNullOrEmptyObject(o *unstructured.Unstructured) bool {
 		return false
 	}
 	return string(b) == "null" || string(b) == "{}"
+}
+
+type savingWrinter struct {
+	objects []client.Object
+}
+
+func (w *savingWrinter) Add(o *unstructured.Unstructured) error {
+	if o == nil {
+		return nil
+	}
+	w.objects = append(w.objects, o.DeepCopy())
+	return nil
+}
+func (w *savingWrinter) Write() error { return nil }
+
+// Synth produced a SynthFunc that 1) uses inputs as a values func ratehr than input reader 2) a writer that saves the objects to a slice rather than serialing
+func Synth[T function.Inputs](values func(inputs T) (map[string]any, error), opts ...RenderOption) function.SynthFunc[T] {
+
+	return func(inputs T) ([]client.Object, error) {
+		w := &savingWrinter{}
+		opts = append(opts, helmshim.WithValuesFunc(func(_ *function.InputReader) (map[string]any, error) {
+			return values(inputs)
+		}),
+			helmshim.WithOutputWriter(w))
+
+		if err := RenderChart(opts...); err != nil {
+			return nil, err
+		}
+		return w.objects, nil
+	}
 }
 
 func RenderChart(opts ...RenderOption) error {
