@@ -203,10 +203,6 @@ func (c *Composition) ShouldOrphanResources() bool {
 	return c.Annotations["eno.azure.io/deletion-strategy"] == "orphan" || c.Spec.Suspend
 }
 
-func (c *Composition) IsSuspended() bool {
-	return c.Spec.Suspend
-}
-
 func (s *CompositionStatus) getLatestSynthesisUUID() string {
 	if s.InFlightSynthesis != nil {
 		return s.InFlightSynthesis.UUID

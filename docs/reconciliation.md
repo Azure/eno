@@ -100,6 +100,8 @@ A composition can be suspended by setting the `suspend` field in the spec to `tr
 When a composition is suspended, the eno-reconciler will stop reconciling any related resources.
 Suspended compositions automatically infer the orphan deletion policy, preventing resources from being deleted while suspended.
 
+When a composition is suspended but a new synthesis occurs, the resources in the new synthesis will have `Synthesized != nil` but will never have `Reconciled != nil` until the composition is unsuspended. This means the resources will be generated but not applied to the cluster while the composition remains suspended.
+
 ```yaml
 spec:
   suspend: true
