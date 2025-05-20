@@ -51,7 +51,7 @@ func isNullOrEmptyObject(o *unstructured.Unstructured) bool {
 	return string(b) == "null" || string(b) == "{}"
 }
 
-// Synth produced a SynthFunc that 1) uses inputs as a values func ratehr than input reader 2) a writer that saves the objects to a slice rather than serialing
+// Synth produced a SynthFunc that 1) uses inputs as a values func rather than input reader 2) a writer that saves the objects to a slice rather than serializing
 func Synth[T function.Inputs](values func(inputs T) (map[string]any, error), opts ...RenderOption) function.SynthFunc[T] {
 
 	return func(inputs T) ([]client.Object, error) {
