@@ -72,9 +72,9 @@ type Resource struct {
 
 func (r *Resource) Deleted(comp *apiv1.Composition) bool {
 	// If it's a patch with deletion timestamp, it should delete the resource
-	// even if the composition is being deleted with orphan strategy
+	// only when the composition is being deleted
 	if r.Patch != nil && r.patchSetsDeletionTimestamp() {
-		return true
+		return comp.DeletionTimestamp != nil
 	}
 	
 	return (comp.DeletionTimestamp != nil && !comp.ShouldOrphanResources()) || r.ManifestDeleted

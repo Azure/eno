@@ -61,7 +61,7 @@ func TestDeletedMethod(t *testing.T) {
 			},
 			compositionAnnotations: nil,
 			deletionTimestamp:      nil,
-			expected:               true,
+			expected:               false, // Patch deletion only happens when composition is being deleted
 		},
 		{
 			name: "Patch with deletion timestamp with composition being deleted with orphaning",
@@ -70,7 +70,7 @@ func TestDeletedMethod(t *testing.T) {
 			},
 			compositionAnnotations: map[string]string{"eno.azure.io/deletion-strategy": "orphan"},
 			deletionTimestamp:      &metav1.Time{},
-			expected:               true, // This should be true - the patch with deletion timestamp should take precedence
+			expected:               true, // Patch deletion happens when composition is being deleted, regardless of orphaning
 		},
 		{
 			name: "Patch without deletion timestamp with composition being deleted with orphaning",

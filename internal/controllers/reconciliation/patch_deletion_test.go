@@ -15,7 +15,7 @@ import (
 )
 
 // TestPatchDeleteWhenCompositionIsDeleted proves that a patch resource can delete the resource it references
-// even when the composition is deleted with orphaning enabled.
+// when the composition is deleted with orphaning enabled.
 func TestPatchDeleteWhenCompositionIsDeleted(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)

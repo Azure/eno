@@ -119,7 +119,7 @@ patch:
 > Note: the resource will not be created if it doesn't already exist. Similarly, removing the patch pseudo-resource will not cause Eno to delete the resource.
 
 Setting `metadata.deletionTimestamp` to any value will cause the resource to be deleted if it exists.
-Patch resources with deletion timestamps will delete their target resources even when a composition has been deleted with the orphan strategy. This is useful for clean-up after controllers.
+Patch resources with deletion timestamps will only delete their target resources when a composition is being deleted (including when orphaning strategy is enabled). This is useful for clean-up after controllers.
 
 ```yaml
 apiVersion: eno.azure.io/v1
