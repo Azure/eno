@@ -162,8 +162,6 @@ func newInput(ir *InputReader, field reflect.Value) (*input, error) {
 	return i, nil
 }
 
-// Finalize applies the binding function to convert the raw Kubernetes object
-// to a custom type, if applicable, and sets the field value.
 func (i *input) Finalize() error {
 	if i.bindFn == nil {
 		return nil
