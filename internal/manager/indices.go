@@ -54,3 +54,13 @@ func indexSynthRefs() client.IndexerFunc {
 		return keys
 	}
 }
+
+func indexCompositionsBySynthesizer() client.IndexerFunc {
+	return func(o client.Object) []string {
+		comp, ok := o.(*apiv1.Composition)
+		if !ok {
+			return nil
+		}
+		return []string{comp.Spec.Synthesizer.Name}
+	}
+}
