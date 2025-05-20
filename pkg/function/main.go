@@ -130,7 +130,6 @@ func AddCustomInputType[Resource client.Object, Custom any](bind func(Resource) 
 type input struct {
 	// Object is the raw Kubernetes object read from the input ResourceList
 	Object client.Object
-	// bindFn is the function to convert the raw object to a custom type, if applicable
 	bindFn func(any) (any, error)
 	// field is the reflect.Value representing the target field in the inputs struct
 	field reflect.Value
