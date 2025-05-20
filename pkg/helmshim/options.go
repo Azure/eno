@@ -7,7 +7,6 @@ import (
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 type ValuesFunc func(*function.InputReader) (map[string]any, error)
@@ -19,17 +18,12 @@ func defaultChartLoader() (*chart.Chart, error) {
 	return loader.Load("./chart")
 }
 
-type writer interface {
-	Add(*unstructured.Unstructured) error
-	Write() error //only necessary because defaulting writer writes.
-}
-
 type options struct {
 	Action      *action.Install
 	ValuesFunc  ValuesFunc
 	ChartLoader ChartLoader
 	Reader      *function.InputReader
-	writer      *writer
+	Writer      *function.OutputWriter
 }
 
 type RenderOption func(*options)

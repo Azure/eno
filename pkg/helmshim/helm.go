@@ -9,7 +9,6 @@ import (
 	"os"
 
 	"github.com/Azure/eno/pkg/function"
-	"github.com/Azure/eno/pkg/helmshim"
 	"helm.sh/helm/v3/pkg/action"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/yaml"
@@ -52,52 +51,75 @@ func isNullOrEmptyObject(o *unstructured.Unstructured) bool {
 	return string(b) == "null" || string(b) == "{}"
 }
 
-type savingWrinter struct {
-	objects []client.Object
-}
-
-func (w *savingWrinter) Add(o *unstructured.Unstructured) error {
-	if o == nil {
-		return nil
-	}
-	w.objects = append(w.objects, o.DeepCopy())
-	return nil
-}
-func (w *savingWrinter) Write() error { return nil }
-
 // Synth produced a SynthFunc that 1) uses inputs as a values func ratehr than input reader 2) a writer that saves the objects to a slice rather than serialing
 func Synth[T function.Inputs](values func(inputs T) (map[string]any, error), opts ...RenderOption) function.SynthFunc[T] {
 
 	return func(inputs T) ([]client.Object, error) {
-		w := &savingWrinter{}
-		opts = append(opts, helmshim.WithValuesFunc(func(_ *function.InputReader) (map[string]any, error) {
-			return values(inputs)
-		}),
-			helmshim.WithOutputWriter(w))
 
-		if err := RenderChart(opts...); err != nil {
-			return nil, err
+		a := action.NewInstall(&action.Configuration{})
+		a.ReleaseName = "eno-helm-shim"
+		a.Namespace = "default"
+		a.DryRun = true
+		a.Replace = true
+		a.ClientOnly = true
+		a.IncludeCRDs = true
+
+		o := &options{
+			Action:      a,
+			ChartLoader: defaultChartLoader,
 		}
-		return w.objects, nil
+		for _, opt := range opts {
+			opt.apply(o)
+		}
+
+		c, err := o.ChartLoader()
+		if err != nil {
+			return nil, errors.Join(ErrChartNotFound, err)
+		}
+
+		//error if reader is set?
+
+		vals, err := values(inputs)
+		if err != nil {
+			return nil, errors.Join(ErrConstructingValues, err)
+		}
+
+		rel, err := a.Run(c, vals)
+		if err != nil {
+			return nil, errors.Join(ErrRenderAction, err)
+		}
+
+		b := bytes.NewBufferString(rel.Manifest)
+		// append manifest from hook
+		for _, hook := range rel.Hooks {
+			fmt.Fprintf(b, "---\n# Source: %s\n%s\n", hook.Name, hook.Manifest)
+		}
+
+		var results []client.Object
+		d := yaml.NewYAMLToJSONDecoder(b)
+		for {
+			m := &unstructured.Unstructured{}
+			err = d.Decode(m)
+			if err == io.EOF {
+				break
+			} else if err != nil {
+				return nil, errors.Join(ErrCannotParseChart, err)
+			}
+			if isNullOrEmptyObject(m) {
+				continue
+			}
+			results = append(results, m.DeepCopy())
+		}
+
+		return results, nil
 	}
 }
 
 func RenderChart(opts ...RenderOption) error {
-	a := action.NewInstall(&action.Configuration{})
-	a.ReleaseName = "eno-helm-shim"
-	a.Namespace = "default"
-	a.DryRun = true
-	a.Replace = true
-	a.ClientOnly = true
-	a.IncludeCRDs = true
-
-	o := &options{
-		Action:      a,
-		ValuesFunc:  inputsToValues,
-		ChartLoader: defaultChartLoader,
-	}
+	// prepare default reader and writer
+	o := &options{ValuesFunc: inputsToValues}
 	for _, opt := range opts {
-		opt.apply(o)
+		opt.apply(o) //we really only care about reader/writer and value func here but can't distinguish so re apply all
 	}
 
 	if o.Reader == nil {
@@ -107,55 +129,28 @@ func RenderChart(opts ...RenderOption) error {
 			return err
 		}
 	}
-
 	var usingDefaultWriter bool
 	if o.Writer == nil {
 		usingDefaultWriter = true
 		o.Writer = function.NewDefaultOutputWriter()
 	}
 
-	c, err := o.ChartLoader()
+	// delegate rendering to Synth
+	synth := Synth(o.ValuesFunc, opts...)
+	objs, err := synth(o.Reader)
 	if err != nil {
-		return errors.Join(ErrChartNotFound, err)
+		return err
 	}
 
-	vals, err := o.ValuesFunc(o.Reader)
-	if err != nil {
-		return errors.Join(ErrConstructingValues, err)
-	}
-
-	rel, err := a.Run(c, vals)
-	if err != nil {
-		return errors.Join(ErrRenderAction, err)
-	}
-
-	b := bytes.NewBufferString(rel.Manifest)
-	// append manifest from hook
-	for _, hook := range rel.Hooks {
-		fmt.Fprintf(b, "---\n# Source: %s\n%s\n", hook.Name, hook.Manifest)
-	}
-
-	d := yaml.NewYAMLToJSONDecoder(b)
-	for {
-		m := &unstructured.Unstructured{}
-		err = d.Decode(m)
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			return errors.Join(ErrCannotParseChart, err)
-		}
-		if isNullOrEmptyObject(m) {
-			continue
-		}
+	// write out results
+	for _, m := range objs {
 		if err := o.Writer.Add(m); err != nil {
 			return fmt.Errorf("adding object %s to output writer: %w", m, err)
 		}
 	}
-
 	if usingDefaultWriter {
 		return o.Writer.Write()
 	}
-
 	return nil
 }
 
