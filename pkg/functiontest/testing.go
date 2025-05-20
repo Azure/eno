@@ -182,6 +182,8 @@ func LoadSnapshots[T function.Inputs](t *testing.T, dir string) Assertion[T] {
 	}
 }
 
+// walkFiles recursively walks through a directory and processes files with yaml, yml, or json extensions.
+// For each file, it calls the provided function with the file path and name (without extension).
 func walkFiles(t *testing.T, dir string, fn func(path, name string) error) {
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {

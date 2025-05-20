@@ -130,10 +130,15 @@ func AddCustomInputType[Resource client.Object, Custom any](bind func(Resource) 
 type input struct {
 	// Object is the raw Kubernetes object read from the input ResourceList
 	Object client.Object
+	// bindFn is the function that converts the raw object to a custom input type
 	bindFn func(any) (any, error)
+	// field is the reflect.Value of the field in the inputs struct where the bound value will be stored
 	field reflect.Value
 }
 
+// newInput creates a new input instance for binding a field in the inputs struct.
+// It determines the appropriate type of object to create based on whether the field is a client.Object
+// or a custom input type, and creates an empty instance of that object.
 func newInput(ir *InputReader, field reflect.Value) (*input, error) {
 	i := &input{field: field}
 
@@ -162,6 +167,8 @@ func newInput(ir *InputReader, field reflect.Value) (*input, error) {
 	return i, nil
 }
 
+// Finalize applies the binding function to convert the raw Kubernetes object
+// to a custom type, if applicable, and sets the field value.
 func (i *input) Finalize() error {
 	if i.bindFn == nil {
 		return nil
