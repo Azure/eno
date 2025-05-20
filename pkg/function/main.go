@@ -134,8 +134,6 @@ type input struct {
 	field reflect.Value
 }
 
-// newInput creates a new input instance for the given field.
-// It handles both direct client.Object fields and custom input types.
 func newInput(ir *InputReader, field reflect.Value) (*input, error) {
 	i := &input{field: field}
 
