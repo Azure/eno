@@ -13,14 +13,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// InputReader reads and processes input resources from a KRM ResourceList.
 type InputReader struct {
 	resources *krmv1.ResourceList
 }
 
+// NewDefaultInputReader creates an InputReader that reads from os.Stdin.
 func NewDefaultInputReader() (*InputReader, error) {
 	return NewInputReader(os.Stdin)
 }
 
+// NewInputReader creates an InputReader that reads from the specified reader.
+// The reader should provide a JSON-encoded KRM ResourceList.
 func NewInputReader(r io.Reader) (*InputReader, error) {
 	rl := krmv1.ResourceList{}
 	err := json.NewDecoder(r).Decode(&rl)
@@ -32,6 +36,10 @@ func NewInputReader(r io.Reader) (*InputReader, error) {
 	}, nil
 }
 
+// ReadInput reads and converts an input resource with the specified key into the provided output object.
+// The key is matched against the "eno.azure.io/input-key" annotation on the resources.
+// Returns an error if the input with the specified key is not found or if there's an error
+// converting the resource to the requested type.
 func ReadInput[T client.Object](ir *InputReader, key string, out T) error {
 	var found bool
 	for _, i := range ir.resources.Items {
@@ -51,6 +59,7 @@ func ReadInput[T client.Object](ir *InputReader, key string, out T) error {
 	return nil
 }
 
+// All returns a map of all input resources keyed by their input key.
 func (i *InputReader) All() map[string]*unstructured.Unstructured {
 	m := map[string]*unstructured.Unstructured{}
 	for _, o := range i.resources.Items {
@@ -59,6 +68,7 @@ func (i *InputReader) All() map[string]*unstructured.Unstructured {
 	return m
 }
 
+// getKey returns the input key for a Kubernetes object by reading the "eno.azure.io/input-key" annotation.
 func getKey(obj client.Object) string {
 	if obj.GetAnnotations() == nil {
 		return ""
