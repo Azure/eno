@@ -71,7 +71,13 @@ type Resource struct {
 }
 
 func (r *Resource) Deleted(comp *apiv1.Composition) bool {
-	return (comp.DeletionTimestamp != nil && !comp.ShouldOrphanResources()) || r.ManifestDeleted || (r.Patch != nil && r.patchSetsDeletionTimestamp())
+	// If it's a patch with deletion timestamp, it should delete the resource
+	// even if the composition is being deleted with orphan strategy
+	if r.Patch != nil && r.patchSetsDeletionTimestamp() {
+		return true
+	}
+	
+	return (comp.DeletionTimestamp != nil && !comp.ShouldOrphanResources()) || r.ManifestDeleted
 }
 
 func (r *Resource) Unstructured() *unstructured.Unstructured { return r.parsed.DeepCopy() }
