@@ -99,7 +99,7 @@ func (s *Synthesizer) SetCondition(cType SynthesizerConditionType, status metav1
 	}
 
 	now := metav1.Now()
-	existingCondition := s.findCondition(cType)
+	existingCondition := s.GetCondition(cType)
 
 	if existingCondition == nil {
 		s.Status.Conditions = append(s.Status.Conditions, metav1.Condition{
@@ -112,21 +112,31 @@ func (s *Synthesizer) SetCondition(cType SynthesizerConditionType, status metav1
 		return
 	}
 
-	if existingCondition.Status != status {
-		existingCondition.LastTransitionTime = now
+	// Only update if values have changed
+	if existingCondition.Status != status || existingCondition.Reason != reason || existingCondition.Message != message {
+		// Replace the entire condition instead of mutating it
+		for i := range s.Status.Conditions {
+			if s.Status.Conditions[i].Type == string(cType) {
+				lastTransitionTime := existingCondition.LastTransitionTime
+				if existingCondition.Status != status {
+					lastTransitionTime = now
+				}
+
+				s.Status.Conditions[i] = metav1.Condition{
+					Type:               string(cType),
+					Status:             status,
+					Reason:             reason,
+					Message:            message,
+					LastTransitionTime: lastTransitionTime,
+				}
+				break
+			}
+		}
 	}
-	existingCondition.Status = status
-	existingCondition.Reason = reason
-	existingCondition.Message = message
 }
 
 // GetCondition returns the condition with the given type from the synthesizer status
 func (s *Synthesizer) GetCondition(cType SynthesizerConditionType) *metav1.Condition {
-	return s.findCondition(cType)
-}
-
-// findCondition is a helper function to find a condition by type
-func (s *Synthesizer) findCondition(cType SynthesizerConditionType) *metav1.Condition {
 	for i := range s.Status.Conditions {
 		if s.Status.Conditions[i].Type == string(cType) {
 			return &s.Status.Conditions[i]

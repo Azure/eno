@@ -125,11 +125,6 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			continue
 		}
 
-		// Skip operations for paused synthesizers
-		if synth.Spec.Paused {
-			continue
-		}
-
 		next := newOp(&synth, &comp, nextSlot)
 		if next != nil && (op == nil || next.Less(op)) {
 			op = next
@@ -141,7 +136,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	for _, synth := range synths.Items {
 		if err := updateSynthesizerStatus(ctx, c.client, &synth, comps.Items); err != nil {
 			logger.Error(err, "updating synthesizer status", "synthesizer", synth.Name)
-			// Continue processing - don't fail the whole reconcile for status updates
+			return ctrl.Result{}, err
 		}
 	}
 

@@ -373,6 +373,8 @@ to return a set of Kubernetes resources. Essentially they generate the desired s
 | `status` _[SynthesizerStatus](#synthesizerstatus)_ |  |  |  |
 
 
+
+
 #### SynthesizerRef
 
 
@@ -407,6 +409,7 @@ _Appears in:_
 | `command` _string array_ | Copied opaquely into the container's command property. | [synthesize] |  |
 | `execTimeout` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#duration-v1-meta)_ | Timeout for each execution of the synthesizer command. | 10s |  |
 | `podTimeout` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#duration-v1-meta)_ | Pods are recreated after they've existed for at least the pod timeout interval.<br />This helps close the loop in failure modes where a pod may be considered ready but not actually able to run. | 2m |  |
+| `paused` _boolean_ | Paused indicates that rollout of changes to compositions using this synthesizer should be suspended.<br />Changes to the synthesizer will not be applied until Paused is set to false. |  |  |
 | `refs` _[Ref](#ref) array_ | Refs define the Synthesizer's input schema without binding it to specific<br />resources. |  |  |
 | `podOverrides` _[PodOverrides](#podoverrides)_ | PodOverrides sets values in the pods used to execute this synthesizer. |  |  |
 
@@ -415,13 +418,16 @@ _Appears in:_
 
 
 
-
+SynthesizerStatus contains information about the current state of the synthesizer
 
 
 
 _Appears in:_
 - [Synthesizer](#synthesizer)
 
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#condition-v1-meta) array_ | Conditions provide information about the current state of the synthesizer rollout |  |  |
 
 
 #### Variation
