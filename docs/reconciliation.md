@@ -94,6 +94,17 @@ annotations:
   eno.azure.io/deletion-strategy: orphan
 ```
 
+## Suspending Reconciliation
+
+A composition can be suspended by setting the `suspend` field in the spec to `true`.
+When a composition is suspended, the eno-reconciler will stop reconciling any related resources.
+Suspended compositions automatically infer the orphan deletion policy, preventing resources from being deleted while suspended.
+
+```yaml
+spec:
+  suspend: true
+```
+
 
 ## Meta Resources
 

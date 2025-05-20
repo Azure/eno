@@ -101,6 +101,12 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	synthesisUUID := comp.Status.GetCurrentSynthesisUUID()
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisUUID", synthesisUUID)
 
+	// Skip reconciliation if the composition is suspended
+	if comp.IsSuspended() {
+		logger.V(1).Info("skipping reconciliation because composition is suspended")
+		return ctrl.Result{}, nil
+	}
+
 	if comp.Status.CurrentSynthesis == nil {
 		return ctrl.Result{}, nil // nothing to do
 	}

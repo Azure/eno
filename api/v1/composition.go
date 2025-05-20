@@ -48,6 +48,9 @@ type CompositionSpec struct {
 	// A set of environment variables that will be made available inside the synthesis Pod.
 	// +kubebuilder:validation:MaxItems:=500
 	SynthesisEnv []EnvVar `json:"synthesisEnv,omitempty"`
+
+	// Suspend tells the eno-reconciler to stop reconciling any related resources when set to true.
+	Suspend bool `json:"suspend,omitempty"`
 }
 
 type CompositionStatus struct {
@@ -197,7 +200,11 @@ func (c *Composition) ShouldForceResynthesis() bool {
 }
 
 func (c *Composition) ShouldOrphanResources() bool {
-	return c.Annotations["eno.azure.io/deletion-strategy"] == "orphan"
+	return c.Annotations["eno.azure.io/deletion-strategy"] == "orphan" || c.Spec.Suspend
+}
+
+func (c *Composition) IsSuspended() bool {
+	return c.Spec.Suspend
 }
 
 func (s *CompositionStatus) getLatestSynthesisUUID() string {

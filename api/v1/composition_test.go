@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestInputRevisionsLess(t *testing.T) {
@@ -202,4 +203,87 @@ func TestForceSynthesisAnnotation(t *testing.T) {
 	// Update the synthesis UUID
 	comp.Status.CurrentSynthesis.UUID = "234"
 	assert.False(t, comp.ShouldForceResynthesis())
+}
+
+func TestIsSuspended(t *testing.T) {
+	tests := []struct {
+		name     string
+		comp     Composition
+		expected bool
+	}{
+		{
+			name:     "not suspended",
+			comp:     Composition{},
+			expected: false,
+		},
+		{
+			name: "suspended",
+			comp: Composition{
+				Spec: CompositionSpec{
+					Suspend: true,
+				},
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.comp.IsSuspended())
+		})
+	}
+}
+
+func TestShouldOrphanResources(t *testing.T) {
+	tests := []struct {
+		name     string
+		comp     Composition
+		expected bool
+	}{
+		{
+			name:     "no annotation, not suspended",
+			comp:     Composition{},
+			expected: false,
+		},
+		{
+			name: "no annotation, suspended",
+			comp: Composition{
+				Spec: CompositionSpec{
+					Suspend: true,
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "orphan annotation, not suspended",
+			comp: Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"eno.azure.io/deletion-strategy": "orphan",
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "orphan annotation and suspended",
+			comp: Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"eno.azure.io/deletion-strategy": "orphan",
+					},
+				},
+				Spec: CompositionSpec{
+					Suspend: true,
+				},
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.comp.ShouldOrphanResources())
+		})
+	}
 }
