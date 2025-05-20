@@ -52,7 +52,9 @@ func isNullOrEmptyObject(o *unstructured.Unstructured) bool {
 }
 
 // Synth produced a SynthFunc that 1) uses inputs as a values func rather than input reader 2) a writer that saves the objects to a slice rather than serializing
-func Synth[T function.Inputs](values func(inputs T) (map[string]any, error), opts ...RenderOption) function.SynthFunc[T] {
+type ValuesFunc[T function.Inputs] func(inputs T) (map[string]any, error)
+
+func Synth[T function.Inputs](values ValuesFunc[T], opts ...RenderOption) function.SynthFunc[T] {
 
 	return func(inputs T) ([]client.Object, error) {
 
