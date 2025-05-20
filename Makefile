@@ -7,7 +7,7 @@ ENO_CONTROLLER_IMAGE_NAME ?= eno-controller
 ENO_RECONCILER_IMAGE_VERSION ?= $(TAG)
 ENO_RECONCILER_IMAGE_NAME ?= eno-reconciler
 
-# Test timeout for reconciliation controller tests (default: 5m)
+# Test timeout for tests (5m, shorter than Go's default of 10m)
 RECONCILIATION_TEST_TIMEOUT ?= 5m
 
 .PHONY: docker-build-eno-controller
@@ -24,7 +24,7 @@ docker-build-eno-reconciler:
 		--tag $(REGISTRY)/$(ENO_RECONCILER_IMAGE_NAME):$(ENO_RECONCILER_IMAGE_VERSION) .
 	docker push $(REGISTRY)/$(ENO_RECONCILER_IMAGE_NAME):$(ENO_RECONCILER_IMAGE_VERSION)
 
-# Run tests with increased timeout for all test packages
+# Run tests with a 5m timeout (shorter than Go's default of 10m)
 .PHONY: test
 test:
 	go test -v -timeout $(RECONCILIATION_TEST_TIMEOUT) ./...
