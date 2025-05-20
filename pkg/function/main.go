@@ -14,9 +14,15 @@ import (
 type Inputs interface{}
 
 // SynthFunc defines a synthesizer function that takes a set of inputs and returns a list of objects.
+// It's the core function type that implements the logic of a KRM function, taking typed inputs
+// and producing Kubernetes objects as outputs.
 type SynthFunc[T Inputs] func(inputs T) ([]client.Object, error)
 
 // Main is the entrypoint for Eno synthesizer processes written using the framework defined by this package.
+// It handles the initialization of input/output, the reading of inputs from stdin as a KRM ResourceList,
+// the execution of the provided function, and writing the outputs to stdout as a KRM ResourceList.
+//
+// This function panics if there is an error during input/output initialization or function execution.
 func Main[T Inputs](fn SynthFunc[T]) {
 	ow := NewDefaultOutputWriter()
 	ir, err := NewDefaultInputReader()
@@ -80,6 +86,32 @@ var customInputSourceTypes = map[string]reflect.Type{}
 var customInputBindings = map[string]func(any) (any, error){}
 
 // AddCustomInputType allows types that do not implement client.Object to be used as fields of Inputs structs.
+// This enables the use of domain-specific types in function inputs, while still using the KRM ResourceList
+// format for serialization.
+//
+// Example:
+//
+//	type Config struct {
+//	    Port int
+//	    Host string
+//	}
+//
+//	AddCustomInputType(func(cm *corev1.ConfigMap) (*Config, error) {
+//	    port, err := strconv.Atoi(cm.Data["port"])
+//	    if err != nil {
+//	        return nil, err
+//	    }
+//	    return &Config{
+//	        Port: port,
+//	        Host: cm.Data["host"],
+//	    }, nil
+//	})
+//
+// The Config type can then be used in an Inputs struct:
+//
+//	type MyInputs struct {
+//	    AppConfig *Config `eno_key:"app-config"` // Will be bound to a ConfigMap with that key
+//	}
 func AddCustomInputType[Resource client.Object, Custom any](bind func(Resource) (Custom, error)) {
 	str := reflect.TypeOf(bind).Out(0).String()
 
@@ -93,12 +125,19 @@ func AddCustomInputType[Resource client.Object, Custom any](bind func(Resource) 
 	}
 }
 
+// input is an internal type that handles the process of binding a raw Kubernetes object
+// from the input ResourceList to the appropriate field in the function's inputs struct.
 type input struct {
+	// Object is the raw Kubernetes object read from the input ResourceList
 	Object client.Object
+	// bindFn is the function to convert the raw object to a custom type, if applicable
 	bindFn func(any) (any, error)
-	field  reflect.Value
+	// field is the reflect.Value representing the target field in the inputs struct
+	field reflect.Value
 }
 
+// newInput creates a new input instance for the given field.
+// It handles both direct client.Object fields and custom input types.
 func newInput(ir *InputReader, field reflect.Value) (*input, error) {
 	i := &input{field: field}
 
@@ -127,6 +166,8 @@ func newInput(ir *InputReader, field reflect.Value) (*input, error) {
 	return i, nil
 }
 
+// Finalize applies the binding function to convert the raw Kubernetes object
+// to a custom type, if applicable, and sets the field value.
 func (i *input) Finalize() error {
 	if i.bindFn == nil {
 		return nil

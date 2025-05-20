@@ -11,6 +11,9 @@ import (
 )
 
 // ReadManifest reads a YAML file from disk and parses each document into an unstructured object.
+// The file can contain multiple YAML documents separated by "---".
+// Each document must be a valid Kubernetes resource.
+// Returns a slice of client.Object (as unstructured.Unstructured) or an error.
 func ReadManifest(path string) ([]client.Object, error) {
 	file, err := os.Open(path)
 	if err != nil {

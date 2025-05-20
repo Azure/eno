@@ -15,13 +15,17 @@ import (
 )
 
 // Scenario represents a test case for a synthesizer function.
+// It contains the name of the scenario, the inputs to provide to the function,
+// and an assertion function to validate the outputs.
 type Scenario[T function.Inputs] struct {
-	Name      string
-	Inputs    T
-	Assertion Assertion[T]
+	Name      string       // Name identifies the test scenario
+	Inputs    T            // Inputs to provide to the function
+	Assertion Assertion[T] // Function to validate the outputs
 }
 
 // Evaluate runs the synthesizer function with the provided scenarios and asserts on the outputs.
+// Each scenario is run as a separate subtest, and the function's outputs are passed to the scenario's
+// assertion function for validation.
 func Evaluate[T function.Inputs](t *testing.T, synth function.SynthFunc[T], scenarios ...Scenario[T]) {
 	for _, s := range scenarios {
 		t.Run(s.Name, func(t *testing.T) {
@@ -35,6 +39,21 @@ func Evaluate[T function.Inputs](t *testing.T, synth function.SynthFunc[T], scen
 }
 
 // LoadScenarios recursively loads yaml and json input fixtures from the specified directory.
+// Each file is loaded as a scenario with the given assertion function.
+// The scenarios are shuffled to ensure tests aren't dependent on execution order.
+//
+// Example:
+//
+//	func TestMyFunction(t *testing.T) {
+//	    fn := func(inputs MyInputs) ([]client.Object, error) {
+//	        // Your function implementation
+//	    }
+//
+//	    scenarios := functiontest.LoadScenarios(t, "testdata/fixtures", func(t *testing.T, s *functiontest.Scenario[MyInputs], outputs []client.Object) {
+//	        // Assertions on outputs
+//	    })
+//	    functiontest.Evaluate(t, fn, scenarios...)
+//	}
 func LoadScenarios[T any](t *testing.T, dir string, assertion Assertion[T]) []Scenario[T] {
 	scenarios := []Scenario[T]{}
 	walkFiles(t, dir, func(path, name string) error {
@@ -64,9 +83,37 @@ func LoadScenarios[T any](t *testing.T, dir string, assertion Assertion[T]) []Sc
 	return scenarios
 }
 
+// Assertion is a function that validates the outputs of a synthesizer function.
+// It receives the testing.T instance, the scenario that was run, and the outputs from the function.
 type Assertion[T function.Inputs] func(t *testing.T, s *Scenario[T], outputs []client.Object)
 
 // AssertionChain is a helper function to create an assertion that runs multiple assertions in sequence.
+// This allows composing multiple assertions for the same scenario.
+//
+// Example:
+//
+//	func TestMyFunction(t *testing.T) {
+//	    fn := func(inputs struct{}) ([]client.Object, error) {
+//	        // Your function implementation
+//	    }
+//
+//	    hasOnePod := func(t *testing.T, s *functiontest.Scenario[struct{}], outputs []client.Object) {
+//	        require.Len(t, outputs, 1)
+//	        _, ok := outputs[0].(*corev1.Pod)
+//	        require.True(t, ok)
+//	    }
+//
+//	    podHasName := func(t *testing.T, s *functiontest.Scenario[struct{}], outputs []client.Object) {
+//	        pod := outputs[0].(*corev1.Pod)
+//	        assert.Equal(t, "test-pod", pod.Name)
+//	    }
+//
+//	    functiontest.Evaluate(t, fn, functiontest.Scenario[struct{}]{
+//	        Name:      "creates-pod",
+//	        Inputs:    struct{}{},
+//	        Assertion: functiontest.AssertionChain(hasOnePod, podHasName),
+//	    })
+//	}
 func AssertionChain[T function.Inputs](asserts ...Assertion[T]) Assertion[T] {
 	return func(t *testing.T, s *Scenario[T], outputs []client.Object) {
 		for i, assert := range asserts {
@@ -86,6 +133,18 @@ func AssertionChain[T function.Inputs](asserts ...Assertion[T]) Assertion[T] {
 // So, to bootstrap snapshots for a given fixture/scenario: create an empty snapshot file
 // that matches the name of the scenario (or fixture if using LoadScenarios), and run the
 // tests with ENO_GEN_SNAPSHOTS=true.
+//
+// Example:
+//
+//	func TestMyFunction(t *testing.T) {
+//	    fn := func(inputs MyInputs) ([]client.Object, error) {
+//	        // Your function implementation
+//	    }
+//
+//	    assertion := functiontest.LoadSnapshots[MyInputs](t, "testdata/snapshots")
+//	    scenarios := functiontest.LoadScenarios(t, "testdata/fixtures", assertion)
+//	    functiontest.Evaluate(t, fn, scenarios...)
+//	}
 func LoadSnapshots[T function.Inputs](t *testing.T, dir string) Assertion[T] {
 	snapshots := map[string][]byte{}
 	walkFiles(t, dir, func(path, name string) error {
@@ -123,6 +182,8 @@ func LoadSnapshots[T function.Inputs](t *testing.T, dir string) Assertion[T] {
 	}
 }
 
+// walkFiles recursively walks through a directory and processes files with yaml, yml, or json extensions.
+// For each file, it calls the provided function with the file path and name (without extension).
 func walkFiles(t *testing.T, dir string, fn func(path, name string) error) {
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
