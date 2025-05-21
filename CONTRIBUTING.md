@@ -61,15 +61,3 @@ make setup-testenv
 ```
 
 This will download the controller-runtime test environment binaries needed for running tests.
-
-### Running Tests
-
-Run all tests with extended timeout:
-```bash
-make test
-```
-
-Or run specific tests:
-```bash
-go test -v ./...
-```
