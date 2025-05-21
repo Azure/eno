@@ -24,11 +24,6 @@ docker-build-eno-reconciler:
 		--tag $(REGISTRY)/$(ENO_RECONCILER_IMAGE_NAME):$(ENO_RECONCILER_IMAGE_VERSION) .
 	docker push $(REGISTRY)/$(ENO_RECONCILER_IMAGE_NAME):$(ENO_RECONCILER_IMAGE_VERSION)
 
-# Run tests with a 5m timeout (shorter than Go's default of 10m)
-.PHONY: test
-test:
-	go test -v -timeout $(RECONCILIATION_TEST_TIMEOUT) ./...
-
 # Setup controller-runtime test environment binaries
 .PHONY: setup-testenv
 setup-testenv:
