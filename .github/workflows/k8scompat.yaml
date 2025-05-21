@@ -8,30 +8,37 @@ on:
   schedule:
     - cron: 0 0 * * *
 
-env:
-  setupEnvtestCmd: "go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest"
-
 jobs:
   buildMatrix:
-    name: Generate Matrix
+    name: Prepare Matrix
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.build.outputs.matrix }}
+      matrix: ${{ steps.matrixbuild.outputs.matrix }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: Set up Go
         uses: actions/setup-go@v5
 
-      - name: Generate test matrix using setup-envtest
-        id: build
-        run: |
-          echo "matrix=$($setupEnvtestCmd -p env list | awk '/)/ {print $2}' | awk -F'.' '{print $2}' | jq -c --slurp 'map(tostring) | unique')" >> $GITHUB_OUTPUT 
+      - name: Generate test matrix
+        id: matrixbuild
+        run: echo "matrix=$(./hack/build-k8s-matrix.sh)" >> $GITHUB_OUTPUT
+
+      - name: Build the test binary
+        id: testbuild
+        run: go test -c -o eno-tests ./internal/controllers/reconciliation
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-artifacts
+          retention-days: 1
+          path: eno-tests
 
   test:
     name: Kubernetes 1.${{ matrix.downstreamApiserverMinorVersion }}
     needs: buildMatrix
     runs-on: ubuntu-latest
-    env:
-      upstreamApiserverVersion: 1.28.x
     strategy:
       fail-fast: false
       matrix:
@@ -39,17 +46,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Download test artifacts
+        uses: actions/download-artifact@v4
         with:
-          go-version-file: go.mod
+          name: test-artifacts
 
       - name: Download kubebuilder assets
         run: |
-          echo "UPSTREAM_KUBEBUILDER_ASSETS=$($setupEnvtestCmd use -p path ${{ env.upstreamApiserverVersion }})" >> $GITHUB_ENV
-          echo "DOWNSTREAM_KUBEBUILDER_ASSETS=$($setupEnvtestCmd use -p path 1.${{ matrix.downstreamApiserverMinorVersion }}.x)" >> $GITHUB_ENV
+          echo "UPSTREAM_KUBEBUILDER_ASSETS=$(./hack/download-k8s.sh)" >> $GITHUB_ENV
+          echo "DOWNSTREAM_KUBEBUILDER_ASSETS=$(./hack/download-k8s.sh ${{ matrix.downstreamApiserverMinorVersion }})" >> $GITHUB_ENV
 
       - name: Run tests
-        run: go test -v ./internal/controllers/reconciliation
+        run: |
+          chmod +x eno-tests
+          cd internal/controllers/reconciliation
+          ../../../eno-tests -test.v
         env:
           DOWNSTREAM_VERSION_MINOR: "${{ matrix.downstreamApiserverMinorVersion }}"
