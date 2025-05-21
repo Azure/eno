@@ -12,16 +12,6 @@ The `eno-reconciler` process can be configured to reconcile only a subset of res
 
 Using resource label selectors allows running multiple `eno-reconciler` processes to handle different subsets of resources from the same compositions. This is useful for dividing responsibilities between reconcilers or implementing specialized reconcilers for certain types of resources.
 
-```yaml
-# Resource with a label that can be selected by a reconciler
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: example
-  labels:
-    reconciler: group-a  # Label used for selecting by a specific reconciler
-```
-
 ## Merge Semantics
 
 By default, Eno uses [server-side apply](https://kubernetes.io/docs/reference/using-api/server-side-apply/) to create and update resources it manages.

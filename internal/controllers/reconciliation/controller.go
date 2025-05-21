@@ -39,7 +39,6 @@ type Options struct {
 	ReadinessPollInterval time.Duration
 	MinReconcileInterval  time.Duration
 	
-	// ResourceSelector filters which resources within compositions should be reconciled
 	ResourceSelector labels.Selector
 }
 
