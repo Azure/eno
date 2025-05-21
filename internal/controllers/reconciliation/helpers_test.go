@@ -59,9 +59,10 @@ func writeComposition(t *testing.T, client client.Client, orphan bool) (*apiv1.S
 
 func setupTestSubject(t *testing.T, mgr *testutil.Manager) {
 	setupTestSubjectForOptions(t, mgr, Options{
-		Manager:               mgr.Manager,
-		Timeout:               time.Minute,
-		ReadinessPollInterval: time.Hour,
+		Manager:                mgr.Manager,
+		Timeout:                time.Minute,
+		ReadinessPollInterval:  time.Hour,
+		DisableServerSideApply: mgr.NoSsaSupport,
 	})
 }
 

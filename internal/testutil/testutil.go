@@ -203,6 +203,11 @@ func NewManager(t *testing.T, testOpts ...TestManagerOption) *Manager {
 		conf.Disable("service-account-issuer")
 	}
 
+	// k8s <1.16 does not support server-side-apply
+	if version < 16 {
+		m.NoSsaSupport = true
+	}
+
 	t.Cleanup(func() {
 		err := downstreamEnv.Stop()
 		if err != nil {
@@ -255,6 +260,9 @@ type Manager struct {
 	DownstreamRestConfig *rest.Config  // may or may not == RestConfig
 	DownstreamClient     client.Client // may or may not == Manager.GetClient()
 	DownstreamEnv        *envtest.Environment
+
+	// NoSsaSupport is true if the cluster does not support server-side-apply
+	NoSsaSupport bool
 }
 
 func (m *Manager) Start(t *testing.T) {
