@@ -157,28 +157,6 @@ This project has adopted the [Microsoft Open Source Code of Conduct](https://ope
 For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
 contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
 
-### Development Scripts
-
-The project includes various scripts in the `hack` directory to assist with development tasks:
-
-- Building and deploying images: `hack/build.sh` and `hack/deploy.sh`
-- Running tests: `hack/smoke-test.sh`
-
-For convenience, common development tasks are available as Makefile targets:
-
-```bash
-# Build all images
-make build
-
-# Deploy using existing images
-make deploy
-
-# Build and deploy
-make build-deploy
-```
-
-See the [hack/README.md](./hack/README.md) file for more details on available scripts and options.
-
 ## Trademarks
 
 This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft 
