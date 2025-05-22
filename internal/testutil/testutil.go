@@ -183,6 +183,7 @@ func NewManager(t *testing.T, testOpts ...TestManagerOption) *Manager {
 		return m // only one env needed
 	}
 	version, _ := strconv.Atoi(os.Getenv("DOWNSTREAM_VERSION_MINOR"))
+	m.DownstreamVersion = version
 
 	downstreamEnv := &envtest.Environment{
 		BinaryAssetsDirectory:    dir,
@@ -260,6 +261,7 @@ type Manager struct {
 	DownstreamRestConfig *rest.Config  // may or may not == RestConfig
 	DownstreamClient     client.Client // may or may not == Manager.GetClient()
 	DownstreamEnv        *envtest.Environment
+	DownstreamVersion    int
 
 	// NoSsaSupport is true if the cluster does not support server-side-apply
 	NoSsaSupport bool

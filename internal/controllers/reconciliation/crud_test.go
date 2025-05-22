@@ -211,6 +211,10 @@ func TestCRUD(t *testing.T) {
 			upstream := mgr.GetClient()
 			downstream := mgr.DownstreamClient
 
+			if test.Name == "strategic-merge" {
+				requireSSA(t, mgr)
+			}
+
 			registerControllers(t, mgr)
 			testutil.WithFakeExecutor(t, mgr, newSliceBuilder(t, scheme, &test))
 
