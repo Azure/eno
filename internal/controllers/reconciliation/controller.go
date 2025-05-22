@@ -284,6 +284,11 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 func (c *Controller) update(ctx context.Context, resource *resource.Resource, current *unstructured.Unstructured, dryrun bool) (updated *unstructured.Unstructured, err error) {
 	updated = resource.Unstructured()
 
+	// Default the namespace to "default" if it's empty to prevent "an empty namespace may not be set" errors
+	if updated.GetNamespace() == "" {
+		updated.SetNamespace("default")
+	}
+
 	if current != nil {
 		updated.SetResourceVersion(current.GetResourceVersion())
 	}
