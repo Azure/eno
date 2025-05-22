@@ -307,6 +307,9 @@ func (c *Controller) update(ctx context.Context, resource *resource.Resource, cu
 	var patch client.Patch
 	if c.disableSSA {
 		patch = client.MergeFrom(current)
+
+		js, _ := patch.Data(updated)
+		println("TODO PATCH", string(js))
 	} else {
 		patch = client.Apply
 		opts = append(opts, client.ForceOwnership, client.FieldOwner("eno"))
