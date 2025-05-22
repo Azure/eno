@@ -221,46 +221,48 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	}
 
 	// Dry-run the update to see if it's needed
-	dryRun, err := c.update(ctx, res, current, true)
-	if err != nil {
-		return false, fmt.Errorf("dry-run applying update: %w", err)
-	}
-	if resource.Compare(dryRun, current) {
-		return false, nil // in sync
-	}
-
-	// When using server side apply, make sure we haven't lost any managedFields metadata.
-	// Eno should always remove fields that are no longer set by the synthesizer, even if another client messed with managedFields.
-	if current != nil && !c.disableSSA && !res.Replace {
-		var dryRunPrev *unstructured.Unstructured
-		if prev != nil {
-			dryRunPrev = prev.Unstructured()
-			err = c.upstreamClient.Patch(ctx, dryRunPrev, client.Apply, client.ForceOwnership, client.FieldOwner("eno"), client.DryRunAll)
-			if err != nil {
-				return false, fmt.Errorf("getting managed fields values for previous version: %w", err)
-			}
+	if !c.disableSSA {
+		dryRun, err := c.update(ctx, res, current, true)
+		if err != nil {
+			return false, fmt.Errorf("dry-run applying update: %w", err)
+		}
+		if resource.Compare(dryRun, current) {
+			return false, nil // in sync
 		}
 
-		outOfSyncWithPrevious := dryRunPrev != nil && !resource.CompareEnoManagedFields(dryRunPrev.GetManagedFields(), current.GetManagedFields())
-		outOfSyncWithCurrent := !resource.CompareEnoManagedFields(dryRun.GetManagedFields(), current.GetManagedFields())
-
-		if (outOfSyncWithPrevious && outOfSyncWithCurrent) || (outOfSyncWithCurrent && dryRunPrev == nil) {
-			if dryRunPrev == nil {
-				current.SetManagedFields(
-					resource.MergeEnoManagedFields(
-						current.GetManagedFields(), dryRun.GetManagedFields()))
-			} else {
-				current.SetManagedFields(
-					resource.MergeEnoManagedFields(
-						current.GetManagedFields(), dryRunPrev.GetManagedFields()))
+		// When using server side apply, make sure we haven't lost any managedFields metadata.
+		// Eno should always remove fields that are no longer set by the synthesizer, even if another client messed with managedFields.
+		if current != nil && !res.Replace {
+			var dryRunPrev *unstructured.Unstructured
+			if prev != nil {
+				dryRunPrev = prev.Unstructured()
+				err = c.upstreamClient.Patch(ctx, dryRunPrev, client.Apply, client.ForceOwnership, client.FieldOwner("eno"), client.DryRunAll)
+				if err != nil {
+					return false, fmt.Errorf("getting managed fields values for previous version: %w", err)
+				}
 			}
 
-			err := c.upstreamClient.Update(ctx, current, client.FieldOwner("eno"))
-			if err != nil {
-				return false, fmt.Errorf("updating managed fields metadata: %w", err)
+			outOfSyncWithPrevious := dryRunPrev != nil && !resource.CompareEnoManagedFields(dryRunPrev.GetManagedFields(), current.GetManagedFields())
+			outOfSyncWithCurrent := !resource.CompareEnoManagedFields(dryRun.GetManagedFields(), current.GetManagedFields())
+
+			if (outOfSyncWithPrevious && outOfSyncWithCurrent) || (outOfSyncWithCurrent && dryRunPrev == nil) {
+				if dryRunPrev == nil {
+					current.SetManagedFields(
+						resource.MergeEnoManagedFields(
+							current.GetManagedFields(), dryRun.GetManagedFields()))
+				} else {
+					current.SetManagedFields(
+						resource.MergeEnoManagedFields(
+							current.GetManagedFields(), dryRunPrev.GetManagedFields()))
+				}
+
+				err := c.upstreamClient.Update(ctx, current, client.FieldOwner("eno"))
+				if err != nil {
+					return false, fmt.Errorf("updating managed fields metadata: %w", err)
+				}
+				logger.V(0).Info("corrected drift in managed fields metadata")
+				return true, nil
 			}
-			logger.V(0).Info("corrected drift in managed fields metadata")
-			return true, nil
 		}
 	}
 
@@ -277,7 +279,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	if current != nil {
 		logger = logger.WithValues("oldResourceVersion", current.GetResourceVersion())
 	}
-	logger.V(0).Info("applied resource", "resourceVersion", updated.GetResourceVersion(), "dryRunResourceVersion", dryRun.GetResourceVersion())
+	logger.V(0).Info("applied resource", "resourceVersion", updated.GetResourceVersion())
 	return true, nil
 }
 
