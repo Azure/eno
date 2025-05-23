@@ -229,6 +229,10 @@ func TestPatchStrategyReplace(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
 
+	if mgr.DownstreamVersion < 21 {
+		t.Skipf("skipping test for downstream version %d because it doesn't support policy/v1", mgr.DownstreamVersion)
+	}
+
 	registerControllers(t, mgr)
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 		output := &krmv1.ResourceList{}

@@ -153,6 +153,7 @@ func TestRemoveProperty(t *testing.T) {
 func TestRemovePropertyAndOwnership(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
+	requireSSA(t, mgr)
 	upstream := mgr.GetClient()
 
 	registerControllers(t, mgr)
@@ -226,6 +227,7 @@ func TestRemovePropertyAndOwnership(t *testing.T) {
 func TestReplaceProperty(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
+	requireSSA(t, mgr)
 	upstream := mgr.GetClient()
 
 	registerControllers(t, mgr)
@@ -296,6 +298,7 @@ func TestReplaceProperty(t *testing.T) {
 func TestReplacePropertyAndRemoveOwnership(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
+	requireSSA(t, mgr)
 	upstream := mgr.GetClient()
 
 	registerControllers(t, mgr)
