@@ -10,8 +10,18 @@ on:
 
 jobs:
   test:
-    name: Apply Examples
+    name: Apply Examples (${{ matrix.config.name }})
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - name: Default
+            disable_ssa: "false"
+          - name: Disable SSA
+            disable_ssa: "true"
+
     steps:
       - uses: actions/checkout@v4
 
@@ -34,6 +44,7 @@ jobs:
         env:
           REGISTRY: localhost
           SKIP_PUSH: "yes"
+          DISABLE_SSA: "${{ matrix.config.disable_ssa }}"
         run: |
           echo "--- building eno..."
           ./dev/build.sh
