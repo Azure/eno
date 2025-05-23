@@ -306,7 +306,15 @@ func (c *Controller) update(ctx context.Context, resource *resource.Resource, cu
 
 	var patch client.Patch
 	if c.disableSSA {
-		patch = client.MergeFrom(current)
+		// When SSA is disabled, use StrategicMergeFrom which preserves fields
+		// not explicitly managed by the patch
+		if current != nil {
+			patch = client.StrategicMergeFrom(current)
+		} else {
+			// If there's no current object (shouldn't happen due to checks above),
+			// fall back to MergeFrom as a safety measure
+			patch = client.MergeFrom(current)
+		}
 	} else {
 		patch = client.Apply
 		opts = append(opts, client.ForceOwnership, client.FieldOwner("eno"))
