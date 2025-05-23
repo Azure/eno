@@ -304,10 +304,69 @@ func (c *Controller) update(ctx context.Context, resource *resource.Resource, cu
 
 	var patch client.Patch
 	if c.disableSSA {
-		// When server-side apply is disabled, use strategic merge patch
-		// This type of patch only adds or updates fields, and never removes fields
-		// that are no longer in the object specification
-		patch = client.StrategicMergeFrom(current)
+		if current != nil {
+			// When SSA is disabled, ensure we only update fields we control by:
+			// 1. Starting with the current object to preserve all fields
+			// 2. Selectively copying only the fields we want to change from the updated object
+			preserveObject := current.DeepCopy()
+			
+			// Since we can't rely on type information from the Scheme, we have to manually
+			// copy only the fields we want to update without removing any existing fields
+			// that aren't part of our managed set
+			
+			// Copy non-metadata fields we care about (spec, data, etc.)
+			// We don't want to remove fields, only add or update them
+			for k, v := range updated.Object {
+				if k != "apiVersion" && k != "kind" && k != "metadata" && k != "status" {
+					if current, ok := preserveObject.Object[k]; ok && current != nil {
+						// If the field exists in current object and is a map, we need to merge
+						// rather than replace to preserve fields we don't manage
+						if currentMap, ok := current.(map[string]interface{}); ok {
+							if updatedMap, ok := v.(map[string]interface{}); ok {
+								// Merge maps without removing fields
+								for updatedKey, updatedValue := range updatedMap {
+									currentMap[updatedKey] = updatedValue
+								}
+								continue // Skip setting this field directly as we've merged it
+							}
+						}
+					}
+					// For non-map fields or if the field doesn't exist yet, set directly
+					preserveObject.Object[k] = v
+				}
+			}
+			
+			// Copy metadata we care about like labels and annotations, without removing existing ones
+			// For unstructured objects, we need to use Get/SetLabels and Get/SetAnnotations directly
+			
+			// Merge labels
+			if labels := updated.GetLabels(); len(labels) > 0 {
+				currentLabels := preserveObject.GetLabels()
+				if currentLabels == nil {
+					currentLabels = make(map[string]string)
+				}
+				for k, v := range labels {
+					currentLabels[k] = v
+				}
+				preserveObject.SetLabels(currentLabels)
+			}
+			
+			// Merge annotations
+			if annotations := updated.GetAnnotations(); len(annotations) > 0 {
+				currentAnnotations := preserveObject.GetAnnotations()
+				if currentAnnotations == nil {
+					currentAnnotations = make(map[string]string)
+				}
+				for k, v := range annotations {
+					currentAnnotations[k] = v
+				}
+				preserveObject.SetAnnotations(currentAnnotations)
+			}
+			
+			// Use the updated object with preserved fields instead
+			updated = preserveObject
+		}
+		patch = client.MergeFrom(current)
 	} else {
 		patch = client.Apply
 		opts = append(opts, client.ForceOwnership, client.FieldOwner("eno"))
