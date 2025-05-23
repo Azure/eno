@@ -222,7 +222,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 
 	// Dry-run the update to see if it's needed
 	if !c.disableSSA {
-		dryRun, err := c.update(ctx, res, current, true)
+		dryRun, err := c.update(ctx, prev, res, current, true)
 		if err != nil {
 			return false, fmt.Errorf("dry-run applying update: %w", err)
 		}
@@ -268,7 +268,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 
 	// Do the actual non-dryrun update
 	reconciliationActions.WithLabelValues("apply").Inc()
-	updated, err := c.update(ctx, res, current, false)
+	updated, err := c.update(ctx, prev, res, current, false)
 	if err != nil {
 		return false, fmt.Errorf("applying update: %w", err)
 	}
@@ -283,7 +283,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	return true, nil
 }
 
-func (c *Controller) update(ctx context.Context, resource *resource.Resource, current *unstructured.Unstructured, dryrun bool) (updated *unstructured.Unstructured, err error) {
+func (c *Controller) update(ctx context.Context, previous, resource *resource.Resource, current *unstructured.Unstructured, dryrun bool) (updated *unstructured.Unstructured, err error) {
 	updated = resource.Unstructured()
 
 	if current != nil {
@@ -306,10 +306,10 @@ func (c *Controller) update(ctx context.Context, resource *resource.Resource, cu
 
 	var patch client.Patch
 	if c.disableSSA {
-		patch = client.MergeFrom(current)
-
-		js, _ := patch.Data(updated)
-		println("TODO PATCH", string(js))
+		if previous == nil {
+			previous = resource
+		}
+		patch = client.MergeFrom(previous.Unstructured())
 	} else {
 		patch = client.Apply
 		opts = append(opts, client.ForceOwnership, client.FieldOwner("eno"))
