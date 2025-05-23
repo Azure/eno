@@ -304,7 +304,10 @@ func (c *Controller) update(ctx context.Context, resource *resource.Resource, cu
 
 	var patch client.Patch
 	if c.disableSSA {
-		patch = client.MergeFrom(current)
+		// When server-side apply is disabled, use strategic merge patch
+		// This type of patch only adds or updates fields, and never removes fields
+		// that are no longer in the object specification
+		patch = client.StrategicMergeFrom(current)
 	} else {
 		patch = client.Apply
 		opts = append(opts, client.ForceOwnership, client.FieldOwner("eno"))

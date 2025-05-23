@@ -11,7 +11,7 @@ Any property set by the synthesizer will be applied during reconciliation, even 
 Other clients can safely populate fields _not_ managed by Eno - unmanaged fields are not modified.
 This is the standard behavior of server-side apply with `--force-conflicts=true`.
 
-> Client-side patching is supported by setting `--disable-ssa`. But beware that Eno can only add and update fields. Fields no longer returned from the synthesizer will not be removed.
+> Client-side patching is supported by setting `--disable-ssa`. When server-side apply is disabled, Eno only adds or updates fields managed by Eno - never removes them. This ensures safer patching without the risk of removing properties set by other clients.
 
 ## Opacity
 
