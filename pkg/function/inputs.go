@@ -14,17 +14,23 @@ import (
 )
 
 // InputReader reads and processes input resources from a KRM ResourceList.
+//
+// Deprecated: This type will be removed in a future version.
 type InputReader struct {
 	resources *krmv1.ResourceList
 }
 
 // NewDefaultInputReader creates an InputReader that reads from os.Stdin.
+//
+// Deprecated: This function will be removed in a future version.
 func NewDefaultInputReader() (*InputReader, error) {
 	return NewInputReader(os.Stdin)
 }
 
 // NewInputReader creates an InputReader that reads from the specified reader.
 // The reader should provide a JSON-encoded KRM ResourceList.
+//
+// Deprecated: This function will be removed in a future version.
 func NewInputReader(r io.Reader) (*InputReader, error) {
 	rl := krmv1.ResourceList{}
 	err := json.NewDecoder(r).Decode(&rl)
@@ -40,6 +46,8 @@ func NewInputReader(r io.Reader) (*InputReader, error) {
 // The key is matched against the "eno.azure.io/input-key" annotation on the resources.
 // Returns an error if the input with the specified key is not found or if there's an error
 // converting the resource to the requested type.
+//
+// Deprecated: This function will be removed in a future version.
 func ReadInput[T client.Object](ir *InputReader, key string, out T) error {
 	var found bool
 	for _, i := range ir.resources.Items {
@@ -60,6 +68,8 @@ func ReadInput[T client.Object](ir *InputReader, key string, out T) error {
 }
 
 // All returns a map of all input resources keyed by their input key.
+//
+// Deprecated: This method will be removed in a future version.
 func (i *InputReader) All() map[string]*unstructured.Unstructured {
 	m := map[string]*unstructured.Unstructured{}
 	for _, o := range i.resources.Items {
