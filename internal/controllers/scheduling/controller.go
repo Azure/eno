@@ -132,6 +132,14 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 	freeSynthesisSlots.Set(float64(c.concurrencyLimit - inFlight))
 
+	// Update synthesizer status for all synthesizers
+	for _, synth := range synths.Items {
+		if err := updateSynthesizerStatus(ctx, c.client, &synth, comps.Items); err != nil {
+			logger.Error(err, "updating synthesizer status", "synthesizer", synth.Name)
+			return ctrl.Result{}, err
+		}
+	}
+
 	if op == nil || inFlight >= c.concurrencyLimit {
 		return ctrl.Result{}, nil
 	}
