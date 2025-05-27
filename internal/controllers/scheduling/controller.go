@@ -140,7 +140,9 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			return ctrl.Result{RequeueAfter: wait}, nil
 		}
 	}
-	logger = logger.WithValues("compositionName", op.Composition.Name, "compositionNamespace", op.Composition.Namespace, "reason", op.Reason, "synthEpoch", synthEpoch)
+	logger = logger.WithValues("reason", op.Reason, "synthEpoch", synthEpoch,
+		"compositionName", op.Composition.Name, "compositionNamespace", op.Composition.Namespace,
+		"synthesizerName", op.Synthesizer.Name, "synthesizerGeneration", op.Synthesizer.Generation)
 
 	// Maintain ordering across synth/composition informers by doing a 2PC on the composition
 	if op.Reason == synthesizerModifiedOp && setSynthEpochAnnotation(op.Composition, synthEpoch) {
