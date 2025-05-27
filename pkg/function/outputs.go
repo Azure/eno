@@ -13,8 +13,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// Scheme is the default Kubernetes scheme used for serialization and GVK resolution.
 var Scheme = scheme.Scheme
 
+// OutputWriter handles writing Kubernetes resources as KRM function output.
+// It manages the collection of resources and results that will be written as a
+// KRM ResourceList when Write() is called.
+//
+// Deprecated: This type will be removed in a future version.
 type OutputWriter struct {
 	outputs   []*unstructured.Unstructured
 	results   []*krmv1.Result
@@ -23,12 +29,23 @@ type OutputWriter struct {
 	munge     MungeFunc
 }
 
+// MungeFunc is a function that can modify a Kubernetes object before it is added to the output.
+//
+// Deprecated: This type will be removed in a future version.
 type MungeFunc func(*unstructured.Unstructured)
 
+// NewDefaultOutputWriter creates an OutputWriter that writes to os.Stdout.
+//
+// Deprecated: This function will be removed in a future version.
 func NewDefaultOutputWriter() *OutputWriter {
 	return NewOutputWriter(os.Stdout, nil)
 }
 
+// NewOutputWriter creates an OutputWriter that writes to the specified writer.
+// The munge function is called on each object before it is added to the output,
+// allowing for customization of the objects.
+//
+// Deprecated: This function will be removed in a future version.
 func NewOutputWriter(w io.Writer, munge MungeFunc) *OutputWriter {
 	return &OutputWriter{
 		outputs:   []*unstructured.Unstructured{},
@@ -38,10 +55,19 @@ func NewOutputWriter(w io.Writer, munge MungeFunc) *OutputWriter {
 	}
 }
 
+// AddResult adds a Result to the output ResourceList, typically used for reporting errors.
+//
+// Deprecated: This method will be removed in a future version.
 func (w *OutputWriter) AddResult(result *krmv1.Result) {
 	w.results = append(w.results, result)
 }
 
+// Add adds one or more Kubernetes objects to the output ResourceList.
+// Objects are converted to unstructured.Unstructured and added to the list of outputs.
+// Returns an error if the output has already been written or if there's an issue
+// converting the objects to unstructured format.
+//
+// Deprecated: This method will be removed in a future version.
 func (w *OutputWriter) Add(outs ...client.Object) error {
 	if w.committed {
 		return fmt.Errorf("cannot add to a committed output")
@@ -81,6 +107,11 @@ func (w *OutputWriter) Add(outs ...client.Object) error {
 	return nil
 }
 
+// Write serializes the collected objects and results as a KRM ResourceList and writes
+// it to the configured io.Writer. After calling Write, the OutputWriter is marked as
+// committed and further calls to Add will return an error.
+//
+// Deprecated: This method will be removed in a future version.
 func (w *OutputWriter) Write() error {
 	rl := &krmv1.ResourceList{
 		Kind:       krmv1.ResourceListKind,
