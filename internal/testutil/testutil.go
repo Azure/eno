@@ -14,6 +14,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/testr"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
@@ -169,6 +170,7 @@ func NewManager(t *testing.T, testOpts ...TestManagerOption) *Manager {
 	mgr, err := manager.NewTest(logr.FromContextOrDiscard(NewContext(t)), options)
 	require.NoError(t, err)
 	require.NoError(t, testv1.SchemeBuilder.AddToScheme(mgr.GetScheme())) // test-specific CRDs
+	require.NoError(t, appsv1.SchemeBuilder.AddToScheme(mgr.GetScheme()))
 
 	m := &Manager{
 		Manager:              mgr,

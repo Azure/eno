@@ -222,7 +222,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 
 	// Dry-run the update to see if it's needed
 	if !c.disableSSA {
-		dryRun, err := c.update(ctx, res, current, true)
+		dryRun, err := c.update(ctx, prev, res, current, true)
 		if err != nil {
 			return false, fmt.Errorf("dry-run applying update: %w", err)
 		}
@@ -268,7 +268,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 
 	// Do the actual non-dryrun update
 	reconciliationActions.WithLabelValues("apply").Inc()
-	updated, err := c.update(ctx, res, current, false)
+	updated, err := c.update(ctx, prev, res, current, false)
 	if err != nil {
 		return false, fmt.Errorf("applying update: %w", err)
 	}
@@ -283,7 +283,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	return true, nil
 }
 
-func (c *Controller) update(ctx context.Context, resource *resource.Resource, current *unstructured.Unstructured, dryrun bool) (updated *unstructured.Unstructured, err error) {
+func (c *Controller) update(ctx context.Context, previous, resource *resource.Resource, current *unstructured.Unstructured, dryrun bool) (updated *unstructured.Unstructured, err error) {
 	updated = resource.Unstructured()
 
 	if current != nil {
@@ -306,7 +306,7 @@ func (c *Controller) update(ctx context.Context, resource *resource.Resource, cu
 
 	var patch client.Patch
 	if c.disableSSA {
-		patch = client.MergeFrom(current)
+		patch = buildNonStrategicPatch(previous)
 	} else {
 		patch = client.Apply
 		opts = append(opts, client.ForceOwnership, client.FieldOwner("eno"))
@@ -314,6 +314,16 @@ func (c *Controller) update(ctx context.Context, resource *resource.Resource, cu
 
 	err = c.upstreamClient.Patch(ctx, updated, patch, opts...)
 	return
+}
+
+func buildNonStrategicPatch(previous *resource.Resource) client.Patch {
+	var from *unstructured.Unstructured
+	if previous == nil {
+		from = &unstructured.Unstructured{Object: map[string]any{}}
+	} else {
+		from = previous.Unstructured()
+	}
+	return client.MergeFrom(from)
 }
 
 func (c *Controller) getCurrent(ctx context.Context, resource *resource.Resource) (*unstructured.Unstructured, error) {
