@@ -76,6 +76,7 @@ _Appears in:_
 | `synthesizer` _[SynthesizerRef](#synthesizerref)_ | Compositions are synthesized by a Synthesizer, referenced by name. |  |  |
 | `bindings` _[Binding](#binding) array_ | Synthesizers can accept Kubernetes resources as inputs.<br />Bindings allow compositions to specify which resource to use for a particular input "reference".<br />Declaring extra bindings not (yet) supported by the synthesizer is valid. |  |  |
 | `synthesisEnv` _[EnvVar](#envvar) array_ | SynthesisEnv<br />A set of environment variables that will be made available inside the synthesis Pod. |  | MaxItems: 500 <br /> |
+| `suspend` _boolean_ | Suspend tells the eno-reconciler to stop reconciling any related resources when set to true.<br />Suspended compositions automatically infer the orphan deletion policy. | false |  |
 
 
 #### CompositionStatus
