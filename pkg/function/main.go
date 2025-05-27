@@ -104,7 +104,11 @@ func newInput(ir *InputReader, field reflect.Value) (*input, error) {
 
 	// Allocate values for nil pointers
 	if field.IsNil() {
-		field.Set(reflect.New(field.Type().Elem()))
+		if field.Kind() == reflect.Slice {
+			field.Set(reflect.MakeSlice(field.Type(), 0, 0))
+		} else {
+			field.Set(reflect.New(field.Type().Elem()))
+		}
 	}
 
 	// Pass through client.Object types
