@@ -95,7 +95,7 @@ func mapToResource(t *testing.T, res map[string]any) (*unstructured.Unstructured
 }
 
 func requireSSA(t *testing.T, mgr *testutil.Manager) {
-	if mgr.DownstreamVersion < 16 {
+	if mgr.DownstreamVersion > 0 && mgr.DownstreamVersion < 16 {
 		t.Skipf("skipping test because it requires server-side apply which isn't supported on k8s 1.%d", mgr.DownstreamVersion)
 	}
 }
