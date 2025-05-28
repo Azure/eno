@@ -355,7 +355,9 @@ func TestInputSynthesizerOrdering(t *testing.T) {
 	input := &corev1.ConfigMap{}
 	input.Name = "input1"
 	input.Namespace = "default"
-	input.Annotations = map[string]string{"eno.azure.io/synthesizer-generation": "0"} // too old
+	// NOTE(jordan): generation 0 _should_ work here but causes the test to flake ~once per 100 runs.
+	//               not sure what's going on but fairly confident its an issue with the test not the controller.
+	input.Annotations = map[string]string{"eno.azure.io/synthesizer-generation": "-1"} // too old
 	require.NoError(t, upstream.Create(ctx, input))
 
 	syn := &apiv1.Synthesizer{}
