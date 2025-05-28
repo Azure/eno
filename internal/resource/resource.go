@@ -313,7 +313,7 @@ func CompareEnoManagedFields(a, b []metav1.ManagedFieldsEntry) bool {
 	if ai == -1 || ab == -1 {
 		return false
 	}
-	return equality.Semantic.DeepEqual(a[ai], b[ab])
+	return equality.Semantic.DeepEqual(a[ai].FieldsV1, b[ab].FieldsV1)
 }
 
 // Compare compares two unstructured resources while ignoring:
