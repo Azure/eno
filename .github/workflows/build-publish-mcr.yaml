@@ -45,9 +45,12 @@ jobs:
       - name: Build and push deployment manifest
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY: "mcr.microsoft.com/aks/eno"
+          TAG: ${{ needs.prepare-variables.outputs.release_tag }}
+          DISABLE_SSA: "false"
         run: |
           cat ./api/v1/config/crd/* > manifest.yaml
-          cat ./dev/deploy.yaml | REGISTRY="mcr.microsoft.com/aks/eno" TAG="${{ needs.prepare-variables.outputs.release_tag }}" DISABLE_SSA="false" envsubst >> manifest.yaml
+          cat ./dev/deploy.yaml | envsubst >> manifest.yaml
           gh release upload ${{ needs.prepare-variables.outputs.release_tag }} manifest.yaml
 
   publish-images:
