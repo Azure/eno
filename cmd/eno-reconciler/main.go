@@ -36,6 +36,7 @@ func run() error {
 		remoteQPS                    float64
 		compositionSelector          string
 		compositionNamespace         string
+		resourceSelector             string
 		namespaceCreationGracePeriod time.Duration
 		namespaceCleanup             bool
 
@@ -53,6 +54,7 @@ func run() error {
 	flag.DurationVar(&recOpts.MinReconcileInterval, "min-reconcile-interval", time.Second, "Minimum value of eno.azure.com/reconcile-interval that will be honored by the controller")
 	flag.BoolVar(&recOpts.DisableServerSideApply, "disable-ssa", false, "Use non-strategic three-way merge patches instead of server-side apply")
 	flag.StringVar(&compositionSelector, "composition-label-selector", labels.Everything().String(), "Optional label selector for compositions to be reconciled")
+	flag.StringVar(&resourceSelector, "resource-label-selector", labels.Everything().String(), "Optional label selector for resources within compositions to be reconciled")
 	flag.StringVar(&compositionNamespace, "composition-namespace", metav1.NamespaceAll, "Optional namespace to limit compositions that will be reconciled")
 	flag.DurationVar(&namespaceCreationGracePeriod, "ns-creation-grace-period", time.Second, "A namespace is assumed to be missing if it doesn't exist once one of its resources has existed for this long")
 	flag.BoolVar(&namespaceCleanup, "namespace-cleanup", true, "Clean up orphaned resources caused by namespace force-deletions")
@@ -78,6 +80,16 @@ func run() error {
 		}
 	} else {
 		mgrOpts.CompositionSelector = labels.Everything()
+	}
+
+	if resourceSelector != "" {
+		var err error
+		recOpts.ResourceSelector, err = labels.Parse(resourceSelector)
+		if err != nil {
+			return fmt.Errorf("invalid resource label selector: %w", err)
+		}
+	} else {
+		recOpts.ResourceSelector = labels.Everything()
 	}
 
 	mgrOpts.Rest.UserAgent = "eno-reconciler"
