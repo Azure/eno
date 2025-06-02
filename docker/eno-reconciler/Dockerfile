@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/devcontainers/go:1.23 AS builder
+FROM mcr.microsoft.com/devcontainers/go:1.24 AS builder
 WORKDIR /app
 
 ADD go.mod .

@@ -41,9 +41,11 @@ func newReconstitutionSource(mgr ctrl.Manager) (source.TypedSource[resource.Requ
 		}
 
 		// This controller's queue uses composition name/namespace as its key
-		c, err := controller.NewTypedUnmanaged[reconcile.Request]("reconstitutionController", mgr, controller.TypedOptions[reconcile.Request]{
-			LogConstructor: manager.NewTypedLogConstructor[*reconcile.Request](mgr, "reconstitutionController"),
-			Reconciler:     r,
+		skipNameValidation := true
+		c, err := controller.NewTypedUnmanaged[reconcile.Request]("reconstitutionController", controller.TypedOptions[reconcile.Request]{
+			LogConstructor:     manager.NewTypedLogConstructor[*reconcile.Request](mgr, "reconstitutionController"),
+			SkipNameValidation: &skipNameValidation, // Allow duplicate names since we create many dynamic controllers
+			Reconciler:         r,
 		})
 		if err != nil {
 			return err
