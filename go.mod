@@ -5,6 +5,7 @@ go 1.24.0
 toolchain go1.24.3
 
 require (
+	github.com/alecthomas/participle/v2 v2.1.4
 	github.com/emirpasic/gods/v2 v2.0.0-alpha
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/go-logr/logr v1.4.3
