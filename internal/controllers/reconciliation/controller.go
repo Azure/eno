@@ -187,8 +187,13 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 
 	// Create the resource when it doesn't exist, should exist, and wouldn't be created later by server-side apply
 	if current == nil && (res.DisableUpdates || res.Replace || c.disableSSA) {
+		resource, err := res.Unstructured(ctx, nil)
+		if err != nil {
+			return false, fmt.Errorf("error while rendering expected resource: %w", err)
+		}
+
 		reconciliationActions.WithLabelValues("create").Inc()
-		err := c.upstreamClient.Create(ctx, res.Unstructured())
+		err = c.upstreamClient.Create(ctx, resource)
 		if err != nil {
 			return false, fmt.Errorf("creating resource: %w", err)
 		}
@@ -233,7 +238,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		// When using server side apply, make sure we haven't lost any managedFields metadata.
 		// Eno should always remove fields that are no longer set by the synthesizer, even if another client messed with managedFields.
 		if current != nil && prev != nil && !res.Replace {
-			dryRunPrev := prev.Unstructured()
+			dryRunPrev := prev.UnstructuredWithoutOverrides()
 			err := c.upstreamClient.Patch(ctx, dryRunPrev, client.Apply, client.ForceOwnership, client.FieldOwner("eno"), client.DryRunAll)
 			if err != nil {
 				return false, fmt.Errorf("getting managed fields values for previous version: %w", err)
@@ -270,7 +275,10 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 }
 
 func (c *Controller) update(ctx context.Context, previous, resource *resource.Resource, current *unstructured.Unstructured, dryrun bool) (updated *unstructured.Unstructured, err error) {
-	updated = resource.Unstructured()
+	updated, err = resource.Unstructured(ctx, current)
+	if err != nil {
+		return nil, fmt.Errorf("error while rendering expected resource: %w", err)
+	}
 
 	if current != nil {
 		updated.SetResourceVersion(current.GetResourceVersion())
@@ -307,7 +315,7 @@ func buildNonStrategicPatch(previous *resource.Resource) client.Patch {
 	if previous == nil {
 		from = &unstructured.Unstructured{Object: map[string]any{}}
 	} else {
-		from = previous.Unstructured()
+		from = previous.UnstructuredWithoutOverrides()
 	}
 	return client.MergeFrom(from)
 }

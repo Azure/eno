@@ -2,7 +2,6 @@ package readiness
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"time"
 
@@ -12,21 +11,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/google/cel-go/cel"
+
+	enocel "github.com/Azure/eno/internal/cel"
 )
-
-var defaultEnv *cel.Env
-
-func init() {
-	initDefaultEnv()
-}
-
-func initDefaultEnv() {
-	var err error
-	defaultEnv, err = cel.NewEnv(cel.Variable("self", cel.DynType))
-	if err != nil {
-		panic(fmt.Sprintf("failed to create default CEL environment: %v", err))
-	}
-}
 
 // Check represents a parsed readiness check CEL expression.
 type Check struct {
@@ -37,11 +24,7 @@ type Check struct {
 // ParseCheck parses the given CEL expression in the context of an environment,
 // and returns a reusable execution handle.
 func ParseCheck(expr string) (*Check, error) {
-	ast, iss := defaultEnv.Compile(expr)
-	if iss != nil && iss.Err() != nil {
-		return nil, iss.Err()
-	}
-	prgm, err := defaultEnv.Program(ast, cel.InterruptCheckFrequency(10))
+	prgm, err := enocel.Parse(expr)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +36,7 @@ func (r *Check) Eval(ctx context.Context, resource *unstructured.Unstructured) (
 	if resource == nil {
 		return nil, false
 	}
-	val, _, err := r.program.ContextEval(ctx, map[string]any{"self": resource.Object})
+	val, err := enocel.Eval(ctx, r.program, resource)
 	if err != nil {
 		return nil, false
 	}

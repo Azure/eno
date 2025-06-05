@@ -16,6 +16,7 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/readiness"
+	"github.com/Azure/eno/internal/resource/mutation"
 	jsonpatch "github.com/evanphx/json-patch/v5"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -61,6 +62,7 @@ type Resource struct {
 	Replace           bool
 	ReadinessGroup    int
 	Labels            map[string]string
+	Overrides         []*mutation.Op
 
 	// DefinedGroupKind is set on CRDs to represent the resource type they define.
 	DefinedGroupKind *schema.GroupKind
@@ -72,8 +74,6 @@ type Resource struct {
 func (r *Resource) Deleted(comp *apiv1.Composition) bool {
 	return (comp.DeletionTimestamp != nil && !comp.ShouldOrphanResources()) || r.ManifestDeleted || (r.Patch != nil && r.patchSetsDeletionTimestamp())
 }
-
-func (r *Resource) Unstructured() *unstructured.Unstructured { return r.parsed.DeepCopy() }
 
 func (r *Resource) State() *apiv1.ResourceState { return r.latestKnownState.Load() }
 
@@ -121,6 +121,23 @@ func (r *Resource) patchSetsDeletionTimestamp() bool {
 
 	dt, _, _ := unstructured.NestedString(patched, "metadata", "deletionTimestamp")
 	return dt != ""
+}
+
+func (r *Resource) UnstructuredWithoutOverrides() *unstructured.Unstructured {
+	return r.parsed.DeepCopy()
+}
+
+func (r *Resource) Unstructured(ctx context.Context, actual *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+	copy := r.parsed.DeepCopy()
+
+	for i, op := range r.Overrides {
+		err := op.Apply(ctx, actual, copy)
+		if err != nil {
+			return nil, fmt.Errorf("applying override %d: %w", i+1, err)
+		}
+	}
+
+	return copy, nil
 }
 
 func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*Resource, error) {
@@ -212,6 +229,14 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 
 	const replaceKey = "eno.azure.io/replace"
 	res.Replace = anno[replaceKey] == "true"
+
+	const overridesKey = "eno.azure.io/overrides"
+	if js, ok := anno[overridesKey]; ok {
+		err = json.Unmarshal([]byte(js), &res.Overrides)
+		if err != nil {
+			logger.Error(err, "invalid override json")
+		}
+	}
 
 	const readinessGroupKey = "eno.azure.io/readiness-group"
 	if str, ok := anno[readinessGroupKey]; ok {
