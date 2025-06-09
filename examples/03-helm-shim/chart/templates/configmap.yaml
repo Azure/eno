@@ -4,4 +4,4 @@ metadata:
   name: helm-generated-configmap
   namespace: default
 data:
-  valueFromEnoInput: {{ .Values.myinput.data.mykey | quote }}
+  valueFromEnoInput: {{ .Values.myinput.mykey | quote }}

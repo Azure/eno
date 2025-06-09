@@ -11,6 +11,7 @@ require (
 	github.com/stretchr/testify v1.10.0
 	helm.sh/helm/v3 v3.18.1
 	k8s.io/apimachinery v0.33.1
+	sigs.k8s.io/controller-runtime v0.21.0
 )
 
 require (
@@ -130,7 +131,6 @@ require (
 	k8s.io/kubectl v0.33.1 // indirect
 	k8s.io/utils v0.0.0-20250502105355-0f33e8f1c979 // indirect
 	oras.land/oras-go/v2 v2.6.0 // indirect
-	sigs.k8s.io/controller-runtime v0.21.0 // indirect
 	sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8 // indirect
 	sigs.k8s.io/kustomize/api v0.19.0 // indirect
 	sigs.k8s.io/kustomize/kyaml v0.19.0 // indirect
