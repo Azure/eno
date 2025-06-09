@@ -6,9 +6,13 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/resource"
+	"github.com/Azure/eno/internal/testutil"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func TestRequeue(t *testing.T) {
@@ -75,4 +79,29 @@ func TestRequeue(t *testing.T) {
 			assert.InDelta(t, tt.expectedResult, result.RequeueAfter, float64(2*time.Second))
 		})
 	}
+}
+
+func TestBuildNonStrategicPatch_NilPrevious(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+
+	// Create
+	actual := &corev1.ConfigMap{}
+	actual.Name = "test-configmap"
+	actual.Namespace = "default"
+	actual.Data = map[string]string{"original": "value"}
+	require.NoError(t, cli.Create(ctx, actual))
+
+	// Patch
+	expected := actual.DeepCopy()
+	expected.Data = map[string]string{"added": "value"}
+	patch := buildNonStrategicPatch(nil)
+	require.NoError(t, cli.Patch(ctx, expected, patch))
+
+	// Verify
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(actual), actual))
+	assert.Equal(t, map[string]string{
+		"added":    "value",
+		"original": "value",
+	}, actual.Data)
 }

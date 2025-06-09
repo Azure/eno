@@ -10,10 +10,12 @@ import (
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -78,6 +80,37 @@ func TestDisableSSA(t *testing.T) {
 	testutil.Eventually(t, func() bool {
 		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == comp.Generation
+	})
+
+	// Add a field to the deployment
+	dep := &appsv1.Deployment{}
+	dep.Name = "test-obj"
+	dep.Namespace = "default"
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(dep), dep)
+		dep.Spec.ProgressDeadlineSeconds = ptr.To(int32(10))
+		return mgr.DownstreamClient.Update(ctx, dep)
+	})
+	require.NoError(t, err)
+
+	// Resynthesize to guarantee that Eno has reconciled the resource after the mutation
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Spec.SynthesisEnv = []apiv1.EnvVar{{Name: "FORCE_SYNTHESIS", Value: "true"}}
+		return upstream.Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	latestGen := comp.Generation
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration >= latestGen
+	})
+
+	// Prove the field wasn't removed
+	testutil.Eventually(t, func() bool {
+		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(dep), dep)
+		return err == nil && dep.Spec.ProgressDeadlineSeconds != nil && *dep.Spec.ProgressDeadlineSeconds == 10
 	})
 }
 
@@ -153,6 +186,7 @@ func TestRemoveProperty(t *testing.T) {
 func TestRemovePropertyAndOwnership(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
+	requireSSA(t, mgr)
 	upstream := mgr.GetClient()
 
 	registerControllers(t, mgr)
@@ -226,6 +260,7 @@ func TestRemovePropertyAndOwnership(t *testing.T) {
 func TestReplaceProperty(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
+	requireSSA(t, mgr)
 	upstream := mgr.GetClient()
 
 	registerControllers(t, mgr)
@@ -296,6 +331,7 @@ func TestReplaceProperty(t *testing.T) {
 func TestReplacePropertyAndRemoveOwnership(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
+	requireSSA(t, mgr)
 	upstream := mgr.GetClient()
 
 	registerControllers(t, mgr)

@@ -328,36 +328,36 @@ func TestResourceOrdering(t *testing.T) {
 func TestManagedFields(t *testing.T) {
 	current := []metav1.ManagedFieldsEntry{
 		{
-			Manager:   "something-else",
-			Operation: "Update",
+			Manager:  "something-else",
+			FieldsV1: &metav1.FieldsV1{Raw: []byte("1")},
 		},
 		{
-			Manager:   "another-thing",
-			Operation: "Update",
+			Manager:  "another-thing",
+			FieldsV1: &metav1.FieldsV1{Raw: []byte("1")},
 		},
 		{
-			Manager:   "eno",
-			Operation: "Update",
+			Manager:  "eno",
+			FieldsV1: &metav1.FieldsV1{Raw: []byte("1")},
 		},
 	}
 	expected := []metav1.ManagedFieldsEntry{{
-		Manager:   "eno",
-		Operation: "Apply",
+		Manager:  "eno",
+		FieldsV1: &metav1.FieldsV1{Raw: []byte("2")},
 	}}
 
 	merged := MergeEnoManagedFields(current, expected)
 	assert.Equal(t, []metav1.ManagedFieldsEntry{
 		{
-			Manager:   "eno",
-			Operation: "Apply",
+			Manager:  "eno",
+			FieldsV1: &metav1.FieldsV1{Raw: []byte("2")},
 		},
 		{
-			Manager:   "something-else",
-			Operation: "Update",
+			Manager:  "something-else",
+			FieldsV1: &metav1.FieldsV1{Raw: []byte("1")},
 		},
 		{
-			Manager:   "another-thing",
-			Operation: "Update",
+			Manager:  "another-thing",
+			FieldsV1: &metav1.FieldsV1{Raw: []byte("1")},
 		},
 	}, merged)
 

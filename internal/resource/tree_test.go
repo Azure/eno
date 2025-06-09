@@ -317,3 +317,71 @@ func TestTreeRefConflicts(t *testing.T) {
 	assert.True(t, visible)
 	assert.Equal(t, "b", string(res.ManifestHash))
 }
+func TestIndexedResourceBacktracks(t *testing.T) {
+	baseGVK := schema.GroupVersionKind{Group: "test.group", Version: "v1", Kind: "TestKind"}
+
+	newIdx := func(name string, group int) *indexedResource {
+		return &indexedResource{
+			Resource: &Resource{
+				Ref:            newTestRef(name),
+				GVK:            baseGVK,
+				ReadinessGroup: group,
+			},
+			PendingDependencies: map[Ref]struct{}{},
+			Dependents:          map[Ref]*indexedResource{},
+		}
+	}
+
+	t.Run("no dependents", func(t *testing.T) {
+		ir := newIdx("a", 1)
+		assert.False(t, ir.Backtracks())
+	})
+
+	t.Run("dependent with different GVK", func(t *testing.T) {
+		ir := newIdx("a", 1)
+		dep := &indexedResource{
+			Resource: &Resource{
+				Ref:            newTestRef("a"),
+				GVK:            schema.GroupVersionKind{Group: "other.group", Version: "v1", Kind: "OtherKind"},
+				ReadinessGroup: 2,
+			},
+			PendingDependencies: map[Ref]struct{}{},
+			Dependents:          map[Ref]*indexedResource{},
+		}
+		ir.Dependents[dep.Resource.Ref] = dep
+		assert.False(t, ir.Backtracks())
+	})
+
+	t.Run("dependent with same GVK and Ref, but has pending dependencies", func(t *testing.T) {
+		ir := newIdx("a", 1)
+		dep := newIdx("a", 2)
+		dep.PendingDependencies[newTestRef("other")] = struct{}{}
+		ir.Dependents[dep.Resource.Ref] = dep
+		assert.False(t, ir.Backtracks())
+	})
+
+	t.Run("dependent with same GVK and Ref, no pending dependencies", func(t *testing.T) {
+		ir := newIdx("a", 1)
+		dep := newIdx("a", 2)
+		ir.Dependents[dep.Resource.Ref] = dep
+		assert.True(t, ir.Backtracks())
+	})
+
+	t.Run("multiple dependents, only one triggers backtrack", func(t *testing.T) {
+		ir := newIdx("a", 1)
+		dep1 := newIdx("a", 2)
+		dep2 := newIdx("b", 2)
+		ir.Dependents[dep1.Resource.Ref] = dep1
+		ir.Dependents[dep2.Resource.Ref] = dep2
+		assert.True(t, ir.Backtracks())
+	})
+
+	t.Run("multiple dependents, none triggers backtrack", func(t *testing.T) {
+		ir := newIdx("a", 1)
+		dep1 := newIdx("b", 2)
+		dep2 := newIdx("c", 2)
+		ir.Dependents[dep1.Resource.Ref] = dep1
+		ir.Dependents[dep2.Resource.Ref] = dep2
+		assert.False(t, ir.Backtracks())
+	})
+}

@@ -17,6 +17,21 @@ type indexedResource struct {
 	CompositionDeleting bool
 }
 
+// Backtracks returns true if visibility would cause the resource to backtrack to a previous state.
+// This is possible if a resource also has a patch defined in a different readiness group.
+// The earlier resource should not be visible to the reconciler once the later one has become visible,
+// otherwise the reconciler would re-apply the previous state and oscillate between the two.
+func (i *indexedResource) Backtracks() bool {
+	for _, dep := range i.Dependents {
+		matches := dep.Resource.GVK == i.Resource.GVK && dep.Resource.Ref.Name == i.Resource.Ref.Name && dep.Resource.Ref.Namespace == i.Resource.Ref.Namespace
+		hasPendingDeps := len(dep.PendingDependencies) > 0
+		if matches && !hasPendingDeps {
+			return true
+		}
+	}
+	return false
+}
+
 // treeBuilder is used to index a set of resources into a stateTree.
 type treeBuilder struct {
 	byRef        map[Ref]*indexedResource                    // fast key/value lookup by group/kind/ns/name
@@ -112,7 +127,7 @@ func (t *tree) Get(key Ref) (res *Resource, visible bool, found bool) {
 	if !ok {
 		return nil, false, false
 	}
-	return idx.Resource, len(idx.PendingDependencies) == 0 || idx.CompositionDeleting, true
+	return idx.Resource, (!idx.Backtracks() && len(idx.PendingDependencies) == 0) || idx.CompositionDeleting, true
 }
 
 // UpdateState updates the state of a resource and requeues dependents if necessary.

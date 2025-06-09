@@ -15,6 +15,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/inputs"
@@ -31,8 +34,29 @@ func NewController(mgr ctrl.Manager) error {
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
+		WatchesRawSource(source.Kind(mgr.GetCache(), &apiv1.Synthesizer{}, c.newSynthEventHandler())).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "compositionController")).
 		Complete(c)
+}
+
+func (c *compositionController) newSynthEventHandler() handler.TypedEventHandler[*apiv1.Synthesizer, reconcile.Request] {
+	fn := func(ctx context.Context, synth *apiv1.Synthesizer) (reqs []reconcile.Request) {
+		logger := logr.FromContextOrDiscard(ctx)
+
+		list := &apiv1.CompositionList{}
+		err := c.client.List(ctx, list, client.MatchingFields{
+			manager.IdxCompositionsBySynthesizer: synth.Name,
+		})
+		if err != nil {
+			logger.Error(err, "failed to list compositions for synthesizer")
+			return nil
+		}
+		for _, comp := range list.Items {
+			reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&comp)})
+		}
+		return reqs
+	}
+	return handler.TypedEnqueueRequestsFromMapFunc(fn)
 }
 
 func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

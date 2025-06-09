@@ -221,52 +221,40 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	}
 
 	// Dry-run the update to see if it's needed
-	dryRun, err := c.update(ctx, res, current, true)
-	if err != nil {
-		return false, fmt.Errorf("dry-run applying update: %w", err)
-	}
-	if resource.Compare(dryRun, current) {
-		return false, nil // in sync
-	}
+	if !c.disableSSA {
+		dryRun, err := c.update(ctx, prev, res, current, true)
+		if err != nil {
+			return false, fmt.Errorf("dry-run applying update: %w", err)
+		}
+		if resource.Compare(dryRun, current) {
+			return false, nil // in sync
+		}
 
-	// When using server side apply, make sure we haven't lost any managedFields metadata.
-	// Eno should always remove fields that are no longer set by the synthesizer, even if another client messed with managedFields.
-	if current != nil && !c.disableSSA && !res.Replace {
-		var dryRunPrev *unstructured.Unstructured
-		if prev != nil {
-			dryRunPrev = prev.Unstructured()
-			err = c.upstreamClient.Patch(ctx, dryRunPrev, client.Apply, client.ForceOwnership, client.FieldOwner("eno"), client.DryRunAll)
+		// When using server side apply, make sure we haven't lost any managedFields metadata.
+		// Eno should always remove fields that are no longer set by the synthesizer, even if another client messed with managedFields.
+		if current != nil && prev != nil && !res.Replace {
+			dryRunPrev := prev.Unstructured()
+			err := c.upstreamClient.Patch(ctx, dryRunPrev, client.Apply, client.ForceOwnership, client.FieldOwner("eno"), client.DryRunAll)
 			if err != nil {
 				return false, fmt.Errorf("getting managed fields values for previous version: %w", err)
 			}
-		}
 
-		outOfSyncWithPrevious := dryRunPrev != nil && !resource.CompareEnoManagedFields(dryRunPrev.GetManagedFields(), current.GetManagedFields())
-		outOfSyncWithCurrent := !resource.CompareEnoManagedFields(dryRun.GetManagedFields(), current.GetManagedFields())
+			if !resource.CompareEnoManagedFields(dryRunPrev.GetManagedFields(), current.GetManagedFields()) {
+				current.SetManagedFields(resource.MergeEnoManagedFields(current.GetManagedFields(), dryRunPrev.GetManagedFields()))
 
-		if (outOfSyncWithPrevious && outOfSyncWithCurrent) || (outOfSyncWithCurrent && dryRunPrev == nil) {
-			if dryRunPrev == nil {
-				current.SetManagedFields(
-					resource.MergeEnoManagedFields(
-						current.GetManagedFields(), dryRun.GetManagedFields()))
-			} else {
-				current.SetManagedFields(
-					resource.MergeEnoManagedFields(
-						current.GetManagedFields(), dryRunPrev.GetManagedFields()))
+				err := c.upstreamClient.Update(ctx, current, client.FieldOwner("eno"))
+				if err != nil {
+					return false, fmt.Errorf("updating managed fields metadata: %w", err)
+				}
+				logger.V(0).Info("corrected drift in managed fields metadata")
+				return true, nil
 			}
-
-			err := c.upstreamClient.Update(ctx, current, client.FieldOwner("eno"))
-			if err != nil {
-				return false, fmt.Errorf("updating managed fields metadata: %w", err)
-			}
-			logger.V(0).Info("corrected drift in managed fields metadata")
-			return true, nil
 		}
 	}
 
 	// Do the actual non-dryrun update
 	reconciliationActions.WithLabelValues("apply").Inc()
-	updated, err := c.update(ctx, res, current, false)
+	updated, err := c.update(ctx, prev, res, current, false)
 	if err != nil {
 		return false, fmt.Errorf("applying update: %w", err)
 	}
@@ -277,11 +265,11 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	if current != nil {
 		logger = logger.WithValues("oldResourceVersion", current.GetResourceVersion())
 	}
-	logger.V(0).Info("applied resource", "resourceVersion", updated.GetResourceVersion(), "dryRunResourceVersion", dryRun.GetResourceVersion())
+	logger.V(0).Info("applied resource", "resourceVersion", updated.GetResourceVersion())
 	return true, nil
 }
 
-func (c *Controller) update(ctx context.Context, resource *resource.Resource, current *unstructured.Unstructured, dryrun bool) (updated *unstructured.Unstructured, err error) {
+func (c *Controller) update(ctx context.Context, previous, resource *resource.Resource, current *unstructured.Unstructured, dryrun bool) (updated *unstructured.Unstructured, err error) {
 	updated = resource.Unstructured()
 
 	if current != nil {
@@ -304,7 +292,7 @@ func (c *Controller) update(ctx context.Context, resource *resource.Resource, cu
 
 	var patch client.Patch
 	if c.disableSSA {
-		patch = client.MergeFrom(current)
+		patch = buildNonStrategicPatch(previous)
 	} else {
 		patch = client.Apply
 		opts = append(opts, client.ForceOwnership, client.FieldOwner("eno"))
@@ -312,6 +300,16 @@ func (c *Controller) update(ctx context.Context, resource *resource.Resource, cu
 
 	err = c.upstreamClient.Patch(ctx, updated, patch, opts...)
 	return
+}
+
+func buildNonStrategicPatch(previous *resource.Resource) client.Patch {
+	var from *unstructured.Unstructured
+	if previous == nil {
+		from = &unstructured.Unstructured{Object: map[string]any{}}
+	} else {
+		from = previous.Unstructured()
+	}
+	return client.MergeFrom(from)
 }
 
 func (c *Controller) getCurrent(ctx context.Context, resource *resource.Resource) (*unstructured.Unstructured, error) {

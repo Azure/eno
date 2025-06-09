@@ -12,11 +12,12 @@ set +e
 # Tail the controller logs
 function watch_logs() {
     while true; do
-        kubectl logs -f -l app=eno-controller
+        kubectl logs -f -l $1
         sleep 1
     done
 }
-watch_logs &
+watch_logs app=eno-controller &
+watch_logs app=eno-reconciler &
 
 # Wait for the composition to be reconciled
 while true; do

@@ -65,8 +65,11 @@ func NewKindWatchController(ctx context.Context, parent *WatchController, resour
 }
 
 func (k *KindWatchController) newResourceWatchController(parent *WatchController, ref *metav1.PartialObjectMetadata) (controller.Controller, error) {
-	rrc, err := controller.NewUnmanaged("kindWatchController", parent.mgr, controller.Options{
-		LogConstructor: manager.NewLogConstructor(parent.mgr, "kindWatchController"),
+	controllerName := fmt.Sprintf("kindWatchController-%s-%s-%s-%s", ref.APIVersion, ref.Kind, ref.GetNamespace(), ref.GetName())
+	skipNameValidation := true
+	rrc, err := controller.NewUnmanaged(controllerName, controller.Options{
+		LogConstructor:     manager.NewLogConstructor(parent.mgr, controllerName),
+		SkipNameValidation: &skipNameValidation, // Allow duplicate names since we create many dynamic controllers
 		RateLimiter: &workqueue.TypedBucketRateLimiter[reconcile.Request]{
 			// Be careful about feedback loops - low, hardcoded rate limits make sense here.
 			// Maybe expose as a flag in the future.

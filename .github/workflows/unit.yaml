@@ -19,9 +19,8 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Download kubebuilder assets
-        run: |
-          echo "KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path)" >> $GITHUB_ENV
+      - name: Download k8s
+        run: echo "KUBEBUILDER_ASSETS=$(./hack/download-k8s.sh)" >> $GITHUB_ENV
 
       - name: Run tests
         run: go test -v ./...

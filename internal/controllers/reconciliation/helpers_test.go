@@ -59,9 +59,10 @@ func writeComposition(t *testing.T, client client.Client, orphan bool) (*apiv1.S
 
 func setupTestSubject(t *testing.T, mgr *testutil.Manager) {
 	setupTestSubjectForOptions(t, mgr, Options{
-		Manager:               mgr.Manager,
-		Timeout:               time.Minute,
-		ReadinessPollInterval: time.Hour,
+		Manager:                mgr.Manager,
+		Timeout:                time.Minute,
+		ReadinessPollInterval:  time.Hour,
+		DisableServerSideApply: mgr.NoSsaSupport,
 	})
 }
 
@@ -91,4 +92,10 @@ func mapToResource(t *testing.T, res map[string]any) (*unstructured.Unstructured
 	require.NoError(t, err)
 
 	return obj, rr
+}
+
+func requireSSA(t *testing.T, mgr *testutil.Manager) {
+	if mgr.DownstreamVersion > 0 && mgr.DownstreamVersion < 16 {
+		t.Skipf("skipping test because it requires server-side apply which isn't supported on k8s 1.%d", mgr.DownstreamVersion)
+	}
 }

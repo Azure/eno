@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -409,7 +410,8 @@ func TestPatchDeleteOrphanedResources(t *testing.T) {
 						"name":      cmName,
 						"namespace": cmNamespace,
 						"annotations": map[string]string{
-							"eno.azure.io/readiness-group": "1",
+							"eno.azure.io/readiness-group":    "1",
+							"eno.azure.io/reconcile-interval": "10ms",
 						},
 					},
 					"data": map[string]string{"foo": "bar"},
@@ -442,7 +444,7 @@ func TestPatchDeleteOrphanedResources(t *testing.T) {
 
 	setupTestSubject(t, mgr)
 	mgr.Start(t)
-	_, comp := writeComposition(t, upstream, true) // Set orphan to true
+	syn, comp := writeComposition(t, upstream, true) // Set orphan to true
 
 	// Ensure the composition is created and reconciled.
 	testutil.Eventually(t, func() bool {
@@ -457,5 +459,17 @@ func TestPatchDeleteOrphanedResources(t *testing.T) {
 	testutil.Eventually(t, func() bool {
 		err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm)
 		return errors.IsNotFound(err)
+	})
+
+	// Resynthesis should still be possible
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+		syn.Spec.Image = "updated"
+		return upstream.Update(ctx, syn)
+	})
+	require.NoError(t, err)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
 	})
 }

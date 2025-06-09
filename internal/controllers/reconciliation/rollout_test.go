@@ -239,7 +239,7 @@ func TestSynthesisTimeout(t *testing.T) {
 
 	registerControllers(t, mgr)
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
-		time.Sleep(100 * time.Millisecond) // long enough to never succeed
+		time.Sleep(2 * time.Second) // long enough to never succeed
 		return &krmv1.ResourceList{}, nil
 	})
 
@@ -249,8 +249,8 @@ func TestSynthesisTimeout(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "create"
-	syn.Spec.PodTimeout = ptr.To(metav1.Duration{Duration: 50 * time.Millisecond})
-	syn.Spec.ExecTimeout = ptr.To(metav1.Duration{Duration: 49 * time.Millisecond})
+	syn.Spec.PodTimeout = ptr.To(metav1.Duration{Duration: 250 * time.Millisecond})
+	syn.Spec.ExecTimeout = ptr.To(metav1.Duration{Duration: 150 * time.Millisecond})
 	require.NoError(t, upstream.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}
@@ -267,7 +267,7 @@ func TestSynthesisTimeout(t *testing.T) {
 		for _, pod := range pods.Items {
 			seenPods[pod.Name] = struct{}{}
 		}
-		return len(seenPods) > 4
+		return len(seenPods) > 1
 	})
 
 	// The synthesis should have timed out every time

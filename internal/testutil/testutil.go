@@ -14,6 +14,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/testr"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
@@ -169,6 +170,7 @@ func NewManager(t *testing.T, testOpts ...TestManagerOption) *Manager {
 	mgr, err := manager.NewTest(logr.FromContextOrDiscard(NewContext(t)), options)
 	require.NoError(t, err)
 	require.NoError(t, testv1.SchemeBuilder.AddToScheme(mgr.GetScheme())) // test-specific CRDs
+	require.NoError(t, appsv1.SchemeBuilder.AddToScheme(mgr.GetScheme()))
 
 	m := &Manager{
 		Manager:              mgr,
@@ -183,6 +185,7 @@ func NewManager(t *testing.T, testOpts ...TestManagerOption) *Manager {
 		return m // only one env needed
 	}
 	version, _ := strconv.Atoi(os.Getenv("DOWNSTREAM_VERSION_MINOR"))
+	m.DownstreamVersion = version
 
 	downstreamEnv := &envtest.Environment{
 		BinaryAssetsDirectory:    dir,
@@ -201,6 +204,11 @@ func NewManager(t *testing.T, testOpts ...TestManagerOption) *Manager {
 		conf := downstreamEnv.ControlPlane.GetAPIServer().Configure()
 		conf.Disable("service-account-signing-key-file")
 		conf.Disable("service-account-issuer")
+	}
+
+	// k8s <1.16 does not support server-side-apply
+	if version < 16 {
+		m.NoSsaSupport = true
 	}
 
 	t.Cleanup(func() {
@@ -255,6 +263,10 @@ type Manager struct {
 	DownstreamRestConfig *rest.Config  // may or may not == RestConfig
 	DownstreamClient     client.Client // may or may not == Manager.GetClient()
 	DownstreamEnv        *envtest.Environment
+	DownstreamVersion    int
+
+	// NoSsaSupport is true if the cluster does not support server-side-apply
+	NoSsaSupport bool
 }
 
 func (m *Manager) Start(t *testing.T) {

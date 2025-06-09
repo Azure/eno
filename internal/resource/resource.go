@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"maps"
-	"reflect"
 	"slices"
 	"sort"
 	"strconv"
@@ -314,7 +313,7 @@ func CompareEnoManagedFields(a, b []metav1.ManagedFieldsEntry) bool {
 	if ai == -1 || ab == -1 {
 		return false
 	}
-	return reflect.DeepEqual(a[ai], b[ab])
+	return equality.Semantic.DeepEqual(a[ai].FieldsV1, b[ab].FieldsV1)
 }
 
 // Compare compares two unstructured resources while ignoring:
@@ -335,7 +334,7 @@ func Compare(a, b *unstructured.Unstructured) bool {
 	if !CompareEnoManagedFields(a.GetManagedFields(), b.GetManagedFields()) {
 		return false
 	}
-	return reflect.DeepEqual(stripInsignificantFields(a), stripInsignificantFields(b))
+	return equality.Semantic.DeepEqual(stripInsignificantFields(a), stripInsignificantFields(b))
 }
 
 func stripInsignificantFields(u *unstructured.Unstructured) *unstructured.Unstructured {
