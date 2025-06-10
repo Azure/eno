@@ -45,6 +45,9 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 		return fmt.Errorf("fetching synthesizer: %w", err)
 	}
 
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", syn.Name)
+	ctx = logr.NewContext(ctx, logger)
+
 	if reason, skip := skipSynthesis(comp, syn, env); skip {
 		logger.V(0).Info("synthesis is no longer relevant - skipping", "reason", reason)
 		return nil

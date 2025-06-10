@@ -23,6 +23,9 @@ func (c *pruningController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", comp.Spec.Synthesizer.Name)
+	ctx = logr.NewContext(ctx, logger)
+
 	synth := &apiv1.Synthesizer{}
 	synth.Name = comp.Spec.Synthesizer.Name
 	err = c.client.Get(ctx, client.ObjectKeyFromObject(synth), synth)
