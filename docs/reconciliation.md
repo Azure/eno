@@ -87,7 +87,7 @@ This allows Eno synthesizers to specify basic runtime behavior without requiring
 annotations:
   eno.azure.io/overrides: |
     [
-      { "path": "/self/data/foo", "value": "new conditional value", "condition": "self.data.bar == 'baz'" }
+      { "path": "self.data.foo", "value": "new conditional value", "condition": "self.data.bar == 'baz'" }
     ]
 ```
 
