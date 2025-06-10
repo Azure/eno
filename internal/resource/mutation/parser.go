@@ -12,12 +12,12 @@ type PathExpr struct {
 // ParsePathExpr parses a path expression string.
 //
 // Supported syntax:
-// - `/field/anotherfield`: object field traversal
-// - `/field[2]`: array indexing
-// - `/field[*]`: array wildcards
-// - `/field[someKey="value"]`: object array field matchers
+// - `field.anotherfield`: object field traversal
+// - `field[2]`: array indexing
+// - `field[*]`: array wildcards
+// - `field[someKey="value"]`: object array field matchers
 //
-// Expressions can be chained, e.g. `/field/anotherfield[2]/yetAnotherField`.
+// Expressions can be chained, e.g. `field.anotherfield[2].yetAnotherField`.
 func ParsePathExpr(expr string) (*PathExpr, error) {
 	ast, err := parser.ParseString("", expr)
 	if err != nil {
@@ -33,7 +33,7 @@ type pathExprAST struct {
 }
 
 type section struct {
-	Field *string `"/"* (@Ident`
+	Field *string `"."* (@Ident`
 	Index *index  `| "[" @@ "]")`
 }
 
