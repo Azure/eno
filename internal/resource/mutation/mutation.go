@@ -51,6 +51,10 @@ func (o *Op) UnmarshalJSON(data []byte) error {
 
 // Apply applies the operation to the "mutated" object if the condition is met by the "current" object.
 func (o *Op) Apply(ctx context.Context, current, mutated *unstructured.Unstructured) error {
+	if current == nil {
+		return nil // nothing to do
+	}
+
 	if o.Condition != nil {
 		val, err := enocel.Eval(ctx, o.Condition, current)
 		if err != nil {

@@ -40,7 +40,7 @@ var newResourceTests = []struct {
 					"eno.azure.io/readiness-test": "false",
 					"eno.azure.io/replace": "true",
 					"eno.azure.io/disable-updates": "true",
-					"eno.azure.io/overrides": "[{\"path\":\"/foo\"}, {\"path\":\"/bar\"}]"
+					"eno.azure.io/overrides": "[{\"path\":\".foo\"}, {\"path\":\".bar\"}]"
 				}
 			}
 		}`,
