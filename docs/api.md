@@ -442,5 +442,6 @@ _Appears in:_
 | `synthesizer` _[SynthesizerRef](#synthesizerref)_ | Used to populate the composition's spec.synthesizer. |  |  |
 | `bindings` _[Binding](#binding) array_ | Variation-specific bindings get merged with Symphony bindings and take<br />precedence over them. |  |  |
 | `synthesisEnv` _[EnvVar](#envvar) array_ | SynthesisEnv<br />Copied opaquely into the compositions that's derived from this variation.<br />It gets merged with the Symhony environment and takes precedence over it. |  | MaxItems: 25 <br /> |
+| `optional` _boolean_ | If true, this variation is optional and does not count against the aggregated synthesis, reconciliation, and readiness statuses of the symphony. | false | |
 
 
