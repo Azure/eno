@@ -39,7 +39,8 @@ var newResourceTests = []struct {
 					"eno.azure.io/readiness": "true",
 					"eno.azure.io/readiness-test": "false",
 					"eno.azure.io/replace": "true",
-					"eno.azure.io/disable-updates": "true"
+					"eno.azure.io/disable-updates": "true",
+					"eno.azure.io/overrides": "[{\"path\":\".foo\"}, {\"path\":\".bar\"}]"
 				}
 			}
 		}`,
@@ -56,6 +57,7 @@ var newResourceTests = []struct {
 			assert.True(t, r.DisableUpdates)
 			assert.True(t, r.Replace)
 			assert.Equal(t, int(250), r.ReadinessGroup)
+			assert.Len(t, r.Overrides, 2)
 		},
 	},
 	{
@@ -224,7 +226,7 @@ var newResourceTests = []struct {
 						"labels":      map[string]any{"test-label": "should not be pruned"},
 					},
 				},
-			}, r.Unstructured())
+			}, r.parsed)
 		},
 	},
 	{
@@ -251,7 +253,23 @@ var newResourceTests = []struct {
 						"name": "foo",
 					},
 				},
-			}, r.Unstructured())
+			}, r.parsed)
+		},
+	},
+	{
+		Name: "invalid-override-json",
+		Manifest: `{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "foo",
+				"annotations": {
+					"eno.azure.io/overrides": "not json"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Resource) {
+			assert.Len(t, r.Overrides, 0)
 		},
 	},
 	{
@@ -279,7 +297,7 @@ var newResourceTests = []struct {
 						},
 					},
 				},
-			}, r.Unstructured())
+			}, r.parsed)
 
 			assert.Equal(t, map[string]string{
 				"test-label":               "label-value",
