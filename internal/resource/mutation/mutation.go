@@ -58,7 +58,7 @@ func (o *Op) Apply(ctx context.Context, current, mutated *unstructured.Unstructu
 	if o.Condition != nil {
 		val, err := enocel.Eval(ctx, o.Condition, current)
 		if err != nil {
-			return fmt.Errorf("evaluating condition: %w", err)
+			return nil // fail closed (too noisy to log)
 		}
 		if b, ok := val.Value().(bool); !ok || !b {
 			return nil // condition not met
@@ -74,9 +74,11 @@ func Apply(path *PathExpr, obj, value any) error {
 	if s := path.ast.Sections; len(s) == 0 || s[0].Field == nil || *s[0].Field != "self" {
 		return fmt.Errorf("cannot apply mutation to non-self path")
 	}
-	path.ast.Sections = path.ast.Sections[1:] // remove the "self" section
 
-	return apply(path, 0, obj, value)
+	copy := &PathExpr{ast: &pathExprAST{}}
+	copy.ast.Sections = path.ast.Sections[1:] // remove the "self" section
+
+	return apply(copy, 0, obj, value)
 }
 
 func apply(path *PathExpr, startIndex int, obj any, value any) error {

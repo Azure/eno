@@ -80,3 +80,108 @@ func TestOverrideBasics(t *testing.T) {
 		return cm.Data["foo"] == "external-value"
 	})
 }
+
+func TestOverridePolling(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]any{
+						"eno.azure.io/overrides":          `[{"path": "self.data.foo", "value": "eno-replaced-value", "condition": "self.data.bar == 'EnableOverride'"}]`,
+						"eno.azure.io/reconcile-interval": "10ms",
+					},
+				},
+				"data": map[string]any{"foo": "eno-value"},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	// Wait for initial reconciliation
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["foo"] == "eno-value"
+	})
+
+	// Enable the condition
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		if err != nil {
+			return err
+		}
+		cm.Data["bar"] = "EnableOverride"
+		return mgr.DownstreamClient.Update(ctx, cm)
+	})
+	require.NoError(t, err)
+
+	// The override should eventually be applied
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["foo"] == "eno-replaced-value"
+	})
+}
+
+func TestOverridePrecedence(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]any{
+						"eno.azure.io/overrides": `[
+							{"path": "self.data.foo", "value": "value-2"},
+							{"path": "self.data.foo", "value": "value-3"}
+						]`,
+					},
+				},
+				"data": map[string]any{"foo": "value-1"},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["foo"] == "value-3"
+	})
+}
