@@ -85,7 +85,7 @@ func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace)
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", comp.Spec.Synthesizer.Name)
 	ctx = logr.NewContext(ctx, logger)
 
 	// The reconciliation controller assumes that the previous synthesis will be loaded first
