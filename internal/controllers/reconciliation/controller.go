@@ -300,7 +300,10 @@ func (c *Controller) update(ctx context.Context, previous, resource *resource.Re
 
 	var patch client.Patch
 	if c.disableSSA {
-		patch = buildNonStrategicPatch(previous)
+		patch, err = buildNonStrategicPatch(ctx, previous, current)
+		if err != nil {
+			return nil, fmt.Errorf("building patch: %w", err)
+		}
 	} else {
 		patch = client.Apply
 		opts = append(opts, client.ForceOwnership, client.FieldOwner("eno"))
@@ -310,14 +313,18 @@ func (c *Controller) update(ctx context.Context, previous, resource *resource.Re
 	return
 }
 
-func buildNonStrategicPatch(previous *resource.Resource) client.Patch {
+func buildNonStrategicPatch(ctx context.Context, previous *resource.Resource, current *unstructured.Unstructured) (client.Patch, error) {
 	var from *unstructured.Unstructured
 	if previous == nil {
 		from = &unstructured.Unstructured{Object: map[string]any{}}
 	} else {
-		from = previous.UnstructuredWithoutOverrides()
+		var err error
+		from, err = previous.Unstructured(ctx, current)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return client.MergeFrom(from)
+	return client.MergeFrom(from), nil
 }
 
 func (c *Controller) getCurrent(ctx context.Context, resource *resource.Resource) (*unstructured.Unstructured, error) {
