@@ -239,28 +239,36 @@ func (c *symphonyController) buildStatus(symph *apiv1.Symphony, comps *apiv1.Com
 	newStatus := apiv1.SymphonyStatus{
 		ObservedGeneration: symph.Generation,
 	}
-	synthMap := map[string]struct{}{}
-	for _, comp := range comps.Items {
-		synthMap[comp.Spec.Synthesizer.Name] = struct{}{}
 
+	// Build a map of synthesizer name to whether the variation is optional
+	optionalSynths := map[string]bool{}
+	for _, v := range symph.Spec.Variations {
+		optionalSynths[v.Synthesizer.Name] = v.Optional
+	}
+
+	// Aggregate status only for non-optional variations
+	for _, comp := range comps.Items {
 		syn := comp.Status.CurrentSynthesis
-		if syn == nil {
+		if syn == nil || optionalSynths[comp.Spec.Synthesizer.Name] {
 			continue
 		}
 
-		if newStatus.Ready.Before(syn.Ready) || newStatus.Ready == nil {
+		if newStatus.Ready == nil || newStatus.Ready.Before(syn.Ready) {
 			newStatus.Ready = syn.Ready
 		}
-		if newStatus.Reconciled.Before(syn.Reconciled) || newStatus.Reconciled == nil {
+		if newStatus.Reconciled == nil || newStatus.Reconciled.Before(syn.Reconciled) {
 			newStatus.Reconciled = syn.Reconciled
 		}
-		if newStatus.Synthesized.Before(syn.Synthesized) || newStatus.Synthesized == nil {
+		if newStatus.Synthesized == nil || newStatus.Synthesized.Before(syn.Synthesized) {
 			newStatus.Synthesized = syn.Synthesized
 		}
 	}
 
-	// Status should be nil for any states that haven't been reached by all compositions
+	// Status should be nil for any states that haven't been reached by all non-optional compositions
 	for _, comp := range comps.Items {
+		if optionalSynths[comp.Spec.Synthesizer.Name] {
+			continue
+		}
 		syn := comp.Status.CurrentSynthesis
 		synInvalid := syn == nil || syn.ObservedCompositionGeneration != comp.Generation || comp.DeletionTimestamp != nil
 

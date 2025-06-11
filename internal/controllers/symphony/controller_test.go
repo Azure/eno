@@ -327,6 +327,86 @@ func TestBuildStatus(t *testing.T) {
 			Ready: readyTime,
 		}, status)
 	})
+
+	t.Run("optional variation does not block readiness", func(t *testing.T) {
+		readyTime := ptr.To(metav1.NewTime(time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC)))
+
+		symph := &apiv1.Symphony{
+			Spec: apiv1.SymphonySpec{
+				Variations: []apiv1.Variation{
+					{Synthesizer: apiv1.SynthesizerRef{Name: "foo"}},
+					{Synthesizer: apiv1.SynthesizerRef{Name: "bar"}, Optional: true},
+				},
+			},
+		}
+		comps := &apiv1.CompositionList{}
+		comps.Items = []apiv1.Composition{
+			{
+				Spec: apiv1.CompositionSpec{
+					Synthesizer: apiv1.SynthesizerRef{Name: "foo"},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						Ready: readyTime,
+					},
+				},
+			},
+			{
+				Spec: apiv1.CompositionSpec{
+					Synthesizer: apiv1.SynthesizerRef{Name: "bar"},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						Ready: nil, // stuck
+					},
+				},
+			},
+		}
+
+		status := c.buildStatus(symph, comps)
+		assert.Equal(t, apiv1.SymphonyStatus{
+			Ready: readyTime,
+		}, status)
+	})
+
+	t.Run("non-optional variation blocks readiness", func(t *testing.T) {
+		readyTime := ptr.To(metav1.NewTime(time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC)))
+
+		symph := &apiv1.Symphony{
+			Spec: apiv1.SymphonySpec{
+				Variations: []apiv1.Variation{
+					{Synthesizer: apiv1.SynthesizerRef{Name: "foo"}},
+					{Synthesizer: apiv1.SynthesizerRef{Name: "bar"}},
+				},
+			},
+		}
+		comps := &apiv1.CompositionList{}
+		comps.Items = []apiv1.Composition{
+			{
+				Spec: apiv1.CompositionSpec{
+					Synthesizer: apiv1.SynthesizerRef{Name: "foo"},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						Ready: readyTime,
+					},
+				},
+			},
+			{
+				Spec: apiv1.CompositionSpec{
+					Synthesizer: apiv1.SynthesizerRef{Name: "bar"},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						Ready: nil, // stuck
+					},
+				},
+			},
+		}
+
+		status := c.buildStatus(symph, comps)
+		assert.Equal(t, apiv1.SymphonyStatus{}, status)
+	})
 }
 
 func TestGetBindings(t *testing.T) {

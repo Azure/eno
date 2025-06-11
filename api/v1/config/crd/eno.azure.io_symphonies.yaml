@@ -157,6 +157,9 @@ spec:
                         name:
                           type: string
                       type: object
+                    optional:
+                      description: Optional marks this variation as optional. Optional variations do not count against the aggregated synthesis, reconciliation, and readiness statuses of the symphony.
+                      type: boolean
                   type: object
                 type: array
             type: object
