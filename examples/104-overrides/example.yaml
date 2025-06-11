@@ -1,0 +1,39 @@
+apiVersion: eno.azure.io/v1
+kind: Synthesizer
+metadata:
+  name: overrides-example
+spec:
+  image: docker.io/ubuntu:latest
+  command:
+  - /bin/bash
+  - -c
+  - |
+    echo '
+      {
+        "apiVersion":"config.kubernetes.io/v1",
+        "kind":"ResourceList",
+        "items":[
+          {
+            "apiVersion":"v1",
+            "data":{"someKey":"someVal"},
+            "kind":"ConfigMap",
+            "metadata":{
+              "name":"some-config",
+              "namespace": "default",
+              "annotations": {
+                "eno.azure.io/overrides": "[{ \"path\": \"self.data.someKey\", \"value\": \"overrideValue\", \"condition\": \"!has(self.data.disableOverrides)\" }]"
+              }
+            }
+          }
+        ]
+      }'
+---
+
+apiVersion: eno.azure.io/v1
+kind: Composition
+metadata:
+  name: overrides-example
+  namespace: default
+spec:
+  synthesizer:
+    name: overrides-example
