@@ -14,7 +14,7 @@ import (
 
 func TestBasics(t *testing.T) {
 	mgr := testutil.NewManager(t)
-	require.NoError(t, NewController(mgr.Manager))
+	require.NoError(t, NewController(mgr.Manager, 10.0))
 	mgr.Start(t)
 
 	ctx := testutil.NewContext(t)
@@ -80,7 +80,7 @@ func TestBasics(t *testing.T) {
 
 func TestDeferredBasics(t *testing.T) {
 	mgr := testutil.NewManager(t)
-	require.NoError(t, NewController(mgr.Manager))
+	require.NoError(t, NewController(mgr.Manager, 10.0))
 	mgr.Start(t)
 
 	ctx := testutil.NewContext(t)
@@ -148,7 +148,7 @@ func TestDeferredBasics(t *testing.T) {
 
 func TestDeferredWithIgnoreSideEffects(t *testing.T) {
 	mgr := testutil.NewManager(t)
-	require.NoError(t, NewController(mgr.Manager))
+	require.NoError(t, NewController(mgr.Manager, 10.0))
 	mgr.Start(t)
 
 	ctx := testutil.NewContext(t)
@@ -201,7 +201,7 @@ func TestDeferredWithIgnoreSideEffects(t *testing.T) {
 
 func TestBasicsImplicitBinding(t *testing.T) {
 	mgr := testutil.NewManager(t)
-	require.NoError(t, NewController(mgr.Manager))
+	require.NoError(t, NewController(mgr.Manager, 10.0))
 	mgr.Start(t)
 
 	ctx := testutil.NewContext(t)
@@ -262,7 +262,7 @@ func TestBasicsImplicitBinding(t *testing.T) {
 
 func TestBasicsImplicitBindingConflict(t *testing.T) {
 	mgr := testutil.NewManager(t)
-	require.NoError(t, NewController(mgr.Manager))
+	require.NoError(t, NewController(mgr.Manager, 10.0))
 	mgr.Start(t)
 
 	ctx := testutil.NewContext(t)
@@ -317,7 +317,7 @@ func TestBasicsImplicitBindingConflict(t *testing.T) {
 
 func TestCompositionChange(t *testing.T) {
 	mgr := testutil.NewManager(t)
-	require.NoError(t, NewController(mgr.Manager))
+	require.NoError(t, NewController(mgr.Manager, 10.0))
 	mgr.Start(t)
 
 	ctx := testutil.NewContext(t)
@@ -382,7 +382,7 @@ func TestCompositionChange(t *testing.T) {
 
 func TestSynthesizerChange(t *testing.T) {
 	mgr := testutil.NewManager(t)
-	require.NoError(t, NewController(mgr.Manager))
+	require.NoError(t, NewController(mgr.Manager, 10.0))
 	mgr.Start(t)
 
 	ctx := testutil.NewContext(t)
@@ -461,7 +461,7 @@ func TestSynthesizerChange(t *testing.T) {
 
 func TestRemoveInput(t *testing.T) {
 	mgr := testutil.NewManager(t)
-	require.NoError(t, NewController(mgr.Manager))
+	require.NoError(t, NewController(mgr.Manager, 10.0))
 	mgr.Start(t)
 
 	ctx := testutil.NewContext(t)

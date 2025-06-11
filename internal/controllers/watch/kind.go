@@ -7,7 +7,6 @@ import (
 	"path"
 	"reflect"
 	"slices"
-	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
@@ -27,9 +26,10 @@ import (
 )
 
 type KindWatchController struct {
-	client client.Client
-	gvk    schema.GroupVersionKind
-	cancel context.CancelFunc
+	client        client.Client
+	gvk           schema.GroupVersionKind
+	cancel        context.CancelFunc
+	sharedLimiter *rate.Limiter
 }
 
 func NewKindWatchController(ctx context.Context, parent *WatchController, resource *apiv1.ResourceRef) (*KindWatchController, error) {
@@ -42,6 +42,7 @@ func NewKindWatchController(ctx context.Context, parent *WatchController, resour
 			Version: resource.Version,
 			Kind:    resource.Kind,
 		},
+		sharedLimiter: parent.sharedLimiter,
 	}
 
 	ref := &metav1.PartialObjectMetadata{}
@@ -71,9 +72,8 @@ func (k *KindWatchController) newResourceWatchController(parent *WatchController
 		LogConstructor:     manager.NewLogConstructor(parent.mgr, controllerName),
 		SkipNameValidation: &skipNameValidation, // Allow duplicate names since we create many dynamic controllers
 		RateLimiter: &workqueue.TypedBucketRateLimiter[reconcile.Request]{
-			// Be careful about feedback loops - low, hardcoded rate limits make sense here.
-			// Maybe expose as a flag in the future.
-			Limiter: rate.NewLimiter(rate.Every(time.Second), 2),
+			// Use shared rate limiter across all kind controllers to rate limit as a single unit
+			Limiter: k.sharedLimiter,
 		},
 		Reconciler: k,
 	})

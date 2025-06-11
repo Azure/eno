@@ -55,6 +55,7 @@ func runController() error {
 		nodeAffinity             string
 		concurrencyLimit         int
 		containerCreationTimeout time.Duration
+		watchKindRateLimit       float64
 		synconf                  = &synthesis.Config{}
 
 		mgrOpts = &manager.Options{
@@ -72,6 +73,7 @@ func runController() error {
 	flag.StringVar(&nodeAffinity, "node-affinity", "", "Synthesizer pods will be created with this required node affinity expression e.g. labelKey=labelValue to match on value, just labelKey to match on presence of the label")
 	flag.IntVar(&concurrencyLimit, "concurrency-limit", 10, "Upper bound on active syntheses. This effectively limits the number of running synthesizer pods spawned by Eno.")
 	flag.DurationVar(&selfHealingGracePeriod, "self-healing-grace-period", time.Minute*5, "How long before the self-healing controllers are allowed to start the resynthesis process.")
+	flag.Float64Var(&watchKindRateLimit, "watch-kind-rate-limit", 10.0, "Rate limit for watch kind controllers in requests per second. This limit is shared across all kind controllers.")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 
@@ -122,7 +124,7 @@ func runController() error {
 		return fmt.Errorf("constructing resource slice cleanup controller: %w", err)
 	}
 
-	err = watch.NewController(mgr)
+	err = watch.NewController(mgr, watchKindRateLimit)
 	if err != nil {
 		return fmt.Errorf("constructing watch controller: %w", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"math/rand"
 
 	"github.com/go-logr/logr"
+	"golang.org/x/time/rate"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -16,9 +17,12 @@ type WatchController struct {
 	mgr            ctrl.Manager
 	client         client.Client
 	refControllers map[apiv1.ResourceRef]*KindWatchController
+	sharedLimiter  *rate.Limiter
 }
 
-func NewController(mgr ctrl.Manager) error {
+func NewController(mgr ctrl.Manager, watchKindRateLimit float64) error {
+	sharedLimiter := rate.NewLimiter(rate.Limit(watchKindRateLimit), int(watchKindRateLimit))
+	
 	err := ctrl.NewControllerManagedBy(mgr).
 		Named("watchControllerController").
 		Watches(&apiv1.Synthesizer{}, manager.SingleEventHandler()).
@@ -27,6 +31,7 @@ func NewController(mgr ctrl.Manager) error {
 			mgr:            mgr,
 			client:         mgr.GetClient(),
 			refControllers: map[apiv1.ResourceRef]*KindWatchController{},
+			sharedLimiter:  sharedLimiter,
 		})
 	if err != nil {
 		return err
