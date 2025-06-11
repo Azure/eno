@@ -7,6 +7,7 @@ import (
 	"path"
 	"reflect"
 	"slices"
+	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
@@ -25,11 +26,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
-var rateLimiter *rate.Limiter
+var rateLimiter = rate.NewLimiter(rate.Every(time.Second), 10)
 
 // SetKindWatchRateLimit configures the shared rate limiter for KindWatchControllers.
-func SetKindWatchRateLimit(rps float64, burst int) {
-	rateLimiter = rate.NewLimiter(rate.Limit(rps), burst)
+func SetKindWatchRateLimit(rps int) {
+	rateLimiter = rate.NewLimiter(rate.Every(time.Second), rps)
 }
 
 type KindWatchController struct {

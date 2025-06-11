@@ -55,7 +55,7 @@ func runController() error {
 		taintToleration          string
 		nodeAffinity             string
 		concurrencyLimit         int
-		inputRateLimit           float64
+		inputRateLimit           int
 		containerCreationTimeout time.Duration
 		synconf                  = &synthesis.Config{}
 
@@ -74,10 +74,10 @@ func runController() error {
 	flag.StringVar(&nodeAffinity, "node-affinity", "", "Synthesizer pods will be created with this required node affinity expression e.g. labelKey=labelValue to match on value, just labelKey to match on presence of the label")
 	flag.IntVar(&concurrencyLimit, "concurrency-limit", 10, "Upper bound on active syntheses. This effectively limits the number of running synthesizer pods spawned by Eno.")
 	flag.DurationVar(&selfHealingGracePeriod, "self-healing-grace-period", time.Minute*5, "How long before the self-healing controllers are allowed to start the resynthesis process.")
-	flag.Float64Var(&inputRateLimit, "input-rate-limit", 10, "RPS limit for input changes")
+	flag.IntVar(&inputRateLimit, "input-qps", 10, "Writes-per-second limit for input controllers")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
-	watch.SetKindWatchRateLimit(inputRateLimit, 2)
+	watch.SetKindWatchRateLimit(inputRateLimit)
 
 	synconf.NodeAffinityKey, synconf.NodeAffinityValue = parseKeyValue(nodeAffinity)
 	synconf.TaintTolerationKey, synconf.TaintTolerationValue = parseKeyValue(taintToleration)
