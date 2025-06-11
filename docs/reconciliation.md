@@ -91,16 +91,23 @@ annotations:
     ]
 ```
 
+This is commonly used to make a subset of properties managed by Eno optional i.e. allow other clients to override them.
+For example:
+
+```json
+{ "path": "self.data.foo", "value": "default value", "condition": "!has(self.data.foo)" }
+```
+
 #### Path Expression Syntax
 
-Overrides use a jsonpath-esque syntax to target properties.
+Overrides use a CEL-like syntax to reference properties.
 
-- `/field/anotherfield`: Traverse object fields
-- `/field[2]`: Access array elements by index
-- `/field[*]`: Match all elements in an array
-- `/field[someKey="value"]`: Match array elements by a key-value pair
+- `field.anotherfield`: Traverse object fields
+- `field[2]`: Access array elements by index
+- `field[*]`: Match all elements in an array
+- `field[someKey="value"]`: Match array elements by a key-value pair
 
-Paths can be chained, e.g., `/field/anotherfield[2]/yetAnotherField`.
+Paths can be chained, e.g., `self.field.anotherfield[2].yetAnotherField`.
 If any segment of the path is nil or missing, the override will not be applied.
 
 ### Replace
