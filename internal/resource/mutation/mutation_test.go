@@ -87,6 +87,15 @@ func TestApply(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "Slice_WildcardAndOutOfRange",
+			path: "self.foo[*][123]",
+			obj: map[string]any{"foo": []any{
+				map[string]any{"name": "test-2"},
+				map[string]any{"name": 234},
+			}},
+			wantErr: true,
+		},
+		{
 			name: "Slice_MapMatcher",
 			path: "self.foo[name=\"test-1\"].bar",
 			obj: map[string]any{"foo": []any{

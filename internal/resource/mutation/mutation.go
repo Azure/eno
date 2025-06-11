@@ -140,7 +140,10 @@ func apply(path *PathExpr, startIndex int, obj any, value any) error {
 			}
 
 			if isMap && startIndex+i < len(path.ast.Sections)-1 {
-				apply(path, i+1, cur, value) // recurse into object
+				err := apply(path, i+1, cur, value) // recurse into object
+				if err != nil {
+					return err
+				}
 				continue
 			}
 			slice[j] = value
