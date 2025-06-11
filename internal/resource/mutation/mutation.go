@@ -51,8 +51,8 @@ func (o *Op) UnmarshalJSON(data []byte) error {
 
 // Apply applies the operation to the "mutated" object if the condition is met by the "current" object.
 func (o *Op) Apply(ctx context.Context, current, mutated *unstructured.Unstructured) error {
-	if current == nil {
-		return nil // nothing to do
+	if current == nil && o.Condition != nil {
+		return nil // impossible condition
 	}
 
 	if o.Condition != nil {

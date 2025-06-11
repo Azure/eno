@@ -1,10 +1,15 @@
 package mutation
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
+	enocel "github.com/Azure/eno/internal/cel"
+	"github.com/google/cel-go/cel"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func TestApply(t *testing.T) {
@@ -189,4 +194,104 @@ func TestApply(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestOpApply(t *testing.T) {
+	ctx := context.Background()
+
+	testCases := []struct {
+		name            string
+		op              Op
+		current         *unstructured.Unstructured
+		mutated         *unstructured.Unstructured
+		expectedMutated *unstructured.Unstructured
+		wantErr         bool
+	}{
+		{
+			name: "ConditionMet_MutationApplied",
+			op: Op{
+				Path:      mustParsePathExpr("self.foo"),
+				Condition: mustParseCondition("true"),
+				Value:     "bar",
+			},
+			current: &unstructured.Unstructured{Object: map[string]any{}},
+			mutated: &unstructured.Unstructured{Object: map[string]any{}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{
+				"foo": "bar",
+			}},
+		},
+		{
+			name: "ConditionNotMet_NoMutation",
+			op: Op{
+				Path:      mustParsePathExpr("self.foo"),
+				Condition: mustParseCondition("false"),
+				Value:     "bar",
+			},
+			current:         &unstructured.Unstructured{Object: map[string]any{}},
+			mutated:         &unstructured.Unstructured{Object: map[string]any{}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{}},
+		},
+		{
+			name: "NilCurrentWithCondition_NoMutation",
+			op: Op{
+				Path:      mustParsePathExpr("self.foo"),
+				Condition: mustParseCondition("true"),
+				Value:     "bar",
+			},
+			current:         nil,
+			mutated:         &unstructured.Unstructured{Object: map[string]any{}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{}},
+		},
+		{
+			name: "NoCondition_MutationApplied",
+			op: Op{
+				Path:  mustParsePathExpr("self.foo"),
+				Value: "bar",
+			},
+			current: &unstructured.Unstructured{Object: map[string]any{}},
+			mutated: &unstructured.Unstructured{Object: map[string]any{}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{
+				"foo": "bar",
+			}},
+		},
+		{
+			name: "InvalidPath_Error",
+			op: Op{
+				Path:  mustParsePathExpr("invalid.foo"),
+				Value: "bar",
+			},
+			current: &unstructured.Unstructured{Object: map[string]any{}},
+			mutated: &unstructured.Unstructured{Object: map[string]any{}},
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.op.Apply(ctx, tc.current, tc.mutated)
+			if tc.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.expectedMutated, tc.mutated)
+			}
+		})
+	}
+}
+
+// helper functions for tests
+func mustParsePathExpr(path string) *PathExpr {
+	expr, err := ParsePathExpr(path)
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse path expr %q: %v", path, err))
+	}
+	return expr
+}
+
+func mustParseCondition(cond string) cel.Program {
+	prog, err := enocel.Parse(cond)
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse condition %q: %v", cond, err))
+	}
+	return prog
 }
