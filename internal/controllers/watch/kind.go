@@ -26,6 +26,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
+var rateLimiter = rate.NewLimiter(rate.Every(time.Second), 10)
+
+// SetKindWatchRateLimit configures the shared rate limiter for KindWatchControllers.
+func SetKindWatchRateLimit(rps int) {
+	rateLimiter = rate.NewLimiter(rate.Every(time.Second), rps)
+}
+
 type KindWatchController struct {
 	client client.Client
 	gvk    schema.GroupVersionKind
@@ -71,9 +78,7 @@ func (k *KindWatchController) newResourceWatchController(parent *WatchController
 		LogConstructor:     manager.NewLogConstructor(parent.mgr, controllerName),
 		SkipNameValidation: &skipNameValidation, // Allow duplicate names since we create many dynamic controllers
 		RateLimiter: &workqueue.TypedBucketRateLimiter[reconcile.Request]{
-			// Be careful about feedback loops - low, hardcoded rate limits make sense here.
-			// Maybe expose as a flag in the future.
-			Limiter: rate.NewLimiter(rate.Every(time.Second), 2),
+			Limiter: rateLimiter,
 		},
 		Reconciler: k,
 	})
