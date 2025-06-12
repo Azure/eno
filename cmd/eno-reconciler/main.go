@@ -14,7 +14,6 @@ import (
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	"github.com/Azure/eno/internal/controllers/liveness"
 	"github.com/Azure/eno/internal/controllers/reconciliation"
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/k8s"
@@ -31,13 +30,11 @@ func main() {
 func run() error {
 	ctx := ctrl.SetupSignalHandler()
 	var (
-		debugLogging                 bool
-		remoteKubeconfigFile         string
-		remoteQPS                    float64
-		compositionSelector          string
-		compositionNamespace         string
-		namespaceCreationGracePeriod time.Duration
-		namespaceCleanup             bool
+		debugLogging         bool
+		remoteKubeconfigFile string
+		remoteQPS            float64
+		compositionSelector  string
+		compositionNamespace string
 
 		mgrOpts = &manager.Options{
 			Rest: ctrl.GetConfigOrDie(),
@@ -54,8 +51,6 @@ func run() error {
 	flag.BoolVar(&recOpts.DisableServerSideApply, "disable-ssa", false, "Use non-strategic three-way merge patches instead of server-side apply")
 	flag.StringVar(&compositionSelector, "composition-label-selector", labels.Everything().String(), "Optional label selector for compositions to be reconciled")
 	flag.StringVar(&compositionNamespace, "composition-namespace", metav1.NamespaceAll, "Optional namespace to limit compositions that will be reconciled")
-	flag.DurationVar(&namespaceCreationGracePeriod, "ns-creation-grace-period", time.Second, "A namespace is assumed to be missing if it doesn't exist once one of its resources has existed for this long")
-	flag.BoolVar(&namespaceCleanup, "namespace-cleanup", true, "Clean up orphaned resources caused by namespace force-deletions")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 
@@ -84,13 +79,6 @@ func run() error {
 	mgr, err := manager.NewReconciler(logger, mgrOpts)
 	if err != nil {
 		return fmt.Errorf("constructing manager: %w", err)
-	}
-
-	if namespaceCleanup {
-		err = liveness.NewNamespaceController(mgr, 5, namespaceCreationGracePeriod)
-		if err != nil {
-			return fmt.Errorf("constructing namespace liveness controller: %w", err)
-		}
 	}
 
 	remoteConfig := rest.CopyConfig(mgr.GetConfig())
