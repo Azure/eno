@@ -238,3 +238,72 @@ func TestOrphanedNamespaceSymphony(t *testing.T) {
 		return upstream.List(ctx, slices) == nil && len(slices.Items) == 0
 	})
 }
+
+// TestOptionalVariationReadiness ensures that optional variations do not block readiness or reconciliation.
+func TestOptionalVariationReadiness(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t, testutil.WithCompositionNamespace(ctrlcache.AllNamespaces))
+	upstream := mgr.GetClient()
+
+	// Create test namespace.
+	require.NoError(t, upstream.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-optional"}}))
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]string{
+					"name":      "test-obj",
+					"namespace": "test-optional",
+				},
+				"data": map[string]string{"foo": "bar"},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "anything"
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	synOptional := &apiv1.Synthesizer{}
+	synOptional.Name = "test-syn-optional"
+	synOptional.Spec.Image = "anything"
+	require.NoError(t, upstream.Create(ctx, synOptional))
+
+	symph := &apiv1.Symphony{}
+	symph.Name = "test-comp-optional"
+	symph.Namespace = "test-optional"
+	symph.Spec.Variations = []apiv1.Variation{
+		{Synthesizer: apiv1.SynthesizerRef{Name: syn.Name}},
+		{Synthesizer: apiv1.SynthesizerRef{Name: synOptional.Name}, Optional: true},
+	}
+	require.NoError(t, upstream.Create(ctx, symph))
+
+	// The Symphony should become ready even if the optional variation is not reconciled.
+	testutil.Eventually(t, func() bool {
+		upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph)
+		return symph.Status.Ready != nil && symph.Status.ObservedGeneration == symph.Generation
+	})
+
+	// Remove the required variation, leaving only the optional one.
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph)
+		symph.Spec.Variations = symph.Spec.Variations[1:]
+		return upstream.Update(ctx, symph)
+	})
+	require.NoError(t, err)
+
+	// Symphony should still be ready (since only optional variations remain).
+	testutil.Eventually(t, func() bool {
+		upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph)
+		return symph.Status.Ready != nil && symph.Status.ObservedGeneration == symph.Generation
+	})
+}
