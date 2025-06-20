@@ -8,7 +8,7 @@ import (
 )
 
 func TestSynthesize(t *testing.T) {
-	input, _ := os.Open("input.json")
+	input, _ := os.Open("example_input.json")
 	stdin, w, _ := os.Pipe()
 	os.Stdin = stdin
 	io.Copy(w, input)
@@ -33,9 +33,16 @@ func TestSynthesize(t *testing.T) {
 	buf, _ := io.ReadAll(r)
 	output := string(buf)
 
-    expected := `{
-    "apiVersion":"apps/v1",
-    "kind":"Deployment"
+    expected := `
+{
+    "apiVersion":"config.kubernetes.io/v1",
+    "items":[
+        {
+			"apiVersion":"apps/v1",
+			"kind":"Deployment"
+		}
+    ],
+    "kind":"ResourceList"
 }`
 	for _, whitespace := range []string{"\n", "\t", " "} {
 		expected = strings.ReplaceAll(expected, whitespace, "")

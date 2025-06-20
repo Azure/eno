@@ -1,7 +1,11 @@
 import k8s.api.apps.v1
 
-Synthesize = lambda input: any -> any { 
-    output = v1.Deployment {
-        
+Synthesize = lambda input: ResourceList -> ResourceList { 
+    output = ResourceList {
+        items: [
+            v1.Deployment {
+                
+            }
+        ]
     }
 }

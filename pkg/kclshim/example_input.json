@@ -1,0 +1,17 @@
+{
+    "apiVersion":"config.kubernetes.io/v1",
+    "kind":"ResourceList",
+    "items":[
+        {
+            "apiVersion":"v1",
+            "data":{
+                "mcrbase":"mcr.microsoft.com"
+            },
+            "kind":"ConfigMap",
+            "metadata":{
+                "name":"some-config",
+                "namespace": "default"
+            }
+        }
+    ]
+}
