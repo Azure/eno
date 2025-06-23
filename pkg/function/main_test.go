@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -143,6 +144,59 @@ func TestMainError(t *testing.T) {
 	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[],\"results\":[{\"message\":\"foobar\",\"severity\":\"error\"}]}\n", outBuf.String())
 }
 
+func TestCompositeMunger(t *testing.T) {
+	// Create test munge functions
+	addLabelMunger := func(obj *unstructured.Unstructured) {
+		labels := obj.GetLabels()
+		if labels == nil {
+			labels = make(map[string]string)
+		}
+		labels["test-label"] = "test-value"
+		obj.SetLabels(labels)
+	}
+
+	addAnnotationMunger := func(obj *unstructured.Unstructured) {
+		annotations := obj.GetAnnotations()
+		if annotations == nil {
+			annotations = make(map[string]string)
+		}
+		annotations["test-annotation"] = "test-value"
+		obj.SetAnnotations(annotations)
+	}
+
+	outBuf := &bytes.Buffer{}
+	inBuf := bytes.NewBufferString(`{"items": []}`)
+
+	ow := NewOutputWriter(outBuf, nil)
+	ir, err := NewInputReader(inBuf)
+	require.NoError(t, err)
+
+	// Test function that returns a simple pod
+	fn := func(inputs struct{}) ([]client.Object, error) {
+		pod := &corev1.Pod{}
+		pod.Name = "test-pod"
+		pod.Namespace = "default"
+		return []client.Object{pod}, nil
+	}
+
+	// Process options
+	opts := &mainConfig{}
+	WithMunger(addLabelMunger)(opts)
+	WithMunger(addAnnotationMunger)(opts)
+
+	// Create composite munge function using the receiver method
+	compositeMunge := opts.CompositeMungeFunc()
+
+	ow = NewOutputWriter(outBuf, compositeMunge)
+	require.NoError(t, main(fn, ir, ow))
+
+	// Verify that both mungers were applied
+	output := outBuf.String()
+	assert.Contains(t, output, "test-label")
+	assert.Contains(t, output, "test-value")
+	assert.Contains(t, output, "test-annotation")
+}
+
 func TestMainWithMungers(t *testing.T) {
 	// Create test munge functions
 	addLabelMunger := func(obj *unstructured.Unstructured) {
@@ -197,24 +251,15 @@ func TestMainWithMungers(t *testing.T) {
 }
 
 func ExampleMain_withMungers() {
-	// Example showing how to use the new options pattern
-	addLabelMunger := func(obj *unstructured.Unstructured) {
-		labels := obj.GetLabels()
-		if labels == nil {
-			labels = make(map[string]string)
-		}
-		labels["environment"] = "test"
-		obj.SetLabels(labels)
-	}
-
+	// Example using precreted mungers
 	fn := func(inputs struct{}) ([]client.Object, error) {
 		output := &corev1.Pod{}
 		output.Name = "test-pod"
 		return []client.Object{output}, nil
 	}
 
-	Main(fn, WithMunger(addLabelMunger))
-	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"creationTimestamp":null,"labels":{"environment":"test"},"name":"test-pod"},"spec":{"containers":null},"status":{}}]}
+	Main(fn, WithManagedByEno(), WithReconcilationInterval(time.Minute))
+	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"annotations":{"eno.azure.io/reconcile-interval":"1m0s"},"creationTimestamp":null,"labels":{"app.kubernetes.io/managed-by":"eno"},"name":"test-pod"},"spec":{"containers":null},"status":{}}]}
 }
 
 type testSimpleInputs struct {

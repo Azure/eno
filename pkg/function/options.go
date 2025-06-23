@@ -1,6 +1,8 @@
 package function
 
 import (
+	"time"
+
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -41,6 +43,28 @@ func WithMunger(m MungeFunc) mainOption {
 	return func(opts *mainConfig) {
 		opts.mungers = append(opts.mungers, m)
 	}
+}
+
+func WithManagedByEno() mainOption {
+	return WithMunger(func(obj *unstructured.Unstructured) {
+		labels := obj.GetLabels()
+		if labels == nil {
+			labels = make(map[string]string)
+		}
+		labels["app.kubernetes.io/managed-by"] = "eno"
+		obj.SetLabels(labels)
+	})
+}
+
+func WithReconcilationInterval(interval time.Duration) mainOption {
+	return WithMunger(func(obj *unstructured.Unstructured) {
+		annotations := obj.GetAnnotations()
+		if annotations == nil {
+			annotations = make(map[string]string)
+		}
+		annotations["eno.azure.io/reconcile-interval"] = interval.String()
+		obj.SetAnnotations(annotations)
+	})
 }
 
 // CompositeMungeFunc creates a composite munge function that applies all
