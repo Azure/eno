@@ -45,6 +45,8 @@ func WithMunger(m MungeFunc) mainOption {
 	}
 }
 
+// WithManagedByEno returns an iption that annotates the given Kubernetes object to indicate
+// that it is managed by Eno. It sets the "eno.azure.io/managed-by" annotation to the Eno controller identifier.
 func WithManagedByEno() mainOption {
 	return WithMunger(func(obj *unstructured.Unstructured) {
 		labels := obj.GetLabels()
@@ -56,6 +58,9 @@ func WithManagedByEno() mainOption {
 	})
 }
 
+// WithReconcilationInterval returns an option that annotates the given Kubernetes object to configure
+// its reconciliation interval. It sets the "eno.azure.io/reconcile-interval" annotation to the provided
+// duration string, which controls how frequently Eno will reconcile the resource.
 func WithReconcilationInterval(interval time.Duration) mainOption {
 	return WithMunger(func(obj *unstructured.Unstructured) {
 		annotations := obj.GetAnnotations()
