@@ -1,5 +1,5 @@
 import json
 import pkg
 
-input = option("input")
-output = pkg.Synthesize(input)
+input: pkg.ResourceList = option("input")
+output: pkg.ResourceList = pkg.Synthesize(input)

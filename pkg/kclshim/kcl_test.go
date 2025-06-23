@@ -38,11 +38,46 @@ func TestSynthesize(t *testing.T) {
     "apiVersion":"config.kubernetes.io/v1",
     "items":[
         {
-			"apiVersion":"apps/v1",
-			"kind":"Deployment"
+			"apiVersion": "apps/v1",
+			"kind": "Deployment",
+			"metadata": {
+				"name": "my-deployment",
+				"namespace": "default"
+			},
+			"spec": {
+				"replicas": 3,
+				"selector": {
+					"matchLabels": {
+						"app": "my-app"
+					}
+				},
+				"template": {
+					"metadata": {
+						"labels": {
+							"app": "my-app"
+						}
+					},
+					"spec": {
+						"containers": [
+							{
+								"image": "mcr.microsoft.com/a/b/my-image:latest",
+								"name": "my-container"
+							}
+						]
+					}
+				}
+			}
+		},
+		{
+			"apiVersion": "v1",
+			"kind": "ServiceAccount",
+			"metadata": {
+				"name": "my-service-account",
+				"namespace": "default"
+            }
 		}
-    ],
-    "kind":"ResourceList"
+	],
+	"kind": "ResourceList"
 }`
 	for _, whitespace := range []string{"\n", "\t", " "} {
 		expected = strings.ReplaceAll(expected, whitespace, "")

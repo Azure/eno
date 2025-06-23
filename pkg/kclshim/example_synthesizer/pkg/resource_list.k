@@ -1,3 +1,5 @@
+# TODO: Move this file to a KCL module.
+
 schema ResultFile:
     path: str
     index?: float
