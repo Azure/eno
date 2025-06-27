@@ -6,28 +6,52 @@ import (
 	"io"
 	"os"
 
+	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kcl "kcl-lang.io/kcl-go"
-    "kcl-lang.io/kcl-go/pkg/spec/gpyrpc"
+	"kcl-lang.io/kcl-go/pkg/spec/gpyrpc"
 )
 
-func Synthesize(workingDir string) int {
+func printErr(err error) {
+	rl := krmv1.ResourceList{
+		APIVersion: krmv1.SchemeGroupVersion.String(),
+		Kind:       krmv1.ResourceListKind,
+		Items:      []*unstructured.Unstructured{},
+		Results: []*krmv1.Result{
+			{
+				Message:  err.Error(),
+				Severity: krmv1.ResultSeverityError,
+			},
+		},
+	}
+	bytes, err := json.Marshal(rl)
+	if err != nil {
+		rl.Results = append(rl.Results, &krmv1.Result{
+			Message:  fmt.Sprintf("error marshaling error response: %v", err),
+			Severity: krmv1.ResultSeverityError,
+		})
+	}
+	fmt.Print(string(bytes))
+}
+
+func Synthesize(workingDir string) {
 	buffer, err := io.ReadAll(os.Stdin)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error reading from stdin:", err)
-		return 1
+		printErr(fmt.Errorf("error reading from stdin: %w", err))
+		return
 	}
 	input := string(buffer)
 
-	 depResult, err := kcl.UpdateDependencies(&gpyrpc.UpdateDependencies_Args{
-        ManifestPath: workingDir,
-    })
-    if err != nil {
-        fmt.Fprintln(os.Stderr, "Error updating dependencies:", err)
-		return 3
-    }
+	depResult, err := kcl.UpdateDependencies(&gpyrpc.UpdateDependencies_Args{
+		ManifestPath: workingDir,
+	})
+	if err != nil {
+		printErr(fmt.Errorf("error updating dependencies: %w", err))
+		return
+	}
 
-    depOpt := kcl.NewOption()
-    depOpt.ExternalPkgs = depResult.ExternalPkgs
+	depOpt := kcl.NewOption()
+	depOpt.ExternalPkgs = depResult.ExternalPkgs
 
 	results, err := kcl.Run(
 		"main.k",
@@ -36,22 +60,21 @@ func Synthesize(workingDir string) int {
 		kcl.WithOptions(fmt.Sprintf("input=%s", input)),
 	)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error running KCL:", err)
-		return 4
+		printErr(fmt.Errorf("error running KCL: %w", err))
+		return
 	}
 
 	result, err := results.First().ToMap()
 	output := result["output"]
 	outputJSON, err := json.Marshal(output)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error marshaling output to JSON:", err)
-		return 5
+		printErr(fmt.Errorf("error marshaling output to JSON: %w", err))
+		return
 	}
-	
+
 	_, err = fmt.Println(string(outputJSON))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error printing output:", err)
-		return 6
+		printErr(fmt.Errorf("error printing output: %w", err))
+		return
 	}
-	return 0
 }
