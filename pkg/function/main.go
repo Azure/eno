@@ -18,7 +18,7 @@ type Inputs interface{}
 type SynthFunc[T Inputs] func(inputs T) ([]client.Object, error)
 
 // Main is the entrypoint for Eno synthesizer processes written using the framework defined by this package.
-func Main[T Inputs](fn SynthFunc[T], opts ...mainOption) {
+func Main[T Inputs](fn SynthFunc[T], opts ...Option) {
 	// Process options
 	options := &mainConfig{}
 	for _, opt := range opts {

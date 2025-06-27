@@ -6,10 +6,10 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// MainOption defines an option for configuring the Main function.
-type mainOption func(*mainConfig)
+// option defines an option for configuring/augmenting the Main function.
+type Option func(*mainConfig)
 
-// MainOpts holds configuration options for the Main function.
+// mainConfig holds configuration options for the Main function.
 type mainConfig struct {
 	mungers []MungeFunc
 }
@@ -39,7 +39,7 @@ type mainConfig struct {
 //			obj.SetAnnotations(annotations)
 //		}),
 //	)
-func WithMunger(m MungeFunc) mainOption {
+func WithMunger(m MungeFunc) Option {
 	return func(opts *mainConfig) {
 		opts.mungers = append(opts.mungers, m)
 	}
@@ -47,7 +47,7 @@ func WithMunger(m MungeFunc) mainOption {
 
 // WithManagedByEno returns an iption that annotates the given Kubernetes object to indicate
 // that it is managed by Eno. It sets the "eno.azure.io/managed-by" annotation to the Eno controller identifier.
-func WithManagedByEno() mainOption {
+func WithManagedByEno() Option {
 	return WithMunger(func(obj *unstructured.Unstructured) {
 		labels := obj.GetLabels()
 		if labels == nil {
@@ -61,7 +61,7 @@ func WithManagedByEno() mainOption {
 // WithReconcilationInterval returns an option that annotates the given Kubernetes object to configure
 // its reconciliation interval. It sets the "eno.azure.io/reconcile-interval" annotation to the provided
 // duration string, which controls how frequently Eno will reconcile the resource.
-func WithReconcilationInterval(interval time.Duration) mainOption {
+func WithReconcilationInterval(interval time.Duration) Option {
 	return WithMunger(func(obj *unstructured.Unstructured) {
 		annotations := obj.GetAnnotations()
 		if annotations == nil {
