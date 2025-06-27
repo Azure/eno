@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -144,59 +143,6 @@ func TestMainError(t *testing.T) {
 	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[],\"results\":[{\"message\":\"foobar\",\"severity\":\"error\"}]}\n", outBuf.String())
 }
 
-func TestCompositeMunger(t *testing.T) {
-	// Create test munge functions
-	addLabelMunger := func(obj *unstructured.Unstructured) {
-		labels := obj.GetLabels()
-		if labels == nil {
-			labels = make(map[string]string)
-		}
-		labels["test-label"] = "test-value"
-		obj.SetLabels(labels)
-	}
-
-	addAnnotationMunger := func(obj *unstructured.Unstructured) {
-		annotations := obj.GetAnnotations()
-		if annotations == nil {
-			annotations = make(map[string]string)
-		}
-		annotations["test-annotation"] = "test-value"
-		obj.SetAnnotations(annotations)
-	}
-
-	outBuf := &bytes.Buffer{}
-	inBuf := bytes.NewBufferString(`{"items": []}`)
-
-	ow := NewOutputWriter(outBuf, nil)
-	ir, err := NewInputReader(inBuf)
-	require.NoError(t, err)
-
-	// Test function that returns a simple pod
-	fn := func(inputs struct{}) ([]client.Object, error) {
-		pod := &corev1.Pod{}
-		pod.Name = "test-pod"
-		pod.Namespace = "default"
-		return []client.Object{pod}, nil
-	}
-
-	// Process options
-	opts := &mainConfig{}
-	WithMunger(addLabelMunger)(opts)
-	WithMunger(addAnnotationMunger)(opts)
-
-	// Create composite munge function using the receiver method
-	compositeMunge := opts.CompositeMungeFunc()
-
-	ow = NewOutputWriter(outBuf, compositeMunge)
-	require.NoError(t, main(fn, ir, ow))
-
-	// Verify that both mungers were applied
-	output := outBuf.String()
-	assert.Contains(t, output, "test-label")
-	assert.Contains(t, output, "test-value")
-	assert.Contains(t, output, "test-annotation")
-}
-
 func ExampleMain_withMungers() {
 	// Example using precreted mungers
 	fn := func(inputs struct{}) ([]client.Object, error) {
@@ -205,6 +151,7 @@ func ExampleMain_withMungers() {
 		return []client.Object{output}, nil
 	}
 
+	//stdout of main will be compared with output comment below becausse this is an example
 	Main(fn, WithManagedByEno(), WithReconcilationInterval(time.Minute))
 	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"annotations":{"eno.azure.io/reconcile-interval":"1m0s"},"creationTimestamp":null,"labels":{"app.kubernetes.io/managed-by":"eno"},"name":"test-pod"},"spec":{"containers":null},"status":{}}]}
 }
