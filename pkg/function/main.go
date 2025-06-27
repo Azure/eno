@@ -2,6 +2,7 @@ package function
 
 import (
 	"fmt"
+	"os"
 	"reflect"
 
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
@@ -17,8 +18,14 @@ type Inputs interface{}
 type SynthFunc[T Inputs] func(inputs T) ([]client.Object, error)
 
 // Main is the entrypoint for Eno synthesizer processes written using the framework defined by this package.
-func Main[T Inputs](fn SynthFunc[T]) {
-	ow := NewDefaultOutputWriter()
+func Main[T Inputs](fn SynthFunc[T], opts ...Option) {
+	// Process options
+	options := &mainConfig{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	ow := NewOutputWriter(os.Stdout, options.CompositeMungeFunc())
 	ir, err := NewDefaultInputReader()
 	if err != nil {
 		panic(fmt.Sprintf("failed to create default input reader: %s", err))
