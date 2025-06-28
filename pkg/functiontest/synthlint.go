@@ -69,6 +69,10 @@ func extractEnoKeysWithError(structInstance any) ([]string, error) {
 		}
 	}
 
+	if len(enoKeys) == 0 {
+		return nil, fmt.Errorf("no eno_key tags in input")
+	}
+
 	return enoKeys, nil
 }
 

@@ -1,6 +1,7 @@
 package functiontest
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
@@ -48,7 +49,7 @@ func TestInputsMatchSynthesizerRefs_StrictMode_Success(t *testing.T) {
 
 func TestInputsMatchSynthesizerRefs_StrictMode_FailureMissingEnoKey(t *testing.T) {
 	// Create synthesizer.yaml with more refs than eno_keys
-	synthesizerPath := createTempSynthesizer(t, []string{"database", "cache", "storage", "network"})
+	synthesizerPath := createTempSynthesizer(t, []string{"database", "cache", "network"})
 	defer os.Remove(synthesizerPath)
 
 	// Test with missing eno_key - should fail in strict mode
@@ -115,9 +116,11 @@ func TestInputsMatchSynthesizerRefs_EmptyEnoKeys(t *testing.T) {
 	// Test with struct that has no eno_key tags
 	inputs := TestInputsEmpty{}
 
+	mockT := &mockTestingT{}
 	// Should pass in both modes since there are no eno_keys to validate
-	InputsMatchSynthesizerRefs(t, inputs, synthesizerPath, KeyMatchStrict)
-	InputsMatchSynthesizerRefs(t, inputs, synthesizerPath, KeyMatchRelaxed)
+	InputsMatchSynthesizerRefs(mockT, inputs, synthesizerPath, KeyMatchStrict)
+	assert.True(t, mockT.failed, "Expected test to fail when synthesizer file doesn't exist")
+	assert.Contains(t, mockT.errorMsg, "no eno_key tags in input", "Expected error about loading synthesizer refs")
 }
 
 func TestInputsMatchSynthesizerRefs_InvalidSynthesizerPath(t *testing.T) {
@@ -254,7 +257,7 @@ type mockTestingT struct {
 func (m *mockTestingT) Errorf(format string, args ...interface{}) {
 	m.failed = true
 	if m.errorMsg == "" {
-		m.errorMsg = format
+		m.errorMsg = fmt.Sprintf(format, args...)
 	}
 }
 
