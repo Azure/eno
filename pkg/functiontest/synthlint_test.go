@@ -157,7 +157,7 @@ func TestInputsMatchSynthesizerRefs_InvalidSynthesizerYaml(t *testing.T) {
 
 func TestInputsMatchSynthesizerRefs_SynthesizerWithoutRefs(t *testing.T) {
 	// Create synthesizer.yaml without refs
-	synthesizerPath := createTempSynthesizerWithoutRefs(t)
+	synthesizerPath := createTempSynthesizer(t, []string{})
 	defer os.Remove(synthesizerPath)
 
 	inputs := TestInputsComplete{}
@@ -215,27 +215,6 @@ func createTempSynthesizer(t *testing.T, refKeys []string) string {
 				Version: "v1",
 			},
 		}
-	}
-
-	data, err := yaml.Marshal(synthesizer)
-	require.NoError(t, err)
-
-	_, err = tmpFile.Write(data)
-	require.NoError(t, err)
-	tmpFile.Close()
-
-	return tmpFile.Name()
-}
-
-// Helper function to create a synthesizer.yaml without refs
-func createTempSynthesizerWithoutRefs(t *testing.T) string {
-	tmpFile, err := os.CreateTemp("", "synthesizer-no-refs-*.yaml")
-	require.NoError(t, err)
-
-	synthesizer := enov1.Synthesizer{
-		Spec: enov1.SynthesizerSpec{
-			Image: "test-image",
-		},
 	}
 
 	data, err := yaml.Marshal(synthesizer)
