@@ -73,6 +73,43 @@ annotations:
   eno.azure.io/disable-updates: "true"
 ```
 
+### Overrides
+
+Overrides let you modify specific fields of a resource during reconciliation.
+These modifications are applied on top of the synthesized resource and can be conditional.
+Conditions are CEL expressions that are evaluated against the current state of the resource at reconciliation time.
+
+This allows Eno synthesizers to specify basic runtime behavior without requiring resynthesis.
+
+> Overrides are applied during reconciliation, so in most cases they should be used alongside `eno.azure.io/reconcile-interval`.
+
+```yaml
+annotations:
+  eno.azure.io/overrides: |
+    [
+      { "path": "self.data.foo", "value": "new conditional value", "condition": "self.data.bar == 'baz'" }
+    ]
+```
+
+This is commonly used to make a subset of properties managed by Eno optional i.e. allow other clients to override them.
+For example:
+
+```json
+{ "path": "self.data.foo", "value": "default value", "condition": "!has(self.data.foo)" }
+```
+
+#### Path Expression Syntax
+
+Overrides use a CEL-like syntax to reference properties.
+
+- `field.anotherfield`: Traverse object fields
+- `field[2]`: Access array elements by index
+- `field[*]`: Match all elements in an array
+- `field[someKey="value"]`: Match array elements by a key-value pair
+
+Paths can be chained, e.g., `self.field.anotherfield[2].yetAnotherField`.
+If any segment of the path is nil or missing, the override will not be applied.
+
 ### Replace
 
 Designating a resource to be replaced means that updates will use the normal update endpoint instead of server-side apply.

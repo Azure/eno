@@ -41,9 +41,11 @@ func newReconstitutionSource(mgr ctrl.Manager) (source.TypedSource[resource.Requ
 		}
 
 		// This controller's queue uses composition name/namespace as its key
-		c, err := controller.NewTypedUnmanaged[reconcile.Request]("reconstitutionController", mgr, controller.TypedOptions[reconcile.Request]{
-			LogConstructor: manager.NewTypedLogConstructor[*reconcile.Request](mgr, "reconstitutionController"),
-			Reconciler:     r,
+		skipNameValidation := true
+		c, err := controller.NewTypedUnmanaged[reconcile.Request]("reconstitutionController", controller.TypedOptions[reconcile.Request]{
+			LogConstructor:     manager.NewTypedLogConstructor[*reconcile.Request](mgr, "reconstitutionController"),
+			SkipNameValidation: &skipNameValidation, // Allow duplicate names since we create many dynamic controllers
+			Reconciler:         r,
 		})
 		if err != nil {
 			return err
@@ -83,7 +85,7 @@ func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace)
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", comp.Spec.Synthesizer.Name)
 	ctx = logr.NewContext(ctx, logger)
 
 	// The reconciliation controller assumes that the previous synthesis will be loaded first

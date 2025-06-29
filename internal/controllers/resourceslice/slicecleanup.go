@@ -178,6 +178,11 @@ func (c *cleanupController) removeFinalizer(ctx context.Context, slice *apiv1.Re
 		return ctrl.Result{}, fmt.Errorf("getting composition: %w", err)
 	}
 
+	if comp != nil {
+		logger = logger.WithValues("synthesizerName", comp.Spec.Synthesizer.Name)
+		ctx = logr.NewContext(ctx, logger)
+	}
+
 	syn := comp.Status.CurrentSynthesis
 	if syn != nil && syn.Reconciled == nil {
 		idx := slices.IndexFunc(syn.ResourceSlices, func(ref *apiv1.ResourceSliceRef) bool {
