@@ -15,7 +15,7 @@ func TestSynthesize(t *testing.T) {
 	}{
 		{
 			name:       "successful synthesis",
-			workingDir: "./example_synthesizer",
+			workingDir: "fixtures/example_synthesizer",
 			expectedOutput: `{
                 "apiVersion":"config.kubernetes.io/v1",
                 "items":[
@@ -64,7 +64,7 @@ func TestSynthesize(t *testing.T) {
 		},
 		{
 			name: "failed synthesis",
-			workingDir: "./bad_example_synthesizer",
+			workingDir: "fixtures/bad_example_synthesizer",
 			expectedOutput: `{
 				"apiVersion":"config.kubernetes.io/v1",
 				"kind":"ResourceList",
