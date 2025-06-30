@@ -1,9 +1,5 @@
 # TODO: Move this file to a KCL module.
 
-schema ResultFile:
-    path: str
-    index?: float
-
 schema ResultResourceRef:
     apiVersion: str
     kind: str
@@ -12,7 +8,6 @@ schema ResultResourceRef:
 
 schema Result:
     message: str
-    file?: ResultFile
     resourceRef?: ResultResourceRef
     severity?: str
     tag?: [str]str

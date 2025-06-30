@@ -88,7 +88,7 @@ func TestSynthesize(t *testing.T) {
 				os.Stdout = originalStdout
 			}()
 
-			input, err := os.Open("example_input.json")
+			input, err := os.Open("fixtures/example_input.json")
 			if err != nil {
 				t.Fatalf("Failed to open input file: %v", err)
 			}

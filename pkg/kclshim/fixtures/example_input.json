@@ -5,7 +5,7 @@
         {
             "apiVersion":"v1",
             "data":{
-                "mcr_base":"mcr.microsoft.com"
+                "image_base":"mcr.microsoft.com"
             },
             "kind":"ConfigMap",
             "metadata":{

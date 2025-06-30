@@ -1,4 +1,5 @@
+import eno
 import pkg
 
-input: pkg.ResourceList = option("input")
-output: pkg.ResourceList = pkg.Synthesize(input)
+input: eno.ResourceList = option("input")
+output: eno.ResourceList = pkg.Synthesize(input)

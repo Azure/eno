@@ -1,9 +1,11 @@
-Synthesize: (ResourceList) -> ResourceList = lambda input: ResourceList -> ResourceList {
-    mcr_base = [item.data.mcr_base for item in input.items if item.metadata.name == "some-config"][0]
+import eno
 
-    output = ResourceList {
+Synthesize: (eno.ResourceList) -> eno.ResourceList = lambda input: eno.ResourceList -> eno.ResourceList {
+    image_base = [item.data.image_base for item in input.items if item.metadata.name == "some-config"][0]
+
+    output = eno.ResourceList {
         items: [
-            GetDeployment(mcr_base),
+            GetDeployment(image_base),
             my_service_account,
         ]
     }

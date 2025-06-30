@@ -2,7 +2,7 @@ import k8s.api.apps.v1 as appsv1
 import k8s.api.core.v1 as corev1
 import k8s.apimachinery.pkg.apis.meta.v1 as metav1
 
-GetDeployment = lambda mcr_base: str -> appsv1.Deployment {
+GetDeployment = lambda image_base: str -> appsv1.Deployment {
     appsv1.Deployment {
         metadata: metav1.ObjectMeta {
             name: "my-deployment",
@@ -21,7 +21,7 @@ GetDeployment = lambda mcr_base: str -> appsv1.Deployment {
                     containers: [
                         corev1.Container {
                             name: "my-container",
-                            image: mcr_base + "/a/b/my-image:latest",
+                            image: image_base + "/a/b/my-image:latest",
                         },
                     ],
                 },
