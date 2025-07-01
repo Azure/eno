@@ -346,6 +346,48 @@ func TestOutOfLockstep(t *testing.T) {
 			},
 			Expectation: false,
 		},
+		{
+			Name: "Lagging behind comp",
+			Input: apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Generation: 123,
+				},
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{{
+						CompositionGeneration: ptr.To(int64(122)),
+					}},
+				},
+			},
+			Expectation: true,
+		},
+		{
+			Name: "At pace with comp",
+			Input: apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Generation: 123,
+				},
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{{
+						CompositionGeneration: ptr.To(int64(123)),
+					}},
+				},
+			},
+			Expectation: false,
+		},
+		{
+			Name: "Ahead of comp",
+			Input: apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Generation: 123,
+				},
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{{
+						CompositionGeneration: ptr.To(int64(124)),
+					}},
+				},
+			},
+			Expectation: false,
+		},
 	}
 
 	for _, tt := range tests {
