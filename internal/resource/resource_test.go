@@ -134,9 +134,12 @@ var newResourceTests = []struct {
 			}
 		}`,
 		Assert: func(t *testing.T, r *Resource) {
+			rs, err := r.Snapshot(t.Context(), nil)
+			require.NoError(t, err)
+
 			assert.Equal(t, schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, r.GVK)
 			assert.Len(t, r.Patch, 1)
-			assert.False(t, r.patchSetsDeletionTimestamp())
+			assert.False(t, rs.patchSetsDeletionTimestamp())
 		},
 	},
 	{
@@ -157,9 +160,12 @@ var newResourceTests = []struct {
 			}
 		}`,
 		Assert: func(t *testing.T, r *Resource) {
+			rs, err := r.Snapshot(t.Context(), nil)
+			require.NoError(t, err)
+
 			assert.Equal(t, schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, r.GVK)
 			assert.Len(t, r.Patch, 1)
-			assert.True(t, r.patchSetsDeletionTimestamp())
+			assert.True(t, rs.patchSetsDeletionTimestamp())
 		},
 	},
 	{
