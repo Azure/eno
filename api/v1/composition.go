@@ -136,6 +136,7 @@ type InputRevisions struct {
 	ResourceVersion       string `json:"resourceVersion,omitempty"`
 	Revision              *int   `json:"revision,omitempty"`
 	SynthesizerGeneration *int64 `json:"synthesizerGeneration,omitempty"`
+	CompositionGeneration *int64 `json:"compositionGeneration,omitempty"`
 }
 
 func (i *InputRevisions) Less(b InputRevisions) bool {

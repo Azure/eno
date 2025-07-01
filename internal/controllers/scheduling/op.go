@@ -61,7 +61,7 @@ func newOp(synth *apiv1.Synthesizer, comp *apiv1.Composition, nextCooldownSlot t
 
 func classifyOp(synth *apiv1.Synthesizer, comp *apiv1.Composition) (opReason, bool) {
 	switch {
-	case comp.DeletionTimestamp != nil || !inputs.Exist(synth, comp) || inputs.OutOfLockstep(synth, comp.Status.InputRevisions) || !controllerutil.ContainsFinalizer(comp, "eno.azure.io/cleanup"):
+	case comp.DeletionTimestamp != nil || !inputs.Exist(synth, comp) || inputs.OutOfLockstep(synth, comp, comp.Status.InputRevisions) || !controllerutil.ContainsFinalizer(comp, "eno.azure.io/cleanup"):
 		return 0, false
 
 	case (comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil) && comp.Status.InFlightSynthesis == nil:

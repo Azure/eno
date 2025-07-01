@@ -260,7 +260,7 @@ func skipSynthesis(comp *apiv1.Composition, syn *apiv1.Synthesizer, env *Env) (s
 	if synthesis.Canceled != nil {
 		return "SynthesisCanceled", true
 	}
-	if inputs.OutOfLockstep(syn, synthesis.InputRevisions) {
+	if inputs.OutOfLockstep(syn, comp, synthesis.InputRevisions) {
 		return "InputsOutOfLockstep", true
 	}
 	if env.Image != "" && env.Image != syn.Spec.Image {
