@@ -20,12 +20,15 @@ func Exist(syn *apiv1.Synthesizer, c *apiv1.Composition) bool {
 }
 
 // OutOfLockstep returns true when one or more inputs that specify a revision do not match the others.
-// It also returns true if any revision is derived from a synthesizer generation older than the provided synthesizer.
-func OutOfLockstep(synth *apiv1.Synthesizer, revs []apiv1.InputRevisions) bool {
+// It also returns true if any revision is derived from a synthesizer/composition generation older than the ones provided.
+func OutOfLockstep(synth *apiv1.Synthesizer, comp *apiv1.Composition, revs []apiv1.InputRevisions) bool {
 	// First, the the max revision across all bindings
 	var maxRevision *int
 	for _, rev := range revs {
 		if rev.SynthesizerGeneration != nil && *rev.SynthesizerGeneration < synth.Generation {
+			return true
+		}
+		if rev.CompositionGeneration != nil && *rev.CompositionGeneration < comp.Generation {
 			return true
 		}
 		if rev.Revision == nil {

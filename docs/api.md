@@ -137,6 +137,7 @@ _Appears in:_
 | `resourceVersion` _string_ |  |  |  |
 | `revision` _integer_ |  |  |  |
 | `synthesizerGeneration` _integer_ |  |  |  |
+| `compositionGeneration` _integer_ |  |  |  |
 
 
 

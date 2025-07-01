@@ -39,10 +39,11 @@ annotations:
   eno.azure.io/revision: "123"
 ```
 
-It's also possible to block synthesis until an input has "seen" the current synthesizer resource.
-This is useful in cases where another controller generates input resources based on some properties or annotations of the synthesizer.
+It's also possible to block synthesis until an input has "seen" the current synthesizer/composition resource.
+This is useful in cases where another controller generates input resources based on some properties or annotations of the synthesizer/composition.
 
 ```yaml
 annotations:
   eno.azure.io/synthesizer-generation: "123" # Will block synthesis if < the synthesizer's metadata.generation
+  eno.azure.io/composition-generation: "321" # Will block synthesis if < the composition's metadata.generation
 ```

@@ -196,7 +196,7 @@ func TestBulkLockstepInputUpdates(t *testing.T) {
 			if syn == nil {
 				return reconcile.Result{}, nil
 			}
-			if inputs.OutOfLockstep(synth, syn.InputRevisions) {
+			if inputs.OutOfLockstep(synth, comp, syn.InputRevisions) {
 				t.Errorf("a synthesis with inconsistent inputs was committed!")
 			}
 			return reconcile.Result{}, nil
