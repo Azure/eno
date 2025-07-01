@@ -1,6 +1,8 @@
 module github.com/Azure/eno/pkg/kclshim
 
-go 1.24.3
+go 1.24.0
+
+toolchain go1.24.3
 
 require (
 	github.com/Azure/eno v0.1.21
