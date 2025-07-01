@@ -71,13 +71,55 @@ type Resource struct {
 	latestKnownState atomic.Pointer[apiv1.ResourceState]
 }
 
-func (r *Resource) Deleted(comp *apiv1.Composition) bool {
+func (r *Resource) State() *apiv1.ResourceState { return r.latestKnownState.Load() }
+
+func (r *Resource) UnstructuredWithoutOverrides() *unstructured.Unstructured {
+	return r.parsed.DeepCopy()
+}
+
+// Less returns true when r < than.
+// Used to establish determinstic ordering for conflicting resources.
+func (r *Resource) Less(than *Resource) bool {
+	return bytes.Compare(r.ManifestHash, than.ManifestHash) < 0
+}
+
+// Snapshot evaluates the resource against its current/actual state and returns the resulting "snapshot".
+//
+// The snapshot should only be used to progress the resource's state from the given resourceVersion.
+// Call this function again to get an updated snapshot with the latest state if applying the current snapshot results in a conflict.
+func (r *Resource) Snapshot(ctx context.Context, actual *unstructured.Unstructured) (*Snapshot, error) {
+	copy := r.parsed.DeepCopy()
+
+	for i, op := range r.Overrides {
+		err := op.Apply(ctx, actual, copy)
+		if err != nil {
+			return nil, fmt.Errorf("applying override %d: %w", i+1, err)
+		}
+	}
+
+	return &Snapshot{
+		Resource: r,
+		parsed:   copy,
+	}, nil
+}
+
+// Snapshot is a representation of a resource in the context of its current state.
+// Practically speaking this means it's a Resource that has had any overrides applied.
+type Snapshot struct {
+	*Resource
+	parsed *unstructured.Unstructured
+}
+
+func (r *Snapshot) Unstructured() *unstructured.Unstructured {
+	// NOTE(jordan): This probably doesn't need to be deep copied. Leaving it during some refactoring, maybe carefully remove it for perf later.
+	return r.parsed.DeepCopy()
+}
+
+func (r *Snapshot) Deleted(comp *apiv1.Composition) bool {
 	return (comp.DeletionTimestamp != nil && !comp.ShouldOrphanResources()) || r.ManifestDeleted || (r.Patch != nil && r.patchSetsDeletionTimestamp())
 }
 
-func (r *Resource) State() *apiv1.ResourceState { return r.latestKnownState.Load() }
-
-func (r *Resource) NeedsToBePatched(current *unstructured.Unstructured) bool {
+func (r *Snapshot) NeedsToBePatched(current *unstructured.Unstructured) bool {
 	if r.Patch == nil || current == nil {
 		return false
 	}
@@ -101,7 +143,7 @@ func (r *Resource) NeedsToBePatched(current *unstructured.Unstructured) bool {
 	return !equality.Semantic.DeepEqual(current, patched)
 }
 
-func (r *Resource) patchSetsDeletionTimestamp() bool {
+func (r *Snapshot) patchSetsDeletionTimestamp() bool {
 	if r.Patch == nil {
 		return false
 	}
@@ -121,23 +163,6 @@ func (r *Resource) patchSetsDeletionTimestamp() bool {
 
 	dt, _, _ := unstructured.NestedString(patched, "metadata", "deletionTimestamp")
 	return dt != ""
-}
-
-func (r *Resource) UnstructuredWithoutOverrides() *unstructured.Unstructured {
-	return r.parsed.DeepCopy()
-}
-
-func (r *Resource) Unstructured(ctx context.Context, actual *unstructured.Unstructured) (*unstructured.Unstructured, error) {
-	copy := r.parsed.DeepCopy()
-
-	for i, op := range r.Overrides {
-		err := op.Apply(ctx, actual, copy)
-		if err != nil {
-			return nil, fmt.Errorf("applying override %d: %w", i+1, err)
-		}
-	}
-
-	return copy, nil
 }
 
 func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*Resource, error) {
@@ -282,12 +307,6 @@ func pruneMetadata(m map[string]string) map[string]string {
 		m = nil
 	}
 	return m
-}
-
-// Less returns true when r < than.
-// Used to establish determinstic ordering for conflicting resources.
-func (r *Resource) Less(than *Resource) bool {
-	return bytes.Compare(r.ManifestHash, than.ManifestHash) < 0
 }
 
 type patchMeta struct {

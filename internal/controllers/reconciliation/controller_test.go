@@ -74,7 +74,7 @@ func TestRequeue(t *testing.T) {
 				minReconcileInterval:  tt.minReconcile,
 			}
 
-			result, err := c.requeue(logger, tt.comp, tt.resource, tt.ready)
+			result, err := c.requeue(logger, tt.comp, &resource.Snapshot{Resource: tt.resource}, tt.ready)
 			assert.NoError(t, err)
 			assert.InDelta(t, tt.expectedResult, result.RequeueAfter, float64(2*time.Second))
 		})

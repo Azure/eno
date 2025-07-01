@@ -142,7 +142,12 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		ready = status.Ready
 	}
 
-	modified, err := c.reconcileResource(ctx, comp, prev, resource, current)
+	snap, err := resource.Snapshot(ctx, current)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to create resource snapshot: %w", err)
+	}
+
+	modified, err := c.reconcileResource(ctx, comp, prev, snap, current)
 	if err != nil {
 		logger.Error(err, "failed to reconcile resource")
 		return ctrl.Result{}, err
@@ -153,13 +158,13 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 
 	deleted := current == nil ||
 		current.GetDeletionTimestamp() != nil ||
-		(resource.Deleted(comp) && comp.ShouldOrphanResources()) // orphaning should be reflected on the status.
+		(snap.Deleted(comp) && comp.ShouldOrphanResources()) // orphaning should be reflected on the status.
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 
-	return c.requeue(logger, comp, resource, ready)
+	return c.requeue(logger, comp, snap, ready)
 }
 
-func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composition, prev, res *resource.Resource, current *unstructured.Unstructured) (bool, error) {
+func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composition, prev *resource.Resource, res *resource.Snapshot, current *unstructured.Unstructured) (bool, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 	start := time.Now()
 	defer func() {
@@ -187,13 +192,8 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 
 	// Create the resource when it doesn't exist, should exist, and wouldn't be created later by server-side apply
 	if current == nil && (res.DisableUpdates || res.Replace || c.disableSSA) {
-		resource, err := res.Unstructured(ctx, nil)
-		if err != nil {
-			return false, fmt.Errorf("error while rendering expected resource: %w", err)
-		}
-
 		reconciliationActions.WithLabelValues("create").Inc()
-		err = c.upstreamClient.Create(ctx, resource)
+		err := c.upstreamClient.Create(ctx, res.Unstructured())
 		if err != nil {
 			return false, fmt.Errorf("creating resource: %w", err)
 		}
@@ -274,11 +274,8 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	return true, nil
 }
 
-func (c *Controller) update(ctx context.Context, previous, resource *resource.Resource, current *unstructured.Unstructured, dryrun bool) (updated *unstructured.Unstructured, err error) {
-	updated, err = resource.Unstructured(ctx, current)
-	if err != nil {
-		return nil, fmt.Errorf("error while rendering expected resource: %w", err)
-	}
+func (c *Controller) update(ctx context.Context, previous *resource.Resource, resource *resource.Snapshot, current *unstructured.Unstructured, dryrun bool) (updated *unstructured.Unstructured, err error) {
+	updated = resource.Unstructured()
 
 	if current != nil {
 		updated.SetResourceVersion(current.GetResourceVersion())
@@ -318,11 +315,11 @@ func buildNonStrategicPatch(ctx context.Context, previous *resource.Resource, cu
 	if previous == nil {
 		from = &unstructured.Unstructured{Object: map[string]any{}}
 	} else {
-		var err error
-		from, err = previous.Unstructured(ctx, current)
+		snap, err := previous.Snapshot(ctx, current)
 		if err != nil {
 			return nil, err
 		}
+		from = snap.Unstructured()
 	}
 	return client.MergeFrom(from), nil
 }
@@ -340,7 +337,7 @@ func (c *Controller) getCurrent(ctx context.Context, resource *resource.Resource
 	return current, nil
 }
 
-func (c *Controller) requeue(logger logr.Logger, comp *apiv1.Composition, resource *resource.Resource, ready *metav1.Time) (ctrl.Result, error) {
+func (c *Controller) requeue(logger logr.Logger, comp *apiv1.Composition, resource *resource.Snapshot, ready *metav1.Time) (ctrl.Result, error) {
 	if ready == nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}
