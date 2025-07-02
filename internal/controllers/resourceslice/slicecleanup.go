@@ -225,8 +225,13 @@ func ParseGracePeriods(str string) (slice []*CleanupGracePeriod, err error) {
 	elements := strings.Split(str, ",")
 
 	for _, elem := range elements {
+		str := strings.TrimSpace(elem)
+		if str == "" {
+			continue
+		}
+
 		gp := &CleanupGracePeriod{}
-		parts := strings.SplitN(strings.TrimSpace(elem), ":", 2)
+		parts := strings.SplitN(str, ":", 2)
 
 		gp.Duration, err = time.ParseDuration(parts[0])
 		if err != nil {
