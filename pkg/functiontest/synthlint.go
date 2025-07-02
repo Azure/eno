@@ -75,7 +75,6 @@ func extractEnoKeys(structInstance any) ([]string, error) {
 }
 
 // loadSynthesizerRefs loads the synthesizer.yaml file and extracts all ref keys
-// will error
 func loadSynthesizerRefs(synthesizerPath string) ([]string, error) {
 
 	// Read the YAML file
