@@ -30,7 +30,7 @@ func registerControllers(t *testing.T, mgr *testutil.Manager) {
 	require.NoError(t, liveness.NewNamespaceController(mgr.Manager, 3, time.Second))
 	require.NoError(t, watch.NewController(mgr.Manager))
 	require.NoError(t, resourceslice.NewController(mgr.Manager))
-	require.NoError(t, resourceslice.NewCleanupController(mgr.Manager))
+	require.NoError(t, resourceslice.NewCleanupController(mgr.Manager, nil))
 	require.NoError(t, composition.NewController(mgr.Manager))
 	require.NoError(t, symphony.NewController(mgr.Manager))
 }

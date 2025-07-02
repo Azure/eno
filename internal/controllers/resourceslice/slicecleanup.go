@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -11,6 +12,7 @@ import (
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -30,12 +32,14 @@ import (
 type cleanupController struct {
 	client        client.Client
 	noCacheReader client.Reader
+	gracePeriods  []*CleanupGracePeriod
 }
 
-func NewCleanupController(mgr ctrl.Manager) error {
+func NewCleanupController(mgr ctrl.Manager, gps []*CleanupGracePeriod) error {
 	c := &cleanupController{
 		client:        mgr.GetClient(),
 		noCacheReader: mgr.GetAPIReader(),
+		gracePeriods:  gps,
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.ResourceSlice{}).
@@ -183,8 +187,17 @@ func (c *cleanupController) removeFinalizer(ctx context.Context, slice *apiv1.Re
 		ctx = logr.NewContext(ctx, logger)
 	}
 
+	var shouldOrphan bool
+	for _, gp := range c.gracePeriods {
+		if gp.CompositionSelector.Matches(labels.Set(comp.Labels)) && time.Since(slice.DeletionTimestamp.Time) > gp.Duration {
+			shouldOrphan = true
+			logger = logger.WithValues("gracePeriodExceeded", "true")
+			break
+		}
+	}
+
 	syn := comp.Status.CurrentSynthesis
-	if syn != nil && syn.Reconciled == nil {
+	if syn != nil && syn.Reconciled == nil && !shouldOrphan {
 		idx := slices.IndexFunc(syn.ResourceSlices, func(ref *apiv1.ResourceSliceRef) bool {
 			return ref.Name == slice.Name
 		})
@@ -201,4 +214,36 @@ func (c *cleanupController) removeFinalizer(ctx context.Context, slice *apiv1.Re
 	logger.V(0).Info("removed resource slice finalizers")
 
 	return ctrl.Result{}, nil
+}
+
+type CleanupGracePeriod struct {
+	CompositionSelector labels.Selector
+	Duration            time.Duration
+}
+
+func ParseGracePeriods(str string) (slice []*CleanupGracePeriod, err error) {
+	elements := strings.Split(str, ",")
+
+	for _, elem := range elements {
+		gp := &CleanupGracePeriod{}
+		parts := strings.SplitN(strings.TrimSpace(elem), ":", 2)
+
+		gp.Duration, err = time.ParseDuration(parts[0])
+		if err != nil {
+			return nil, fmt.Errorf("invalid duration: %w", err)
+		}
+
+		if len(parts) >= 2 {
+			gp.CompositionSelector, err = labels.Parse(parts[1])
+			if err != nil {
+				return nil, fmt.Errorf("invalid label selector: %w", err)
+			}
+		} else {
+			gp.CompositionSelector = labels.Everything()
+		}
+
+		slice = append(slice, gp)
+	}
+
+	return slice, nil
 }

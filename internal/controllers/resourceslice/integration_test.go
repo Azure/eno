@@ -20,7 +20,7 @@ func TestResourceSliceLifecycle(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, NewCleanupController(mgr.Manager))
+	require.NoError(t, NewCleanupController(mgr.Manager, nil))
 	require.NoError(t, NewController(mgr.Manager))
 	mgr.Start(t)
 

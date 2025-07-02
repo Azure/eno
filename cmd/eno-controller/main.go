@@ -56,6 +56,7 @@ func runController() error {
 		nodeAffinity             string
 		concurrencyLimit         int
 		inputRateLimit           int
+		deletionGracePeriod      string
 		containerCreationTimeout time.Duration
 		synconf                  = &synthesis.Config{}
 
@@ -75,6 +76,7 @@ func runController() error {
 	flag.IntVar(&concurrencyLimit, "concurrency-limit", 10, "Upper bound on active syntheses. This effectively limits the number of running synthesizer pods spawned by Eno.")
 	flag.DurationVar(&selfHealingGracePeriod, "self-healing-grace-period", time.Minute*5, "How long before the self-healing controllers are allowed to start the resynthesis process.")
 	flag.IntVar(&inputRateLimit, "input-qps", 10, "Writes-per-second limit for input controllers")
+	flag.StringVar(&deletionGracePeriod, "deletion-grace-period", "", "Grace period for resource slice cleanup to avoid deadlocks at the cost of possible resource orphaning. Example: 5m:someCompLabel=val,10m:anotherCompLabel=val2,15m")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 	watch.SetKindWatchRateLimit(inputRateLimit)
@@ -121,7 +123,12 @@ func runController() error {
 		return fmt.Errorf("constructing resource slice controller: %w", err)
 	}
 
-	err = resourceslice.NewCleanupController(mgr)
+	gps, err := resourceslice.ParseGracePeriods(deletionGracePeriod)
+	if err != nil {
+		return fmt.Errorf("parsing deletion grace periods: %w", err)
+	}
+
+	err = resourceslice.NewCleanupController(mgr, gps)
 	if err != nil {
 		return fmt.Errorf("constructing resource slice cleanup controller: %w", err)
 	}

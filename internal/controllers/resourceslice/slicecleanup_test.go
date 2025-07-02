@@ -53,6 +53,79 @@ func TestSliceCleanupSliceReferences(t *testing.T) {
 	require.True(t, errors.IsNotFound(cli.Get(ctx, client.ObjectKeyFromObject(slice), slice)))
 }
 
+func TestSliceCleanupGracePeriod(t *testing.T) {
+	ctx := testutil.NewContext(t)
+
+	tests := []struct {
+		Name         string
+		GracePeriod  string
+		ShouldDelete bool
+	}{
+		{
+			Name:         "matching selector",
+			GracePeriod:  "-10s:app=test",
+			ShouldDelete: true,
+		},
+		{
+			Name:         "matching selector, not time yet",
+			GracePeriod:  "1h:app=test",
+			ShouldDelete: false,
+		},
+		{
+			Name:         "non-matching selector",
+			GracePeriod:  "-10s:app=not-test",
+			ShouldDelete: false,
+		},
+		{
+			Name:         "one matching, one non-matching",
+			GracePeriod:  "-10s:app=not-test, -10s:app=test",
+			ShouldDelete: true,
+		},
+		{
+			Name:         "wildcard selector",
+			GracePeriod:  "-10s",
+			ShouldDelete: true,
+		},
+	}
+
+	for _, test := range tests {
+		cli := testutil.NewClient(t)
+		gps, err := ParseGracePeriods(test.GracePeriod)
+		require.NoError(t, err)
+		c := cleanupController{client: cli, noCacheReader: cli, gracePeriods: gps}
+
+		comp := &apiv1.Composition{}
+		comp.Name = "test-1"
+		comp.Namespace = "default"
+		comp.Finalizers = []string{"anything.io/slice-cleanup"}
+		comp.Labels = map[string]string{"app": "test"}
+		require.NoError(t, cli.Create(ctx, comp))
+
+		slice := &apiv1.ResourceSlice{}
+		slice.Name = "test-1"
+		slice.Namespace = comp.Namespace
+		slice.Finalizers = []string{"anything.io/slice-cleanup"}
+		slice.Spec.SynthesisUUID = "test-uuid"
+		require.NoError(t, controllerutil.SetControllerReference(comp, slice, cli.Scheme()))
+		require.NoError(t, cli.Create(ctx, slice))
+		require.NoError(t, cli.Delete(ctx, slice))
+		req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(slice)}
+
+		comp.Status.CurrentSynthesis = &apiv1.Synthesis{ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}}}
+		require.NoError(t, cli.Status().Update(ctx, comp))
+		require.NoError(t, cli.Delete(ctx, comp))
+
+		_, err = c.Reconcile(ctx, req)
+		require.NoError(t, err)
+
+		if test.ShouldDelete {
+			require.True(t, errors.IsNotFound(cli.Get(ctx, client.ObjectKeyFromObject(slice), slice)))
+		} else {
+			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(slice), slice))
+		}
+	}
+}
+
 func TestSliceCleanupInFlight(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
