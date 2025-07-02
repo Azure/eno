@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -19,7 +20,7 @@ import (
 func TestSliceCleanupSliceReferences(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
-	c := cleanupController{client: cli, noCacheReader: cli}
+	c := cleanupController{client: cli, noCacheReader: cli, orphanCompSelector: labels.Nothing()}
 
 	comp := &apiv1.Composition{}
 	comp.Name = "test-1"
@@ -50,6 +51,39 @@ func TestSliceCleanupSliceReferences(t *testing.T) {
 
 	_, err = c.Reconcile(ctx, req)
 	require.NoError(t, err)
+	require.True(t, errors.IsNotFound(cli.Get(ctx, client.ObjectKeyFromObject(slice), slice)))
+}
+
+func TestSliceCleanupOrphan(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+	c := cleanupController{client: cli, noCacheReader: cli, orphanCompSelector: labels.Everything()}
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-1"
+	comp.Namespace = "default"
+	comp.Finalizers = []string{"anything.io/any-finalizer"}
+	require.NoError(t, cli.Create(ctx, comp))
+
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-1"
+	slice.Finalizers = []string{"anything.io/any-finalizer"}
+	slice.Namespace = comp.Namespace
+	slice.Spec.SynthesisUUID = "test-uuid"
+	require.NoError(t, controllerutil.SetControllerReference(comp, slice, cli.Scheme()))
+	require.NoError(t, cli.Create(ctx, slice))
+	require.NoError(t, cli.Delete(ctx, slice))
+	req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(slice)}
+
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}}}
+	require.NoError(t, cli.Status().Update(ctx, comp))
+
+	_, err := c.Reconcile(ctx, req)
+	require.NoError(t, err)
+
+	_, err = c.Reconcile(ctx, req)
+	require.NoError(t, err)
+
 	require.True(t, errors.IsNotFound(cli.Get(ctx, client.ObjectKeyFromObject(slice), slice)))
 }
 
