@@ -177,19 +177,33 @@ func (c *cleanupController) removeFinalizer(ctx context.Context, slice *apiv1.Re
 	if client.IgnoreNotFound(err) != nil {
 		return ctrl.Result{}, fmt.Errorf("getting composition: %w", err)
 	}
+	logger = logger.WithValues("synthesizerName", comp.Spec.Synthesizer.Name)
 
-	if comp != nil {
-		logger = logger.WithValues("synthesizerName", comp.Spec.Synthesizer.Name)
-		ctx = logr.NewContext(ctx, logger)
+	var shouldOrphan bool
+	owner := metav1.GetControllerOf(comp)
+	if owner != nil && owner.Kind == "Symphony" {
+		symph := &apiv1.Symphony{}
+		err = c.client.Get(ctx, types.NamespacedName{Name: owner.Name, Namespace: comp.Namespace}, symph)
+		if errors.IsNotFound(err) || symph.DeletionTimestamp != nil {
+			logger.V(1).Info("symphony is being deleted, removing resource slice finalizer", "symphonyName", owner.Name)
+			shouldOrphan = true
+			err = nil
+		}
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("getting symphony: %w", err)
+		}
 	}
 
 	syn := comp.Status.CurrentSynthesis
-	if syn != nil && syn.Reconciled == nil {
+	if syn != nil && syn.Reconciled == nil && !shouldOrphan {
 		idx := slices.IndexFunc(syn.ResourceSlices, func(ref *apiv1.ResourceSliceRef) bool {
 			return ref.Name == slice.Name
 		})
 		if idx != -1 {
-			return ctrl.Result{}, err // slice is needed for cleanup
+			// The slice is still referenced by the current synthesis so we can't remove the finalizer yet.
+			// Requeueue the request since the symphony may change state without causing a workqueue event.
+			// This is simpler than adding a watch on the symphony and in most cases there won't even be time for a second requeue.
+			return ctrl.Result{RequeueAfter: time.Second * 5}, err
 		}
 	}
 

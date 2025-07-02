@@ -53,6 +53,84 @@ func TestSliceCleanupSliceReferences(t *testing.T) {
 	require.True(t, errors.IsNotFound(cli.Get(ctx, client.ObjectKeyFromObject(slice), slice)))
 }
 
+func TestSliceCleanupDeletingSymphony(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+	c := cleanupController{client: cli, noCacheReader: cli}
+
+	symph := &apiv1.Symphony{}
+	symph.Name = "test-1"
+	symph.Namespace = "default"
+	symph.Finalizers = []string{"anything.io/any-finalizer"}
+	require.NoError(t, cli.Create(ctx, symph))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-1"
+	comp.Namespace = "default"
+	comp.Finalizers = []string{"anything.io/any-finalizer"}
+	require.NoError(t, controllerutil.SetControllerReference(symph, comp, cli.Scheme()))
+	require.NoError(t, cli.Create(ctx, comp))
+
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-1"
+	slice.Namespace = comp.Namespace
+	slice.Spec.SynthesisUUID = "test-uuid"
+	slice.Finalizers = []string{"anything.io/any-finalizer"}
+	require.NoError(t, controllerutil.SetControllerReference(comp, slice, cli.Scheme()))
+	require.NoError(t, cli.Create(ctx, slice))
+	req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(slice)}
+
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}}}
+	require.NoError(t, cli.Status().Update(ctx, comp))
+
+	require.NoError(t, cli.Delete(ctx, symph))
+	require.NoError(t, cli.Delete(ctx, comp))
+	require.NoError(t, cli.Delete(ctx, slice))
+
+	_, err := c.Reconcile(ctx, req)
+	require.NoError(t, err)
+	require.True(t, errors.IsNotFound(cli.Get(ctx, client.ObjectKeyFromObject(slice), slice)))
+}
+
+func TestSliceCleanupDeletingSymphonyNegative(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+	c := cleanupController{client: cli, noCacheReader: cli}
+
+	symph := &apiv1.Symphony{}
+	symph.Name = "test-1"
+	symph.Namespace = "default"
+	symph.Finalizers = []string{"anything.io/any-finalizer"}
+	require.NoError(t, cli.Create(ctx, symph))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-1"
+	comp.Namespace = "default"
+	comp.Finalizers = []string{"anything.io/any-finalizer"}
+	require.NoError(t, controllerutil.SetControllerReference(symph, comp, cli.Scheme()))
+	require.NoError(t, cli.Create(ctx, comp))
+
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-1"
+	slice.Namespace = comp.Namespace
+	slice.Spec.SynthesisUUID = "test-uuid"
+	slice.Finalizers = []string{"anything.io/any-finalizer"}
+	require.NoError(t, controllerutil.SetControllerReference(comp, slice, cli.Scheme()))
+	require.NoError(t, cli.Create(ctx, slice))
+	req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(slice)}
+
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}}}
+	require.NoError(t, cli.Status().Update(ctx, comp))
+
+	// don't delete the symphony
+	require.NoError(t, cli.Delete(ctx, comp))
+	require.NoError(t, cli.Delete(ctx, slice))
+
+	_, err := c.Reconcile(ctx, req)
+	require.NoError(t, err)
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(slice), slice))
+}
+
 func TestSliceCleanupInFlight(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
