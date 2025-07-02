@@ -116,7 +116,7 @@ func (r *Snapshot) Unstructured() *unstructured.Unstructured {
 }
 
 func (r *Snapshot) Deleted(comp *apiv1.Composition) bool {
-	return (comp.DeletionTimestamp != nil && comp.ShouldOrphanResources(nil)) || r.ManifestDeleted || (r.Patch != nil && r.patchSetsDeletionTimestamp())
+	return (comp.DeletionTimestamp != nil && comp.ShouldOrphanResources()) || r.ManifestDeleted || (r.Patch != nil && r.patchSetsDeletionTimestamp())
 }
 
 func (r *Snapshot) NeedsToBePatched(current *unstructured.Unstructured) bool {
