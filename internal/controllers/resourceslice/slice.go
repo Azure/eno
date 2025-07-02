@@ -65,6 +65,11 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{}, err
 		}
 
+		// All active slices should be orphaned if composition deletion was caused by symphony deletion
+		if comp.Labels != nil && comp.Labels["eno.azure.io/symphony-deleting"] == "true" {
+			continue
+		}
+
 		// Handle a case where the reconciliation controller hasn't updated the slice's status yet
 		if len(slice.Status.Resources) == 0 && len(slice.Spec.Resources) > 0 {
 			snapshot.Ready = false

@@ -172,7 +172,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	}()
 
 	if res.Deleted(comp) {
-		if current == nil || current.GetDeletionTimestamp() != nil {
+		if current == nil || current.GetDeletionTimestamp() != nil || (comp.Labels != nil && comp.Labels["eno.azure.io/symphony-deleting"] == "true") {
 			return false, nil // already deleted - nothing to do
 		}
 
