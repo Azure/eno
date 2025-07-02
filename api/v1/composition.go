@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 )
 
 // +kubebuilder:object:root=true
@@ -197,7 +198,10 @@ func (c *Composition) ShouldForceResynthesis() bool {
 	return ok && val == c.Status.getLatestSynthesisUUID()
 }
 
-func (c *Composition) ShouldOrphanResources() bool {
+func (c *Composition) ShouldOrphanResources(preserveSel labels.Selector) bool {
+	if c.DeletionTimestamp != nil && preserveSel != nil && preserveSel.Matches(labels.Set(c.Labels)) {
+		return true
+	}
 	return c.Annotations["eno.azure.io/deletion-strategy"] == "orphan"
 }
 

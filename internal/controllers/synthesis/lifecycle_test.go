@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -46,7 +47,7 @@ func TestCompositionDeletion(t *testing.T) {
 	})
 
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
-	require.NoError(t, resourceslice.NewCleanupController(mgr.Manager))
+	require.NoError(t, resourceslice.NewCleanupController(mgr.Manager, labels.Nothing()))
 	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
 	require.NoError(t, composition.NewController(mgr.Manager))
 	require.NoError(t, NewPodGC(mgr.Manager, 0))

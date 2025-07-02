@@ -71,7 +71,6 @@ func run() error {
 
 	mgrOpts.CompositionNamespace = compositionNamespace
 	if compositionSelector != "" {
-		var err error
 		mgrOpts.CompositionSelector, err = labels.Parse(compositionSelector)
 		if err != nil {
 			return fmt.Errorf("invalid composition label selector: %w", err)
@@ -110,6 +109,11 @@ func run() error {
 	recOpts.Manager = mgr
 	recOpts.WriteBuffer = writeBuffer
 	recOpts.Downstream = remoteConfig
+
+	recOpts.PreserveCompositionSelector, err = mgrOpts.PreserveCompositionSelector()
+	if err != nil {
+		return fmt.Errorf("invalid preserve composition label selector: %w", err)
+	}
 
 	err = reconciliation.New(mgr, recOpts)
 	if err != nil {

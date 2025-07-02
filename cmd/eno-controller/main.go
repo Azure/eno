@@ -121,7 +121,12 @@ func runController() error {
 		return fmt.Errorf("constructing resource slice controller: %w", err)
 	}
 
-	err = resourceslice.NewCleanupController(mgr)
+	preserveCompositions, err := mgrOpts.PreserveCompositionSelector()
+	if err != nil {
+		return fmt.Errorf("invalid preserve composition label selector: %w", err)
+	}
+
+	err = resourceslice.NewCleanupController(mgr, preserveCompositions)
 	if err != nil {
 		return fmt.Errorf("constructing resource slice cleanup controller: %w", err)
 	}

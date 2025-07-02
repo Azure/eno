@@ -11,6 +11,7 @@ import (
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -28,14 +29,16 @@ import (
 // A non-cached apiserver client is used to be absolutely sure that a slice can be safely deleted.
 // But we avoid using it by excluding brand new resource slices and always checking the informer cache first.
 type cleanupController struct {
-	client        client.Client
-	noCacheReader client.Reader
+	client             client.Client
+	noCacheReader      client.Reader
+	orphanCompSelector labels.Selector
 }
 
-func NewCleanupController(mgr ctrl.Manager) error {
+func NewCleanupController(mgr ctrl.Manager, orphan labels.Selector) error {
 	c := &cleanupController{
-		client:        mgr.GetClient(),
-		noCacheReader: mgr.GetAPIReader(),
+		client:             mgr.GetClient(),
+		noCacheReader:      mgr.GetAPIReader(),
+		orphanCompSelector: orphan,
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.ResourceSlice{}).
@@ -183,8 +186,9 @@ func (c *cleanupController) removeFinalizer(ctx context.Context, slice *apiv1.Re
 		ctx = logr.NewContext(ctx, logger)
 	}
 
+	shouldOrphan := comp != nil && c.orphanCompSelector != nil && c.orphanCompSelector.Matches(labels.Set(comp.GetLabels()))
 	syn := comp.Status.CurrentSynthesis
-	if syn != nil && syn.Reconciled == nil {
+	if syn != nil && syn.Reconciled == nil && !shouldOrphan {
 		idx := slices.IndexFunc(syn.ResourceSlices, func(ref *apiv1.ResourceSliceRef) bool {
 			return ref.Name == slice.Name
 		})

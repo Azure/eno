@@ -9,6 +9,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -28,9 +29,10 @@ import (
 )
 
 type Options struct {
-	Manager     ctrl.Manager
-	WriteBuffer *flowcontrol.ResourceSliceWriteBuffer
-	Downstream  *rest.Config
+	Manager                     ctrl.Manager
+	WriteBuffer                 *flowcontrol.ResourceSliceWriteBuffer
+	Downstream                  *rest.Config
+	PreserveCompositionSelector labels.Selector
 
 	DisableServerSideApply bool
 
@@ -40,14 +42,15 @@ type Options struct {
 }
 
 type Controller struct {
-	client                client.Client
-	writeBuffer           *flowcontrol.ResourceSliceWriteBuffer
-	resourceClient        *resource.Cache
-	timeout               time.Duration
-	readinessPollInterval time.Duration
-	upstreamClient        client.Client
-	minReconcileInterval  time.Duration
-	disableSSA            bool
+	client                      client.Client
+	writeBuffer                 *flowcontrol.ResourceSliceWriteBuffer
+	resourceClient              *resource.Cache
+	timeout                     time.Duration
+	readinessPollInterval       time.Duration
+	upstreamClient              client.Client
+	minReconcileInterval        time.Duration
+	disableSSA                  bool
+	preserveCompositionSelector labels.Selector
 }
 
 func New(mgr ctrl.Manager, opts Options) error {
@@ -64,14 +67,15 @@ func New(mgr ctrl.Manager, opts Options) error {
 	}
 
 	c := &Controller{
-		client:                opts.Manager.GetClient(),
-		writeBuffer:           opts.WriteBuffer,
-		resourceClient:        cache,
-		timeout:               opts.Timeout,
-		readinessPollInterval: opts.ReadinessPollInterval,
-		upstreamClient:        upstreamClient,
-		minReconcileInterval:  opts.MinReconcileInterval,
-		disableSSA:            opts.DisableServerSideApply,
+		client:                      opts.Manager.GetClient(),
+		writeBuffer:                 opts.WriteBuffer,
+		resourceClient:              cache,
+		timeout:                     opts.Timeout,
+		readinessPollInterval:       opts.ReadinessPollInterval,
+		upstreamClient:              upstreamClient,
+		minReconcileInterval:        opts.MinReconcileInterval,
+		disableSSA:                  opts.DisableServerSideApply,
+		preserveCompositionSelector: opts.PreserveCompositionSelector,
 	}
 
 	return builder.TypedControllerManagedBy[resource.Request](mgr).
@@ -158,7 +162,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 
 	deleted := current == nil ||
 		current.GetDeletionTimestamp() != nil ||
-		(snap.Deleted(comp) && comp.ShouldOrphanResources()) // orphaning should be reflected on the status.
+		(snap.Deleted(comp) || comp.ShouldOrphanResources(c.preserveCompositionSelector)) // orphaning should be reflected on the status.
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 
 	return c.requeue(logger, comp, snap, ready)
@@ -172,7 +176,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	}()
 
 	if res.Deleted(comp) {
-		if current == nil || current.GetDeletionTimestamp() != nil {
+		if current == nil || current.GetDeletionTimestamp() != nil || comp.ShouldOrphanResources(c.preserveCompositionSelector) {
 			return false, nil // already deleted - nothing to do
 		}
 

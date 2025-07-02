@@ -18,6 +18,7 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,7 +31,7 @@ func registerControllers(t *testing.T, mgr *testutil.Manager) {
 	require.NoError(t, liveness.NewNamespaceController(mgr.Manager, 3, time.Second))
 	require.NoError(t, watch.NewController(mgr.Manager))
 	require.NoError(t, resourceslice.NewController(mgr.Manager))
-	require.NoError(t, resourceslice.NewCleanupController(mgr.Manager))
+	require.NoError(t, resourceslice.NewCleanupController(mgr.Manager, labels.Nothing()))
 	require.NoError(t, composition.NewController(mgr.Manager))
 	require.NoError(t, symphony.NewController(mgr.Manager))
 }
@@ -59,10 +60,11 @@ func writeComposition(t *testing.T, client client.Client, orphan bool) (*apiv1.S
 
 func setupTestSubject(t *testing.T, mgr *testutil.Manager) {
 	setupTestSubjectForOptions(t, mgr, Options{
-		Manager:                mgr.Manager,
-		Timeout:                time.Minute,
-		ReadinessPollInterval:  time.Hour,
-		DisableServerSideApply: mgr.NoSsaSupport,
+		Manager:                     mgr.Manager,
+		Timeout:                     time.Minute,
+		ReadinessPollInterval:       time.Hour,
+		DisableServerSideApply:      mgr.NoSsaSupport,
+		PreserveCompositionSelector: labels.Nothing(),
 	})
 }
 

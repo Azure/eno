@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
@@ -569,4 +570,55 @@ func TestSynthesisErrorResult(t *testing.T) {
 		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.InFlightSynthesis == nil
 	})
+}
+
+func TestPreserveComposition(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	// Test subject
+	setupTestSubjectForOptions(t, mgr, Options{
+		Manager:                     mgr.Manager,
+		Timeout:                     time.Minute,
+		ReadinessPollInterval:       time.Hour,
+		DisableServerSideApply:      true,
+		PreserveCompositionSelector: labels.Everything(),
+	})
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	// Wait for resource to be created
+	obj := &corev1.ConfigMap{}
+	obj.SetName("test-obj")
+	obj.SetNamespace("default")
+	testutil.Eventually(t, func() bool {
+		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+		return err == nil
+	})
+
+	// Delete the composition and wait for it to be finalized
+	require.NoError(t, upstream.Delete(ctx, comp))
+	testutil.Eventually(t, func() bool {
+		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	})
+
+	// Prove the resource still exists
+	require.NoError(t, mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(obj), obj))
 }
