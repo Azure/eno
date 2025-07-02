@@ -82,6 +82,27 @@ func TestMissedReconciliation(t *testing.T) {
 			},
 			expected: false,
 		},
+		{
+			name: "Composition Being Deleted",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					DeletionTimestamp: &metav1.Time{Time: time.Now()},
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "Composition Being Deleted, Missed",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					DeletionTimestamp: &metav1.Time{Time: time.Now().Add(-3 * time.Hour)},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{},
+				},
+			},
+			expected: true,
+		},
 	}
 
 	for _, tt := range tests {
