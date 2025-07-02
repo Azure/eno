@@ -133,7 +133,7 @@ func (c *cleanupController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 func (c *cleanupController) shouldDelete(ctx context.Context, reader client.Reader, slice *apiv1.ResourceSlice, ref *metav1.OwnerReference) (bool, error) {
 	comp := &apiv1.Composition{}
 	err := reader.Get(ctx, types.NamespacedName{Name: ref.Name, Namespace: slice.Namespace}, comp)
-	if errors.IsNotFound(err) {
+	if errors.IsNotFound(err) || c.shouldOrphanComp(comp) {
 		return true, nil
 	}
 	if err != nil {
@@ -186,9 +186,8 @@ func (c *cleanupController) removeFinalizer(ctx context.Context, slice *apiv1.Re
 		ctx = logr.NewContext(ctx, logger)
 	}
 
-	shouldOrphan := comp != nil && c.orphanCompSelector != nil && c.orphanCompSelector.Matches(labels.Set(comp.GetLabels()))
 	syn := comp.Status.CurrentSynthesis
-	if syn != nil && syn.Reconciled == nil && !shouldOrphan {
+	if syn != nil && syn.Reconciled == nil && !c.shouldOrphanComp(comp) {
 		idx := slices.IndexFunc(syn.ResourceSlices, func(ref *apiv1.ResourceSliceRef) bool {
 			return ref.Name == slice.Name
 		})
@@ -205,4 +204,8 @@ func (c *cleanupController) removeFinalizer(ctx context.Context, slice *apiv1.Re
 	logger.V(0).Info("removed resource slice finalizers")
 
 	return ctrl.Result{}, nil
+}
+
+func (c *cleanupController) shouldOrphanComp(comp *apiv1.Composition) bool {
+	return comp != nil && c.orphanCompSelector != nil && c.orphanCompSelector.Matches(labels.Set(comp.GetLabels()))
 }
