@@ -6,4 +6,5 @@ use (
 	.
 	./examples/03-helm-shim
 	./pkg/helmshim
+	./pkg/kclshim
 )
