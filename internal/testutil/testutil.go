@@ -174,6 +174,7 @@ func NewManager(t *testing.T, testOpts ...TestManagerOption) *Manager {
 
 	m := &Manager{
 		Manager:              mgr,
+		Options:              options,
 		RestConfig:           cfg,
 		DownstreamRestConfig: cfg, // possible override below
 		DownstreamClient:     mgr.GetClient(),
@@ -259,6 +260,7 @@ func NewManager(t *testing.T, testOpts ...TestManagerOption) *Manager {
 
 type Manager struct {
 	ctrl.Manager
+	Options              *manager.Options
 	RestConfig           *rest.Config
 	DownstreamRestConfig *rest.Config  // may or may not == RestConfig
 	DownstreamClient     client.Client // may or may not == Manager.GetClient()

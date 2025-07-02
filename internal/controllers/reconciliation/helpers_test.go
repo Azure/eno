@@ -25,13 +25,16 @@ import (
 )
 
 func registerControllers(t *testing.T, mgr *testutil.Manager) {
+	pcs, err := mgr.Options.PreserveCompositionSelector()
+	require.NoError(t, err)
+
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, synthesis.NewPodGC(mgr.Manager, time.Second))
 	require.NoError(t, scheduling.NewController(mgr.Manager, 10, time.Millisecond, time.Second))
 	require.NoError(t, liveness.NewNamespaceController(mgr.Manager, 3, time.Second))
 	require.NoError(t, watch.NewController(mgr.Manager))
 	require.NoError(t, resourceslice.NewController(mgr.Manager))
-	require.NoError(t, resourceslice.NewCleanupController(mgr.Manager, labels.Nothing()))
+	require.NoError(t, resourceslice.NewCleanupController(mgr.Manager, pcs))
 	require.NoError(t, composition.NewController(mgr.Manager))
 	require.NoError(t, symphony.NewController(mgr.Manager))
 }
