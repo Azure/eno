@@ -12,7 +12,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
@@ -574,7 +573,7 @@ func TestSynthesisErrorResult(t *testing.T) {
 
 func TestPreserveComposition(t *testing.T) {
 	ctx := testutil.NewContext(t)
-	mgr := testutil.NewManager(t)
+	mgr := testutil.NewManager(t, testutil.WithPreserveCompositionSelector("eno.azure.io/test=true"))
 	upstream := mgr.GetClient()
 
 	registerControllers(t, mgr)
@@ -594,13 +593,7 @@ func TestPreserveComposition(t *testing.T) {
 	})
 
 	// Test subject
-	setupTestSubjectForOptions(t, mgr, Options{
-		Manager:                     mgr.Manager,
-		Timeout:                     time.Minute,
-		ReadinessPollInterval:       time.Hour,
-		DisableServerSideApply:      true,
-		PreserveCompositionSelector: labels.Everything(),
-	})
+	setupTestSubject(t, mgr)
 	mgr.Start(t)
 	_, comp := writeGenericComposition(t, upstream)
 

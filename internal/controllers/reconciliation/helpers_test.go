@@ -18,7 +18,6 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -53,6 +52,7 @@ func writeComposition(t *testing.T, client client.Client, orphan bool) (*apiv1.S
 	comp.Name = "test-comp"
 	comp.Namespace = "default"
 	comp.Spec.Synthesizer.Name = syn.Name
+	comp.Labels = map[string]string{"eno.azure.io/test": "true"}
 	if orphan {
 		comp.Annotations = map[string]string{"eno.azure.io/deletion-strategy": "orphan"}
 	}
@@ -62,12 +62,15 @@ func writeComposition(t *testing.T, client client.Client, orphan bool) (*apiv1.S
 }
 
 func setupTestSubject(t *testing.T, mgr *testutil.Manager) {
+	pcs, err := mgr.Options.PreserveCompositionSelector()
+	require.NoError(t, err)
+
 	setupTestSubjectForOptions(t, mgr, Options{
 		Manager:                     mgr.Manager,
 		Timeout:                     time.Minute,
 		ReadinessPollInterval:       time.Hour,
 		DisableServerSideApply:      mgr.NoSsaSupport,
-		PreserveCompositionSelector: labels.Nothing(),
+		PreserveCompositionSelector: pcs,
 	})
 }
 

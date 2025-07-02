@@ -17,12 +17,12 @@ type Options struct {
 	ElectionLeaseRenewDeadline time.Duration
 	ElectionLeaseRetryPeriod   time.Duration
 
-	Rest                        *rest.Config
-	HealthProbeAddr             string
-	MetricsAddr                 string
-	SynthesizerPodNamespace     string  // set in cmd from synthesis config
-	qps                         float64 // flags don't support float32, bind to this value and copy over to Rest.QPS during initialization
-	preserveCompositionSelector string
+	Rest                           *rest.Config
+	HealthProbeAddr                string
+	MetricsAddr                    string
+	SynthesizerPodNamespace        string  // set in cmd from synthesis config
+	qps                            float64 // flags don't support float32, bind to this value and copy over to Rest.QPS during initialization
+	PreserveCompositionSelectorStr string
 
 	// Only set by cmd in reconciler process
 	CompositionNamespace string
@@ -41,14 +41,14 @@ func (o *Options) Bind(set *flag.FlagSet) {
 	set.DurationVar(&o.ElectionLeaseDuration, "leader-election-lease-duration", 35*time.Second, "How long before non-leaders will forcibly take leadership")
 	set.DurationVar(&o.ElectionLeaseRenewDeadline, "leader-election-lease-renew-deadline", 30*time.Second, "Max duration of all retries when leader is updating the election lease")
 	set.DurationVar(&o.ElectionLeaseRetryPeriod, "leader-election-lease-retry", 4*time.Second, "Interval at which the leader will update the election lease")
-	flag.StringVar(&o.preserveCompositionSelector, "preserve-composition-selector", labels.Nothing().String(), "Optional label selector for compositions that will preserve their resources when deleted")
+	flag.StringVar(&o.PreserveCompositionSelectorStr, "preserve-composition-selector", labels.Nothing().String(), "Optional label selector for compositions that will preserve their resources when deleted")
 }
 
 func (o *Options) PreserveCompositionSelector() (labels.Selector, error) {
-	if o.preserveCompositionSelector == "" {
+	if o.PreserveCompositionSelectorStr == "" {
 		return labels.Nothing(), nil // fail safe
 	}
-	return labels.Parse(o.preserveCompositionSelector)
+	return labels.Parse(o.PreserveCompositionSelectorStr)
 }
 
 func newCacheOptions(ns string, selector labels.Selector) cache.ByObject {
