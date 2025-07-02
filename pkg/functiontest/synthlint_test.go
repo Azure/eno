@@ -2,13 +2,9 @@ package functiontest
 
 import (
 	"fmt"
-	"os"
 	"testing"
 
-	enov1 "github.com/Azure/eno/api/v1"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
 )
 
 // Test structures with eno_key tags
@@ -36,9 +32,7 @@ type TestInputsEmpty struct {
 }
 
 func TestInputsMatchSynthesizerRefs_StrictMode_Success(t *testing.T) {
-	// Create temporary synthesizer.yaml with exact matching refs
-	synthesizerPath := createTempSynthesizer(t, []string{"database", "cache", "storage"})
-	defer os.Remove(synthesizerPath)
+	synthesizerPath := "lintfixtures/synthesizer_complete.yaml"
 
 	// Test with exact match - should pass
 	inputs := TestInputsComplete{}
@@ -48,9 +42,8 @@ func TestInputsMatchSynthesizerRefs_StrictMode_Success(t *testing.T) {
 }
 
 func TestInputsMatchSynthesizerRefs_StrictMode_FailureMissingEnoKey(t *testing.T) {
-	// Create synthesizer.yaml with more refs than eno_keys
-	synthesizerPath := createTempSynthesizer(t, []string{"database", "cache", "network"})
-	defer os.Remove(synthesizerPath)
+	// Use fixture file with more refs than eno_keys
+	synthesizerPath := "lintfixtures/synthesizer_extended.yaml"
 
 	// Test with missing eno_key - should fail in strict mode
 	inputs := TestInputsPartial{} // only has database and cache
@@ -65,9 +58,8 @@ func TestInputsMatchSynthesizerRefs_StrictMode_FailureMissingEnoKey(t *testing.T
 }
 
 func TestInputsMatchSynthesizerRefs_StrictMode_FailureExtraEnoKey(t *testing.T) {
-	// Create synthesizer.yaml with fewer refs than eno_keys
-	synthesizerPath := createTempSynthesizer(t, []string{"database", "cache"})
-	defer os.Remove(synthesizerPath)
+	// Use fixture file with fewer refs than eno_keys
+	synthesizerPath := "lintfixtures/synthesizer_partial.yaml"
 
 	// Test with extra eno_key - should fail in strict mode
 	inputs := TestInputsComplete{} // has database, cache, and storage
@@ -81,9 +73,8 @@ func TestInputsMatchSynthesizerRefs_StrictMode_FailureExtraEnoKey(t *testing.T) 
 }
 
 func TestInputsMatchSynthesizerRefs_RelaxedMode_Success(t *testing.T) {
-	// Create synthesizer.yaml with more refs than eno_keys
-	synthesizerPath := createTempSynthesizer(t, []string{"database", "cache", "storage", "network"})
-	defer os.Remove(synthesizerPath)
+	// Use fixture file with more refs than eno_keys
+	synthesizerPath := "lintfixtures/synthesizer_extended.yaml"
 
 	// Test with subset of refs - should pass in relaxed mode
 	inputs := TestInputsPartial{} // only has database and cache
@@ -93,9 +84,8 @@ func TestInputsMatchSynthesizerRefs_RelaxedMode_Success(t *testing.T) {
 }
 
 func TestInputsMatchSynthesizerRefs_RelaxedMode_FailureMissingRef(t *testing.T) {
-	// Create synthesizer.yaml with fewer refs than eno_keys
-	synthesizerPath := createTempSynthesizer(t, []string{"database", "cache"})
-	defer os.Remove(synthesizerPath)
+	// Use fixture file with fewer refs than eno_keys
+	synthesizerPath := "lintfixtures/synthesizer_partial.yaml"
 
 	// Test with eno_key not in refs - should fail even in relaxed mode
 	inputs := TestInputsComplete{} // has database, cache, and storage
@@ -109,9 +99,8 @@ func TestInputsMatchSynthesizerRefs_RelaxedMode_FailureMissingRef(t *testing.T) 
 }
 
 func TestInputsMatchSynthesizerRefs_EmptyEnoKeys(t *testing.T) {
-	// Create synthesizer.yaml with some refs
-	synthesizerPath := createTempSynthesizer(t, []string{"database", "cache"})
-	defer os.Remove(synthesizerPath)
+	// Use fixture file with some refs
+	synthesizerPath := "lintfixtures/synthesizer_partial.yaml"
 
 	// Test with struct that has no eno_key tags
 	inputs := TestInputsEmpty{}
@@ -119,8 +108,8 @@ func TestInputsMatchSynthesizerRefs_EmptyEnoKeys(t *testing.T) {
 	mockT := &mockTestingT{}
 	// Should pass in both modes since there are no eno_keys to validate
 	InputsMatchSynthesizerRefs(mockT, inputs, synthesizerPath, KeyMatchStrict)
-	assert.True(t, mockT.failed, "Expected test to fail when synthesizer file doesn't exist")
-	assert.Contains(t, mockT.errorMsg, "no eno_key tags in input", "Expected error about loading synthesizer refs")
+	assert.True(t, mockT.failed, "Expected test to fail when no eno_key tags exist")
+	assert.Contains(t, mockT.errorMsg, "no eno_key tags in input", "Expected error about no eno_key tags")
 }
 
 func TestInputsMatchSynthesizerRefs_InvalidSynthesizerPath(t *testing.T) {
@@ -136,19 +125,13 @@ func TestInputsMatchSynthesizerRefs_InvalidSynthesizerPath(t *testing.T) {
 }
 
 func TestInputsMatchSynthesizerRefs_InvalidSynthesizerYaml(t *testing.T) {
-	// Create temporary file with invalid YAML
-	tmpFile, err := os.CreateTemp("", "invalid-synthesizer-*.yaml")
-	require.NoError(t, err)
-	defer os.Remove(tmpFile.Name())
-
-	_, err = tmpFile.WriteString("invalid: yaml: content: [")
-	require.NoError(t, err)
-	tmpFile.Close()
+	// Use fixture file with invalid YAML
+	synthesizerPath := "lintfixtures/synthesizer_invalid.yaml"
 
 	inputs := TestInputsComplete{}
 
 	mockT := &mockTestingT{}
-	InputsMatchSynthesizerRefs(mockT, inputs, tmpFile.Name(), KeyMatchStrict)
+	InputsMatchSynthesizerRefs(mockT, inputs, synthesizerPath, KeyMatchStrict)
 
 	// Verify that the test failed due to invalid YAML
 	assert.True(t, mockT.failed, "Expected test to fail when synthesizer YAML is invalid")
@@ -156,9 +139,8 @@ func TestInputsMatchSynthesizerRefs_InvalidSynthesizerYaml(t *testing.T) {
 }
 
 func TestInputsMatchSynthesizerRefs_SynthesizerWithoutRefs(t *testing.T) {
-	// Create synthesizer.yaml without refs
-	synthesizerPath := createTempSynthesizer(t, []string{})
-	defer os.Remove(synthesizerPath)
+	// Use fixture file without refs
+	synthesizerPath := "lintfixtures/synthesizer_empty.yaml"
 
 	inputs := TestInputsComplete{}
 
@@ -172,8 +154,7 @@ func TestInputsMatchSynthesizerRefs_SynthesizerWithoutRefs(t *testing.T) {
 
 func TestInputsMatchSynthesizerRefs_PointerInput(t *testing.T) {
 	// Test with pointer to struct
-	synthesizerPath := createTempSynthesizer(t, []string{"database", "cache", "storage"})
-	defer os.Remove(synthesizerPath)
+	synthesizerPath := "lintfixtures/synthesizer_complete.yaml"
 
 	inputs := &TestInputsComplete{}
 
@@ -182,8 +163,7 @@ func TestInputsMatchSynthesizerRefs_PointerInput(t *testing.T) {
 }
 
 func TestInputsMatchSynthesizerRefs_NonStructInput(t *testing.T) {
-	synthesizerPath := createTempSynthesizer(t, []string{"database"})
-	defer os.Remove(synthesizerPath)
+	synthesizerPath := "lintfixtures/synthesizer_partial.yaml"
 
 	// Test with non-struct input
 	inputs := "not a struct"
@@ -194,37 +174,6 @@ func TestInputsMatchSynthesizerRefs_NonStructInput(t *testing.T) {
 	// Verify that the test failed due to non-struct input
 	assert.True(t, mockT.failed, "Expected test to fail when input is not a struct")
 	assert.Contains(t, mockT.errorMsg, "Failed to extract eno_keys", "Expected error about extracting eno_keys")
-}
-
-// Helper function to create a temporary synthesizer.yaml file with given ref keys
-func createTempSynthesizer(t *testing.T, refKeys []string) string {
-	tmpFile, err := os.CreateTemp("", "synthesizer-*.yaml")
-	require.NoError(t, err)
-
-	synthesizer := enov1.Synthesizer{
-		Spec: enov1.SynthesizerSpec{
-			Refs: make([]enov1.Ref, len(refKeys)),
-		},
-	}
-
-	for i, key := range refKeys {
-		synthesizer.Spec.Refs[i] = enov1.Ref{
-			Key: key,
-			Resource: enov1.ResourceRef{
-				Group:   "apps",
-				Version: "v1",
-			},
-		}
-	}
-
-	data, err := yaml.Marshal(synthesizer)
-	require.NoError(t, err)
-
-	_, err = tmpFile.Write(data)
-	require.NoError(t, err)
-	tmpFile.Close()
-
-	return tmpFile.Name()
 }
 
 // Mock implementation of require.TestingT to capture test failures
