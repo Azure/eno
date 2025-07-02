@@ -11,7 +11,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Define a new type for your matching mode instead of using a bare bool or int
 type KeyMatchMode int
 
 const (
@@ -19,13 +18,17 @@ const (
 	KeyMatchRelaxed                     // eno_keys can be a subset of refs
 )
 
+// InputsMatchSynthesizerRefs is ensures your synthsizers references stay in sync with the eno_keys to the struct you give function.SynthFunc
+// The level of sync can be defined by the KeyMatchMode parameter
 func InputsMatchSynthesizerRefs(t require.TestingT, inputObject any, synthesizerPath string, mode KeyMatchMode) {
-	enoKeys, err := extractEnoKeysWithError(inputObject)
+	enoKeys, err := extractEnoKeys(inputObject)
 	require.NoError(t, err, "Failed to extract eno_keys from EnoInputs struct")
+	require.NotEmpty(t, enoKeys, "no eno_key tags in input")
 
 	// Load and parse synthesizer.yaml
 	synthesizerRefs, err := loadSynthesizerRefs(synthesizerPath)
 	require.NoError(t, err, "Failed to load synthizer refs")
+	require.NotEmpty(t, synthesizerRefs, "synthesizer.yaml should have refs with keys")
 
 	// Verify that every eno_key has a corresponding ref in synthesizer.yaml
 	for _, enoKey := range enoKeys {
@@ -42,8 +45,8 @@ func InputsMatchSynthesizerRefs(t require.TestingT, inputObject any, synthesizer
 	}
 }
 
-// extractEnoKeysWithError is a version that returns an error instead of failing the test
-func extractEnoKeysWithError(structInstance any) ([]string, error) {
+// extractEnoKeysWithError extracts eno_key tags from a struct and returns them as a slice of strings.
+func extractEnoKeys(structInstance any) ([]string, error) {
 	var enoKeys []string
 
 	// Get the type of the provided struct
@@ -68,15 +71,11 @@ func extractEnoKeysWithError(structInstance any) ([]string, error) {
 			enoKeys = append(enoKeys, enoKey)
 		}
 	}
-
-	if len(enoKeys) == 0 {
-		return nil, fmt.Errorf("no eno_key tags in input")
-	}
-
 	return enoKeys, nil
 }
 
 // loadSynthesizerRefs loads the synthesizer.yaml file and extracts all ref keys
+// will error
 func loadSynthesizerRefs(synthesizerPath string) ([]string, error) {
 
 	// Read the YAML file
@@ -99,8 +98,5 @@ func loadSynthesizerRefs(synthesizerPath string) ([]string, error) {
 		}
 	}
 
-	if len(refKeys) == 0 {
-		return nil, fmt.Errorf("synthesizer.yaml should have refs with keys")
-	}
 	return refKeys, nil
 }
