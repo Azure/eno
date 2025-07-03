@@ -244,7 +244,7 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 	if str, ok := anno[reconcileIntervalKey]; ok {
 		reconcileInterval, err := time.ParseDuration(str)
 		if anno[reconcileIntervalKey] != "" && err != nil {
-			logger.V(0).Info("invalid reconcile interval - ignoring")
+			return nil, fmt.Errorf("invalid reconcile interval, %s", str)
 		}
 		res.ReconcileInterval = &metav1.Duration{Duration: reconcileInterval}
 	}
@@ -259,7 +259,7 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 	if js, ok := anno[overridesKey]; ok {
 		err = json.Unmarshal([]byte(js), &res.Overrides)
 		if err != nil {
-			logger.Error(err, "invalid override json")
+			return nil, fmt.Errorf("invalid override json, %s", err)
 		}
 	}
 
@@ -267,10 +267,9 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 	if str, ok := anno[readinessGroupKey]; ok {
 		rg, err := strconv.Atoi(str)
 		if err != nil {
-			logger.V(0).Info("invalid readiness group - ignoring")
-		} else {
-			res.ReadinessGroup = rg
+			return nil, fmt.Errorf("invalid readiness group, %s", str)
 		}
+		res.ReadinessGroup = rg
 	}
 
 	for key, value := range anno {
