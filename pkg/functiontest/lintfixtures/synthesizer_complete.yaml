@@ -1,0 +1,18 @@
+apiVersion: eno.azure.io/v1
+kind: Synthesizer
+metadata:
+  name: test-synthesizer-complete
+spec:
+  refs:
+    - key: database
+      resource:
+        group: apps
+        version: v1
+    - key: cache
+      resource:
+        group: apps
+        version: v1
+    - key: storage
+      resource:
+        group: apps
+        version: v1

@@ -1,0 +1,6 @@
+apiVersion: eno.azure.io/v1
+kind: Synthesizer
+metadata:
+  name: test-synthesizer-empty
+spec:
+  refs: []

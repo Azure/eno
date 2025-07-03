@@ -1,0 +1,6 @@
+apiVersion: eno.azure.io/v1
+kind: Synthesizer
+metadata:
+  name: test-synthesizer-no-refs
+spec:
+  # Synthesizer without refs field
