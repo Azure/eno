@@ -263,22 +263,6 @@ var newResourceTests = []struct {
 		},
 	},
 	{
-		Name: "invalid-override-json",
-		Manifest: `{
-			"apiVersion": "v1",
-			"kind": "ConfigMap",
-			"metadata": {
-				"name": "foo",
-				"annotations": {
-					"eno.azure.io/overrides": "not json"
-				}
-			}
-		}`,
-		Assert: func(t *testing.T, r *Resource) {
-			assert.Len(t, r.Overrides, 0)
-		},
-	},
-	{
 		Name: "labels",
 		Manifest: `{
 			"apiVersion": "v1",
@@ -324,6 +308,70 @@ func TestNewResource(t *testing.T) {
 			}, 0)
 			require.NoError(t, err)
 			tc.Assert(t, r)
+		})
+	}
+}
+
+func TestNewResourceFailures(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name     string
+		manifest string
+		wantErr  string
+	}{
+		{
+			name: "invalid-override-json",
+			manifest: `{
+				"apiVersion": "v1",
+				"kind": "ConfigMap",
+				"metadata": {
+					"name": "foo",
+					"annotations": {
+						"eno.azure.io/overrides": "[{\"path\":\".foo\", invalid json"
+					}
+				}
+			}`,
+			wantErr: "invalid override json",
+		},
+		{
+			name: "bad-duration-reconcile-interval",
+			manifest: `{
+				"apiVersion": "v1",
+				"kind": "ConfigMap",
+				"metadata": {
+					"name": "foo",
+					"annotations": {
+						"eno.azure.io/reconcile-interval": "not-a-duration"
+					}
+				}
+			}`,
+			wantErr: "invalid reconcile interval",
+		},
+		{
+			name: "not-a-number-readiness-group",
+			manifest: `{
+				"apiVersion": "v1",
+				"kind": "ConfigMap",
+				"metadata": {
+					"name": "foo",
+					"annotations": {
+						"eno.azure.io/readiness-group": "not-a-number"
+					}
+				}
+			}`,
+			wantErr: "invalid readiness group",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := NewResource(ctx, &apiv1.ResourceSlice{
+				Spec: apiv1.ResourceSliceSpec{
+					Resources: []apiv1.Manifest{{Manifest: tc.manifest}},
+				},
+			}, 0)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
 		})
 	}
 }
