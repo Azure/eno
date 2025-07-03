@@ -238,3 +238,108 @@ func TestOrphanedNamespaceSymphony(t *testing.T) {
 		return upstream.List(ctx, slices) == nil && len(slices.Items) == 0
 	})
 }
+
+// TestSymphonyDeletionDeadlock proves that symphony deletion is not blocked by a missing reconciliation controller.
+func TestSymphonyDeletionDeadlock(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]string{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+				"data": map[string]string{"foo": "bar"},
+			},
+		}}
+		return output, nil
+	})
+
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "anything"
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	symph := &apiv1.Symphony{}
+	symph.Name = "test-comp"
+	symph.Namespace = "default"
+	symph.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: syn.Name}}}
+
+	// Wait for initial creation
+	require.NoError(t, upstream.Create(ctx, symph))
+	testutil.Eventually(t, func() bool {
+		upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph)
+		return symph.Status.Synthesized != nil && symph.Status.ObservedGeneration == symph.Generation
+	})
+
+	// Deletion should not deadlock even though the composition was never reconciled
+	require.NoError(t, upstream.Delete(ctx, symph))
+	testutil.Eventually(t, func() bool {
+		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph))
+	})
+}
+
+// TestSymphonyDeletionOrphaning proves that deleting a symphony will cause any managed resources to be orphaned.
+func TestSymphonyDeletionOrphaning(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]string{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+				"data": map[string]string{"foo": "bar"},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "anything"
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	symph := &apiv1.Symphony{}
+	symph.Name = "test-comp"
+	symph.Namespace = "default"
+	symph.Spec.Variations = []apiv1.Variation{{Synthesizer: apiv1.SynthesizerRef{Name: syn.Name}}}
+
+	obj := &corev1.ConfigMap{}
+	obj.SetName("test-obj")
+	obj.SetNamespace("default")
+
+	// Wait for resource to be created
+	require.NoError(t, upstream.Create(ctx, symph))
+	testutil.Eventually(t, func() bool {
+		return mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(obj), obj) == nil
+	})
+
+	// Deleting the symphony should not delete the resource
+	require.NoError(t, upstream.Delete(ctx, symph))
+	testutil.Eventually(t, func() bool {
+		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph))
+	})
+	testutil.Eventually(t, func() bool {
+		return mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(obj), obj) == nil
+	})
+}

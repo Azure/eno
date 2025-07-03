@@ -105,6 +105,7 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 func (c *symphonyController) reconcileReverse(ctx context.Context, symph *apiv1.Symphony, comps *apiv1.CompositionList) (bool, error) {
 	logger := logr.FromContextOrDiscard(ctx)
+	const deletionLabelKey = "eno.azure.io/symphony-deleting"
 
 	expectedSynths := map[string]struct{}{}
 	for _, variation := range symph.Spec.Variations {
@@ -120,8 +121,26 @@ func (c *symphonyController) reconcileReverse(ctx context.Context, symph *apiv1.
 		hasVariation := slices.ContainsFunc(symph.Spec.Variations, func(vrn apiv1.Variation) bool {
 			return vrn.Synthesizer.Name == comp.Spec.Synthesizer.Name
 		})
-		if (hasVariation && symph.DeletionTimestamp == nil) || comp.DeletionTimestamp != nil {
+		shouldExist := hasVariation && symph.DeletionTimestamp == nil
+		labelInSync := symph.DeletionTimestamp == nil || (comp.Labels != nil && comp.Labels[deletionLabelKey] == "true")
+		alreadyDeleted := comp.DeletionTimestamp != nil
+		if shouldExist || (alreadyDeleted && labelInSync) {
 			continue
+		}
+
+		// Signal that the deletion was caused by symphony deletion, not because the variation was removed
+		if !labelInSync {
+			if comp.Labels == nil {
+				comp.Labels = map[string]string{}
+			}
+			comp.Labels[deletionLabelKey] = "true"
+
+			err := c.client.Update(ctx, &comp)
+			if err != nil {
+				return false, fmt.Errorf("updating composition labels: %w", err)
+			}
+			logger.V(0).Info("labeled composition before deleting it", "compositionName", comp.Name, "compositionNamespace", comp.Namespace)
+			return true, nil
 		}
 
 		err := c.client.Delete(ctx, &comp)
@@ -129,7 +148,7 @@ func (c *symphonyController) reconcileReverse(ctx context.Context, symph *apiv1.
 			return false, fmt.Errorf("cleaning up composition: %w", err)
 		}
 
-		logger.V(0).Info("deleted composition because its variation was removed from the symphony", "compositionName", comp.Name, "compositionNamespace", comp.Namespace)
+		logger.V(0).Info("deleted composition", "compositionName", comp.Name, "compositionNamespace", comp.Namespace)
 		return true, nil
 	}
 
