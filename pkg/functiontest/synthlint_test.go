@@ -33,29 +33,28 @@ type TestInputsEmpty struct {
 
 func TestInputsMatchSynthesizerRefs(t *testing.T) {
 	tests := []struct {
-		name     string
-		inputs   interface{}
-		path     string
-		mode     KeyMatchMode
-		wantFail bool
-		wantErr  string
+		name    string
+		inputs  any
+		path    string
+		mode    KeyMatchMode
+		wantErr string
 	}{
-		{"StrictMode_Success", TestInputsComplete{}, "lintfixtures/synthesizer_complete.yaml", KeyMatchStrict, false, ""},
-		{"StrictMode_FailureMissingEnoKey", TestInputsPartial{}, "lintfixtures/synthesizer_extended.yaml", KeyMatchStrict, true, "network"},
-		{"StrictMode_FailureExtraEnoKey", TestInputsComplete{}, "lintfixtures/synthesizer_partial.yaml", KeyMatchStrict, true, "storage"},
-		{"RelaxedMode_Success", TestInputsPartial{}, "lintfixtures/synthesizer_extended.yaml", KeyMatchRelaxed, false, ""},
-		{"RelaxedMode_FailureMissingRef", TestInputsComplete{}, "lintfixtures/synthesizer_partial.yaml", KeyMatchRelaxed, true, "storage"},
-		{"EmptyEnoKeys", TestInputsEmpty{}, "lintfixtures/synthesizer_partial.yaml", KeyMatchStrict, true, "no eno_key tags in input"},
-		{"InvalidSynthesizerPath", TestInputsComplete{}, "/tmp/non-existent-synthesizer.yaml", KeyMatchStrict, true, "Failed to load synthizer refs"},
-		{"InvalidSynthesizerYaml", TestInputsComplete{}, "lintfixtures/synthesizer_invalid.yaml", KeyMatchStrict, true, "Failed to load synthizer refs"},
-		{"SynthesizerWithoutRefs", TestInputsComplete{}, "lintfixtures/synthesizer_empty.yaml", KeyMatchStrict, true, "synthesizer.yaml should have refs with keys"},
-		{"PointerInput", &TestInputsComplete{}, "lintfixtures/synthesizer_complete.yaml", KeyMatchStrict, false, ""},
-		{"NonStructInput", "not a struct", "lintfixtures/synthesizer_partial.yaml", KeyMatchStrict, true, "Failed to extract eno_keys"},
+		{"StrictMode_Success", TestInputsComplete{}, "lintfixtures/synthesizer_complete.yaml", KeyMatchStrict, ""},
+		{"StrictMode_FailureMissingEnoKey", TestInputsPartial{}, "lintfixtures/synthesizer_extended.yaml", KeyMatchStrict, "network"},
+		{"StrictMode_FailureExtraEnoKey", TestInputsComplete{}, "lintfixtures/synthesizer_partial.yaml", KeyMatchStrict, "storage"},
+		{"RelaxedMode_Success", TestInputsPartial{}, "lintfixtures/synthesizer_extended.yaml", KeyMatchRelaxed, ""},
+		{"RelaxedMode_FailureMissingRef", TestInputsComplete{}, "lintfixtures/synthesizer_partial.yaml", KeyMatchRelaxed, "storage"},
+		{"EmptyEnoKeys", TestInputsEmpty{}, "lintfixtures/synthesizer_partial.yaml", KeyMatchStrict, "no eno_key tags in input"},
+		{"InvalidSynthesizerPath", TestInputsComplete{}, "/tmp/non-existent-synthesizer.yaml", KeyMatchStrict, "Failed to load synthizer refs"},
+		{"InvalidSynthesizerYaml", TestInputsComplete{}, "lintfixtures/synthesizer_invalid.yaml", KeyMatchStrict, "Failed to load synthizer refs"},
+		{"SynthesizerWithoutRefs", TestInputsComplete{}, "lintfixtures/synthesizer_empty.yaml", KeyMatchStrict, "synthesizer.yaml should have refs with keys"},
+		{"PointerInput", &TestInputsComplete{}, "lintfixtures/synthesizer_complete.yaml", KeyMatchStrict, ""},
+		{"NonStructInput", "not a struct", "lintfixtures/synthesizer_partial.yaml", KeyMatchStrict, "Failed to extract eno_keys"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.wantFail {
+			if tc.wantErr != "" {
 				mockT := &mockTestingT{}
 				InputsMatchSynthesizerRefs(mockT, tc.inputs, tc.path, tc.mode)
 				assert.True(t, mockT.failed, "Expected failure for %s", tc.name)
