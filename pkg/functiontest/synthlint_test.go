@@ -19,13 +19,6 @@ type TestInputsPartial struct {
 	Cache    string `eno_key:"cache"`
 }
 
-type TestInputsExtra struct {
-	Database string `eno_key:"database"`
-	Cache    string `eno_key:"cache"`
-	Storage  string `eno_key:"storage"`
-	Network  string `eno_key:"network"`
-}
-
 type TestInputsEmpty struct {
 	Field1 string `json:"field1"`
 	Field2 string `json:"field2"`
@@ -72,7 +65,7 @@ type mockTestingT struct {
 	errorMsg string
 }
 
-func (m *mockTestingT) Errorf(format string, args ...interface{}) {
+func (m *mockTestingT) Errorf(format string, args ...any) {
 	m.failed = true
 	if m.errorMsg == "" {
 		m.errorMsg = fmt.Sprintf(format, args...)
@@ -82,5 +75,3 @@ func (m *mockTestingT) Errorf(format string, args ...interface{}) {
 func (m *mockTestingT) FailNow() {
 	m.failed = true
 }
-
-func (m *mockTestingT) Helper() {}
