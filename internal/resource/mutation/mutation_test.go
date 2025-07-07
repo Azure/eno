@@ -51,10 +51,10 @@ func TestApply(t *testing.T) {
 		},
 		{
 			name:     "Map_NestedStringIndex",
-			path:     `self.foo["bar"]`,
+			path:     `self.foo["ba.r"]`,
 			obj:      map[string]any{"foo": map[string]any{}, "another": "baz"},
 			value:    123,
-			expected: map[string]any{"foo": map[string]any{"bar": 123}, "another": "baz"},
+			expected: map[string]any{"foo": map[string]any{"ba.r": 123}, "another": "baz"},
 		},
 		{
 			name:     "Map_NestedStringIndexNil",
