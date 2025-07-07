@@ -169,3 +169,71 @@ func newTestInputReader() *InputReader {
 	}
 	return ir
 }
+
+// Test inputs that implement MungerError
+type mungerInputs struct {
+	MyConfigmap *corev1.ConfigMap `eno_key:"test-cm"`
+	munged      bool
+}
+
+// Implement MungerError interface
+func (m *mungerInputs) Munge() error {
+	m.munged = true
+	// Modify the configmap data as part of munging
+	if m.MyConfigmap != nil {
+		m.MyConfigmap.Data["munged"] = "true"
+	}
+	return nil
+}
+
+func TestMungerError(t *testing.T) {
+	outBuf := &bytes.Buffer{}
+	ow := NewOutputWriter(outBuf, nil)
+	ir := newTestInputReader()
+
+	fn := func(inputs mungerInputs) ([]client.Object, error) {
+		output := &corev1.Pod{}
+		output.Name = "test-pod"
+		output.Annotations = map[string]string{
+			"munged":           fmt.Sprintf("%v", inputs.munged),
+			"configmap-munged": inputs.MyConfigmap.Data["munged"],
+		}
+		return []client.Object{output}, nil
+	}
+
+	require.NoError(t, main(fn, ir, ow))
+
+	// Verify that munging occurred
+	output := outBuf.String()
+	assert.Contains(t, output, `"munged":"true"`)
+	assert.Contains(t, output, `"configmap-munged":"true"`)
+}
+
+// Test inputs that implement MungerError and return an error
+type failingMungerInputs struct {
+	MyConfigmap *corev1.ConfigMap `eno_key:"test-cm"`
+}
+
+// Implement MungerError interface that returns an error
+func (m *failingMungerInputs) Munge() error {
+	return fmt.Errorf("munging failed")
+}
+
+func TestMungerErrorFailure(t *testing.T) {
+	outBuf := &bytes.Buffer{}
+	ow := NewOutputWriter(outBuf, nil)
+	ir := newTestInputReader()
+
+	fn := func(inputs failingMungerInputs) ([]client.Object, error) {
+		// This should not be called because munging will fail
+		output := &corev1.Pod{}
+		output.Name = "test-pod"
+		return []client.Object{output}, nil
+	}
+
+	err := main(fn, ir, ow)
+
+	// Verify that the error from Munge() is returned
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "munging failed")
+}

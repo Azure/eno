@@ -14,6 +14,13 @@ import (
 // Each field must either be a client.Object or a custom type registered with AddCustomInputType.
 type Inputs interface{}
 
+// MungerError is an optional interface that can be implemented by Inputs structs
+// if it is, it gets called after inputs are read. It can fail the whole
+// Synthesis.
+type MungerError interface {
+	Munge() error
+}
+
 // SynthFunc defines a synthesizer function that takes a set of inputs and returns a list of objects.
 type SynthFunc[T Inputs] func(inputs T) ([]client.Object, error)
 
@@ -64,6 +71,17 @@ func main[T Inputs](fn SynthFunc[T], ir *InputReader, ow *OutputWriter) error {
 		}
 
 		input.Finalize()
+	}
+
+	// Use reflection to check if inputs implements MungerError
+	if v.CanAddr() {
+		inputsPtr := v.Addr().Interface()
+		if im, ok := inputsPtr.(MungerError); ok {
+			err := im.Munge()
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	// Call the fn and handle errors through the KRM interface
