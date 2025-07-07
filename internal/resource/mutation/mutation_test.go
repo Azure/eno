@@ -2,6 +2,7 @@ package mutation
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -11,6 +12,16 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
+
+func TestPanic(t *testing.T) {
+	overridesJson := "[\n  { \"path\": \"self.spec.template.spec.containers[name='retina-operator'].resources.requests.cpu\", \"value\": \"250m\", \"condition\": \"self.spec.template.spec.containers[name='retina-operator'].resources.requests.cpu == '250m'\" },\n  { \"path\": \"self.spec.template.spec.containers[name='retina-operator'].resources.requests.memory\", \"value\": \"250Mi\", \"condition\": \"self.spec.template.spec.containers[name='retina-operator'].resources.requests.memory == '250Mi'\" },\n  { \"path\": \"self.spec.template.spec.containers[name='retina-operator'].resources.limits.cpu\", \"value\": \"500m\", \"condition\": \"self.spec.template.spec.containers[name='retina-operator'].resources.limits.cpu == '500m'\" },\n  { \"path\": \"self.spec.template.spec.containers[name='retina-operator'].resources.limits.memory\", \"value\": \"500Mi\", \"condition\": \"self.spec.template.spec.containers[name='retina-operator'].resources.limits.memory == '500Mi'\" }\n]\n"
+	ops := []*Op{}
+	err := json.Unmarshal([]byte(overridesJson), &ops)
+	assert.NoError(t, err)
+	for _, op := range ops {
+		Apply(op.Path, map[string]any{}, op.Value)
+	}
+}
 
 func TestApply(t *testing.T) {
 	testCases := []struct {
