@@ -102,6 +102,22 @@ func apply(path *PathExpr, startIndex int, obj any, value any) error {
 		if section.Index == nil {
 			continue // should be impossible
 		}
+
+		// Alternative map field indexing
+		if key := section.Index.Key; key != nil {
+			m, ok := state.(map[string]any)
+			if !ok {
+				continue
+			}
+			keyStr := (*key)[1 : len(*key)-1] // remove quotes
+			if startIndex+i == len(path.ast.Sections)-1 {
+				m[keyStr] = value
+				return nil
+			}
+			state = m[keyStr]
+			continue
+		}
+
 		slice, ok := state.([]any)
 		if !ok {
 			return fmt.Errorf("cannot apply wildcard to non-slice value")

@@ -13,6 +13,7 @@ type PathExpr struct {
 //
 // Supported syntax:
 // - `field.anotherfield`: object field traversal
+// - `field["anotherField"]`: alternative object field traversal (useful for values containing dots)
 // - `field[2]`: array indexing
 // - `field[*]`: array wildcards
 // - `field[someKey="value"]`: object array field matchers
@@ -40,6 +41,7 @@ type section struct {
 type index struct {
 	Wildcard bool          `@"*"`
 	Element  *int          `| @Int`
+	Key      *string       `| @String`
 	Matcher  *indexMatcher `| @@`
 }
 
