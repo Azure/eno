@@ -2,6 +2,7 @@ package mutation
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -314,6 +315,18 @@ func TestOpApply(t *testing.T) {
 				assert.Equal(t, tc.expectedMutated, tc.mutated)
 			}
 		})
+	}
+}
+
+// TestInvalidPathInJson proves that the non-nil ops with nil paths left after failed unmarshalling will not panic when applied.
+func TestInvalidPathInJson(t *testing.T) {
+	overridesJson := "[\n  { \"path\": \"self.spec.template.spec.containers[name='operator'].resources.requests.cpu\", \"value\": \"250m\", \"condition\": \"self.spec.template.spec.containers[name='operator'].resources.requests.cpu == '250m'\" } ]"
+	ops := []*Op{}
+	err := json.Unmarshal([]byte(overridesJson), &ops)
+	assert.Error(t, err)
+	assert.Len(t, ops, 1)
+	for _, op := range ops {
+		assert.NoError(t, Apply(op.Path, map[string]any{}, op.Value))
 	}
 }
 
