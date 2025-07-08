@@ -14,12 +14,12 @@ import (
 
 func TestApply(t *testing.T) {
 	testCases := []struct {
-		name     string
-		path     string
-		obj      map[string]any
-		value    any
-		expected map[string]any
-		wantErr  bool
+		name                  string
+		path                  string
+		obj                   map[string]any
+		value                 any
+		expected              map[string]any
+		wantErr, wantParseErr bool
 	}{
 		{
 			name:     "Map_TopLevel",
@@ -48,6 +48,39 @@ func TestApply(t *testing.T) {
 			obj:      map[string]any{"another": "baz"},
 			value:    123,
 			expected: map[string]any{"another": "baz"},
+		},
+		{
+			name:     "Map_NestedStringIndex",
+			path:     `self.foo["ba.r"]`,
+			obj:      map[string]any{"foo": map[string]any{}, "another": "baz"},
+			value:    123,
+			expected: map[string]any{"foo": map[string]any{"ba.r": 123}, "another": "baz"},
+		},
+		{
+			name:     "Map_NestedStringIndexNil",
+			path:     `self.foo["bar"]`,
+			obj:      map[string]any{"foo": nil, "another": "baz"},
+			value:    123,
+			expected: map[string]any{"foo": nil, "another": "baz"},
+		},
+		{
+			name:     "Map_NestedStringIndexMissing",
+			path:     `self.foo["bar"]`,
+			obj:      map[string]any{"another": "baz"},
+			value:    123,
+			expected: map[string]any{"another": "baz"},
+		},
+		{
+			name:         "Map_NestedStringIndexSingleQuotes",
+			path:         `self.foo['bar']`,
+			wantParseErr: true,
+		},
+		{
+			name:     "Map_NestedStringIndexChain",
+			path:     `self["foo"]["bar"]`,
+			obj:      map[string]any{"foo": map[string]any{}, "another": "baz"},
+			value:    123,
+			expected: map[string]any{"foo": map[string]any{"bar": 123}, "another": "baz"},
 		},
 		{
 			name:     "Slice_ScalarIndex",
@@ -182,7 +215,12 @@ func TestApply(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			expr, err := ParsePathExpr(tc.path)
-			require.NoError(t, err)
+			if tc.wantParseErr {
+				require.Error(t, err)
+				return
+			} else {
+				require.NoError(t, err)
+			}
 
 			err = Apply(expr, tc.obj, tc.value)
 
