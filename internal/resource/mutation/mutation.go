@@ -71,6 +71,10 @@ func (o *Op) Apply(ctx context.Context, current, mutated *unstructured.Unstructu
 // Apply applies a mutation i.e. sets the value(s) referred to by the path expression.
 // Missing or nil values in the path will not be created, and will cause an error.
 func Apply(path *PathExpr, obj, value any) error {
+	if path == nil {
+		return nil
+	}
+
 	if s := path.ast.Sections; len(s) == 0 || s[0].Field == nil || *s[0].Field != "self" {
 		return fmt.Errorf("cannot apply mutation to non-self path")
 	}
