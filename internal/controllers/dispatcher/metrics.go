@@ -18,8 +18,8 @@ var (
 
 	dispatchingLatency = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
-			Name:    "eno_dispatching_latency_seconds",
-			Help:    "Latency of dispatching operations",
+			Name:    "eno_scheduling_latency_seconds",
+			Help:    "Latency of scheduling operations",
 			Buckets: []float64{0.1, 0.25, 0.5, 1, 5},
 		},
 	)
