@@ -28,7 +28,7 @@ var (
 		prometheus.GaugeOpts{
 			Name: "eno_compositions_stuck_reconciling_total",
 			Help: "Number of compositions that have not been reconciled since a period after their current synthesis was initialized",
-		}, []string{"synthesizer"},
+		}, []string{"synthesizer", "owner"},
 	)
 )
 
