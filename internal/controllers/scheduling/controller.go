@@ -117,7 +117,8 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 
 		if missedReconciliation(&comp, c.watchdogThreshold) {
-			stuckReconciling.WithLabelValues(comp.Spec.Synthesizer.Name).Inc()
+			synth := synthsByName[comp.Spec.Synthesizer.Name]
+			stuckReconciling.WithLabelValues(comp.Spec.Synthesizer.Name, getSynthOwner(&synth)).Inc()
 		}
 
 		synth, ok := synthsByName[comp.Spec.Synthesizer.Name]
@@ -199,7 +200,7 @@ func indexSynthesizers(synths []apiv1.Synthesizer) (byName map[string]apiv1.Synt
 	for _, synth := range synths {
 		byName[synth.Name] = synth
 		fmt.Fprintf(h, "%s:%d", synth.UID, synth.Generation)
-		stuckReconciling.WithLabelValues(synth.Name).Set(0)
+		stuckReconciling.WithLabelValues(synth.Name, getSynthOwner(&synth)).Set(0)
 	}
 	return byName, hex.EncodeToString(h.Sum(nil))
 }
@@ -214,4 +215,11 @@ func setSynthEpochAnnotation(comp *apiv1.Composition, value string) bool {
 	anno[synthEpochAnnotationKey] = value
 	comp.SetAnnotations(anno)
 	return ok
+}
+
+func getSynthOwner(synth *apiv1.Synthesizer) string {
+	if synth == nil {
+		return ""
+	}
+	return synth.GetAnnotations()["eno.azure.io/owner"]
 }
