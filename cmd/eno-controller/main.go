@@ -20,7 +20,7 @@ import (
 	v1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/controllers/composition"
 	"github.com/Azure/eno/internal/controllers/resourceslice"
-	"github.com/Azure/eno/internal/controllers/scheduling"
+	"github.com/Azure/eno/internal/controllers/dispatcher"
 	"github.com/Azure/eno/internal/controllers/symphony"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/controllers/watch"
@@ -131,9 +131,9 @@ func runController() error {
 		return fmt.Errorf("constructing watch controller: %w", err)
 	}
 
-	err = scheduling.NewController(mgr, concurrencyLimit, rolloutCooldown, watchdogThres)
+	err = dispatcher.NewController(mgr, concurrencyLimit, rolloutCooldown, watchdogThres)
 	if err != nil {
-		return fmt.Errorf("constructing synthesis scheduling controller: %w", err)
+		return fmt.Errorf("constructing synthesis dispatcher controller: %w", err)
 	}
 
 	err = composition.NewController(mgr)
