@@ -32,18 +32,18 @@ func TestTreeBuilderSanity(t *testing.T) {
 			Resources: []*Resource{
 				{
 					Ref:            newTestRef("test-negative-2"),
-					ReadinessGroup: -2,
+					readinessGroup: -2,
 				},
 				{
 					Ref:            newTestRef("test-1"),
-					ReadinessGroup: 1,
+					readinessGroup: 1,
 				},
 				{
 					Ref: newTestRef("test-0"),
 				},
 				{
 					Ref:            newTestRef("test-4"),
-					ReadinessGroup: 4,
+					readinessGroup: 4,
 				},
 			},
 		},
@@ -52,15 +52,15 @@ func TestTreeBuilderSanity(t *testing.T) {
 			Resources: []*Resource{
 				{
 					Ref:            newTestRef("test-1"),
-					ReadinessGroup: 4,
+					readinessGroup: 4,
 				},
 				{
 					Ref:            newTestRef("test-2-a"),
-					ReadinessGroup: 8,
+					readinessGroup: 8,
 				},
 				{
 					Ref:            newTestRef("test-2-b"),
-					ReadinessGroup: 8,
+					readinessGroup: 8,
 				},
 			},
 		},
@@ -83,20 +83,20 @@ func TestTreeBuilderSanity(t *testing.T) {
 				{
 					Ref:            newTestRef("test-cr"),
 					GVK:            schema.GroupVersionKind{Group: "test.group", Version: "v1", Kind: "TestCRDKind"},
-					ReadinessGroup: 5,
+					readinessGroup: 5,
 				},
 				{
 					Ref:              newTestRef("test-crd"),
 					DefinedGroupKind: &schema.GroupKind{Group: "test.group", Kind: "TestCRDKind"},
-					ReadinessGroup:   3,
+					readinessGroup:   3,
 				},
 				{
 					Ref:            newTestRef("also-not-a-crd"),
-					ReadinessGroup: 10,
+					readinessGroup: 10,
 				},
 				{
 					Ref:            newTestRef("not-a-crd"),
-					ReadinessGroup: 1,
+					readinessGroup: 1,
 				},
 			},
 		},
@@ -106,12 +106,12 @@ func TestTreeBuilderSanity(t *testing.T) {
 				{
 					Ref:            newTestRef("test-cr"),
 					GVK:            schema.GroupVersionKind{Group: "test.group", Version: "v1", Kind: "TestCRDKind"},
-					ReadinessGroup: 3,
+					readinessGroup: 3,
 				},
 				{
 					Ref:              newTestRef("test-crd"),
 					DefinedGroupKind: &schema.GroupKind{Group: "test.group", Kind: "TestCRDKind"},
-					ReadinessGroup:   5,
+					readinessGroup:   5,
 				},
 			},
 		},
@@ -153,22 +153,22 @@ func TestTreeVisibility(t *testing.T) {
 	var b treeBuilder
 	b.Add(&Resource{
 		Ref:            newTestRef("test-resource-4"),
-		ReadinessGroup: 4,
+		readinessGroup: 4,
 		ManifestRef:    ManifestRef{Index: 4},
 	})
 	b.Add(&Resource{
 		Ref:            newTestRef("test-resource-1"),
-		ReadinessGroup: 1,
+		readinessGroup: 1,
 		ManifestRef:    ManifestRef{Index: 1},
 	})
 	b.Add(&Resource{
 		Ref:            newTestRef("test-resource-3"),
-		ReadinessGroup: 3,
+		readinessGroup: 3,
 		ManifestRef:    ManifestRef{Index: 3},
 	})
 	b.Add(&Resource{
 		Ref:            newTestRef("test-resource-2"),
-		ReadinessGroup: 2,
+		readinessGroup: 2,
 		ManifestRef:    ManifestRef{Index: 2},
 	})
 	names := []string{"test-resource-1", "test-resource-2", "test-resource-3", "test-resource-4"}
@@ -237,17 +237,17 @@ func TestTreeDeletion(t *testing.T) {
 	var b treeBuilder
 	b.Add(&Resource{
 		Ref:            newTestRef("test-resource-1"),
-		ReadinessGroup: 1,
+		readinessGroup: 1,
 		ManifestRef:    ManifestRef{Index: 1},
 	})
 	b.Add(&Resource{
 		Ref:            newTestRef("test-resource-3"),
-		ReadinessGroup: 3,
+		readinessGroup: 3,
 		ManifestRef:    ManifestRef{Index: 3},
 	})
 	b.Add(&Resource{
 		Ref:            newTestRef("test-resource-2"),
-		ReadinessGroup: 2,
+		readinessGroup: 2,
 		ManifestRef:    ManifestRef{Index: 2},
 	})
 
@@ -303,11 +303,11 @@ func TestTreeRefConflicts(t *testing.T) {
 	var b treeBuilder
 	b.Add(&Resource{
 		Ref:          newTestRef("test-resource"),
-		ManifestHash: []byte("b"),
+		manifestHash: []byte("b"),
 	})
 	b.Add(&Resource{
 		Ref:          newTestRef("test-resource"),
-		ManifestHash: []byte("a"),
+		manifestHash: []byte("a"),
 	})
 
 	tree := b.Build()
@@ -315,7 +315,7 @@ func TestTreeRefConflicts(t *testing.T) {
 	res, visible, found := tree.Get(newTestRef("test-resource"))
 	assert.True(t, found)
 	assert.True(t, visible)
-	assert.Equal(t, "b", string(res.ManifestHash))
+	assert.Equal(t, "b", string(res.manifestHash))
 }
 func TestIndexedResourceBacktracks(t *testing.T) {
 	baseGVK := schema.GroupVersionKind{Group: "test.group", Version: "v1", Kind: "TestKind"}
@@ -325,7 +325,7 @@ func TestIndexedResourceBacktracks(t *testing.T) {
 			Resource: &Resource{
 				Ref:            newTestRef(name),
 				GVK:            baseGVK,
-				ReadinessGroup: group,
+				readinessGroup: group,
 			},
 			PendingDependencies: map[Ref]struct{}{},
 			Dependents:          map[Ref]*indexedResource{},
@@ -343,7 +343,7 @@ func TestIndexedResourceBacktracks(t *testing.T) {
 			Resource: &Resource{
 				Ref:            newTestRef("a"),
 				GVK:            schema.GroupVersionKind{Group: "other.group", Version: "v1", Kind: "OtherKind"},
-				ReadinessGroup: 2,
+				readinessGroup: 2,
 			},
 			PendingDependencies: map[Ref]struct{}{},
 			Dependents:          map[Ref]*indexedResource{},
