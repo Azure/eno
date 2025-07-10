@@ -98,6 +98,16 @@ For example:
 { "path": "self.data.foo", "value": "default value", "condition": "!has(self.data.foo)" }
 ```
 
+It's also possible to access composition metadata in condition expressions.
+
+```yaml
+annotations:
+  eno.azure.io/overrides: |
+    [
+      { "path": "spec.cleaningUp", "value": true, "condition": "composition.metadata.deletionTimestamp != null" }
+    ]
+```
+
 #### Path Expression Syntax
 
 Overrides use a CEL-like syntax to reference properties.
