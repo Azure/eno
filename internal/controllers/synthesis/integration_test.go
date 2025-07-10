@@ -17,7 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/controllers/scheduling"
+	"github.com/Azure/eno/internal/controllers/dispatcher"
 	"github.com/Azure/eno/internal/testutil"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 )
@@ -34,7 +34,7 @@ func TestControllerHappyPath(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
+	require.NoError(t, dispatcher.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewPodGC(mgr.Manager, 0))
 
@@ -115,7 +115,7 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
+	require.NoError(t, dispatcher.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewPodGC(mgr.Manager, 0))
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
@@ -195,7 +195,7 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 		return output, nil
 	})
 
-	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
+	require.NoError(t, dispatcher.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewPodGC(mgr.Manager, 0))
 	mgr.Start(t)
@@ -252,7 +252,7 @@ func TestDeadKubelet(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	cli := mgr.GetClient()
 
-	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
+	require.NoError(t, dispatcher.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewPodGC(mgr.Manager, 0))
 	mgr.Start(t)

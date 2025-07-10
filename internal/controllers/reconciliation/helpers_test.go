@@ -9,7 +9,7 @@ import (
 	"github.com/Azure/eno/internal/controllers/composition"
 	"github.com/Azure/eno/internal/controllers/liveness"
 	"github.com/Azure/eno/internal/controllers/resourceslice"
-	"github.com/Azure/eno/internal/controllers/scheduling"
+	"github.com/Azure/eno/internal/controllers/dispatcher"
 	"github.com/Azure/eno/internal/controllers/symphony"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/controllers/watch"
@@ -26,7 +26,7 @@ import (
 func registerControllers(t *testing.T, mgr *testutil.Manager) {
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, synthesis.NewPodGC(mgr.Manager, time.Second))
-	require.NoError(t, scheduling.NewController(mgr.Manager, 10, time.Millisecond, time.Second))
+	require.NoError(t, dispatcher.NewController(mgr.Manager, 10, time.Millisecond, time.Second))
 	require.NoError(t, liveness.NewNamespaceController(mgr.Manager, 3, time.Second))
 	require.NoError(t, watch.NewController(mgr.Manager))
 	require.NoError(t, resourceslice.NewController(mgr.Manager))

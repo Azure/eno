@@ -1,4 +1,4 @@
-package scheduling
+package dispatcher
 
 import (
 	"time"
@@ -16,7 +16,7 @@ var (
 		},
 	)
 
-	schedulingLatency = prometheus.NewHistogram(
+	dispatchingLatency = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Name:    "eno_scheduling_latency_seconds",
 			Help:    "Latency of scheduling operations",
@@ -33,7 +33,7 @@ var (
 )
 
 func init() {
-	metrics.Registry.MustRegister(freeSynthesisSlots, schedulingLatency, stuckReconciling)
+	metrics.Registry.MustRegister(freeSynthesisSlots, dispatchingLatency, stuckReconciling)
 }
 
 func missedReconciliation(comp *apiv1.Composition, threshold time.Duration) bool {

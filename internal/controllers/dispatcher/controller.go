@@ -1,4 +1,4 @@
-package scheduling
+package dispatcher
 
 import (
 	"context"
@@ -64,10 +64,10 @@ func NewController(mgr ctrl.Manager, concurrencyLimit int, cooldown, watchdogThr
 	freeSynthesisSlots.Set(float64(concurrencyLimit))
 
 	return ctrl.NewControllerManagedBy(mgr).
-		Named("schedulingController").
+		Named("dispatcherController").
 		Watches(&apiv1.Composition{}, manager.SingleEventHandler()).
 		Watches(&apiv1.Synthesizer{}, manager.SingleEventHandler()).
-		WithLogConstructor(manager.NewLogConstructor(mgr, "schedulingController")).
+		WithLogConstructor(manager.NewLogConstructor(mgr, "dispatcherController")).
 		Complete(c)
 }
 
@@ -75,7 +75,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	logger := logr.FromContextOrDiscard(ctx)
 	start := time.Now()
 	defer func() {
-		schedulingLatency.Observe(time.Since(start).Seconds())
+		dispatchingLatency.Observe(time.Since(start).Seconds())
 	}()
 
 	// Avoid conflict errors by waiting until we see the last dispatched synthesis (or timeout)
