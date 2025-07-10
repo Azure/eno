@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,7 +24,7 @@ import (
 var newResourceTests = []struct {
 	Name     string
 	Manifest string
-	Assert   func(*testing.T, *Resource)
+	Assert   func(*testing.T, *Snapshot)
 }{
 	{
 		Name: "configmap",
@@ -40,11 +41,11 @@ var newResourceTests = []struct {
 					"eno.azure.io/readiness-test": "false",
 					"eno.azure.io/replace": "true",
 					"eno.azure.io/disable-updates": "true",
-					"eno.azure.io/overrides": "[{\"path\":\".foo\"}, {\"path\":\".bar\"}]"
+					"eno.azure.io/overrides": "[{\"path\":\".self.foo\"}, {\"path\":\".self.bar\"}]"
 				}
 			}
 		}`,
-		Assert: func(t *testing.T, r *Resource) {
+		Assert: func(t *testing.T, r *Snapshot) {
 			assert.Equal(t, schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, r.GVK)
 			assert.Len(t, r.ReadinessChecks, 2)
 			assert.Equal(t, time.Second*10, r.ReconcileInterval.Duration)
@@ -56,8 +57,26 @@ var newResourceTests = []struct {
 			}, r.Ref)
 			assert.True(t, r.DisableUpdates)
 			assert.True(t, r.Replace)
-			assert.Equal(t, int(250), r.ReadinessGroup)
-			assert.Len(t, r.Overrides, 2)
+			assert.Equal(t, int(250), r.readinessGroup)
+			assert.Len(t, r.overrides, 2)
+		},
+	},
+	{
+		Name: "reconcile interval override",
+		Manifest: `{
+			"apiVersion": "apps/v1",
+			"kind": "Deployment",
+			"metadata": {
+				"name": "foo",
+				"namespace": "bar",
+				"annotations": {
+					"eno.azure.io/reconcile-interval": "10s",
+					"eno.azure.io/overrides": "[{\"path\":\".self.metadata.annotations[\\\"eno.azure.io/reconcile-interval\\\"]\", \"value\":\"20s\"}]"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Snapshot) {
+			assert.Equal(t, 20*time.Second, r.ReconcileInterval.Duration)
 		},
 	},
 	{
@@ -72,8 +91,8 @@ var newResourceTests = []struct {
 				}
 			}
 		}`,
-		Assert: func(t *testing.T, r *Resource) {
-			assert.Equal(t, int(0), r.ReadinessGroup)
+		Assert: func(t *testing.T, r *Snapshot) {
+			assert.Equal(t, int(0), r.readinessGroup)
 			assert.False(t, r.DisableUpdates)
 			assert.False(t, r.Replace)
 		},
@@ -90,8 +109,8 @@ var newResourceTests = []struct {
 				}
 			}
 		}`,
-		Assert: func(t *testing.T, r *Resource) {
-			assert.Equal(t, int(-10), r.ReadinessGroup)
+		Assert: func(t *testing.T, r *Snapshot) {
+			assert.Equal(t, int(-10), r.readinessGroup)
 		},
 	},
 	{
@@ -104,7 +123,7 @@ var newResourceTests = []struct {
 				"namespace": "bar"
 			}
 		}`,
-		Assert: func(t *testing.T, r *Resource) {
+		Assert: func(t *testing.T, r *Snapshot) {
 			assert.Equal(t, schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}, r.GVK)
 			assert.Len(t, r.ReadinessChecks, 0)
 			assert.Nil(t, r.ReconcileInterval)
@@ -133,13 +152,10 @@ var newResourceTests = []struct {
 				]
 			}
 		}`,
-		Assert: func(t *testing.T, r *Resource) {
-			rs, err := r.Snapshot(t.Context(), nil)
-			require.NoError(t, err)
-
+		Assert: func(t *testing.T, r *Snapshot) {
 			assert.Equal(t, schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, r.GVK)
 			assert.Len(t, r.Patch, 1)
-			assert.False(t, rs.patchSetsDeletionTimestamp())
+			assert.False(t, r.patchSetsDeletionTimestamp())
 		},
 	},
 	{
@@ -159,13 +175,10 @@ var newResourceTests = []struct {
 				]
 			}
 		}`,
-		Assert: func(t *testing.T, r *Resource) {
-			rs, err := r.Snapshot(t.Context(), nil)
-			require.NoError(t, err)
-
+		Assert: func(t *testing.T, r *Snapshot) {
 			assert.Equal(t, schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, r.GVK)
 			assert.Len(t, r.Patch, 1)
-			assert.True(t, rs.patchSetsDeletionTimestamp())
+			assert.True(t, r.patchSetsDeletionTimestamp())
 		},
 	},
 	{
@@ -183,7 +196,7 @@ var newResourceTests = []struct {
 				}
 			}
 		}`,
-		Assert: func(t *testing.T, r *Resource) {
+		Assert: func(t *testing.T, r *Snapshot) {
 			assert.Equal(t, schema.GroupVersionKind{Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition"}, r.GVK)
 			assert.Equal(t, &schema.GroupKind{Group: "test-group", Kind: "TestKind"}, r.DefinedGroupKind)
 		},
@@ -197,7 +210,7 @@ var newResourceTests = []struct {
 				"name": "foo"
 			}
 		}`,
-		Assert: func(t *testing.T, r *Resource) {
+		Assert: func(t *testing.T, r *Snapshot) {
 			assert.Equal(t, schema.GroupVersionKind{Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition"}, r.GVK)
 			assert.Equal(t, &schema.GroupKind{Group: "", Kind: ""}, r.DefinedGroupKind)
 		},
@@ -220,7 +233,7 @@ var newResourceTests = []struct {
 				}
 			}
 		}`,
-		Assert: func(t *testing.T, r *Resource) {
+		Assert: func(t *testing.T, r *Snapshot) {
 			assert.Equal(t, time.Second*10, r.ReconcileInterval.Duration)
 			assert.Equal(t, &unstructured.Unstructured{
 				Object: map[string]any{
@@ -250,7 +263,7 @@ var newResourceTests = []struct {
 				}
 			}
 		}`,
-		Assert: func(t *testing.T, r *Resource) {
+		Assert: func(t *testing.T, r *Snapshot) {
 			assert.Equal(t, &unstructured.Unstructured{
 				Object: map[string]any{
 					"apiVersion": "v1",
@@ -274,8 +287,8 @@ var newResourceTests = []struct {
 				}
 			}
 		}`,
-		Assert: func(t *testing.T, r *Resource) {
-			assert.Len(t, r.Overrides, 0)
+		Assert: func(t *testing.T, r *Snapshot) {
+			assert.Len(t, r.overrides, 0)
 		},
 	},
 	{
@@ -291,7 +304,7 @@ var newResourceTests = []struct {
 				}
 			}
 		}`,
-		Assert: func(t *testing.T, r *Resource) {
+		Assert: func(t *testing.T, r *Snapshot) {
 			assert.Equal(t, &unstructured.Unstructured{
 				Object: map[string]any{
 					"apiVersion": "v1",
@@ -323,18 +336,29 @@ func TestNewResource(t *testing.T) {
 				},
 			}, 0)
 			require.NoError(t, err)
-			tc.Assert(t, r)
+
+
+			rs, err := r.Snapshot(t.Context(), nil)
+			require.NoError(t, err)
+			tc.Assert(t, rs)
+
+			noOverrides := r.UnstructuredWithoutOverrides()
+			for key := range noOverrides.GetAnnotations() {
+				if strings.HasPrefix(key, "eno.azure.io/") {
+					t.Errorf("expected no overrides in unstructured, but found %s", key)
+				}
+			}
 		})
 	}
 }
 
 func TestResourceOrdering(t *testing.T) {
 	resources := []*Resource{
-		{ManifestHash: []byte("a")},
+		{manifestHash: []byte("a")},
 		{},
-		{ManifestHash: []byte("b")},
+		{manifestHash: []byte("b")},
 		{},
-		{ManifestHash: []byte("c")},
+		{manifestHash: []byte("c")},
 	}
 	sort.Slice(resources, func(i, j int) bool {
 		return resources[i].Less(resources[j])
@@ -343,9 +367,9 @@ func TestResourceOrdering(t *testing.T) {
 	assert.Equal(t, []*Resource{
 		{},
 		{},
-		{ManifestHash: []byte("a")},
-		{ManifestHash: []byte("b")},
-		{ManifestHash: []byte("c")},
+		{manifestHash: []byte("a")},
+		{manifestHash: []byte("b")},
+		{manifestHash: []byte("c")},
 	}, resources)
 }
 

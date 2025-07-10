@@ -70,8 +70,8 @@ func (b *treeBuilder) Add(resource *Resource) {
 		Dependents:          map[Ref]*indexedResource{},
 	}
 	b.byRef[resource.Ref] = idx
-	current, _ := b.byGroup.Get(resource.ReadinessGroup)
-	b.byGroup.Put(resource.ReadinessGroup, append(current, idx))
+	current, _ := b.byGroup.Get(resource.readinessGroup)
+	b.byGroup.Put(resource.readinessGroup, append(current, idx))
 	b.byGK[resource.GVK.GroupKind()] = idx
 	if resource.DefinedGroupKind != nil {
 		b.byDefiningGK[*resource.DefinedGroupKind] = idx
@@ -88,7 +88,7 @@ func (b *treeBuilder) Build() *tree {
 		t.byManiRef[idx.Resource.ManifestRef] = idx
 
 		// CRs are dependent on their CRDs
-		i := b.byGroup.IteratorAt(b.byGroup.GetNode(idx.Resource.ReadinessGroup))
+		i := b.byGroup.IteratorAt(b.byGroup.GetNode(idx.Resource.readinessGroup))
 		crd, ok := b.byDefiningGK[idx.Resource.GVK.GroupKind()]
 		if ok {
 			idx.PendingDependencies[crd.Resource.Ref] = struct{}{}
@@ -104,7 +104,7 @@ func (b *treeBuilder) Build() *tree {
 		i.Next() // Prev always moves the cursor, even if it returns false
 
 		// Any resources in the next readiness group depend on us
-		if i.Next() && i.Key() > idx.Resource.ReadinessGroup {
+		if i.Next() && i.Key() > idx.Resource.readinessGroup {
 			for _, cur := range i.Value() {
 				idx.Dependents[cur.Resource.Ref] = cur
 			}

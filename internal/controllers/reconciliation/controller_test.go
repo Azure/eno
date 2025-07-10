@@ -19,7 +19,7 @@ func TestRequeue(t *testing.T) {
 	tests := []struct {
 		name           string
 		comp           *apiv1.Composition
-		resource       *resource.Resource
+		resource       *resource.Snapshot
 		ready          *metav1.Time
 		minReconcile   time.Duration
 		expectedResult time.Duration
@@ -27,7 +27,7 @@ func TestRequeue(t *testing.T) {
 		{
 			name: "resource is not ready, requeue after readiness poll interval",
 			comp: &apiv1.Composition{},
-			resource: &resource.Resource{
+			resource: &resource.Snapshot{
 				ReconcileInterval: nil,
 			},
 			ready:          nil,
@@ -37,7 +37,7 @@ func TestRequeue(t *testing.T) {
 		{
 			name: "resource is deleted, no requeue",
 			comp: &apiv1.Composition{},
-			resource: &resource.Resource{
+			resource: &resource.Snapshot{
 				ReconcileInterval: nil,
 			},
 			ready:          &metav1.Time{},
@@ -47,7 +47,7 @@ func TestRequeue(t *testing.T) {
 		{
 			name: "resource has reconcile interval less than minReconcileInterval",
 			comp: &apiv1.Composition{},
-			resource: &resource.Resource{
+			resource: &resource.Snapshot{
 				ReconcileInterval: &metav1.Duration{Duration: 5 * time.Second},
 			},
 			ready:          &metav1.Time{},
@@ -57,7 +57,7 @@ func TestRequeue(t *testing.T) {
 		{
 			name: "resource has valid reconcile interval",
 			comp: &apiv1.Composition{},
-			resource: &resource.Resource{
+			resource: &resource.Snapshot{
 				ReconcileInterval: &metav1.Duration{Duration: 15 * time.Second},
 			},
 			ready:          &metav1.Time{},
@@ -73,8 +73,11 @@ func TestRequeue(t *testing.T) {
 				readinessPollInterval: 10 * time.Second,
 				minReconcileInterval:  tt.minReconcile,
 			}
+			if tt.resource.Resource == nil {
+				tt.resource.Resource = &resource.Resource{}
+			}
 
-			result, err := c.requeue(logger, tt.comp, &resource.Snapshot{Resource: tt.resource}, tt.ready)
+			result, err := c.requeue(logger, tt.comp, tt.resource, tt.ready)
 			assert.NoError(t, err)
 			assert.InDelta(t, tt.expectedResult, result.RequeueAfter, float64(2*time.Second))
 		})

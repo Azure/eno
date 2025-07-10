@@ -50,37 +50,37 @@ type ManifestRef struct {
 
 // Resource is the controller's internal representation of a single resource out of a ResourceSlice.
 type Resource struct {
-	Ref               Ref
-	ManifestDeleted   bool
-	ManifestRef       ManifestRef
-	ManifestHash      []byte
-	ReconcileInterval *metav1.Duration
-	GVK               schema.GroupVersionKind
-	ReadinessChecks   readiness.Checks
-	Patch             jsonpatch.Patch
-	DisableUpdates    bool
-	Replace           bool
-	ReadinessGroup    int
-	Labels            map[string]string
-	Overrides         []*mutation.Op
+	Ref             Ref
+	ManifestRef     ManifestRef
+	GVK             schema.GroupVersionKind
+	ReadinessChecks readiness.Checks
+	Patch           jsonpatch.Patch
+	Labels          map[string]string
 
 	// DefinedGroupKind is set on CRDs to represent the resource type they define.
 	DefinedGroupKind *schema.GroupKind
 
 	parsed           *unstructured.Unstructured
+	manifestHash     []byte
+	manifestDeleted  bool
+	readinessGroup   int
+	overrides        []*mutation.Op
 	latestKnownState atomic.Pointer[apiv1.ResourceState]
 }
 
 func (r *Resource) State() *apiv1.ResourceState { return r.latestKnownState.Load() }
 
 func (r *Resource) UnstructuredWithoutOverrides() *unstructured.Unstructured {
-	return r.parsed.DeepCopy()
+	copy := r.parsed.DeepCopy()
+	copy.SetAnnotations(pruneMetadata(copy.GetAnnotations()))
+	copy.SetLabels(pruneMetadata(copy.GetLabels()))
+	return copy
 }
 
 // Less returns true when r < than.
 // Used to establish determinstic ordering for conflicting resources.
 func (r *Resource) Less(than *Resource) bool {
-	return bytes.Compare(r.ManifestHash, than.ManifestHash) < 0
+	return bytes.Compare(r.manifestHash, than.manifestHash) < 0
 }
 
 // Snapshot evaluates the resource against its current/actual state and returns the resulting "snapshot".
@@ -90,23 +90,54 @@ func (r *Resource) Less(than *Resource) bool {
 func (r *Resource) Snapshot(ctx context.Context, actual *unstructured.Unstructured) (*Snapshot, error) {
 	copy := r.parsed.DeepCopy()
 
-	for i, op := range r.Overrides {
+	for i, op := range r.overrides {
 		err := op.Apply(ctx, actual, copy)
 		if err != nil {
 			return nil, fmt.Errorf("applying override %d: %w", i+1, err)
 		}
 	}
 
-	return &Snapshot{
+	snap := &Snapshot{
 		Resource: r,
 		parsed:   copy,
-	}, nil
+	}
+
+	anno := copy.GetAnnotations()
+	if anno == nil {
+		anno = map[string]string{}
+	}
+
+	const disableUpdatesKey = "eno.azure.io/disable-updates"
+	snap.DisableUpdates = anno[disableUpdatesKey] == "true"
+
+	const replaceKey = "eno.azure.io/replace"
+	snap.Replace = anno[replaceKey] == "true"
+
+	const reconcileIntervalKey = "eno.azure.io/reconcile-interval"
+	if str, ok := anno[reconcileIntervalKey]; ok {
+		reconcileInterval, err := time.ParseDuration(str)
+		if anno[reconcileIntervalKey] != "" && err != nil {
+			logr.FromContextOrDiscard(ctx).V(0).Info("invalid reconcile interval - ignoring")
+		}
+		snap.ReconcileInterval = &metav1.Duration{Duration: reconcileInterval}
+	}
+
+	// Remove any eno.azure.io annotations and labels
+	copy.SetAnnotations(pruneMetadata(copy.GetAnnotations()))
+	copy.SetLabels(pruneMetadata(copy.GetLabels()))
+
+	return snap, nil
 }
 
 // Snapshot is a representation of a resource in the context of its current state.
 // Practically speaking this means it's a Resource that has had any overrides applied.
 type Snapshot struct {
 	*Resource
+
+	ReconcileInterval *metav1.Duration
+	DisableUpdates    bool
+	Replace           bool
+
 	parsed *unstructured.Unstructured
 }
 
@@ -116,7 +147,7 @@ func (r *Snapshot) Unstructured() *unstructured.Unstructured {
 }
 
 func (r *Snapshot) Deleted(comp *apiv1.Composition) bool {
-	return (comp.DeletionTimestamp != nil && !comp.ShouldOrphanResources()) || r.ManifestDeleted || (r.Patch != nil && r.patchSetsDeletionTimestamp())
+	return (comp.DeletionTimestamp != nil && !comp.ShouldOrphanResources()) || r.manifestDeleted || (r.Patch != nil && r.patchSetsDeletionTimestamp())
 }
 
 func (r *Snapshot) NeedsToBePatched(current *unstructured.Unstructured) bool {
@@ -169,7 +200,7 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 	logger := logr.FromContextOrDiscard(ctx)
 	resource := slice.Spec.Resources[index]
 	res := &Resource{
-		ManifestDeleted: resource.Deleted,
+		manifestDeleted: resource.Deleted,
 		ManifestRef: ManifestRef{
 			Slice: types.NamespacedName{
 				Namespace: slice.Namespace,
@@ -181,7 +212,7 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 
 	hash := fnv.New64()
 	hash.Write([]byte(resource.Manifest))
-	res.ManifestHash = hash.Sum(nil)
+	res.manifestHash = hash.Sum(nil)
 
 	parsed := &unstructured.Unstructured{}
 	res.parsed = parsed
@@ -214,7 +245,7 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 		obj := struct {
 			Patch patchMeta `json:"patch"`
 		}{}
-		err = json.Unmarshal([]byte(resource.Manifest), &obj)
+		err := json.Unmarshal([]byte(resource.Manifest), &obj)
 		if err != nil {
 			return nil, fmt.Errorf("parsing patch json: %w", err)
 		}
@@ -226,6 +257,7 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 		res.GVK.Version = gv.Version
 		res.GVK.Kind = obj.Patch.Kind
 		res.Patch = obj.Patch.Ops
+		// TODO: Support overrides for patch operations
 	}
 
 	if res.GVK.Group == "apiextensions.k8s.io" && res.GVK.Kind == "CustomResourceDefinition" {
@@ -240,24 +272,9 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 		anno = map[string]string{}
 	}
 
-	const reconcileIntervalKey = "eno.azure.io/reconcile-interval"
-	if str, ok := anno[reconcileIntervalKey]; ok {
-		reconcileInterval, err := time.ParseDuration(str)
-		if anno[reconcileIntervalKey] != "" && err != nil {
-			logger.V(0).Info("invalid reconcile interval - ignoring")
-		}
-		res.ReconcileInterval = &metav1.Duration{Duration: reconcileInterval}
-	}
-
-	const disableUpdatesKey = "eno.azure.io/disable-updates"
-	res.DisableUpdates = anno[disableUpdatesKey] == "true"
-
-	const replaceKey = "eno.azure.io/replace"
-	res.Replace = anno[replaceKey] == "true"
-
 	const overridesKey = "eno.azure.io/overrides"
 	if js, ok := anno[overridesKey]; ok {
-		err = json.Unmarshal([]byte(js), &res.Overrides)
+		err = json.Unmarshal([]byte(js), &res.overrides)
 		if err != nil {
 			logger.Error(err, "invalid override json")
 		}
@@ -269,7 +286,7 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 		if err != nil {
 			logger.V(0).Info("invalid readiness group - ignoring")
 		} else {
-			res.ReadinessGroup = rg
+			res.readinessGroup = rg
 		}
 	}
 
@@ -292,9 +309,6 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 		res.ReadinessChecks = append(res.ReadinessChecks, check)
 	}
 	sort.Slice(res.ReadinessChecks, func(i, j int) bool { return res.ReadinessChecks[i].Name < res.ReadinessChecks[j].Name })
-
-	parsed.SetAnnotations(pruneMetadata(parsed.GetAnnotations()))
-	parsed.SetLabels(pruneMetadata(parsed.GetLabels()))
 
 	return res, nil
 }
