@@ -39,7 +39,13 @@ func init() {
 func missedReconciliation(comp *apiv1.Composition, threshold time.Duration) bool {
 	syn := comp.Status.CurrentSynthesis
 	if comp.DeletionTimestamp != nil {
-		return time.Since(comp.DeletionTimestamp.Time) > threshold
+		return time.Since(comp.DeletionTimestamp.Time) > threshold // stuck deleting
 	}
-	return syn != nil && syn.Reconciled == nil && syn.Initialized != nil && time.Since(syn.Initialized.Time) > threshold
+	if syn != nil && syn.Reconciled != nil {
+		return false // reconciled!
+	}
+	if (syn == nil || syn.Initialized == nil) && comp.Status.PreviousSynthesis == nil && time.Since(comp.CreationTimestamp.Time) > threshold {
+		return true // stuck waiting for synthesis dispatch
+	}
+	return syn != nil && syn.Initialized != nil && time.Since(syn.Initialized.Time) > threshold // stuck waiting for reconciliation
 }

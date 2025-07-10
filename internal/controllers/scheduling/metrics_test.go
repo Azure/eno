@@ -18,6 +18,9 @@ func TestMissedReconciliation(t *testing.T) {
 		{
 			name: "No Current Synthesis",
 			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					CreationTimestamp: metav1.Time{Time: time.Now().Add(-30 * time.Minute)},
+				},
 				Status: apiv1.CompositionStatus{
 					CurrentSynthesis: nil,
 				},
@@ -38,6 +41,9 @@ func TestMissedReconciliation(t *testing.T) {
 		{
 			name: "Synthesis Not Initialized",
 			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					CreationTimestamp: metav1.Time{Time: time.Now().Add(-30 * time.Minute)},
+				},
 				Status: apiv1.CompositionStatus{
 					CurrentSynthesis: &apiv1.Synthesis{
 						Initialized: nil,
@@ -102,6 +108,70 @@ func TestMissedReconciliation(t *testing.T) {
 				},
 			},
 			expected: true,
+		},
+		{
+			name: "No Synthesis, Old Creation Timestamp",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					CreationTimestamp: metav1.Time{Time: time.Now().Add(-2 * time.Hour)},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: nil,
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "No Synthesis, Old Creation Timestamp, Previous Synthesis",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					CreationTimestamp: metav1.Time{Time: time.Now().Add(-2 * time.Hour)},
+				},
+				Status: apiv1.CompositionStatus{
+					PreviousSynthesis: &apiv1.Synthesis{},
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "No Synthesis, Recent Creation Timestamp",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					CreationTimestamp: metav1.Time{Time: time.Now().Add(-30 * time.Minute)},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: nil,
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "Synthesis Not Initialized, Old Creation Timestamp",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					CreationTimestamp: metav1.Time{Time: time.Now().Add(-2 * time.Hour)},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						Initialized: nil,
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "Synthesis Not Initialized, Recent Creation Timestamp",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					CreationTimestamp: metav1.Time{Time: time.Now().Add(-30 * time.Minute)},
+				},
+				Status: apiv1.CompositionStatus{
+					CurrentSynthesis: &apiv1.Synthesis{
+						Initialized: nil,
+					},
+				},
+			},
+			expected: false,
 		},
 	}
 
