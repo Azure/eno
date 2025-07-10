@@ -357,7 +357,7 @@ func TestNewResource(t *testing.T) {
 			}, 0)
 			require.NoError(t, err)
 
-			rs, err := r.Snapshot(t.Context(), nil)
+			rs, err := r.Snapshot(t.Context(), &apiv1.Composition{}, nil)
 			require.NoError(t, err)
 			tc.Assert(t, rs)
 

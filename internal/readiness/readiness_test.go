@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -123,13 +124,13 @@ func TestEvalCheck(t *testing.T) {
 			r, err := ParseCheck(tc.Expr)
 			require.NoError(t, err)
 
-			time, ok := r.Eval(context.Background(), tc.Resource)
+			time, ok := r.Eval(context.Background(), &apiv1.Composition{}, tc.Resource)
 			assert.Equal(t, tc.Expect, time != nil)
 			assert.Equal(t, time != nil, ok)
 			assert.Equal(t, tc.ExpectPrecise, time != nil && time.PreciseTime)
 
 			// Make sure every program can be evaluated multiple times
-			time, ok = r.Eval(context.Background(), tc.Resource)
+			time, ok = r.Eval(context.Background(), &apiv1.Composition{}, tc.Resource)
 			assert.Equal(t, tc.Expect, time != nil)
 			assert.Equal(t, time != nil, ok)
 			assert.Equal(t, tc.ExpectPrecise, time != nil && time.PreciseTime)
@@ -257,7 +258,7 @@ var evalChecksTests = []struct {
 func TestEvalChecks(t *testing.T) {
 	for _, tc := range evalChecksTests {
 		t.Run(tc.Name, func(t *testing.T) {
-			actual, ok := tc.Checks.EvalOptionally(context.Background(), tc.Resource)
+			actual, ok := tc.Checks.EvalOptionally(context.Background(), &apiv1.Composition{}, tc.Resource)
 			assert.Equal(t, ok, actual != nil)
 
 			if tc.ExpectedTime == "" {

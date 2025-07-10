@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	apiv1 "github.com/Azure/eno/api/v1"
 	enocel "github.com/Azure/eno/internal/cel"
 	"github.com/google/cel-go/cel"
 	"github.com/stretchr/testify/assert"
@@ -307,7 +308,7 @@ func TestOpApply(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.op.Apply(ctx, tc.current, tc.mutated)
+			err := tc.op.Apply(ctx, &apiv1.Composition{}, tc.current,  tc.mutated)
 			if tc.wantErr {
 				require.Error(t, err)
 			} else {
