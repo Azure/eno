@@ -2,7 +2,6 @@ package reconciliation
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -185,7 +184,11 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		return true, nil
 	}
 
-	if res.Patch != nil && current == nil {
+	patchJson, isPatch, err := res.Patch()
+	if err != nil {
+		return false, fmt.Errorf("building patch: %w", err)
+	}
+	if isPatch && current == nil {
 		logger.V(1).Info("resource doesn't exist - skipping patch")
 		return false, nil
 	}
@@ -206,22 +209,18 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	}
 
 	// Apply Eno patches
-	if res.Patch != nil {
-		if !res.NeedsToBePatched(current) {
-			return false, nil
-		}
-		patch, err := json.Marshal(&res.Patch)
-		if err != nil {
-			return false, fmt.Errorf("encoding json patch: %w", err)
-		}
-
+	if isPatch {
 		reconciliationActions.WithLabelValues("patch").Inc()
-		err = c.upstreamClient.Patch(ctx, current, client.RawPatch(types.JSONPatchType, patch))
+		updated := current.DeepCopy()
+		err := c.upstreamClient.Patch(ctx, updated, client.RawPatch(types.JSONPatchType, patchJson))
 		if err != nil {
 			return false, fmt.Errorf("applying patch: %w", err)
 		}
-
-		logger.V(0).Info("patched resource", "resourceVersion", current.GetResourceVersion())
+		if updated.GetResourceVersion() == current.GetResourceVersion() {
+			logger.V(0).Info("resource didn't change after patch")
+			return false, nil
+		}
+		logger.V(0).Info("patched resource", "resourceVersion", updated.GetResourceVersion())
 		return true, nil
 	}
 

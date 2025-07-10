@@ -154,7 +154,6 @@ var newResourceTests = []struct {
 		}`,
 		Assert: func(t *testing.T, r *Snapshot) {
 			assert.Equal(t, schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, r.GVK)
-			assert.Len(t, r.Patch, 1)
 			assert.False(t, r.patchSetsDeletionTimestamp())
 		},
 	},
@@ -177,8 +176,29 @@ var newResourceTests = []struct {
 		}`,
 		Assert: func(t *testing.T, r *Snapshot) {
 			assert.Equal(t, schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, r.GVK)
-			assert.Len(t, r.Patch, 1)
 			assert.True(t, r.patchSetsDeletionTimestamp())
+		},
+	},
+	{
+		Name: "deletionPatchEmptyStr",
+		Manifest: `{
+			"apiVersion": "eno.azure.io/v1",
+			"kind": "Patch",
+			"metadata": {
+				"name": "foo",
+				"namespace": "bar"
+			},
+			"patch": {
+				"apiVersion": "v1",
+				"kind": "ConfigMap",
+				"ops": [
+					{"op": "add", "path": "/metadata/deletionTimestamp", "value": ""}
+				]
+			}
+		}`,
+		Assert: func(t *testing.T, r *Snapshot) {
+			assert.Equal(t, schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, r.GVK)
+			assert.False(t, r.patchSetsDeletionTimestamp())
 		},
 	},
 	{
@@ -336,7 +356,6 @@ func TestNewResource(t *testing.T) {
 				},
 			}, 0)
 			require.NoError(t, err)
-
 
 			rs, err := r.Snapshot(t.Context(), nil)
 			require.NoError(t, err)

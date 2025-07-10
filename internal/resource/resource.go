@@ -17,7 +17,6 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/readiness"
 	"github.com/Azure/eno/internal/resource/mutation"
-	jsonpatch "github.com/evanphx/json-patch/v5"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -54,13 +53,13 @@ type Resource struct {
 	ManifestRef     ManifestRef
 	GVK             schema.GroupVersionKind
 	ReadinessChecks readiness.Checks
-	Patch           jsonpatch.Patch
 	Labels          map[string]string
 
 	// DefinedGroupKind is set on CRDs to represent the resource type they define.
 	DefinedGroupKind *schema.GroupKind
 
 	parsed           *unstructured.Unstructured
+	isPatch          bool
 	manifestHash     []byte
 	manifestDeleted  bool
 	readinessGroup   int
@@ -147,53 +146,34 @@ func (r *Snapshot) Unstructured() *unstructured.Unstructured {
 }
 
 func (r *Snapshot) Deleted(comp *apiv1.Composition) bool {
-	return (comp.DeletionTimestamp != nil && !comp.ShouldOrphanResources()) || r.manifestDeleted || (r.Patch != nil && r.patchSetsDeletionTimestamp())
+	return (comp.DeletionTimestamp != nil && !comp.ShouldOrphanResources()) || r.manifestDeleted || (r.isPatch && r.patchSetsDeletionTimestamp())
 }
 
-func (r *Snapshot) NeedsToBePatched(current *unstructured.Unstructured) bool {
-	if r.Patch == nil || current == nil {
-		return false
+func (r *Snapshot) Patch() ([]byte, bool, error) {
+	if !r.isPatch {
+		return nil, false, nil
 	}
 
-	curjson, err := current.MarshalJSON()
+	ops, _, _ := unstructured.NestedSlice(r.parsed.Object, "patch", "ops")
+	js, err := json.Marshal(&ops)
 	if err != nil {
-		return false
+		return nil, false, err
 	}
-
-	patchedjson, err := r.Patch.Apply(curjson)
-	if err != nil {
-		return false
-	}
-
-	patched := &unstructured.Unstructured{}
-	err = patched.UnmarshalJSON(patchedjson)
-	if err != nil {
-		return false
-	}
-
-	return !equality.Semantic.DeepEqual(current, patched)
+	return js, true, nil
 }
 
 func (r *Snapshot) patchSetsDeletionTimestamp() bool {
-	if r.Patch == nil {
-		return false
+	ops, _, _ := unstructured.NestedSlice(r.parsed.Object, "patch", "ops")
+	for _, op := range ops {
+		op, _ := op.(map[string]any)
+		if str, ok := op["value"].(string); !ok || str == "" {
+			continue
+		}
+		if op["path"] == "/metadata/deletionTimestamp" {
+			return true
+		}
 	}
-
-	// Apply the patch to a minimally-viable unstructured resource.
-	// This is needed to satisfy the validation logic of the unstructured json parser, which requires a kind/apiVersion.
-	patchedjson, err := r.Patch.Apply([]byte(`{"apiVersion": "eno.azure.io/v1", "kind":"PatchPlaceholder", "metadata":{}}`))
-	if err != nil {
-		return false
-	}
-
-	patched := map[string]any{}
-	err = json.Unmarshal(patchedjson, &patched)
-	if err != nil {
-		return false
-	}
-
-	dt, _, _ := unstructured.NestedString(patched, "metadata", "deletionTimestamp")
-	return dt != ""
+	return false
 }
 
 func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*Resource, error) {
@@ -242,22 +222,17 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 	}
 
 	if res.GVK == patchGVK {
-		obj := struct {
-			Patch patchMeta `json:"patch"`
-		}{}
-		err := json.Unmarshal([]byte(resource.Manifest), &obj)
-		if err != nil {
-			return nil, fmt.Errorf("parsing patch json: %w", err)
-		}
-		gv, err := schema.ParseGroupVersion(obj.Patch.APIVersion)
+		res.isPatch = true
+
+		apiVersion, _, _ := unstructured.NestedString(parsed.Object, "patch", "apiVersion")
+		gv, err := schema.ParseGroupVersion(apiVersion)
 		if err != nil {
 			return nil, fmt.Errorf("parsing patch apiVersion: %w", err)
 		}
 		res.GVK.Group = gv.Group
 		res.GVK.Version = gv.Version
-		res.GVK.Kind = obj.Patch.Kind
-		res.Patch = obj.Patch.Ops
-		// TODO: Support overrides for patch operations
+
+		res.GVK.Kind, _, _ = unstructured.NestedString(parsed.Object, "patch", "kind")
 	}
 
 	if res.GVK.Group == "apiextensions.k8s.io" && res.GVK.Kind == "CustomResourceDefinition" {
@@ -321,12 +296,6 @@ func pruneMetadata(m map[string]string) map[string]string {
 		m = nil
 	}
 	return m
-}
-
-type patchMeta struct {
-	APIVersion string          `json:"apiVersion"`
-	Kind       string          `json:"kind"`
-	Ops        jsonpatch.Patch `json:"ops"`
 }
 
 func NewInputRevisions(obj client.Object, refKey string) *apiv1.InputRevisions {

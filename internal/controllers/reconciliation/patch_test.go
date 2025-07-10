@@ -130,6 +130,64 @@ func TestPatchDeletion(t *testing.T) {
 	require.True(t, errors.IsNotFound(err))
 }
 
+// TestPatchOverrides proves that patches support the overrides annotation.
+func TestPatchOverrides(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		obj := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "eno.azure.io/v1",
+				"kind":       "Patch",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]string{
+						"eno.azure.io/overrides": `[{ "path": "self.patch.ops[0].value", "value": "baz" }]`,
+					},
+				},
+				"patch": map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"ops": []map[string]any{
+						{"op": "add", "path": "/data/foo", "value": "bar"},
+					},
+				},
+			},
+		}
+		return &krmv1.ResourceList{Items: []*unstructured.Unstructured{obj}}, nil
+	})
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	cm.Data = map[string]string{"foo": "initial"}
+	require.NoError(t, downstream.Create(ctx, cm))
+
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
+	})
+
+	testutil.Eventually(t, func() bool {
+		downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data != nil && cm.Data["foo"] == "baz"
+	})
+}
+
 // TestPatchDeletionBeforeCreation proves that a patch resource can delete the resource it references before the resource is created.
 // Basically, this is the same behavior as Helm hook event with delete policy "before-hook-creation".
 func TestPatchDeletionBeforeCreation(t *testing.T) {
