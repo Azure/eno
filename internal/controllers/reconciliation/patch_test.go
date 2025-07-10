@@ -9,6 +9,7 @@ import (
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
 	"github.com/Azure/eno/internal/testutil"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -128,6 +129,61 @@ func TestPatchDeletion(t *testing.T) {
 
 	err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm)
 	require.True(t, errors.IsNotFound(err))
+}
+
+// TestPatchDeleteOnCompositionDeletion proves that patches can delete resources conditionally, only when the composition is deleted.
+func TestPatchDeleteOnCompositionDeletion(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		obj := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "eno.azure.io/v1",
+				"kind":       "Patch",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]string{
+						"eno.azure.io/overrides": `[{ "path": "self.patch.ops", "condition": "composition.metadata.deletionTimestamp != null", "value": [{ "op": "add", "path": "/metadata/deletionTimestamp", "value": "anything" }] }]`,
+					},
+				},
+				"patch": map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"ops":        []map[string]any{},
+				},
+			},
+		}
+		return &krmv1.ResourceList{Items: []*unstructured.Unstructured{obj}}, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	require.NoError(t, downstream.Create(ctx, cm))
+
+	_, comp := writeGenericComposition(t, upstream)
+
+	// Initial reconciliation
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
+	})
+
+	// Configmap should still exist
+	testutil.Eventually(t, func() bool { return downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm) == nil })
+
+	// Deleting the composition should also delete the configmap
+	assert.NoError(t, upstream.Delete(ctx, comp))
+	testutil.Eventually(t, func() bool { return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)) })
+	testutil.Eventually(t, func() bool { return errors.IsNotFound(downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm)) })
 }
 
 // TestPatchOverrides proves that patches support the overrides annotation.

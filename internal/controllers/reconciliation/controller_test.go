@@ -98,7 +98,7 @@ func TestBuildNonStrategicPatch_NilPrevious(t *testing.T) {
 	// Patch
 	expected := actual.DeepCopy()
 	expected.Data = map[string]string{"added": "value"}
-	patch, err := buildNonStrategicPatch(ctx, nil, nil)
+	patch, err := buildNonStrategicPatch(ctx, &apiv1.Composition{}, nil, nil)
 	require.NoError(t, err)
 	require.NoError(t, cli.Patch(ctx, expected, patch))
 

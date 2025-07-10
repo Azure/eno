@@ -133,7 +133,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	var ready *metav1.Time
 	status := resource.State()
 	if status == nil || status.Ready == nil {
-		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, current)
+		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, &apiv1.Composition{}, current)
 		if ok {
 			ready = &readiness.ReadyTime
 		}
@@ -141,7 +141,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		ready = status.Ready
 	}
 
-	snap, err := resource.Snapshot(ctx, current)
+	snap, err := resource.Snapshot(ctx, comp, current)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to create resource snapshot: %w", err)
 	}
@@ -226,7 +226,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 
 	// Dry-run the update to see if it's needed
 	if !c.disableSSA {
-		dryRun, err := c.update(ctx, prev, res, current, true)
+		dryRun, err := c.update(ctx, comp, prev, res, current, true)
 		if err != nil {
 			return false, fmt.Errorf("dry-run applying update: %w", err)
 		}
@@ -258,7 +258,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 
 	// Do the actual non-dryrun update
 	reconciliationActions.WithLabelValues("apply").Inc()
-	updated, err := c.update(ctx, prev, res, current, false)
+	updated, err := c.update(ctx, comp, prev, res, current, false)
 	if err != nil {
 		return false, fmt.Errorf("applying update: %w", err)
 	}
@@ -273,7 +273,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	return true, nil
 }
 
-func (c *Controller) update(ctx context.Context, previous *resource.Resource, resource *resource.Snapshot, current *unstructured.Unstructured, dryrun bool) (updated *unstructured.Unstructured, err error) {
+func (c *Controller) update(ctx context.Context, comp *apiv1.Composition, previous *resource.Resource, resource *resource.Snapshot, current *unstructured.Unstructured, dryrun bool) (updated *unstructured.Unstructured, err error) {
 	updated = resource.Unstructured()
 
 	if current != nil {
@@ -296,7 +296,7 @@ func (c *Controller) update(ctx context.Context, previous *resource.Resource, re
 
 	var patch client.Patch
 	if c.disableSSA {
-		patch, err = buildNonStrategicPatch(ctx, previous, current)
+		patch, err = buildNonStrategicPatch(ctx, comp, previous, current)
 		if err != nil {
 			return nil, fmt.Errorf("building patch: %w", err)
 		}
@@ -309,12 +309,12 @@ func (c *Controller) update(ctx context.Context, previous *resource.Resource, re
 	return
 }
 
-func buildNonStrategicPatch(ctx context.Context, previous *resource.Resource, current *unstructured.Unstructured) (client.Patch, error) {
+func buildNonStrategicPatch(ctx context.Context, comp *apiv1.Composition, previous *resource.Resource, current *unstructured.Unstructured) (client.Patch, error) {
 	var from *unstructured.Unstructured
 	if previous == nil {
 		from = &unstructured.Unstructured{Object: map[string]any{}}
 	} else {
-		snap, err := previous.Snapshot(ctx, current)
+		snap, err := previous.Snapshot(ctx, comp, current)
 		if err != nil {
 			return nil, err
 		}

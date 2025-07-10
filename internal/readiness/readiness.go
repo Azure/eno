@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	apiv1 "github.com/Azure/eno/api/v1"
 	celtypes "github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,11 +33,11 @@ func ParseCheck(expr string) (*Check, error) {
 }
 
 // Eval executes the compiled check against a given resource.
-func (r *Check) Eval(ctx context.Context, resource *unstructured.Unstructured) (*Status, bool) {
+func (r *Check) Eval(ctx context.Context, comp *apiv1.Composition, resource *unstructured.Unstructured) (*Status, bool) {
 	if resource == nil {
 		return nil, false
 	}
-	val, err := enocel.Eval(ctx, r.program, resource)
+	val, err := enocel.Eval(ctx, r.program, comp, resource)
 	if err != nil {
 		return nil, false
 	}
@@ -73,10 +74,10 @@ type Checks []*Check
 // - Nil is returned when less than all of the checks are ready
 // - If some precise and some inprecise times are given, the precise times are favored
 // - Within precise or non-precise times, the max of that group is always used
-func (r Checks) Eval(ctx context.Context, resource *unstructured.Unstructured) (*Status, bool) {
+func (r Checks) Eval(ctx context.Context, comp *apiv1.Composition, resource *unstructured.Unstructured) (*Status, bool) {
 	var all []*Status
 	for _, check := range r {
-		if ready, ok := check.Eval(ctx, resource); ok {
+		if ready, ok := check.Eval(ctx, comp, resource); ok {
 			all = append(all, ready)
 		}
 	}
@@ -100,11 +101,11 @@ func (r Checks) Eval(ctx context.Context, resource *unstructured.Unstructured) (
 }
 
 // EvalOptionally is identical to Eval, except it returns the current time in the status if no checks are set.
-func (r Checks) EvalOptionally(ctx context.Context, resource *unstructured.Unstructured) (*Status, bool) {
+func (r Checks) EvalOptionally(ctx context.Context, comp *apiv1.Composition, resource *unstructured.Unstructured) (*Status, bool) {
 	if len(r) == 0 {
 		return &Status{ReadyTime: metav1.Now()}, true
 	}
-	return r.Eval(ctx, resource)
+	return r.Eval(ctx, comp, resource)
 }
 
 type Status struct {
