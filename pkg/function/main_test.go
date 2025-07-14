@@ -153,7 +153,7 @@ func ExampleMain_withMungers() {
 
 	//stdout of main will be compared with output comment below becausse this is an example
 	Main(fn, WithManagedByEno(), WithReconcilationInterval(time.Minute))
-	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"annotations":{"eno.azure.io/reconcile-interval":"1m0s"},"creationTimestamp":null,"labels":{"app.kubernetes.io/managed-by":"eno"},"name":"test-pod"},"spec":{"containers":null},"status":{}}]}
+	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"annotations":{"eno.azure.io/reconcile-interval":"1m0s"},"creationTimestamp":null,"labels":{"app.kubernetes.io/managed-by":"Eno"},"name":"test-pod"},"spec":{"containers":null},"status":{}}]}
 }
 
 type testSimpleInputs struct {

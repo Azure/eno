@@ -53,7 +53,7 @@ func WithManagedByEno() Option {
 		if labels == nil {
 			labels = make(map[string]string)
 		}
-		labels["app.kubernetes.io/managed-by"] = "eno"
+		labels["app.kubernetes.io/managed-by"] = "Eno"
 		obj.SetLabels(labels)
 	})
 }
