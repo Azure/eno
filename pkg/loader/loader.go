@@ -23,22 +23,50 @@ func LoadObjects(folder string, scheme *runtime.Scheme) ([]client.Object, error)
 		return nil, fmt.Errorf("scheme is required")
 	}
 
-	// Load files from folder
-	folderBytes, err := loadFilesFromFolder(folder)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load files from folder: %w", err)
+	// Check if the folder exists
+	if _, err := os.Stat(folder); os.IsNotExist(err) {
+		return nil, fmt.Errorf("folder does not exist: %s", folder)
 	}
 
 	var objects []client.Object
 
-	// Parse each file separately
-	for _, fileBytes := range folderBytes {
-		fileObjects, err := marshalBytesToObjects(fileBytes, scheme)
+	// Walk through the directory tree and parse files as we encounter them
+	err := filepath.Walk(folder, func(filePath string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal bytes to objects: %w", err)
+			return fmt.Errorf("failed to access path %s: %w", filePath, err)
 		}
 
+		// Skip directories
+		if info.IsDir() {
+			return nil
+		}
+
+		// Only process YAML/JSON files
+		if !isYAMLOrJSONFile(filePath) {
+			return nil
+		}
+
+		// Read and parse the file immediately
+		fileBytes, err := os.ReadFile(filePath)
+		if err != nil {
+			return fmt.Errorf("failed to read file %s: %w", filePath, err)
+		}
+
+		// Parse the file contents immediately
+		fileObjects, err := marshalBytesToObjects(fileBytes, scheme)
+		if err != nil {
+			return fmt.Errorf("failed to marshal bytes to objects from file %s: %w", filePath, err)
+		}
+
+		// Append to our results
 		objects = append(objects, fileObjects...)
+
+		// fileBytes can now be garbage collected
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
 	}
 
 	return objects, nil
@@ -115,48 +143,6 @@ func marshalBytesToObjects(b []byte, scheme *runtime.Scheme) ([]client.Object, e
 	}
 
 	return ret, nil
-}
-
-// loadFilesFromFolder reads all files from the specified folder and returns them as a slice of byte slices.
-func loadFilesFromFolder(folderPath string) ([][]byte, error) {
-	var filesBytes [][]byte
-
-	// Check if the folder exists
-	if _, err := os.Stat(folderPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("folder does not exist: %s", folderPath)
-	}
-
-	// Walk through the directory tree
-	err := filepath.Walk(folderPath, func(filePath string, info os.FileInfo, err error) error {
-		if err != nil {
-			return fmt.Errorf("failed to access path %s: %w", filePath, err)
-		}
-
-		// Skip directories
-		if info.IsDir() {
-			return nil
-		}
-
-		// Only process YAML/JSON files
-		if !isYAMLOrJSONFile(filePath) {
-			return nil
-		}
-
-		// Read the file
-		fileBytes, err := os.ReadFile(filePath)
-		if err != nil {
-			return fmt.Errorf("failed to read file %s: %w", filePath, err)
-		}
-
-		filesBytes = append(filesBytes, fileBytes)
-		return nil
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	return filesBytes, nil
 }
 
 // isYAMLOrJSONFile checks if the file has a YAML or JSON extension
