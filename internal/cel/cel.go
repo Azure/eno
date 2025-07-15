@@ -13,13 +13,17 @@ import (
 
 var Env *cel.Env
 
+type FieldMetadata interface {
+	ManagedByEno(context.Context, *unstructured.Unstructured) bool
+}
+
 func init() {
 	initDefaultEnv()
 }
 
 func initDefaultEnv() {
 	var err error
-	Env, err = cel.NewEnv(cel.Variable("self", cel.DynType), cel.Variable("composition", cel.DynType))
+	Env, err = cel.NewEnv(cel.Variable("self", cel.DynType), cel.Variable("composition", cel.DynType), cel.Variable("pathManagedByEno", cel.BoolType))
 	if err != nil {
 		panic(fmt.Sprintf("failed to create default CEL environment: %v", err))
 	}
@@ -33,11 +37,15 @@ func Parse(expr string) (cel.Program, error) {
 	return Env.Program(ast, cel.InterruptCheckFrequency(10))
 }
 
-func Eval(ctx context.Context, prgm cel.Program, comp *apiv1.Composition, self *unstructured.Unstructured) (ref.Val, error) {
-	val, _, err := prgm.Eval(map[string]any{
+func Eval(ctx context.Context, prgm cel.Program, comp *apiv1.Composition, self *unstructured.Unstructured, fm FieldMetadata) (ref.Val, error) {
+	args := map[string]any{
 		"self":        self.Object,
 		"composition": func() any { return newCompositionMap(comp) }, // cel will only execute this is the composition is referenced in the expression
-	})
+	}
+	if fm != nil {
+		args["pathManagedByEno"] = func() any { return fm.ManagedByEno(ctx, self) }
+	}
+	val, _, err := prgm.Eval(args)
 	return val, err
 }
 

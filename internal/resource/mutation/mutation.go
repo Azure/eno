@@ -57,7 +57,7 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 	}
 
 	if o.Condition != nil {
-		val, err := enocel.Eval(ctx, o.Condition, comp, current)
+		val, err := enocel.Eval(ctx, o.Condition, comp, current, o.Path)
 		if err != nil {
 			return nil // fail closed (too noisy to log)
 		}
@@ -97,7 +97,11 @@ func apply(path *PathExpr, startIndex int, obj any, value any) error {
 				continue
 			}
 			if startIndex+i == len(path.ast.Sections)-1 {
-				m[*section.Field] = value
+				if value == nil {
+					delete(m, *section.Field)
+				} else {
+					m[*section.Field] = value
+				}
 				return nil
 			}
 			state = m[*section.Field]
@@ -116,7 +120,11 @@ func apply(path *PathExpr, startIndex int, obj any, value any) error {
 			}
 			keyStr := (*key)[1 : len(*key)-1] // remove quotes
 			if startIndex+i == len(path.ast.Sections)-1 {
-				m[keyStr] = value
+				if value == nil {
+					delete(m, keyStr)
+				} else {
+					m[keyStr] = value
+				}
 				return nil
 			}
 			state = m[keyStr]

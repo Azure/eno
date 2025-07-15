@@ -104,7 +104,18 @@ It's also possible to access composition metadata in condition expressions.
 annotations:
   eno.azure.io/overrides: |
     [
-      { "path": "spec.cleaningUp", "value": true, "condition": "composition.metadata.deletionTimestamp != null" }
+      { "path": "self.spec.cleaningUp", "value": true, "condition": "composition.metadata.deletionTimestamp != null" }
+    ]
+```
+
+Conditions can match on the ownership status of the field matched by `path`.
+This is useful for dropping particular fields when another field manager has set a value.
+
+```yaml
+annotations:
+  eno.azure.io/overrides: |
+    [
+      { "path": "self.data.foo", "value": null, "condition": "has(self.data.foo) && !pathManagedByEno" }
     ]
 ```
 

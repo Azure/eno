@@ -37,7 +37,7 @@ func (r *Check) Eval(ctx context.Context, comp *apiv1.Composition, resource *uns
 	if resource == nil {
 		return nil, false
 	}
-	val, err := enocel.Eval(ctx, r.program, comp, resource)
+	val, err := enocel.Eval(ctx, r.program, comp, resource, nil)
 	if err != nil {
 		return nil, false
 	}
