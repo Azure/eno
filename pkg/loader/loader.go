@@ -1,3 +1,78 @@
+// Package loader provides utilities for loading and parsing Kubernetes objects from YAML/JSON files.
+//
+// The loader package supports loading any Kubernetes object type from manifest files,
+// provided that the required types are registered in the runtime scheme. The package
+// recursively walks through directories to find and process all supported files.
+//
+// # Basic Usage
+//
+//	import (
+//	    "github.com/Azure/eno/pkg/loader"
+//	    apiv1 "k8s.io/api/core/v1"
+//	    extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+//	    "k8s.io/apimachinery/pkg/runtime"
+//	)
+//
+//	// Create a scheme with the types you want to load
+//	scheme := runtime.NewScheme()
+//	apiv1.AddToScheme(scheme)
+//	extv1.AddToScheme(scheme)
+//
+//	// Load objects from a directory (recursively processes subdirectories)
+//	objects, err := loader.LoadObjects("/path/to/manifests", scheme)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//
+// # Controller-Runtime Integration
+//
+//	func loadManifests(mgr manager.Manager) error {
+//	    // Use the manager's scheme which already has your types registered
+//	    objects, err := loader.LoadObjects("/path/to/manifests", mgr.GetScheme())
+//	    if err != nil {
+//	        return err
+//	    }
+//	    // Process objects...
+//	    return nil
+//	}
+//
+// # Custom API Types
+//
+//	import (
+//	    "github.com/Azure/eno/pkg/loader"
+//	    "k8s.io/apimachinery/pkg/runtime"
+//
+//	    // Your custom API types
+//	    myapiv1 "github.com/example/myoperator/api/v1"
+//	)
+//
+//	// Create a scheme with your custom types
+//	scheme := runtime.NewScheme()
+//
+//	// Register your custom types
+//	myapiv1.AddToScheme(scheme)
+//
+//	// Load manifests that include your custom resources
+//	objects, err := loader.LoadObjects("/path/to/custom/manifests", scheme)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//
+// # File Format Support
+//
+// The package processes files with the following extensions:
+//   - .yaml
+//   - .yml
+//   - .json
+//
+// # Error Handling
+//
+// The package provides detailed error messages for common issues:
+//   - Missing scheme: "scheme is required"
+//   - Folder not found: "folder does not exist: /path"
+//   - Unregistered types: "failed to create object for GVK"
+//   - Invalid YAML/JSON: "failed to decode object"
+//   - Type safety: "object does not implement client.Object interface"
 package loader
 
 import (
@@ -16,7 +91,7 @@ import (
 
 const whitespaceBufferSize = 4096
 
-// LoadObjects reads Kubernetes YAML files from the specified folder and returns a slice of client.Object.
+// LoadObjects reads Kubernetes YAML/JSON files (.yaml, .yml, .json) from the specified folder and returns a slice of client.Object.
 // The scheme parameter is required and must have all necessary types registered for the objects you want to load.
 func LoadObjects(folder string, scheme *runtime.Scheme) ([]client.Object, error) {
 	if scheme == nil {
