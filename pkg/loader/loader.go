@@ -55,9 +55,9 @@ func marshalBytesToObjects(b []byte, scheme *runtime.Scheme) ([]client.Object, e
 	dec := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(b), whitespaceBufferSize)
 
 	for {
-		// Use a generic map to decode first
-		var rawObj map[string]interface{}
-		err := dec.Decode(&rawObj)
+		// Decode directly into runtime.Unknown which preserves the raw bytes
+		var obj runtime.Unknown
+		err := dec.Decode(&obj)
 
 		if err != nil {
 			if err == io.EOF {
@@ -66,29 +66,32 @@ func marshalBytesToObjects(b []byte, scheme *runtime.Scheme) ([]client.Object, e
 			return nil, fmt.Errorf("failed to decode object: %w", err)
 		}
 
-		// Check if the object is nil or empty (handles commented sections)
-		if rawObj == nil || len(rawObj) == 0 {
+		// Check if the object is empty (handles commented sections)
+		if len(obj.Raw) == 0 {
 			continue
 		}
 
-		// Extract GVK from the raw object
-		apiVersion, ok := rawObj["apiVersion"].(string)
-		if !ok || apiVersion == "" {
-			continue // Skip objects without apiVersion
-		}
+		// Get the GVK from the Unknown object
+		gvk := obj.GetObjectKind().GroupVersionKind()
+		if gvk.Empty() {
+			// Try to decode just the type metadata to get GVK
+			var typeMeta struct {
+				APIVersion string `json:"apiVersion" yaml:"apiVersion"`
+				Kind       string `json:"kind" yaml:"kind"`
+			}
+			if err := yaml.Unmarshal(obj.Raw, &typeMeta); err != nil {
+				continue // Skip objects we can't parse
+			}
+			if typeMeta.APIVersion == "" || typeMeta.Kind == "" {
+				continue // Skip objects without proper GVK
+			}
 
-		kind, ok := rawObj["kind"].(string)
-		if !ok || kind == "" {
-			continue // Skip objects without kind
+			gv, err := schema.ParseGroupVersion(typeMeta.APIVersion)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse apiVersion %s: %w", typeMeta.APIVersion, err)
+			}
+			gvk = gv.WithKind(typeMeta.Kind)
 		}
-
-		// Parse the GVK
-		gv, err := schema.ParseGroupVersion(apiVersion)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse apiVersion %s: %w", apiVersion, err)
-		}
-
-		gvk := gv.WithKind(kind)
 
 		// Create the proper object type using the scheme
 		typedObj, err := scheme.New(gvk)
@@ -96,15 +99,8 @@ func marshalBytesToObjects(b []byte, scheme *runtime.Scheme) ([]client.Object, e
 			return nil, fmt.Errorf("failed to create object for GVK %s: %w", gvk, err)
 		}
 
-		// Convert the raw object back to bytes for proper decoding
-		rawBytes, err := yaml.Marshal(rawObj)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal raw object: %w", err)
-		}
-
-		// Decode the bytes into the typed object
-		typedDec := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(rawBytes), whitespaceBufferSize)
-		err = typedDec.Decode(typedObj)
+		// Decode the raw bytes directly into the typed object
+		err = yaml.Unmarshal(obj.Raw, typedObj)
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode typed object: %w", err)
 		}
