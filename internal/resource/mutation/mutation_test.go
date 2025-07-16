@@ -31,6 +31,20 @@ func TestApply(t *testing.T) {
 			expected: map[string]any{"foo": 123},
 		},
 		{
+			name:     "Map_Nil",
+			path:     "self.foo",
+			obj:      map[string]any{},
+			value:    nil,
+			expected: map[string]any{},
+		},
+		{
+			name:     "Alternative_Map_Nil",
+			path:     `self["foo"]`,
+			obj:      map[string]any{},
+			value:    nil,
+			expected: map[string]any{},
+		},
+		{
 			name:     "Map_Nested",
 			path:     "self.foo.bar",
 			obj:      map[string]any{"foo": map[string]any{}, "another": "baz"},
@@ -308,13 +322,17 @@ func TestOpApply(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.op.Apply(ctx, &apiv1.Composition{}, tc.current,  tc.mutated)
+			err := tc.op.Apply(ctx, &apiv1.Composition{}, tc.current, tc.mutated)
 			if tc.wantErr {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
 				assert.Equal(t, tc.expectedMutated, tc.mutated)
 			}
+
+			// Also make sure the path can be successfully converted to the SMD representation
+			_, err = tc.op.Path.toSMDPath()
+			assert.NoError(t, err)
 		})
 	}
 }

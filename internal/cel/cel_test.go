@@ -16,7 +16,7 @@ func TestEvalCompositionBasics(t *testing.T) {
 	comp := &apiv1.Composition{}
 	comp.Name = "test-comp"
 
-	val, err := Eval(t.Context(), p, comp, &unstructured.Unstructured{})
+	val, err := Eval(t.Context(), p, comp, &unstructured.Unstructured{}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "test-comp", val.Value())
 }
