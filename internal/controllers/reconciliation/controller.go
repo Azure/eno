@@ -228,11 +228,6 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		return true, nil
 	}
 
-	if current != nil {
-		js, _ := current.MarshalJSON()
-		println("TODO", string(js))
-	}
-
 	// When using server side apply, make sure we haven't lost any managedFields metadata.
 	// Eno should always remove fields that are no longer set by the synthesizer, even if another client messed with managedFields.
 	if !c.disableSSA {

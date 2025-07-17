@@ -346,7 +346,7 @@ func EnsureManagementOfPrunedFields(ctx context.Context, prev *Resource, next *S
 	managedByEno := &fieldpath.Set{}
 	if index != -1 {
 		if err := managedByEno.FromJSON(bytes.NewReader(current.GetManagedFields()[index].FieldsV1.Raw)); err != nil {
-			logger.Info("unable to parse managed fields metadata - failing open", "error", err)
+			logger.Info("unable to parse managed fields metadata - failing open", "error", err) // this is impossible unless apiserver loses its mind
 			return false
 		}
 	}
@@ -381,6 +381,30 @@ func EnsureManagementOfPrunedFields(ctx context.Context, prev *Resource, next *S
 		fields[index].FieldsV1.Raw = newJS
 		current.SetManagedFields(fields)
 	}
+
+	// Remove the fields from their old manager entries
+	allEntries := current.GetManagedFields()
+	for i, entry := range allEntries {
+		if entry.Manager == "eno" || entry.APIVersion != "v1" || entry.FieldsType != "FieldsV1" || entry.FieldsV1 == nil {
+			continue
+		}
+		fields := &fieldpath.Set{}
+		if err := fields.FromJSON(bytes.NewReader(entry.FieldsV1.Raw)); err != nil {
+			continue
+		}
+
+		updated := fields.Difference(pruned)
+		if updated.Equals(fields) {
+			continue // nothing changed
+		}
+
+		allEntries[i].FieldsV1.Raw, err = updated.ToJSON()
+		if err != nil {
+			logger.Info("unable to encode managed fields metadata - failing open", "error", err)
+			continue
+		}
+	}
+	current.SetManagedFields(allEntries)
 
 	return true
 }
