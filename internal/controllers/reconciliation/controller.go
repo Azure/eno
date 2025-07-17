@@ -228,16 +228,37 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		return true, nil
 	}
 
-	// When using server side apply, make sure we haven't lost any managedFields metadata.
-	// Eno should always remove fields that are no longer set by the synthesizer, even if another client messed with managedFields.
+	// Dry-run the update to see if it's needed
 	if !c.disableSSA {
-		if resource.EnsureManagementOfPrunedFields(ctx, prev, res, current) {
-			err = c.upstreamClient.Update(ctx, current, client.FieldOwner("eno"))
+		dryRun, err := c.update(ctx, comp, prev, res, current, true)
+		if err != nil {
+			return false, fmt.Errorf("dry-run applying update: %w", err)
+		}
+		if resource.Compare(dryRun, current) {
+			return false, nil // in sync
+		}
+
+		// When using server side apply, make sure we haven't lost any managedFields metadata.
+		// Eno should always remove fields that are no longer set by the synthesizer, even if another client messed with managedFields.
+		if current != nil && prev != nil && !res.Replace {
+			dryRunPrev := prev.UnstructuredWithoutOverrides() // TODO: Test
+			err := c.upstreamClient.Patch(ctx, dryRunPrev, client.Apply, client.ForceOwnership, client.FieldOwner("eno"), client.DryRunAll)
 			if err != nil {
-				return false, fmt.Errorf("updating managed fields metadata: %w", err)
+				return false, fmt.Errorf("getting managed fields values for previous version: %w", err)
 			}
-			logger.V(0).Info("corrected drift in managed fields metadata")
-			return true, nil
+
+			// TODO: fix
+			// - Mabye we aren't pruning values from the other owner when taking back ownership?
+			if !resource.CompareEnoManagedFields(dryRunPrev.GetManagedFields(), current.GetManagedFields()) {
+				current.SetManagedFields(resource.MergeEnoManagedFields(current.GetManagedFields(), dryRunPrev.GetManagedFields()))
+
+				err := c.upstreamClient.Update(ctx, current, client.FieldOwner("eno"))
+				if err != nil {
+					return false, fmt.Errorf("updating managed fields metadata: %w", err)
+				}
+				logger.V(0).Info("corrected drift in managed fields metadata")
+				return true, nil
+			}
 		}
 	}
 
