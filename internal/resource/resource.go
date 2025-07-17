@@ -18,12 +18,14 @@ import (
 	"github.com/Azure/eno/internal/readiness"
 	"github.com/Azure/eno/internal/resource/mutation"
 	"github.com/go-logr/logr"
-	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
+	"sigs.k8s.io/structured-merge-diff/v4/value"
 )
 
 var patchGVK = schema.GroupVersionKind{
@@ -315,64 +317,70 @@ func NewInputRevisions(obj client.Object, refKey string) *apiv1.InputRevisions {
 	return &ir
 }
 
-// MergeEnoManagedFields merges Eno managed fields from the overrides slice onto the current.
-// All non-Eno managed fields from the current slice are preserved.
-func MergeEnoManagedFields(current, overrides []metav1.ManagedFieldsEntry) (copy []metav1.ManagedFieldsEntry) {
-	for _, cur := range overrides {
-		if cur.Manager == "eno" {
-			copy = append(copy, cur)
-			break
+// EnsureManagementOfPrunedFields ensures that the ManagedFields of `current` include any fields present in `prev` but not in `next`.
+// This guarantees that fields mutated by other field managers will not be orphaned if removed by Eno.
+// Returns true if `current` has been modified.
+func EnsureManagementOfPrunedFields(ctx context.Context, prev *Resource, next *Snapshot, current *unstructured.Unstructured) bool {
+	if current == nil || prev == nil || next.Replace {
+		return false // nothing to do in this case
+	}
+
+	logger := logr.FromContextOrDiscard(ctx)
+
+	// Transform all three states into their SMD fieldpath.Set representation
+	nextSet := fieldpath.SetFromValue(value.NewValueInterface(next.Unstructured().Object))
+	prevSet := fieldpath.SetFromValue(value.NewValueInterface(prev.UnstructuredWithoutOverrides().Object))
+	currentSet := fieldpath.SetFromValue(value.NewValueInterface(current.Object))
+
+	// Find fields that currently have a value and have been removed by the next expected state
+	pruned := prevSet.Difference(nextSet).Intersection(currentSet)
+	if pruned.Empty() {
+		return false
+	}
+
+	// Look for fields currently managed by Eno
+	index := slices.IndexFunc(current.GetManagedFields(), func(field metav1.ManagedFieldsEntry) bool {
+		return field.Manager == "eno" && field.APIVersion == "v1" && field.FieldsType == "FieldsV1" && field.FieldsV1 != nil
+	})
+
+	managedByEno := &fieldpath.Set{}
+	if index != -1 {
+		if err := managedByEno.FromJSON(bytes.NewReader(current.GetManagedFields()[index].FieldsV1.Raw)); err != nil {
+			logger.Info("unable to parse managed fields metadata - failing open", "error", err)
+			return false
 		}
 	}
-	for _, cur := range current {
-		if cur.Manager != "eno" {
-			copy = append(copy, cur)
-		}
-	}
-	return
-}
 
-// CompareEnoManagedFields returns true when the Eno managed fields in both slices are equal.
-func CompareEnoManagedFields(a, b []metav1.ManagedFieldsEntry) bool {
-	cmp := func(cur metav1.ManagedFieldsEntry) bool { return cur.Manager == "eno" }
-	ai := slices.IndexFunc(a, cmp)
-	ab := slices.IndexFunc(b, cmp)
-	if ai == -1 && ab == -1 {
-		return true
-	}
-	if ai == -1 || ab == -1 {
+	// Filter the diff to only include fields not already managed by Eno
+	pruned = pruned.Difference(managedByEno)
+	if pruned.Empty() {
 		return false
 	}
-	return equality.Semantic.DeepEqual(a[ai].FieldsV1, b[ab].FieldsV1)
-}
 
-// Compare compares two unstructured resources while ignoring:
-// - Managed field metadata not controlled by Eno
-// - Resource version
-// - Generation
-// - Status
-//
-// This should only be used to compare canonical apiserver representations of the resource
-// i.e. the unmodified response from gets or patch/update dryruns.
-func Compare(a, b *unstructured.Unstructured) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
+	// Take ownership of the pruned fields
+	managedByEno = managedByEno.Union(pruned)
+	logger.V(0).Info("detected fields pruned by synthesizer but not currently managed by Eno", "fields", pruned.String())
+
+	newJS, err := managedByEno.ToJSON()
+	if err != nil {
+		logger.Info("unable to encode managed fields metadata - failing open", "error", err)
 		return false
 	}
-	if !CompareEnoManagedFields(a.GetManagedFields(), b.GetManagedFields()) {
-		return false
-	}
-	return equality.Semantic.DeepEqual(stripInsignificantFields(a), stripInsignificantFields(b))
-}
 
-func stripInsignificantFields(u *unstructured.Unstructured) *unstructured.Unstructured {
-	u = u.DeepCopy()
-	u.SetManagedFields(nil)
-	u.SetUID(types.UID(""))
-	u.SetResourceVersion("")
-	u.SetGeneration(0)
-	delete(u.Object, "status")
-	return u
+	if index == -1 {
+		current.SetManagedFields(append(current.GetManagedFields(), metav1.ManagedFieldsEntry{
+			Manager:    "eno",
+			Operation:  metav1.ManagedFieldsOperationApply,
+			APIVersion: "v1",
+			FieldsType: "FieldsV1", // TODO: Update matching logic above?
+			Time:       ptr.To(metav1.Now()),
+			FieldsV1:   &metav1.FieldsV1{Raw: newJS},
+		}))
+	} else {
+		fields := current.GetManagedFields()
+		fields[index].FieldsV1.Raw = newJS
+		current.SetManagedFields(fields)
+	}
+
+	return true
 }

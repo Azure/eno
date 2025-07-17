@@ -2,8 +2,6 @@ package resource
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -15,10 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/rest"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/envtest"
+	"k8s.io/utils/ptr"
 )
 
 var newResourceTests = []struct {
@@ -392,217 +387,233 @@ func TestResourceOrdering(t *testing.T) {
 	}, resources)
 }
 
-func TestManagedFields(t *testing.T) {
-	current := []metav1.ManagedFieldsEntry{
-		{
-			Manager:  "something-else",
-			FieldsV1: &metav1.FieldsV1{Raw: []byte("1")},
-		},
-		{
-			Manager:  "another-thing",
-			FieldsV1: &metav1.FieldsV1{Raw: []byte("1")},
-		},
-		{
-			Manager:  "eno",
-			FieldsV1: &metav1.FieldsV1{Raw: []byte("1")},
-		},
+func TestEnsureManagementOfPrunedFields(t *testing.T) {
+	ctx := context.Background()
+
+	// Helper to create a resource with the given manifest
+	createResource := func(manifest string) *Resource {
+		r, err := NewResource(ctx, &apiv1.ResourceSlice{
+			Spec: apiv1.ResourceSliceSpec{
+				Resources: []apiv1.Manifest{{Manifest: manifest}},
+			},
+		}, 0)
+		require.NoError(t, err)
+		return r
 	}
-	expected := []metav1.ManagedFieldsEntry{{
-		Manager:  "eno",
-		FieldsV1: &metav1.FieldsV1{Raw: []byte("2")},
-	}}
 
-	merged := MergeEnoManagedFields(current, expected)
-	assert.Equal(t, []metav1.ManagedFieldsEntry{
-		{
-			Manager:  "eno",
-			FieldsV1: &metav1.FieldsV1{Raw: []byte("2")},
-		},
-		{
-			Manager:  "something-else",
-			FieldsV1: &metav1.FieldsV1{Raw: []byte("1")},
-		},
-		{
-			Manager:  "another-thing",
-			FieldsV1: &metav1.FieldsV1{Raw: []byte("1")},
-		},
-	}, merged)
+	// Helper to create a snapshot from a resource
+	createSnapshot := func(resource *Resource, annotations map[string]string) *Snapshot {
+		snap, err := resource.Snapshot(ctx, &apiv1.Composition{}, nil)
+		require.NoError(t, err)
 
-	assert.False(t, CompareEnoManagedFields(current, expected))
-	assert.False(t, CompareEnoManagedFields(current, merged))
-	assert.True(t, CompareEnoManagedFields(expected, merged))
-	assert.False(t, CompareEnoManagedFields(merged, nil))
-	assert.False(t, CompareEnoManagedFields(nil, merged))
-	assert.True(t, CompareEnoManagedFields(nil, nil))
-	assert.True(t, CompareEnoManagedFields(merged, merged))
-}
-
-func TestComparisons(t *testing.T) {
-	env := &envtest.Environment{}
-	t.Cleanup(func() {
-		err := env.Stop()
-		if err != nil {
-			panic(err)
+		// Apply any additional annotations to the snapshot
+		if annotations != nil {
+			parsed := snap.Unstructured()
+			existingAnnotations := parsed.GetAnnotations()
+			if existingAnnotations == nil {
+				existingAnnotations = make(map[string]string)
+			}
+			for k, v := range annotations {
+				existingAnnotations[k] = v
+			}
+			parsed.SetAnnotations(existingAnnotations)
+			snap.parsed = parsed
 		}
+
+		return snap
+	}
+
+	t.Run("returns false when current is nil", func(t *testing.T) {
+		prev := createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`)
+		next := createSnapshot(prev, nil)
+
+		result := EnsureManagementOfPrunedFields(ctx, prev, next, nil)
+		assert.False(t, result)
 	})
 
-	var cfg *rest.Config
-	var err error
-	for i := 0; i < 2; i++ {
-		cfg, err = env.Start()
-		if err != nil {
-			t.Logf("failed to start test environment: %s", err)
-			continue
-		}
-		break
-	}
-	require.NoError(t, err)
-
-	cli, err := client.New(cfg, client.Options{})
-	require.NoError(t, err)
-
-	tests := []struct {
-		Resource  map[string]any
-		Mutations []map[string]any
-	}{
-		{
-			Resource: map[string]any{
+	t.Run("returns false when prev is nil", func(t *testing.T) {
+		next := createSnapshot(createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}}`), nil)
+		current := &unstructured.Unstructured{
+			Object: map[string]any{
 				"apiVersion": "v1",
-				"kind":       "Service",
-				"metadata": map[string]any{
-					"name":      "test",
-					"namespace": "default",
-				},
-				"spec": map[string]any{
-					"ports": []any{
-						map[string]any{
-							"name":       "http",
-							"port":       int64(80),
-							"targetPort": int64(8080),
-						},
-					},
-					"selector": map[string]any{
-						"app": "simple",
-					},
-				},
+				"kind":       "ConfigMap",
+				"metadata":   map[string]any{"name": "test"},
 			},
-			Mutations: []map[string]any{
-				{"op": "replace", "path": "/spec/ports/0/name", "value": "modified"},
+		}
+
+		result := EnsureManagementOfPrunedFields(ctx, nil, next, current)
+		assert.False(t, result)
+	})
+
+	t.Run("returns false when replace is true", func(t *testing.T) {
+		prev := createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`)
+		next := createSnapshot(prev, map[string]string{"eno.azure.io/replace": "true"})
+		current := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata":   map[string]any{"name": "test"},
+				"data":       map[string]any{"key": "value"},
 			},
-		},
-		{
-			Resource: map[string]any{
-				"apiVersion": "apps/v1",
-				"kind":       "Deployment",
-				"metadata": map[string]any{
-					"name":      "test",
-					"namespace": "default",
-				},
-				"spec": map[string]any{
-					"selector": map[string]any{
-						"matchLabels": map[string]any{
-							"app": "simple",
-						},
-					},
-					"template": map[string]any{
-						"metadata": map[string]any{
-							"labels": map[string]any{
-								"app": "simple",
-							},
-						},
-						"spec": map[string]any{
-							"containers": []any{
-								map[string]any{
-									"name":  "simple",
-									"image": "nginx:latest",
-									"ports": []any{
-										map[string]any{
-											"name":          "http",
-											"containerPort": int64(80),
-										},
-									},
-									"resources": map[string]any{
-										"limits": map[string]any{
-											"cpu":    int64(1),
-											"memory": "2048Ki",
-										},
-										"requests": map[string]any{
-											"cpu":    "100m",
-											"memory": "1Mi",
-										},
-									},
-								},
-							},
-						},
-					},
-				},
+		}
+
+		result := EnsureManagementOfPrunedFields(ctx, prev, next, current)
+		assert.False(t, result)
+	})
+
+	t.Run("returns false when no fields are pruned", func(t *testing.T) {
+		prev := createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`)
+		next := createSnapshot(prev, nil)
+		current := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata":   map[string]any{"name": "test"},
+				"data":       map[string]any{"key": "value"},
 			},
-			Mutations: []map[string]any{
-				{"op": "replace", "path": "/spec/template/spec/containers/0/name", "value": "updated"},
+		}
+
+		result := EnsureManagementOfPrunedFields(ctx, prev, next, current)
+		assert.False(t, result)
+	})
+
+	t.Run("returns false when pruned fields don't exist in current", func(t *testing.T) {
+		prev := createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value", "removed": "data"}}`)
+		next := createSnapshot(createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`), nil)
+		current := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata":   map[string]any{"name": "test"},
+				"data":       map[string]any{"key": "value"},
 			},
-		},
-		{
-			Resource: map[string]any{
-				"apiVersion": "policy/v1",
-				"kind":       "PodDisruptionBudget", // only PDBs set patch strategy == replace
-				"metadata": map[string]any{
-					"name":      "test-obj",
-					"namespace": "default",
-				},
-				"spec": map[string]any{
-					"maxUnavailable": int64(1),
-					"selector": map[string]any{
-						"matchLabels": map[string]any{"app": "foobar"},
-					},
-				},
+		}
+
+		result := EnsureManagementOfPrunedFields(ctx, prev, next, current)
+		assert.False(t, result)
+	})
+
+	t.Run("adds managed fields entry when none exists", func(t *testing.T) {
+		prev := createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value", "removed": "data"}}`)
+		next := createSnapshot(createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`), nil)
+		current := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata":   map[string]any{"name": "test"},
+				"data":       map[string]any{"key": "value", "removed": "data"},
 			},
-			Mutations: []map[string]any{
-				{"op": "replace", "path": "/spec/maxUnavailable", "value": int64(2)},
+		}
+
+		result := EnsureManagementOfPrunedFields(ctx, prev, next, current)
+		assert.True(t, result)
+
+		managedFields := current.GetManagedFields()
+		assert.Len(t, managedFields, 1)
+		assert.Equal(t, "eno", managedFields[0].Manager)
+		assert.Equal(t, "v1", managedFields[0].APIVersion)
+		assert.NotNil(t, managedFields[0].FieldsV1)
+		assert.NotEmpty(t, managedFields[0].FieldsV1.Raw)
+	})
+
+	t.Run("updates existing managed fields entry", func(t *testing.T) {
+		prev := createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value", "removed": "data"}}`)
+		next := createSnapshot(createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`), nil)
+		current := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata":   map[string]any{"name": "test"},
+				"data":       map[string]any{"key": "value", "removed": "data"},
 			},
-		},
-	}
+		}
 
-	ctx := context.Background()
-	assert.True(t, Compare(nil, nil))
-	for _, tc := range tests {
-		u := &unstructured.Unstructured{Object: tc.Resource}
-		name := fmt.Sprintf("%s/%s", u.GetKind(), u.GetName())
-		t.Run(name, func(t *testing.T) {
-			// Create the resource
-			initial := u.DeepCopy()
-			require.NoError(t, cli.Patch(ctx, initial, client.Apply, client.ForceOwnership, client.FieldOwner("eno")))
-			assert.False(t, Compare(initial, nil))
-			assert.False(t, Compare(nil, initial))
-			assert.True(t, Compare(initial, initial))
-
-			// Dry-run'ing a server-side apply should not change anything
-			dryRun := u.DeepCopy()
-			require.NoError(t, cli.Patch(ctx, dryRun, client.Apply, client.DryRunAll, client.ForceOwnership, client.FieldOwner("eno")))
-			assert.True(t, Compare(initial, dryRun))
-			assert.True(t, Compare(dryRun, initial))
-			assert.True(t, Compare(dryRun, dryRun))
-
-			// Removing the managed fields should always cause comparison to fail
-			dryRun.SetManagedFields(nil)
-			assert.False(t, Compare(initial, dryRun))
-			assert.False(t, Compare(dryRun, initial))
-			assert.True(t, Compare(dryRun, dryRun))
-
-			// Applying the mutation should cause comparison to fail
-			patch, err := json.Marshal(&tc.Mutations)
-			require.NoError(t, err)
-			require.NoError(t, cli.Patch(ctx, u.DeepCopy(), client.RawPatch(types.JSONPatchType, patch)))
-
-			mutated := u.DeepCopy()
-			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(mutated), mutated))
-
-			js, _ := mutated.MarshalJSON()
-			t.Logf("mutated json: %s", js)
-
-			afterMutation := u.DeepCopy()
-			require.NoError(t, cli.Patch(ctx, afterMutation, client.Apply, client.DryRunAll, client.ForceOwnership, client.FieldOwner("eno")))
-			assert.False(t, Compare(mutated, afterMutation))
-			assert.False(t, Compare(afterMutation, mutated))
+		// Add existing managed fields entry
+		current.SetManagedFields([]metav1.ManagedFieldsEntry{
+			{
+				Manager:    "eno",
+				Operation:  metav1.ManagedFieldsOperationApply,
+				APIVersion: "v1",
+				FieldsType: "FieldsV1",
+				Time:       ptr.To(metav1.Now()),
+				FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:data":{"f:key":{}}}`)},
+			},
 		})
-	}
+
+		originalFieldsRaw := current.GetManagedFields()[0].FieldsV1.Raw
+
+		result := EnsureManagementOfPrunedFields(ctx, prev, next, current)
+		assert.True(t, result)
+
+		managedFields := current.GetManagedFields()
+		assert.Len(t, managedFields, 1)
+		assert.Equal(t, "eno", managedFields[0].Manager)
+		assert.NotEqual(t, originalFieldsRaw, managedFields[0].FieldsV1.Raw)
+	})
+
+	t.Run("ignores fields already managed by eno", func(t *testing.T) {
+		prev := createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value", "removed": "data"}}`)
+		next := createSnapshot(createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`), nil)
+		current := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata":   map[string]any{"name": "test"},
+				"data":       map[string]any{"key": "value", "removed": "data"},
+			},
+		}
+
+		// Set managed fields to include the field that's being removed
+		current.SetManagedFields([]metav1.ManagedFieldsEntry{
+			{
+				Manager:    "eno",
+				Operation:  metav1.ManagedFieldsOperationApply,
+				APIVersion: "v1",
+				FieldsType: "FieldsV1",
+				Time:       ptr.To(metav1.Now()),
+				FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:data":{"f:key":{},"f:removed":{}}}`)},
+			},
+		})
+
+		result := EnsureManagementOfPrunedFields(ctx, prev, next, current)
+		assert.False(t, result)
+	})
+
+	t.Run("handles complex nested field pruning", func(t *testing.T) {
+		prev := createResource(`{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {"name": "test"},
+			"data": {
+				"config.yaml": "key: value\nremoved: data",
+				"other": "data"
+			}
+		}`)
+		next := createSnapshot(createResource(`{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {"name": "test"},
+			"data": {
+				"config.yaml": "key: value"
+			}
+		}`), nil)
+		current := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata":   map[string]any{"name": "test"},
+				"data": map[string]any{
+					"config.yaml": "key: value\nremoved: data",
+					"other":       "data",
+				},
+			},
+		}
+
+		result := EnsureManagementOfPrunedFields(ctx, prev, next, current)
+		assert.True(t, result)
+
+		managedFields := current.GetManagedFields()
+		assert.Len(t, managedFields, 1)
+		assert.Equal(t, "eno", managedFields[0].Manager)
+	})
 }

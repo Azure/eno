@@ -255,6 +255,149 @@ func TestRemovePropertyAndOwnership(t *testing.T) {
 	})
 }
 
+// TestRemovePropertyAndPartialOwnership is similar to TestRemovePropertyAndOwnership but instead of removing all
+// field manager metadata it only removes one property. This proves that the pruning behavior works correctly when
+// a subset of fields have been mutated by other clients.
+func TestRemovePropertyAndPartialOwnership(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	requireSSA(t, mgr)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"labels":    map[string]string{"foo": "bar", "baz": "qux"},
+				},
+				"data": map[string]any{"foo": "bar", "baz": "qux"},
+			},
+		}}
+		if s.Spec.Image == "updated" {
+			output.Items[0].SetLabels(map[string]string{"foo": "bar"})
+			output.Items[0].Object["data"] = map[string]string{"baz": "qux"}
+		}
+		return output, nil
+	})
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	syn, comp := writeGenericComposition(t, upstream)
+
+	// Creation
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
+
+	// Mutate one of the fields using another field manager
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		cm.Data["foo"] = "new-value"
+		return mgr.DownstreamClient.Update(ctx, cm)
+	})
+	require.NoError(t, err)
+
+	// Update
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+		syn.Spec.Image = "updated"
+		return upstream.Update(ctx, syn)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
+
+	// Prove the resource was reconciled correctly
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return len(cm.Labels) == 1 && len(cm.Data) == 1
+	})
+}
+
+// TestRemoveMissingProperty proves that Eno's field manager logic doesn't unnecessarily update the field manager
+// when pruning fields that don't currently have a value.
+func TestRemoveMissingProperty(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	requireSSA(t, mgr)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+				"data": map[string]any{"foo": "bar", "baz": "qux"},
+			},
+		}}
+		if s.Spec.Image == "updated" {
+			output.Items[0].Object["data"] = map[string]string{"baz": "qux"}
+		}
+		return output, nil
+	})
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	syn, comp := writeGenericComposition(t, upstream)
+
+	// Creation
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
+
+	// Remove the data field from outside of Eno
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		delete(cm.Data, "foo")
+		return mgr.DownstreamClient.Update(ctx, cm)
+	})
+	require.NoError(t, err)
+
+	// Update
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+		syn.Spec.Image = "updated"
+		return upstream.Update(ctx, syn)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
+
+	// Prove the resource was reconciled correctly
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return len(cm.Data) == 1
+	})
+}
+
 // TestReplaceProperty proves that a property can be overridden by another field owner using SSA,
 // and Eno will still eventually reconcile it into the expected state.
 func TestReplaceProperty(t *testing.T) {
