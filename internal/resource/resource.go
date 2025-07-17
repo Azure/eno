@@ -338,12 +338,8 @@ func EnsureManagementOfPrunedFields(ctx context.Context, prev *Resource, next *S
 		return false
 	}
 
-	// Look for fields currently managed by Eno
-	index := slices.IndexFunc(current.GetManagedFields(), func(field metav1.ManagedFieldsEntry) bool {
-		return field.Manager == "eno" && field.APIVersion == "v1" && field.FieldsType == "FieldsV1" && field.FieldsV1 != nil
-	})
-
 	managedByEno := &fieldpath.Set{}
+	index := slices.IndexFunc(current.GetManagedFields(), isEnoManagedFieldsEntry)
 	if index != -1 {
 		if err := managedByEno.FromJSON(bytes.NewReader(current.GetManagedFields()[index].FieldsV1.Raw)); err != nil {
 			logger.Info("unable to parse managed fields metadata - failing open", "error", err) // this is impossible unless apiserver loses its mind
@@ -367,25 +363,16 @@ func EnsureManagementOfPrunedFields(ctx context.Context, prev *Resource, next *S
 		return false
 	}
 
+	allEntries := current.GetManagedFields()
 	if index == -1 {
-		current.SetManagedFields(append(current.GetManagedFields(), metav1.ManagedFieldsEntry{
-			Manager:    "eno",
-			Operation:  metav1.ManagedFieldsOperationApply,
-			APIVersion: "v1",
-			FieldsType: "FieldsV1", // TODO: Update matching logic above?
-			Time:       ptr.To(metav1.Now()),
-			FieldsV1:   &metav1.FieldsV1{Raw: newJS},
-		}))
+		allEntries = append(allEntries, newEnoManagedFieldsEntry(newJS))
 	} else {
-		fields := current.GetManagedFields()
-		fields[index].FieldsV1.Raw = newJS
-		current.SetManagedFields(fields)
+		allEntries[index].FieldsV1.Raw = newJS
 	}
 
 	// Remove the fields from their old manager entries
-	allEntries := current.GetManagedFields()
 	for i, entry := range allEntries {
-		if entry.Manager == "eno" || entry.APIVersion != "v1" || entry.FieldsType != "FieldsV1" || entry.FieldsV1 == nil {
+		if isEnoManagedFieldsEntry(entry) || entry.APIVersion != "v1" || entry.FieldsType != "FieldsV1" || entry.FieldsV1 == nil {
 			continue
 		}
 		fields := &fieldpath.Set{}
@@ -407,4 +394,19 @@ func EnsureManagementOfPrunedFields(ctx context.Context, prev *Resource, next *S
 	current.SetManagedFields(allEntries)
 
 	return true
+}
+
+func newEnoManagedFieldsEntry(fieldsV1 []byte) metav1.ManagedFieldsEntry {
+	return metav1.ManagedFieldsEntry{
+		Manager:    "eno",
+		Operation:  metav1.ManagedFieldsOperationApply,
+		APIVersion: "v1",
+		FieldsType: "FieldsV1",
+		Time:       ptr.To(metav1.Now()),
+		FieldsV1:   &metav1.FieldsV1{Raw: fieldsV1},
+	}
+}
+
+func isEnoManagedFieldsEntry(field metav1.ManagedFieldsEntry) bool {
+	return field.Manager == "eno" && field.APIVersion == "v1" && field.FieldsType == "FieldsV1" && field.Operation == metav1.ManagedFieldsOperationApply && field.FieldsV1 != nil
 }

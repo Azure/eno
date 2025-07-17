@@ -758,3 +758,9 @@ func TestEnsureManagementOfPrunedFields(t *testing.T) {
 		})
 	}
 }
+
+func TestNewEnoManagedFieldsEntry(t *testing.T) {
+	entry := newEnoManagedFieldsEntry([]byte{})
+	assert.True(t, isEnoManagedFieldsEntry(entry))
+	assert.False(t, isEnoManagedFieldsEntry(metav1.ManagedFieldsEntry{}))
+}
