@@ -423,182 +423,161 @@ func TestEnsureManagementOfPrunedFields(t *testing.T) {
 		return snap
 	}
 
-	t.Run("returns false when current is nil", func(t *testing.T) {
-		prev := createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`)
-		next := createSnapshot(prev, nil)
+	// Helper to create unstructured object
+	createUnstructured := func(obj map[string]any) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: obj}
+	}
 
-		result := EnsureManagementOfPrunedFields(ctx, prev, next, nil)
-		assert.False(t, result)
-	})
-
-	t.Run("returns false when prev is nil", func(t *testing.T) {
-		next := createSnapshot(createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}}`), nil)
-		current := &unstructured.Unstructured{
-			Object: map[string]any{
+	testCases := []struct {
+		name            string
+		prevManifest    string
+		nextManifest    string
+		nextAnnotations map[string]string
+		currentObject   map[string]any
+		managedFields   []metav1.ManagedFieldsEntry
+		expectedResult  bool
+		expectedAssert  func(t *testing.T, current *unstructured.Unstructured)
+	}{
+		{
+			name:           "returns false when current is nil",
+			prevManifest:   `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`,
+			expectedResult: false,
+		},
+		{
+			name:         "returns false when prev is nil",
+			nextManifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}}`,
+			currentObject: map[string]any{
 				"apiVersion": "v1",
 				"kind":       "ConfigMap",
 				"metadata":   map[string]any{"name": "test"},
 			},
-		}
-
-		result := EnsureManagementOfPrunedFields(ctx, nil, next, current)
-		assert.False(t, result)
-	})
-
-	t.Run("returns false when replace is true", func(t *testing.T) {
-		prev := createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`)
-		next := createSnapshot(prev, map[string]string{"eno.azure.io/replace": "true"})
-		current := &unstructured.Unstructured{
-			Object: map[string]any{
-				"apiVersion": "v1",
-				"kind":       "ConfigMap",
-				"metadata":   map[string]any{"name": "test"},
-				"data":       map[string]any{"key": "value"},
-			},
-		}
-
-		result := EnsureManagementOfPrunedFields(ctx, prev, next, current)
-		assert.False(t, result)
-	})
-
-	t.Run("returns false when no fields are pruned", func(t *testing.T) {
-		prev := createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`)
-		next := createSnapshot(prev, nil)
-		current := &unstructured.Unstructured{
-			Object: map[string]any{
+			expectedResult: false,
+		},
+		{
+			name:            "returns false when replace is true",
+			prevManifest:    `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`,
+			nextAnnotations: map[string]string{"eno.azure.io/replace": "true"},
+			currentObject: map[string]any{
 				"apiVersion": "v1",
 				"kind":       "ConfigMap",
 				"metadata":   map[string]any{"name": "test"},
 				"data":       map[string]any{"key": "value"},
 			},
-		}
-
-		result := EnsureManagementOfPrunedFields(ctx, prev, next, current)
-		assert.False(t, result)
-	})
-
-	t.Run("returns false when pruned fields don't exist in current", func(t *testing.T) {
-		prev := createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value", "removed": "data"}}`)
-		next := createSnapshot(createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`), nil)
-		current := &unstructured.Unstructured{
-			Object: map[string]any{
+			expectedResult: false,
+		},
+		{
+			name:         "returns false when no fields are pruned",
+			prevManifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`,
+			currentObject: map[string]any{
 				"apiVersion": "v1",
 				"kind":       "ConfigMap",
 				"metadata":   map[string]any{"name": "test"},
 				"data":       map[string]any{"key": "value"},
 			},
-		}
-
-		result := EnsureManagementOfPrunedFields(ctx, prev, next, current)
-		assert.False(t, result)
-	})
-
-	t.Run("adds managed fields entry when none exists", func(t *testing.T) {
-		prev := createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value", "removed": "data"}}`)
-		next := createSnapshot(createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`), nil)
-		current := &unstructured.Unstructured{
-			Object: map[string]any{
+			expectedResult: false,
+		},
+		{
+			name:         "returns false when pruned fields don't exist in current",
+			prevManifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value", "removed": "data"}}`,
+			nextManifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`,
+			currentObject: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata":   map[string]any{"name": "test"},
+				"data":       map[string]any{"key": "value"},
+			},
+			expectedResult: false,
+		},
+		{
+			name:         "adds managed fields entry when none exists",
+			prevManifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value", "removed": "data"}}`,
+			nextManifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`,
+			currentObject: map[string]any{
 				"apiVersion": "v1",
 				"kind":       "ConfigMap",
 				"metadata":   map[string]any{"name": "test"},
 				"data":       map[string]any{"key": "value", "removed": "data"},
 			},
-		}
-
-		result := EnsureManagementOfPrunedFields(ctx, prev, next, current)
-		assert.True(t, result)
-
-		managedFields := current.GetManagedFields()
-		assert.Len(t, managedFields, 1)
-		assert.Equal(t, "eno", managedFields[0].Manager)
-		assert.Equal(t, "v1", managedFields[0].APIVersion)
-		assert.NotNil(t, managedFields[0].FieldsV1)
-		assert.NotEmpty(t, managedFields[0].FieldsV1.Raw)
-	})
-
-	t.Run("updates existing managed fields entry", func(t *testing.T) {
-		prev := createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value", "removed": "data"}}`)
-		next := createSnapshot(createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`), nil)
-		current := &unstructured.Unstructured{
-			Object: map[string]any{
+			expectedResult: true,
+			expectedAssert: func(t *testing.T, current *unstructured.Unstructured) {
+				managedFields := current.GetManagedFields()
+				assert.Len(t, managedFields, 1)
+				assert.Equal(t, "eno", managedFields[0].Manager)
+				assert.Equal(t, "v1", managedFields[0].APIVersion)
+				assert.NotNil(t, managedFields[0].FieldsV1)
+				assert.NotEmpty(t, managedFields[0].FieldsV1.Raw)
+			},
+		},
+		{
+			name:         "updates existing managed fields entry",
+			prevManifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value", "removed": "data"}}`,
+			nextManifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`,
+			currentObject: map[string]any{
 				"apiVersion": "v1",
 				"kind":       "ConfigMap",
 				"metadata":   map[string]any{"name": "test"},
 				"data":       map[string]any{"key": "value", "removed": "data"},
 			},
-		}
-
-		// Add existing managed fields entry
-		current.SetManagedFields([]metav1.ManagedFieldsEntry{
-			{
-				Manager:    "eno",
-				Operation:  metav1.ManagedFieldsOperationApply,
-				APIVersion: "v1",
-				FieldsType: "FieldsV1",
-				Time:       ptr.To(metav1.Now()),
-				FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:data":{"f:key":{}}}`)},
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "eno",
+					Operation:  metav1.ManagedFieldsOperationApply,
+					APIVersion: "v1",
+					FieldsType: "FieldsV1",
+					Time:       ptr.To(metav1.Now()),
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:data":{"f:key":{}}}`)},
+				},
 			},
-		})
-
-		originalFieldsRaw := current.GetManagedFields()[0].FieldsV1.Raw
-
-		result := EnsureManagementOfPrunedFields(ctx, prev, next, current)
-		assert.True(t, result)
-
-		managedFields := current.GetManagedFields()
-		assert.Len(t, managedFields, 1)
-		assert.Equal(t, "eno", managedFields[0].Manager)
-		assert.NotEqual(t, originalFieldsRaw, managedFields[0].FieldsV1.Raw)
-	})
-
-	t.Run("ignores fields already managed by eno", func(t *testing.T) {
-		prev := createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value", "removed": "data"}}`)
-		next := createSnapshot(createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`), nil)
-		current := &unstructured.Unstructured{
-			Object: map[string]any{
+			expectedResult: true,
+			expectedAssert: func(t *testing.T, current *unstructured.Unstructured) {
+				managedFields := current.GetManagedFields()
+				assert.Len(t, managedFields, 1)
+				assert.Equal(t, "eno", managedFields[0].Manager)
+				assert.Contains(t, string(managedFields[0].FieldsV1.Raw), "f:removed")
+			},
+		},
+		{
+			name:         "ignores fields already managed by eno",
+			prevManifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value", "removed": "data"}}`,
+			nextManifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`,
+			currentObject: map[string]any{
 				"apiVersion": "v1",
 				"kind":       "ConfigMap",
 				"metadata":   map[string]any{"name": "test"},
 				"data":       map[string]any{"key": "value", "removed": "data"},
 			},
-		}
-
-		// Set managed fields to include the field that's being removed
-		current.SetManagedFields([]metav1.ManagedFieldsEntry{
-			{
-				Manager:    "eno",
-				Operation:  metav1.ManagedFieldsOperationApply,
-				APIVersion: "v1",
-				FieldsType: "FieldsV1",
-				Time:       ptr.To(metav1.Now()),
-				FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:data":{"f:key":{},"f:removed":{}}}`)},
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "eno",
+					Operation:  metav1.ManagedFieldsOperationApply,
+					APIVersion: "v1",
+					FieldsType: "FieldsV1",
+					Time:       ptr.To(metav1.Now()),
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:data":{"f:key":{},"f:removed":{}}}`)},
+				},
 			},
-		})
-
-		result := EnsureManagementOfPrunedFields(ctx, prev, next, current)
-		assert.False(t, result)
-	})
-
-	t.Run("handles complex nested field pruning", func(t *testing.T) {
-		prev := createResource(`{
-			"apiVersion": "v1",
-			"kind": "ConfigMap",
-			"metadata": {"name": "test"},
-			"data": {
-				"config.yaml": "key: value\nremoved: data",
-				"other": "data"
-			}
-		}`)
-		next := createSnapshot(createResource(`{
-			"apiVersion": "v1",
-			"kind": "ConfigMap",
-			"metadata": {"name": "test"},
-			"data": {
-				"config.yaml": "key: value"
-			}
-		}`), nil)
-		current := &unstructured.Unstructured{
-			Object: map[string]any{
+			expectedResult: false,
+		},
+		{
+			name: "handles complex nested field pruning",
+			prevManifest: `{
+				"apiVersion": "v1",
+				"kind": "ConfigMap",
+				"metadata": {"name": "test"},
+				"data": {
+					"config.yaml": "key: value\nremoved: data",
+					"other": "data"
+				}
+			}`,
+			nextManifest: `{
+				"apiVersion": "v1",
+				"kind": "ConfigMap",
+				"metadata": {"name": "test"},
+				"data": {
+					"config.yaml": "key: value"
+				}
+			}`,
+			currentObject: map[string]any{
 				"apiVersion": "v1",
 				"kind":       "ConfigMap",
 				"metadata":   map[string]any{"name": "test"},
@@ -607,175 +586,175 @@ func TestEnsureManagementOfPrunedFields(t *testing.T) {
 					"other":       "data",
 				},
 			},
-		}
-
-		result := EnsureManagementOfPrunedFields(ctx, prev, next, current)
-		assert.True(t, result)
-
-		managedFields := current.GetManagedFields()
-		assert.Len(t, managedFields, 1)
-		assert.Equal(t, "eno", managedFields[0].Manager)
-	})
-
-	t.Run("removes pruned fields from other manager entries", func(t *testing.T) {
-		prev := createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value", "removed": "data"}}`)
-		next := createSnapshot(createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`), nil)
-		current := &unstructured.Unstructured{
-			Object: map[string]any{
+			expectedResult: true,
+			expectedAssert: func(t *testing.T, current *unstructured.Unstructured) {
+				managedFields := current.GetManagedFields()
+				assert.Len(t, managedFields, 1)
+				assert.Equal(t, "eno", managedFields[0].Manager)
+			},
+		},
+		{
+			name:         "removes pruned fields from other manager entries",
+			prevManifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value", "removed": "data"}}`,
+			nextManifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`,
+			currentObject: map[string]any{
 				"apiVersion": "v1",
 				"kind":       "ConfigMap",
 				"metadata":   map[string]any{"name": "test"},
 				"data":       map[string]any{"key": "value", "removed": "data"},
 			},
-		}
-
-		// Set up managed fields with multiple managers
-		current.SetManagedFields([]metav1.ManagedFieldsEntry{
-			{
-				Manager:    "kubectl",
-				Operation:  metav1.ManagedFieldsOperationApply,
-				APIVersion: "v1",
-				FieldsType: "FieldsV1",
-				Time:       ptr.To(metav1.Now()),
-				FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:data":{"f:key":{},"f:removed":{}}}`)},
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "kubectl",
+					Operation:  metav1.ManagedFieldsOperationApply,
+					APIVersion: "v1",
+					FieldsType: "FieldsV1",
+					Time:       ptr.To(metav1.Now()),
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:data":{"f:key":{},"f:removed":{}}}`)},
+				},
+				{
+					Manager:    "helm",
+					Operation:  metav1.ManagedFieldsOperationApply,
+					APIVersion: "v1",
+					FieldsType: "FieldsV1",
+					Time:       ptr.To(metav1.Now()),
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:data":{"f:removed":{}}}`)},
+				},
 			},
-			{
-				Manager:    "helm",
-				Operation:  metav1.ManagedFieldsOperationApply,
-				APIVersion: "v1",
-				FieldsType: "FieldsV1",
-				Time:       ptr.To(metav1.Now()),
-				FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:data":{"f:removed":{}}}`)},
+			expectedResult: true,
+			expectedAssert: func(t *testing.T, current *unstructured.Unstructured) {
+				managedFields := current.GetManagedFields()
+				assert.Len(t, managedFields, 3) // kubectl, helm, and new eno entry
+
+				var kubectlEntry, helmEntry, enoEntry *metav1.ManagedFieldsEntry
+				for i := range managedFields {
+					switch managedFields[i].Manager {
+					case "kubectl":
+						kubectlEntry = &managedFields[i]
+					case "helm":
+						helmEntry = &managedFields[i]
+					case "eno":
+						enoEntry = &managedFields[i]
+					}
+				}
+
+				require.NotNil(t, kubectlEntry)
+				require.NotNil(t, helmEntry)
+				require.NotNil(t, enoEntry)
+
+				assert.Equal(t, `{"f:data":{"f:key":{}}}`, string(kubectlEntry.FieldsV1.Raw))
+				assert.Equal(t, `{}`, string(helmEntry.FieldsV1.Raw))
+				assert.Contains(t, string(enoEntry.FieldsV1.Raw), "f:removed")
 			},
-		})
-
-		result := EnsureManagementOfPrunedFields(ctx, prev, next, current)
-		assert.True(t, result)
-
-		managedFields := current.GetManagedFields()
-		assert.Len(t, managedFields, 3) // kubectl, helm, and new eno entry
-
-		// Find the kubectl entry and verify removed field was removed
-		var kubectlEntry *metav1.ManagedFieldsEntry
-		var helmEntry *metav1.ManagedFieldsEntry
-		var enoEntry *metav1.ManagedFieldsEntry
-		for i := range managedFields {
-			switch managedFields[i].Manager {
-			case "kubectl":
-				kubectlEntry = &managedFields[i]
-			case "helm":
-				helmEntry = &managedFields[i]
-			case "eno":
-				enoEntry = &managedFields[i]
-			}
-		}
-
-		require.NotNil(t, kubectlEntry)
-		require.NotNil(t, helmEntry)
-		require.NotNil(t, enoEntry)
-
-		// kubectl should only have "key" field now (removed field should be gone)
-		assert.Equal(t, `{"f:data":{"f:key":{}}}`, string(kubectlEntry.FieldsV1.Raw))
-
-		// helm should have no fields now (only had removed field)
-		assert.Equal(t, `{}`, string(helmEntry.FieldsV1.Raw))
-
-		// eno should have the removed field
-		assert.Contains(t, string(enoEntry.FieldsV1.Raw), "f:removed")
-	})
-
-	t.Run("skips non-FieldsV1 managers when removing fields", func(t *testing.T) {
-		prev := createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value", "removed": "data"}}`)
-		next := createSnapshot(createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`), nil)
-		current := &unstructured.Unstructured{
-			Object: map[string]any{
+		},
+		{
+			name:         "skips non-matching API versions when removing fields",
+			prevManifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value", "removed": "data"}}`,
+			nextManifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`,
+			currentObject: map[string]any{
 				"apiVersion": "v1",
 				"kind":       "ConfigMap",
 				"metadata":   map[string]any{"name": "test"},
 				"data":       map[string]any{"key": "value", "removed": "data"},
 			},
-		}
-
-		// Set up managed fields with different field types and API versions
-		current.SetManagedFields([]metav1.ManagedFieldsEntry{
-			{
-				Manager:    "kubectl",
-				Operation:  metav1.ManagedFieldsOperationApply,
-				APIVersion: "v1",
-				FieldsType: "FieldsV1",
-				Time:       ptr.To(metav1.Now()),
-				FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:data":{"f:removed":{}}}`)},
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "kubectl",
+					Operation:  metav1.ManagedFieldsOperationApply,
+					APIVersion: "v1",
+					FieldsType: "FieldsV1",
+					Time:       ptr.To(metav1.Now()),
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:data":{"f:removed":{}}}`)},
+				},
+				{
+					Manager:    "old-manager",
+					Operation:  metav1.ManagedFieldsOperationApply,
+					APIVersion: "apps/v1", // different API version
+					FieldsType: "FieldsV1",
+					Time:       ptr.To(metav1.Now()),
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:data":{"f:removed":{}}}`)},
+				},
 			},
-			{
-				Manager:    "old-manager",
-				Operation:  metav1.ManagedFieldsOperationApply,
-				APIVersion: "apps/v1", // different API version
-				FieldsType: "FieldsV1",
-				Time:       ptr.To(metav1.Now()),
-				FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:data":{"f:removed":{}}}`)},
+			expectedResult: true,
+			expectedAssert: func(t *testing.T, current *unstructured.Unstructured) {
+				managedFields := current.GetManagedFields()
+				assert.Len(t, managedFields, 3) // kubectl, old-manager, and new eno entry
+
+				assert.Equal(t, `{}`, string(managedFields[0].FieldsV1.Raw))                          // kubectl updated
+				assert.Equal(t, `{"f:data":{"f:removed":{}}}`, string(managedFields[1].FieldsV1.Raw)) // old-manager unchanged
 			},
-		})
-
-		originalOldManagerFields := string(current.GetManagedFields()[1].FieldsV1.Raw)
-
-		result := EnsureManagementOfPrunedFields(ctx, prev, next, current)
-		assert.True(t, result)
-
-		managedFields := current.GetManagedFields()
-		assert.Len(t, managedFields, 3) // kubectl, old-manager, and new eno entry
-
-		// kubectl should have been updated (different APIVersion should be ignored)
-		assert.Equal(t, `{}`, string(managedFields[0].FieldsV1.Raw))
-
-		// old-manager should be unchanged (different APIVersion)
-		assert.Equal(t, originalOldManagerFields, string(managedFields[1].FieldsV1.Raw))
-	})
-
-	t.Run("handles malformed managed fields gracefully", func(t *testing.T) {
-		prev := createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value", "removed": "data"}}`)
-		next := createSnapshot(createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`), nil)
-		current := &unstructured.Unstructured{
-			Object: map[string]any{
+		},
+		{
+			name:         "handles malformed managed fields gracefully",
+			prevManifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value", "removed": "data"}}`,
+			nextManifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`,
+			currentObject: map[string]any{
 				"apiVersion": "v1",
 				"kind":       "ConfigMap",
 				"metadata":   map[string]any{"name": "test"},
 				"data":       map[string]any{"key": "value", "removed": "data"},
 			},
-		}
-
-		// Set up managed fields with one valid and one with malformed JSON
-		current.SetManagedFields([]metav1.ManagedFieldsEntry{
-			{
-				Manager:    "kubectl",
-				Operation:  metav1.ManagedFieldsOperationApply,
-				APIVersion: "v1",
-				FieldsType: "FieldsV1",
-				Time:       ptr.To(metav1.Now()),
-				FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:data":{"f:removed":{}}}`)},
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "kubectl",
+					Operation:  metav1.ManagedFieldsOperationApply,
+					APIVersion: "v1",
+					FieldsType: "FieldsV1",
+					Time:       ptr.To(metav1.Now()),
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:data":{"f:removed":{}}}`)},
+				},
 			},
+			expectedResult: true,
+			expectedAssert: func(t *testing.T, current *unstructured.Unstructured) {
+				managedFields := current.GetManagedFields()
+				assert.Len(t, managedFields, 2)
+
+				var kubectlFound, enoFound bool
+				for _, entry := range managedFields {
+					if entry.Manager == "kubectl" {
+						kubectlFound = true
+						assert.Equal(t, `{}`, string(entry.FieldsV1.Raw))
+					}
+					if entry.Manager == "eno" {
+						enoFound = true
+						assert.Contains(t, string(entry.FieldsV1.Raw), "f:removed")
+					}
+				}
+				assert.True(t, kubectlFound)
+				assert.True(t, enoFound)
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var prev *Resource
+			var next *Snapshot
+			var current *unstructured.Unstructured
+
+			if tc.prevManifest != "" {
+				prev = createResource(tc.prevManifest)
+			}
+
+			if tc.nextManifest != "" {
+				next = createSnapshot(createResource(tc.nextManifest), tc.nextAnnotations)
+			} else if prev != nil {
+				next = createSnapshot(prev, tc.nextAnnotations)
+			}
+
+			if tc.currentObject != nil {
+				current = createUnstructured(tc.currentObject)
+				if tc.managedFields != nil {
+					current.SetManagedFields(tc.managedFields)
+				}
+			}
+
+			result := EnsureManagementOfPrunedFields(ctx, prev, next, current)
+			assert.Equal(t, tc.expectedResult, result)
+
+			if tc.expectedAssert != nil && current != nil {
+				tc.expectedAssert(t, current)
+			}
 		})
-
-		result := EnsureManagementOfPrunedFields(ctx, prev, next, current)
-		assert.True(t, result)
-
-		// Should have kubectl entry (updated) and new eno entry
-		managedFields := current.GetManagedFields()
-		assert.Len(t, managedFields, 2)
-		
-		var kubectlFound, enoFound bool
-		for _, entry := range managedFields {
-			if entry.Manager == "kubectl" {
-				kubectlFound = true
-				// kubectl should have its removed field taken away
-				assert.Equal(t, `{}`, string(entry.FieldsV1.Raw))
-			}
-			if entry.Manager == "eno" {
-				enoFound = true
-				// eno should have the removed field
-				assert.Contains(t, string(entry.FieldsV1.Raw), "f:removed")
-			}
-		}
-		assert.True(t, kubectlFound)
-		assert.True(t, enoFound)
-	})
+	}
 }
