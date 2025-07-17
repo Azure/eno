@@ -616,4 +616,166 @@ func TestEnsureManagementOfPrunedFields(t *testing.T) {
 		assert.Len(t, managedFields, 1)
 		assert.Equal(t, "eno", managedFields[0].Manager)
 	})
+
+	t.Run("removes pruned fields from other manager entries", func(t *testing.T) {
+		prev := createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value", "removed": "data"}}`)
+		next := createSnapshot(createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`), nil)
+		current := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata":   map[string]any{"name": "test"},
+				"data":       map[string]any{"key": "value", "removed": "data"},
+			},
+		}
+
+		// Set up managed fields with multiple managers
+		current.SetManagedFields([]metav1.ManagedFieldsEntry{
+			{
+				Manager:    "kubectl",
+				Operation:  metav1.ManagedFieldsOperationApply,
+				APIVersion: "v1",
+				FieldsType: "FieldsV1",
+				Time:       ptr.To(metav1.Now()),
+				FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:data":{"f:key":{},"f:removed":{}}}`)},
+			},
+			{
+				Manager:    "helm",
+				Operation:  metav1.ManagedFieldsOperationApply,
+				APIVersion: "v1",
+				FieldsType: "FieldsV1",
+				Time:       ptr.To(metav1.Now()),
+				FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:data":{"f:removed":{}}}`)},
+			},
+		})
+
+		result := EnsureManagementOfPrunedFields(ctx, prev, next, current)
+		assert.True(t, result)
+
+		managedFields := current.GetManagedFields()
+		assert.Len(t, managedFields, 3) // kubectl, helm, and new eno entry
+
+		// Find the kubectl entry and verify removed field was removed
+		var kubectlEntry *metav1.ManagedFieldsEntry
+		var helmEntry *metav1.ManagedFieldsEntry
+		var enoEntry *metav1.ManagedFieldsEntry
+		for i := range managedFields {
+			switch managedFields[i].Manager {
+			case "kubectl":
+				kubectlEntry = &managedFields[i]
+			case "helm":
+				helmEntry = &managedFields[i]
+			case "eno":
+				enoEntry = &managedFields[i]
+			}
+		}
+
+		require.NotNil(t, kubectlEntry)
+		require.NotNil(t, helmEntry)
+		require.NotNil(t, enoEntry)
+
+		// kubectl should only have "key" field now (removed field should be gone)
+		assert.Equal(t, `{"f:data":{"f:key":{}}}`, string(kubectlEntry.FieldsV1.Raw))
+
+		// helm should have no fields now (only had removed field)
+		assert.Equal(t, `{}`, string(helmEntry.FieldsV1.Raw))
+
+		// eno should have the removed field
+		assert.Contains(t, string(enoEntry.FieldsV1.Raw), "f:removed")
+	})
+
+	t.Run("skips non-FieldsV1 managers when removing fields", func(t *testing.T) {
+		prev := createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value", "removed": "data"}}`)
+		next := createSnapshot(createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`), nil)
+		current := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata":   map[string]any{"name": "test"},
+				"data":       map[string]any{"key": "value", "removed": "data"},
+			},
+		}
+
+		// Set up managed fields with different field types and API versions
+		current.SetManagedFields([]metav1.ManagedFieldsEntry{
+			{
+				Manager:    "kubectl",
+				Operation:  metav1.ManagedFieldsOperationApply,
+				APIVersion: "v1",
+				FieldsType: "FieldsV1",
+				Time:       ptr.To(metav1.Now()),
+				FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:data":{"f:removed":{}}}`)},
+			},
+			{
+				Manager:    "old-manager",
+				Operation:  metav1.ManagedFieldsOperationApply,
+				APIVersion: "apps/v1", // different API version
+				FieldsType: "FieldsV1",
+				Time:       ptr.To(metav1.Now()),
+				FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:data":{"f:removed":{}}}`)},
+			},
+		})
+
+		originalOldManagerFields := string(current.GetManagedFields()[1].FieldsV1.Raw)
+
+		result := EnsureManagementOfPrunedFields(ctx, prev, next, current)
+		assert.True(t, result)
+
+		managedFields := current.GetManagedFields()
+		assert.Len(t, managedFields, 3) // kubectl, old-manager, and new eno entry
+
+		// kubectl should have been updated (different APIVersion should be ignored)
+		assert.Equal(t, `{}`, string(managedFields[0].FieldsV1.Raw))
+
+		// old-manager should be unchanged (different APIVersion)
+		assert.Equal(t, originalOldManagerFields, string(managedFields[1].FieldsV1.Raw))
+	})
+
+	t.Run("handles malformed managed fields gracefully", func(t *testing.T) {
+		prev := createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value", "removed": "data"}}`)
+		next := createSnapshot(createResource(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test"}, "data": {"key": "value"}}`), nil)
+		current := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata":   map[string]any{"name": "test"},
+				"data":       map[string]any{"key": "value", "removed": "data"},
+			},
+		}
+
+		// Set up managed fields with one valid and one with malformed JSON
+		current.SetManagedFields([]metav1.ManagedFieldsEntry{
+			{
+				Manager:    "kubectl",
+				Operation:  metav1.ManagedFieldsOperationApply,
+				APIVersion: "v1",
+				FieldsType: "FieldsV1",
+				Time:       ptr.To(metav1.Now()),
+				FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:data":{"f:removed":{}}}`)},
+			},
+		})
+
+		result := EnsureManagementOfPrunedFields(ctx, prev, next, current)
+		assert.True(t, result)
+
+		// Should have kubectl entry (updated) and new eno entry
+		managedFields := current.GetManagedFields()
+		assert.Len(t, managedFields, 2)
+		
+		var kubectlFound, enoFound bool
+		for _, entry := range managedFields {
+			if entry.Manager == "kubectl" {
+				kubectlFound = true
+				// kubectl should have its removed field taken away
+				assert.Equal(t, `{}`, string(entry.FieldsV1.Raw))
+			}
+			if entry.Manager == "eno" {
+				enoFound = true
+				// eno should have the removed field
+				assert.Contains(t, string(entry.FieldsV1.Raw), "f:removed")
+			}
+		}
+		assert.True(t, kubectlFound)
+		assert.True(t, enoFound)
+	})
 }
