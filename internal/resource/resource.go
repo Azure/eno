@@ -317,7 +317,10 @@ func NewInputRevisions(obj client.Object, refKey string) *apiv1.InputRevisions {
 
 // MergeEnoManagedFields merges Eno managed fields from the overrides slice onto the current.
 // All non-Eno managed fields from the current slice are preserved.
-func MergeEnoManagedFields(current, overrides []metav1.ManagedFieldsEntry) (copy []metav1.ManagedFieldsEntry) {
+func MergeEnoManagedFields(current, overrides []metav1.ManagedFieldsEntry) (copy []metav1.ManagedFieldsEntry, modified bool) {
+	if compareEnoManagedFields(current, overrides) {
+		return nil, false
+	}
 	for _, cur := range overrides {
 		if cur.Manager == "eno" {
 			copy = append(copy, cur)
@@ -329,11 +332,11 @@ func MergeEnoManagedFields(current, overrides []metav1.ManagedFieldsEntry) (copy
 			copy = append(copy, cur)
 		}
 	}
-	return
+	return copy, true
 }
 
-// CompareEnoManagedFields returns true when the Eno managed fields in both slices are equal.
-func CompareEnoManagedFields(a, b []metav1.ManagedFieldsEntry) bool {
+// compareEnoManagedFields returns true when the Eno managed fields in both slices are equal.
+func compareEnoManagedFields(a, b []metav1.ManagedFieldsEntry) bool {
 	cmp := func(cur metav1.ManagedFieldsEntry) bool { return cur.Manager == "eno" }
 	ai := slices.IndexFunc(a, cmp)
 	ab := slices.IndexFunc(b, cmp)
@@ -361,7 +364,7 @@ func Compare(a, b *unstructured.Unstructured) bool {
 	if a == nil || b == nil {
 		return false
 	}
-	if !CompareEnoManagedFields(a.GetManagedFields(), b.GetManagedFields()) {
+	if !compareEnoManagedFields(a.GetManagedFields(), b.GetManagedFields()) {
 		return false
 	}
 	return equality.Semantic.DeepEqual(stripInsignificantFields(a), stripInsignificantFields(b))

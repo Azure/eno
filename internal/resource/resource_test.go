@@ -412,7 +412,7 @@ func TestManagedFields(t *testing.T) {
 		FieldsV1: &metav1.FieldsV1{Raw: []byte("2")},
 	}}
 
-	merged := MergeEnoManagedFields(current, expected)
+	merged, modified := MergeEnoManagedFields(current, expected)
 	assert.Equal(t, []metav1.ManagedFieldsEntry{
 		{
 			Manager:  "eno",
@@ -427,14 +427,20 @@ func TestManagedFields(t *testing.T) {
 			FieldsV1: &metav1.FieldsV1{Raw: []byte("1")},
 		},
 	}, merged)
+	assert.True(t, modified)
 
-	assert.False(t, CompareEnoManagedFields(current, expected))
-	assert.False(t, CompareEnoManagedFields(current, merged))
-	assert.True(t, CompareEnoManagedFields(expected, merged))
-	assert.False(t, CompareEnoManagedFields(merged, nil))
-	assert.False(t, CompareEnoManagedFields(nil, merged))
-	assert.True(t, CompareEnoManagedFields(nil, nil))
-	assert.True(t, CompareEnoManagedFields(merged, merged))
+	compare := func(a, b []metav1.ManagedFieldsEntry) bool {
+		_, modified := MergeEnoManagedFields(a, b)
+		return !modified
+	}
+
+	assert.False(t, compare(current, expected))
+	assert.False(t, compare(current, merged))
+	assert.True(t, compare(expected, merged))
+	assert.False(t, compare(merged, nil))
+	assert.False(t, compare(nil, merged))
+	assert.True(t, compare(nil, nil))
+	assert.True(t, compare(merged, merged))
 }
 
 func TestComparisons(t *testing.T) {

@@ -247,10 +247,9 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 				return false, fmt.Errorf("getting managed fields values for previous version: %w", err)
 			}
 
-			// TODO: fix
-			// - Mabye we aren't pruning values from the other owner when taking back ownership?
-			if !resource.CompareEnoManagedFields(dryRunPrev.GetManagedFields(), current.GetManagedFields()) {
-				current.SetManagedFields(resource.MergeEnoManagedFields(current.GetManagedFields(), dryRunPrev.GetManagedFields()))
+			merged, modified := resource.MergeEnoManagedFields(current.GetManagedFields(), dryRunPrev.GetManagedFields())
+			if modified {
+				current.SetManagedFields(merged)
 
 				err := c.upstreamClient.Update(ctx, current, client.FieldOwner("eno"))
 				if err != nil {
