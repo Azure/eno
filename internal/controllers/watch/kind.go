@@ -14,6 +14,7 @@ import (
 	"github.com/Azure/eno/internal/resource"
 	"github.com/go-logr/logr"
 	"golang.org/x/time/rate"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -231,7 +232,6 @@ func (k *KindWatchController) updateCompositions(ctx context.Context, logger log
 	for _, comp := range list.Items {
 		key := findRefKey(&comp, synth, meta)
 		if key == "" {
-			logger.V(1).Info("no matching input key found for resource")
 			continue
 		}
 
@@ -242,6 +242,9 @@ func (k *KindWatchController) updateCompositions(ctx context.Context, logger log
 
 		// TODO: Reduce risk of conflict errors here
 		err := k.client.Status().Update(ctx, &comp)
+		if errors.IsConflict(err) {
+			return false, fmt.Errorf("composition was modified during input reconciliation - will retry")
+		}
 		if err != nil {
 			return false, fmt.Errorf("updating input revisions: %w", err)
 		}

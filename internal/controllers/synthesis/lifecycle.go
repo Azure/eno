@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -83,9 +84,12 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	logger := logr.FromContextOrDiscard(ctx)
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, req.NamespacedName, comp)
+	if errors.IsNotFound(err) {
+		return ctrl.Result{}, nil
+	}
 	if err != nil {
-		logger.Error(err, "failed to get composition resource")
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		logger.Error(err, "failed to get composition")
+		return ctrl.Result{}, err
 	}
 	if comp.DeletionTimestamp != nil ||
 		!controllerutil.ContainsFinalizer(comp, "eno.azure.io/cleanup") ||

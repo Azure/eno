@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -93,9 +94,12 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, types.NamespacedName{Name: req.Composition.Name, Namespace: req.Composition.Namespace}, comp)
+	if errors.IsNotFound(err) {
+		return ctrl.Result{}, nil
+	}
 	if err != nil {
 		logger.Error(err, "failed to get composition")
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		return ctrl.Result{}, err
 	}
 	synthesisUUID := comp.Status.GetCurrentSynthesisUUID()
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisUUID", synthesisUUID)
