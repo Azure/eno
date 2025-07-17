@@ -97,6 +97,9 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, nil
 	}
 	err = s.client.Status().Update(ctx, comp)
+	if errors.IsConflict(err) {
+		return ctrl.Result{}, fmt.Errorf("conflict while updating composition status to reflect resource slices - will retry")
+	}
 	if err != nil {
 		logger.Error(err, "failed to update composition status")
 		return ctrl.Result{}, err

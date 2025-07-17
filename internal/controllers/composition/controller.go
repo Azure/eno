@@ -63,9 +63,12 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 	logger := logr.FromContextOrDiscard(ctx)
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, req.NamespacedName, comp)
+	if errors.IsNotFound(err) {
+		return ctrl.Result{}, nil
+	}
 	if err != nil {
-		logger.Error(err, "failed to get composition resource")
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		logger.Error(err, "failed to get composition")
+		return ctrl.Result{}, err
 	}
 
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisUUID", comp.Status.GetCurrentSynthesisUUID())
