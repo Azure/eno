@@ -247,7 +247,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 				return false, fmt.Errorf("getting managed fields values for previous version: %w", err)
 			}
 
-			merged, modified := resource.MergeEnoManagedFields(current.GetManagedFields(), dryRunPrev.GetManagedFields())
+			merged, fields, modified := resource.MergeEnoManagedFields(current.GetManagedFields(), dryRunPrev.GetManagedFields())
 			if modified {
 				current.SetManagedFields(merged)
 
@@ -255,7 +255,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 				if err != nil {
 					return false, fmt.Errorf("updating managed fields metadata: %w", err)
 				}
-				logger.V(0).Info("corrected drift in managed fields metadata")
+				logger.V(0).Info("corrected drift in managed fields metadata", "fields", fields)
 				return true, nil
 			}
 		}

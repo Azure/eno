@@ -23,7 +23,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
 )
 
 var patchGVK = schema.GroupVersionKind{
@@ -317,36 +319,84 @@ func NewInputRevisions(obj client.Object, refKey string) *apiv1.InputRevisions {
 
 // MergeEnoManagedFields merges Eno managed fields from the overrides slice onto the current.
 // All non-Eno managed fields from the current slice are preserved.
-func MergeEnoManagedFields(current, overrides []metav1.ManagedFieldsEntry) (copy []metav1.ManagedFieldsEntry, modified bool) {
-	if compareEnoManagedFields(current, overrides) {
-		return nil, false
+func MergeEnoManagedFields(current, overrides []metav1.ManagedFieldsEntry) (copy []metav1.ManagedFieldsEntry, fields string, modified bool) {
+	currentSet := parseEnoManagedFields(current)
+	overridesSet := parseEnoManagedFields(overrides)
+	missing := overridesSet.Difference(currentSet)
+
+	// All fields in the overriding set already exist in the current
+	if missing.Empty() {
+		return current, "", false
 	}
-	for _, cur := range overrides {
-		if cur.Manager == "eno" {
-			copy = append(copy, cur)
-			break
+
+	// Append the missing fields to the eno field manager entry,
+	// and remove them from others
+	var enoSeen bool
+	for _, entry := range current {
+		if entry.FieldsV1 == nil {
+			copy = append(copy, entry)
+			continue
+		}
+
+		set := &fieldpath.Set{}
+		err := set.FromJSON(bytes.NewBuffer(entry.FieldsV1.Raw))
+		if err != nil {
+			copy = append(copy, entry)
+			continue
+		}
+
+		var updated *fieldpath.Set
+		if entry.Manager == "eno" && entry.Operation == metav1.ManagedFieldsOperationApply {
+			enoSeen = true
+			updated = set.Union(missing)
+		} else {
+			updated = set.Difference(missing)
+		}
+		if updated.Equals(set) {
+			copy = append(copy, entry)
+			continue
+		}
+
+		js, err := updated.ToJSON()
+		if err != nil {
+			copy = append(copy, entry)
+			continue // not possible
+		}
+		entry.FieldsV1 = &metav1.FieldsV1{Raw: js}
+		copy = append(copy, entry)
+	}
+
+	// Eno somehow doesn't own anything - add an entry
+	if !enoSeen {
+		js, err := missing.ToJSON()
+		if err == nil {
+			copy = append(copy, metav1.ManagedFieldsEntry{
+				Manager:    "eno",
+				Operation:  metav1.ManagedFieldsOperationApply,
+				Time:       ptr.To(metav1.Now()),
+				FieldsType: "FieldsV1",
+				FieldsV1:   &metav1.FieldsV1{Raw: js},
+			})
 		}
 	}
-	for _, cur := range current {
-		if cur.Manager != "eno" {
-			copy = append(copy, cur)
-		}
-	}
-	return copy, true
+
+	return copy, missing.String(), true
 }
 
-// compareEnoManagedFields returns true when the Eno managed fields in both slices are equal.
-func compareEnoManagedFields(a, b []metav1.ManagedFieldsEntry) bool {
-	cmp := func(cur metav1.ManagedFieldsEntry) bool { return cur.Manager == "eno" }
-	ai := slices.IndexFunc(a, cmp)
-	ab := slices.IndexFunc(b, cmp)
-	if ai == -1 && ab == -1 {
-		return true
+func parseEnoManagedFields(all []metav1.ManagedFieldsEntry) *fieldpath.Set {
+	set := &fieldpath.Set{}
+	for _, entry := range all {
+		if entry.FieldsV1 == nil || entry.Manager != "eno" || entry.Operation != metav1.ManagedFieldsOperationApply {
+			continue
+		}
+
+		err := set.FromJSON(bytes.NewBuffer(entry.FieldsV1.Raw))
+		if err != nil {
+			continue
+		}
+		break
 	}
-	if ai == -1 || ab == -1 {
-		return false
-	}
-	return equality.Semantic.DeepEqual(a[ai].FieldsV1, b[ab].FieldsV1)
+	return set
 }
 
 // Compare compares two unstructured resources while ignoring:
@@ -368,6 +418,20 @@ func Compare(a, b *unstructured.Unstructured) bool {
 		return false
 	}
 	return equality.Semantic.DeepEqual(stripInsignificantFields(a), stripInsignificantFields(b))
+}
+
+// compareEnoManagedFields returns true when the Eno managed fields in both slices are equal.
+func compareEnoManagedFields(a, b []metav1.ManagedFieldsEntry) bool {
+	cmp := func(cur metav1.ManagedFieldsEntry) bool { return cur.Manager == "eno" }
+	ai := slices.IndexFunc(a, cmp)
+	ab := slices.IndexFunc(b, cmp)
+	if ai == -1 && ab == -1 {
+		return true
+	}
+	if ai == -1 || ab == -1 {
+		return false
+	}
+	return equality.Semantic.DeepEqual(a[ai].FieldsV1, b[ab].FieldsV1)
 }
 
 func stripInsignificantFields(u *unstructured.Unstructured) *unstructured.Unstructured {
