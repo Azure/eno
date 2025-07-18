@@ -95,7 +95,7 @@ This is commonly used to make a subset of properties managed by Eno optional i.e
 For example:
 
 ```json
-{ "path": "self.data.foo", "value": "default value", "condition": "!has(self.data.foo)" }
+{ "path": "self.data.foo", "value": "default value", "condition": "self.data.foo != 'default value'" }
 ```
 
 It's also possible to access composition metadata in condition expressions.
