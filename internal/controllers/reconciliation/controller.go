@@ -247,7 +247,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 				return false, fmt.Errorf("getting managed fields values for previous version: %w", err)
 			}
 
-			merged, fields, modified := resource.MergeEnoManagedFields(current.GetManagedFields(), dryRunPrev.GetManagedFields())
+			merged, fields, modified := resource.MergeEnoManagedFields(dryRunPrev.GetManagedFields(), current.GetManagedFields(), dryRun.GetManagedFields())
 			if modified {
 				current.SetManagedFields(merged)
 

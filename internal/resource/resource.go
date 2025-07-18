@@ -317,22 +317,42 @@ func NewInputRevisions(obj client.Object, refKey string) *apiv1.InputRevisions {
 	return &ir
 }
 
-// MergeEnoManagedFields merges Eno managed fields from the overrides slice onto the current.
-// All non-Eno managed fields from the current slice are preserved.
-func MergeEnoManagedFields(current, overrides []metav1.ManagedFieldsEntry) (copy []metav1.ManagedFieldsEntry, fields string, modified bool) {
-	currentSet := parseEnoManagedFields(current)
-	overridesSet := parseEnoManagedFields(overrides)
-	missing := overridesSet.Difference(currentSet)
+func MergeEnoManagedFields(prev, current, next []metav1.ManagedFieldsEntry) (copy []metav1.ManagedFieldsEntry, fields string, modified bool) {
+	// TODO: Better test coverage, better performance
+	prevEnoSet := parseEnoManagedFields(prev)
+	currentSet := parseAllFields(current)
+	currentEnoSet := parseEnoManagedFields(current)
+	nextEnoSet := parseEnoManagedFields(next)
 
-	// All fields in the overriding set already exist in the current
-	if missing.Empty() {
-		return current, "", false
+	if !prevEnoSet.Empty() && !nextEnoSet.Empty() && currentEnoSet.Empty() {
+		js, err := prevEnoSet.ToJSON()
+		if err == nil {
+			copy = append(current, metav1.ManagedFieldsEntry{
+				Manager:    "eno",
+				Operation:  metav1.ManagedFieldsOperationApply,
+				Time:       ptr.To(metav1.Now()),
+				FieldsType: "FieldsV1",
+				FieldsV1:   &metav1.FieldsV1{Raw: js},
+			})
+		}
+		return copy, "<full>", true
+	}
+
+	// Find fields that are being removed in the next state
+	prunedFields := prevEnoSet.Difference(nextEnoSet)
+	if prunedFields.Empty() {
+		return nil, "", false
+	}
+
+	// Ignore fields that aren't managed by anyone in the current state - they have probably been removed already
+	prunedFields = prunedFields.Intersection(currentSet)
+	if prunedFields.Empty() {
+		return nil, "", false
 	}
 
 	// Append the missing fields to the eno field manager entry,
 	// and remove them from others
-	var enoSeen bool
-	for _, entry := range current {
+	for _, entry := range prev {
 		if entry.FieldsV1 == nil {
 			copy = append(copy, entry)
 			continue
@@ -347,14 +367,9 @@ func MergeEnoManagedFields(current, overrides []metav1.ManagedFieldsEntry) (copy
 
 		var updated *fieldpath.Set
 		if entry.Manager == "eno" && entry.Operation == metav1.ManagedFieldsOperationApply {
-			enoSeen = true
-			updated = set.Union(missing)
+			updated = set.Union(prunedFields)
 		} else {
-			updated = set.Difference(missing)
-		}
-		if updated.Equals(set) {
-			copy = append(copy, entry)
-			continue
+			updated = set.Difference(prunedFields)
 		}
 
 		js, err := updated.ToJSON()
@@ -366,21 +381,7 @@ func MergeEnoManagedFields(current, overrides []metav1.ManagedFieldsEntry) (copy
 		copy = append(copy, entry)
 	}
 
-	// Eno somehow doesn't own anything - add an entry
-	if !enoSeen {
-		js, err := missing.ToJSON()
-		if err == nil {
-			copy = append(copy, metav1.ManagedFieldsEntry{
-				Manager:    "eno",
-				Operation:  metav1.ManagedFieldsOperationApply,
-				Time:       ptr.To(metav1.Now()),
-				FieldsType: "FieldsV1",
-				FieldsV1:   &metav1.FieldsV1{Raw: js},
-			})
-		}
-	}
-
-	return copy, missing.String(), true
+	return copy, prunedFields.String(), true
 }
 
 func parseEnoManagedFields(all []metav1.ManagedFieldsEntry) *fieldpath.Set {
@@ -395,6 +396,23 @@ func parseEnoManagedFields(all []metav1.ManagedFieldsEntry) *fieldpath.Set {
 			continue
 		}
 		break
+	}
+	return set
+}
+
+func parseAllFields(all []metav1.ManagedFieldsEntry) *fieldpath.Set {
+	// TODO: Refactor: nearly identical to the above func
+	set := &fieldpath.Set{}
+	for _, entry := range all {
+		if entry.FieldsV1 == nil || entry.Manager == "eno" || entry.Operation != metav1.ManagedFieldsOperationApply {
+			continue
+		}
+
+		entrySet := &fieldpath.Set{}
+		err := entrySet.FromJSON(bytes.NewBuffer(entry.FieldsV1.Raw))
+		if err == nil {
+			set = set.Union(entrySet)
+		}
 	}
 	return set
 }

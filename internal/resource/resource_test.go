@@ -396,146 +396,94 @@ func TestResourceOrdering(t *testing.T) {
 
 func TestManagedFields(t *testing.T) {
 	tests := []struct {
-		Name               string
-		ExpectModified     bool
-		Current, Overrides []metav1.ManagedFieldsEntry
-		Expected           []metav1.ManagedFieldsEntry
+		Name                    string
+		ExpectModified          bool
+		Previous, Current, Next []metav1.ManagedFieldsEntry
+		Expected                []metav1.ManagedFieldsEntry
 	}{
 		{
-			Name:           "matching",
+			Name:           "fully matching",
 			ExpectModified: false,
+			Previous: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo", "bar"}),
+				makeFields(t, "notEno", []string{"baz"}),
+			},
 			Current: []metav1.ManagedFieldsEntry{
 				makeFields(t, "eno", []string{"foo", "bar"}),
 				makeFields(t, "notEno", []string{"baz"}),
 			},
-			Overrides: []metav1.ManagedFieldsEntry{
-				makeFields(t, "eno", []string{"foo", "bar"}),
-			},
-			Expected: []metav1.ManagedFieldsEntry{
+			Next: []metav1.ManagedFieldsEntry{
 				makeFields(t, "eno", []string{"foo", "bar"}),
 				makeFields(t, "notEno", []string{"baz"}),
 			},
 		},
 		{
-			Name:           "missing from overrides",
-			ExpectModified: false,
+			Name:           "all eno managed fields lost",
+			ExpectModified: true,
+			Previous: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo", "bar"}),
+				makeFields(t, "notEno", []string{"baz"}),
+			},
 			Current: []metav1.ManagedFieldsEntry{
-				makeFields(t, "eno", []string{"foo", "bar"}),
+				makeFields(t, "notEno", []string{"baz"}),
 			},
-			Overrides: []metav1.ManagedFieldsEntry{
-				makeFields(t, "eno", []string{"foo"}),
+			Next: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo", "bar"}),
+				makeFields(t, "notEno", []string{"baz"}),
 			},
 			Expected: []metav1.ManagedFieldsEntry{
+				makeFields(t, "notEno", []string{"baz"}),
 				makeFields(t, "eno", []string{"foo", "bar"}),
 			},
 		},
 		{
-			Name:           "missing from current",
+			Name:           "field removed, owned by another field manager",
 			ExpectModified: true,
-			Current: []metav1.ManagedFieldsEntry{
-				makeFields(t, "eno", []string{"foo"}),
-			},
-			Overrides: []metav1.ManagedFieldsEntry{
+			Previous: []metav1.ManagedFieldsEntry{
 				makeFields(t, "eno", []string{"foo", "bar"}),
 			},
-			Expected: []metav1.ManagedFieldsEntry{
-				makeFields(t, "eno", []string{"foo", "bar"}),
-			},
-		},
-		{
-			Name:           "missing from (missing) current",
-			ExpectModified: true,
-			Current:        nil,
-			Overrides: []metav1.ManagedFieldsEntry{
-				makeFields(t, "eno", []string{"foo", "bar"}),
-			},
-			Expected: []metav1.ManagedFieldsEntry{
-				makeFields(t, "eno", []string{"foo", "bar"}),
-			},
-		},
-		{
-			Name:           "not managed by eno in current",
-			ExpectModified: true,
 			Current: []metav1.ManagedFieldsEntry{
 				makeFields(t, "eno", []string{"foo"}),
 				makeFields(t, "notEno", []string{"bar"}),
 			},
-			Overrides: []metav1.ManagedFieldsEntry{
-				makeFields(t, "eno", []string{"foo", "bar"}),
+			Next: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo"}),
 			},
 			Expected: []metav1.ManagedFieldsEntry{
 				makeFields(t, "eno", []string{"foo", "bar"}),
-				makeFields(t, "notEno", []string{}),
 			},
 		},
 		{
-			Name:           "invalid values owned by eno are preserved",
-			ExpectModified: true,
-			Current: []metav1.ManagedFieldsEntry{
-				makeFields(t, "notEno", []string{"foo", "bar"}),
-				{
-					Manager:    "eno",
-					FieldsType: "notv1",
-				},
-				{
-					Manager:    "eno",
-					FieldsType: "FieldsV1",
-					FieldsV1:   &metav1.FieldsV1{Raw: []byte("!nv@lidJSON")},
-				},
-			},
-			Overrides: []metav1.ManagedFieldsEntry{
-				makeFields(t, "eno", []string{"baz"}),
-			},
-			Expected: []metav1.ManagedFieldsEntry{
-				makeFields(t, "notEno", []string{"foo", "bar"}),
-				{
-					Manager:    "eno",
-					FieldsType: "notv1",
-				},
-				{
-					Manager:    "eno",
-					FieldsType: "FieldsV1",
-					FieldsV1:   &metav1.FieldsV1{Raw: []byte("!nv@lidJSON")},
-				},
-				makeFields(t, "eno", []string{"baz"}),
-			},
-		},
-		{
-			Name:           "invalid values not owned by eno are preserved",
+			Name:           "field removed, already owned by eno",
 			ExpectModified: false,
+			Previous: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo", "bar"}),
+			},
 			Current: []metav1.ManagedFieldsEntry{
 				makeFields(t, "eno", []string{"foo", "bar"}),
-				{
-					Manager:    "notEno",
-					FieldsType: "notv1",
-				},
-				{
-					Manager:    "notEno",
-					FieldsType: "FieldsV1",
-					FieldsV1:   &metav1.FieldsV1{Raw: []byte("!nv@lidJSON")},
-				},
 			},
-			Overrides: []metav1.ManagedFieldsEntry{
+			Next: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo"}),
+			},
+		},
+		{
+			Name:           "field removed, missing from current state",
+			ExpectModified: false,
+			Previous: []metav1.ManagedFieldsEntry{
 				makeFields(t, "eno", []string{"foo", "bar"}),
 			},
-			Expected: []metav1.ManagedFieldsEntry{
-				makeFields(t, "eno", []string{"foo", "bar"}),
-				{
-					Manager:    "notEno",
-					FieldsType: "notv1",
-				},
-				{
-					Manager:    "notEno",
-					FieldsType: "FieldsV1",
-					FieldsV1:   &metav1.FieldsV1{Raw: []byte("!nv@lidJSON")},
-				},
+			Current: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo"}),
+			},
+			Next: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo"}),
 			},
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.Name, func(t *testing.T) {
-			merged, _, modified := MergeEnoManagedFields(tc.Current, tc.Overrides)
+			merged, _, modified := MergeEnoManagedFields(tc.Previous, tc.Current, tc.Next)
 			assert.Equal(t, tc.ExpectModified, modified)
 			assert.Equal(t, parseFieldEntries(t, tc.Expected), parseFieldEntries(t, merged))
 
