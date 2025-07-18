@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/alecthomas/participle/v2"
+	"github.com/alecthomas/participle/v2/lexer"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
@@ -21,12 +22,13 @@ type PathExpr struct {
 //
 // Supported syntax:
 // - `field.anotherfield`: object field traversal
-// - `field["anotherField"]`: alternative object field traversal (useful for values containing dots)
+// - `field["anotherField"]` or `field['anotherField']`: alternative object field traversal (supports any field name including hyphens)
 // - `field[2]`: array indexing
 // - `field[*]`: array wildcards
 // - `field[someKey="value"]`: object array field matchers
 //
 // Expressions can be chained, e.g. `field.anotherfield[2].yetAnotherField`.
+// For field names containing special characters like hyphens, use bracket notation: `field['foo-bar']`.
 func ParsePathExpr(expr string) (*PathExpr, error) {
 	ast, err := parser.ParseString("", expr)
 	if err != nil {
@@ -35,7 +37,15 @@ func ParsePathExpr(expr string) (*PathExpr, error) {
 	return &PathExpr{ast: ast}, nil
 }
 
-var parser = participle.MustBuild[pathExprAST]()
+var pathExprLexer = lexer.MustSimple([]lexer.SimpleRule{
+	{Name: "Ident", Pattern: `[a-zA-Z_][a-zA-Z0-9_]*`},
+	{Name: "String", Pattern: `"([^"\\]|\\.)*"|'([^'\\]|\\.)*'`},
+	{Name: "Int", Pattern: `\d+`},
+	{Name: "Punct", Pattern: `[.\[\]=*]`},
+	{Name: "whitespace", Pattern: `\s+`},
+})
+
+var parser = participle.MustBuild[pathExprAST](participle.Lexer(pathExprLexer))
 
 type pathExprAST struct {
 	Sections []*section `@@*`
@@ -101,6 +111,7 @@ func (p *PathExpr) toSMDPath() (fieldpath.Path, error) {
 func (s *section) toPathElement() fieldpath.PathElement {
 	switch {
 	case s.Field != nil:
+		// Field names in dot notation are always unquoted identifiers
 		return fieldpath.PathElement{FieldName: s.Field}
 
 	case s.Index != nil:

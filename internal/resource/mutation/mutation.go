@@ -69,6 +69,23 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 	return Apply(o.Path, mutated.Object, o.Value)
 }
 
+// unquoteKey removes quotes from a key string, handling both single and double quotes
+func unquoteKey(key string) string {
+	if len(key) >= 2 {
+		if (key[0] == '"' && key[len(key)-1] == '"') || (key[0] == '\'' && key[len(key)-1] == '\'') {
+			// For double quotes, use strconv.Unquote to handle escape sequences properly
+			if key[0] == '"' {
+				if unquoted, err := strconv.Unquote(key); err == nil {
+					return unquoted
+				}
+			}
+			// For single quotes or if strconv.Unquote fails, use simple slicing
+			return key[1 : len(key)-1]
+		}
+	}
+	return key
+}
+
 // Apply applies a mutation i.e. sets the value(s) referred to by the path expression.
 // Missing or nil values in the path will not be created, and will cause an error.
 func Apply(path *PathExpr, obj, value any) error {
@@ -118,7 +135,7 @@ func apply(path *PathExpr, startIndex int, obj any, value any) error {
 			if !ok {
 				continue
 			}
-			keyStr := (*key)[1 : len(*key)-1] // remove quotes
+			keyStr := unquoteKey(*key)
 			if startIndex+i == len(path.ast.Sections)-1 {
 				if value == nil {
 					delete(m, keyStr)

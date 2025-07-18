@@ -349,3 +349,169 @@ func TestOverrideManagedFields(t *testing.T) {
 		return cm.Data["foo"] == "bar"
 	})
 }
+
+func TestOverrideHyphenatedFieldNames(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]any{
+						"eno.azure.io/overrides": `[
+							{"path": "self.data[\"hyphen-key\"]", "value": "double-quote-value"},
+							{"path": "self.data['single-hyphen-key']", "value": "single-quote-value"},
+							{"path": "self.metadata.annotations[\"custom-annotation\"]", "value": "annotation-value"}
+						]`,
+					},
+				},
+				"data": map[string]any{
+					"hyphen-key":        "original-value",
+					"single-hyphen-key": "original-single-value",
+					"regular":           "unchanged",
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["hyphen-key"] == "double-quote-value" &&
+			cm.Data["single-hyphen-key"] == "single-quote-value" &&
+			cm.Data["regular"] == "unchanged" &&
+			cm.Annotations["custom-annotation"] == "annotation-value"
+	})
+}
+
+func TestOverrideHyphenatedFieldNamesWithConditions(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]any{
+						// Test both hyphenated path AND hyphenated condition as required by issue #443
+						"eno.azure.io/overrides": `[{"path": "self.data[\"env-var\"]", "value": "conditional-value", "condition": "self.data[\"enable-flag\"] == \"true\""}]`,
+					},
+				},
+				"data": map[string]any{
+					"env-var":     "original-env-value",
+					"enable-flag": "true", // Start with condition enabled
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	// Wait for initial reconciliation
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+
+	// Verify the override was applied since condition is true
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["env-var"] == "conditional-value"
+	})
+}
+
+func TestOverrideHyphenatedFieldNamesWithPolling(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]any{
+						// Test polling with hyphenated fields - using same pattern as TestOverridePolling
+						"eno.azure.io/overrides":          `[{"path": "self.data[\"env-var\"]", "value": "conditional-value", "condition": "self.data[\"enable-flag\"] == \"true\""}]`,
+						"eno.azure.io/reconcile-interval": "10ms",
+					},
+				},
+				"data": map[string]any{"env-var": "original-env-value"}, // Start without enable-flag
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	// Wait for initial reconciliation
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+
+	// Verify initial state - no enable-flag means condition is false
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["env-var"] == "original-env-value"
+	})
+
+	// Enable the condition by setting the flag
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		if err != nil {
+			return err
+		}
+		cm.Data["enable-flag"] = "true"
+		return mgr.DownstreamClient.Update(ctx, cm)
+	})
+	require.NoError(t, err)
+
+	// The override should eventually be applied due to polling
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["env-var"] == "conditional-value"
+	})
+}
