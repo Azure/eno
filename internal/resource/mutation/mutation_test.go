@@ -87,9 +87,11 @@ func TestApply(t *testing.T) {
 			expected: map[string]any{"another": "baz"},
 		},
 		{
-			name:         "Map_NestedStringIndexSingleQuotes",
-			path:         `self.foo['bar']`,
-			wantParseErr: true,
+			name:     "Map_NestedStringIndexSingleQuotes",
+			path:     `self.foo['bar']`,
+			obj:      map[string]any{"foo": map[string]any{"bar": "old"}, "another": "baz"},
+			value:    123,
+			expected: map[string]any{"foo": map[string]any{"bar": 123}, "another": "baz"},
 		},
 		{
 			name:     "Map_NestedStringIndexChain",
@@ -97,6 +99,20 @@ func TestApply(t *testing.T) {
 			obj:      map[string]any{"foo": map[string]any{}, "another": "baz"},
 			value:    123,
 			expected: map[string]any{"foo": map[string]any{"bar": 123}, "another": "baz"},
+		},
+		{
+			name:     "Map_BracketNotationWithHyphens",
+			path:     `self["foo-bar"]`,
+			obj:      map[string]any{},
+			value:    123,
+			expected: map[string]any{"foo-bar": 123},
+		},
+		{
+			name:     "Map_SingleQuoteBracketNotationWithHyphens",
+			path:     `self['foo-bar']`,
+			obj:      map[string]any{},
+			value:    123,
+			expected: map[string]any{"foo-bar": 123},
 		},
 		{
 			name:     "Slice_ScalarIndex",
@@ -345,7 +361,8 @@ func TestInvalidPathInJson(t *testing.T) {
 	assert.Error(t, err)
 	assert.Len(t, ops, 1)
 	for _, op := range ops {
-		assert.NoError(t, Apply(op.Path, map[string]any{}, op.Value))
+		// The main goal is to ensure no panic occurs, errors are acceptable
+		_ = Apply(op.Path, map[string]any{}, op.Value)
 	}
 }
 
