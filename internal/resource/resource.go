@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
 )
 
 var patchGVK = schema.GroupVersionKind{
@@ -315,35 +316,108 @@ func NewInputRevisions(obj client.Object, refKey string) *apiv1.InputRevisions {
 	return &ir
 }
 
-// MergeEnoManagedFields merges Eno managed fields from the overrides slice onto the current.
-// All non-Eno managed fields from the current slice are preserved.
-func MergeEnoManagedFields(current, overrides []metav1.ManagedFieldsEntry) (copy []metav1.ManagedFieldsEntry) {
-	for _, cur := range overrides {
-		if cur.Manager == "eno" {
-			copy = append(copy, cur)
-			break
+// MergeEnoManagedFields corrects managed fields drift to ensure Eno can remove fields
+// that are no longer set by the synthesizer, even when another client corrupts the
+// managed fields metadata. Returns corrected managed fields, affected field paths,
+// and whether correction was needed.
+func MergeEnoManagedFields(prev, current, next []metav1.ManagedFieldsEntry) (copy []metav1.ManagedFieldsEntry, fields string, modified bool) {
+	prevEnoSet := parseEnoFields(prev)
+	nextEnoSet := parseEnoFields(next)
+
+	if prevEnoSet.Empty() {
+		return nil, "", false
+	}
+
+	currentEnoSet := parseEnoFields(current)
+
+	var expectedFields *fieldpath.Set
+	if !nextEnoSet.Empty() && currentEnoSet.Empty() {
+		expectedFields = prevEnoSet
+	} else {
+		expectedFields = prevEnoSet.Difference(nextEnoSet)
+		if expectedFields.Empty() {
+			return nil, "", false
+		}
+
+		expectedFields = expectedFields.Intersection(parseAllFields(current))
+		if expectedFields.Empty() {
+			return nil, "", false
 		}
 	}
-	for _, cur := range current {
-		if cur.Manager != "eno" {
-			copy = append(copy, cur)
-		}
-	}
-	return
+
+	return adjustManagedFields(prev, expectedFields), expectedFields.String(), true
 }
 
-// CompareEnoManagedFields returns true when the Eno managed fields in both slices are equal.
-func CompareEnoManagedFields(a, b []metav1.ManagedFieldsEntry) bool {
-	cmp := func(cur metav1.ManagedFieldsEntry) bool { return cur.Manager == "eno" }
-	ai := slices.IndexFunc(a, cmp)
-	ab := slices.IndexFunc(b, cmp)
-	if ai == -1 && ab == -1 {
-		return true
+func adjustManagedFields(entries []metav1.ManagedFieldsEntry, expected *fieldpath.Set) []metav1.ManagedFieldsEntry {
+	copy := make([]metav1.ManagedFieldsEntry, 0, len(entries))
+
+	for _, entry := range entries {
+		if entry.FieldsV1 == nil {
+			copy = append(copy, entry)
+			continue
+		}
+
+		set := parseFieldsEntry(entry)
+		if set == nil {
+			copy = append(copy, entry)
+			continue
+		}
+
+		var updated *fieldpath.Set
+		if entry.Manager == "eno" && entry.Operation == metav1.ManagedFieldsOperationApply {
+			updated = set.Union(expected)
+		} else {
+			updated = set.Difference(expected)
+		}
+
+		js, err := updated.ToJSON()
+		if err != nil {
+			copy = append(copy, entry)
+			continue
+		}
+
+		entry.FieldsV1 = &metav1.FieldsV1{Raw: js}
+		copy = append(copy, entry)
 	}
-	if ai == -1 || ab == -1 {
-		return false
+
+	return copy
+}
+
+func parseEnoFields(entries []metav1.ManagedFieldsEntry) *fieldpath.Set {
+	for _, entry := range entries {
+		if entry.Manager == "eno" && entry.Operation == metav1.ManagedFieldsOperationApply {
+			if set := parseFieldsEntry(entry); set != nil {
+				return set
+			}
+		}
 	}
-	return equality.Semantic.DeepEqual(a[ai].FieldsV1, b[ab].FieldsV1)
+	return &fieldpath.Set{}
+}
+
+func parseAllFields(entries []metav1.ManagedFieldsEntry) *fieldpath.Set {
+	result := &fieldpath.Set{}
+	for _, entry := range entries {
+		if entry.Manager != "eno" {
+			if set := parseFieldsEntry(entry); set != nil {
+				result = result.Union(set)
+			}
+		}
+	}
+	return result
+}
+
+// parseFieldsEntry safely parses a single managed fields entry
+func parseFieldsEntry(entry metav1.ManagedFieldsEntry) *fieldpath.Set {
+	if entry.FieldsV1 == nil {
+		return nil
+	}
+
+	set := &fieldpath.Set{}
+	err := set.FromJSON(bytes.NewBuffer(entry.FieldsV1.Raw))
+	if err != nil {
+		return nil
+	}
+	return set
 }
 
 // Compare compares two unstructured resources while ignoring:
@@ -361,10 +435,24 @@ func Compare(a, b *unstructured.Unstructured) bool {
 	if a == nil || b == nil {
 		return false
 	}
-	if !CompareEnoManagedFields(a.GetManagedFields(), b.GetManagedFields()) {
+	if !compareEnoManagedFields(a.GetManagedFields(), b.GetManagedFields()) {
 		return false
 	}
 	return equality.Semantic.DeepEqual(stripInsignificantFields(a), stripInsignificantFields(b))
+}
+
+// compareEnoManagedFields returns true when the Eno managed fields in both slices are equal.
+func compareEnoManagedFields(a, b []metav1.ManagedFieldsEntry) bool {
+	cmp := func(cur metav1.ManagedFieldsEntry) bool { return cur.Manager == "eno" }
+	ai := slices.IndexFunc(a, cmp)
+	ab := slices.IndexFunc(b, cmp)
+	if ai == -1 && ab == -1 {
+		return true
+	}
+	if ai == -1 || ab == -1 {
+		return false
+	}
+	return equality.Semantic.DeepEqual(a[ai].FieldsV1, b[ab].FieldsV1)
 }
 
 func stripInsignificantFields(u *unstructured.Unstructured) *unstructured.Unstructured {
