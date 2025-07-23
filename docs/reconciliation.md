@@ -20,21 +20,23 @@ Resources are automatically deleted if they are no longer synthesized (returned 
 
 > This can be disabled by setting the `eno.azure.io/deletion-strategy: orphan` annotation on the composition.
 
-## Annotations
-
-Eno synthesizers can use special annotations to configure the Eno reconciler.
-
-> Any labels/annotations prefixed with `eno.azure.io/` will not be included in the final materialized/reconciled resource.
-
-### Reconciliation Interval
+## Drift Detection
 
 By default, resources are reconciled when their expected state changes or when `eno-reconciler` restarts.
-The `reconcile-interval` annotation can be used to periodically reconcile the resource to correct for drift, etc.
+
+In some cases it's useful for the Eno reconciler to regularly sync a resource. 
+Syncing the resource will correct any drift, re-evaluate any conditional overrides, etc.
 
 ```yaml
 annotations:
   eno.azure.io/reconcile-interval: "15m" # supports any value parsable by Go's `time.ParseDuration`
 ```
+
+## Annotations
+
+Eno synthesizers can use special annotations to configure the Eno reconciler.
+
+> Any labels/annotations prefixed with `eno.azure.io/` will not be included in the final materialized/reconciled resource.
 
 ### Readiness Expressions
 
