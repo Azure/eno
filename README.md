@@ -27,7 +27,7 @@ kubectl apply -f "https://github.com/Azure/eno/releases/download/${TAG}/manifest
 
 Synthesizers model a reusable set of resources, similar to an `apt` package or Helm chart.
 
-This example uses a simple bash script but real applications should use [KCL](./pkg/kclshim/), [Helm](./pkg/helmshim/), [Go](./pkg/function/), or any other process that implements the [KRM function API](https://github.com/kubernetes-sigs/kustomize/blob/master/cmd/config/docs/api-conventions/functions-spec.md).
+This example uses a simple bash script but real applications should use [Helm](./examples/03-helm-shim), [Go](./examples/02-go-synthesizer/main.go), or [KCL](./pkg/kclshim/) (currently beta-ish) or any other process that implements the [KRM function API](https://github.com/kubernetes-sigs/kustomize/blob/master/cmd/config/docs/api-conventions/functions-spec.md).
 
 ```yaml
 kubectl apply -f - <<YAML
