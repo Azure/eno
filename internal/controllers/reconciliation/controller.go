@@ -214,6 +214,10 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 
 	// Apply Eno patches
 	if isPatch {
+		if patchJson == nil {
+			return false, nil // patch is empty
+		}
+
 		reconciliationActions.WithLabelValues("patch").Inc()
 		updated := current.DeepCopy()
 		err := c.upstreamClient.Patch(ctx, updated, client.RawPatch(types.JSONPatchType, patchJson))
