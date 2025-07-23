@@ -3,9 +3,8 @@
 Compose Kubernetes deployments.
 
 - 🎹 **Synthesize**: generate manifests dynamically in short-lived pods
-- ♻️ **Reconcile**: apply the generated configurations to one (or more!) clusters
-- 🏃‍➡️ **React**: track and aggregate the readiness state of managed resources
- 
+- ♻️ **Reconcile**: apply the generated configurations and rapidly correct any drift
+- 🏃‍➡️ **React**: re-synthesize when input resources are modified
 
 ## What can Eno do?
 
