@@ -6,15 +6,6 @@ Compose Kubernetes deployments.
 - ♻️ **Reconcile**: apply the generated configurations and rapidly correct any drift
 - 🏃‍➡️ **React**: re-synthesize when input resources are modified
 
-## What can Eno do?
-
-- Magically regenerate configurations when their inputs change
-- Safely roll out changes that impact many instances of a configuration
-- Support deployments larger than apiserver's 1.5MB resource limit
-- Define complex ordering relationships between resources
-- Patch resources without taking full ownership
-- Use custom CEL expressions to determine the readiness of resources
-
 ## Docs
 
 - [Reconciliation](./docs/reconciliation.md)
