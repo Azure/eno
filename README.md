@@ -25,10 +25,11 @@ kubectl apply -f "https://github.com/Azure/eno/releases/download/${TAG}/manifest
 
 ### 2. Create a Synthesizer
 
-Synthesizers reference a container image that implements a [KRM function](https://github.com/kubernetes-sigs/kustomize/blob/master/cmd/config/docs/api-conventions/functions-spec.md).
-This example uses a small bash script, but you will probably want to use `github.com/Azure/eno/pkg/function`.
+Synthesizers model a reusable set of resources, similar to an `apt` package or Helm chart.
 
-```bash
+This example uses a simple bash script but real applications should use [KCL](./pkg/kclshim/), [Helm](./pkg/helmshim/), [Go](./pkg/function/), or any other process that implements the [KRM function API](https://github.com/kubernetes-sigs/kustomize/blob/master/cmd/config/docs/api-conventions/functions-spec.md).
+
+```yaml
 kubectl apply -f - <<YAML
 apiVersion: eno.azure.io/v1
 kind: Synthesizer
@@ -36,62 +37,60 @@ metadata:
   name: getting-started
   namespace: default
 spec:
-  image: docker.io/ubuntu:latest
+  # Refs are like arguments.
+  # They specify the type of an input required by the
+  # synthesizer without "binding" to a particular resource.
   refs:
     - key: config
       resource:
         group: "" # core
         version: v1
         kind: ConfigMap
+
+  # Synthesizers are simple containers distributed
+  # as OCI images and executed in short-lived pods
+  image: docker.io/ubuntu:latest
   command:
   - /bin/bash
   - -c
   - |
-    # Read inputs from stdin
-    replica_count=\$(sed -n 's/.*"replicas":"\([^"]*\)".*/\1/p')
+      # Read inputs from stdin
+      replica_count=\$(sed -n 's/.*"replicas":"\([^"]*\)".*/\1/p')
 
-    # Write the resulting KRM resource list to stdout
-    echo '{
-      "apiVersion":"config.kubernetes.io/v1",
-      "kind":"ResourceList",
-      "items":[
-        {
-          "apiVersion":"apps/v1",
-          "kind":"Deployment",
-          "metadata":{
-            "name":"my-app",
-            "namespace": "default"
-          },
-          "spec": {
-            "replicas": REPLICA_COUNT,
-            "selector": { "matchLabels": { "app": "getting-started" } },
-            "template": {
-              "metadata": { "labels": { "app": "getting-started" } },
-              "spec": {
-                "containers": [{ "name": "svc", "image": "nginx" }]
+      # Write the resulting KRM resource list to stdout
+      echo '{
+        "apiVersion":"config.kubernetes.io/v1",
+        "kind":"ResourceList",
+        "items":[
+          {
+            "apiVersion":"apps/v1",
+            "kind":"Deployment",
+            "metadata":{
+              "name":"my-app",
+              "namespace": "default"
+            },
+            "spec": {
+              "replicas": REPLICA_COUNT,
+              "selector": { "matchLabels": { "app": "getting-started" } },
+              "template": {
+                "metadata": { "labels": { "app": "getting-started" } },
+                "spec": {
+                  "containers": [{ "name": "svc", "image": "nginx" }]
+                }
               }
             }
           }
-        }
-      ]
-    }' | sed "s/REPLICA_COUNT/\$replica_count/g"
+        ]
+      }' | sed "s/REPLICA_COUNT/\$replica_count/g"
 YAML
 ```
 
 ### 3. Create a Composition
 
-Compositions bind a unique set of inputs to a synthesizer and manage the lifecycle of the resulting configuration.
+Compositions instantiate Synthesizers, similar to installing a package or creating a Helm release.
 
-```bash
+```yaml
 kubectl apply -f - <<YAML
-  apiVersion: v1
-  kind: ConfigMap
-  metadata:
-    name: my-first-config
-    namespace: default
-  data:
-    replicas: "1"
----
   apiVersion: eno.azure.io/v1
   kind: Composition
   metadata:
@@ -99,12 +98,25 @@ kubectl apply -f - <<YAML
     namespace: default
   spec:
     synthesizer:
-      name: getting-started
+      name: getting-started # references the name of the Synthesizer object
+
+    # Bindings assign a specific object to `refs` exposed by the Synthesizer.
+    # Many compositions can use the one synthesizer while passing unique inputs.
     bindings:
       - key: config
         resource:
           name: my-first-config
           namespace: default
+
+---
+
+  apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: my-first-config
+    namespace: default
+  data:
+    replicas: "1"
 YAML
 ```
 
@@ -122,7 +134,7 @@ my-app   1/1     1            1           0s
 
 ### 4. Resynthesize
 
-Eno will automatically resynthesize the composition when its inputs change.
+Eno will automatically "resynthesize" the composition when its inputs change.
 
 ```bash
 kubectl patch configmap my-first-config --patch '{"data":{"replicas":"2"}}'
