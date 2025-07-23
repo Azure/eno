@@ -681,6 +681,144 @@ func parseFieldEntries(t *testing.T, entries []metav1.ManagedFieldsEntry) []*fie
 	return sets
 }
 
+func TestSnapshotPatch(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		Name     string
+		Manifest string
+		Assert   func(*testing.T, *Snapshot)
+	}{
+		{
+			Name: "non-patch resource",
+			Manifest: `{
+				"apiVersion": "v1",
+				"kind": "ConfigMap",
+				"metadata": {
+					"name": "foo",
+					"namespace": "bar"
+				},
+				"data": {
+					"key": "value"
+				}
+			}`,
+			Assert: func(t *testing.T, s *Snapshot) {
+				patch, isPatch, err := s.Patch()
+				require.NoError(t, err)
+				assert.False(t, isPatch)
+				assert.Nil(t, patch)
+			},
+		},
+		{
+			Name: "patch with operations",
+			Manifest: `{
+				"apiVersion": "eno.azure.io/v1",
+				"kind": "Patch",
+				"metadata": {
+					"name": "foo",
+					"namespace": "bar"
+				},
+				"patch": {
+					"apiVersion": "v1",
+					"kind": "ConfigMap",
+					"ops": [
+						{ "op": "add", "path": "/data/foo", "value": "bar" },
+						{ "op": "replace", "path": "/data/existing", "value": "new" }
+					]
+				}
+			}`,
+			Assert: func(t *testing.T, s *Snapshot) {
+				patch, isPatch, err := s.Patch()
+				require.NoError(t, err)
+				assert.True(t, isPatch)
+				assert.NotNil(t, patch)
+			},
+		},
+		{
+			Name: "patch with empty ops",
+			Manifest: `{
+				"apiVersion": "eno.azure.io/v1",
+				"kind": "Patch",
+				"metadata": {
+					"name": "foo",
+					"namespace": "bar"
+				},
+				"patch": {
+					"apiVersion": "v1",
+					"kind": "ConfigMap",
+					"ops": []
+				}
+			}`,
+			Assert: func(t *testing.T, s *Snapshot) {
+				patch, isPatch, err := s.Patch()
+				require.NoError(t, err)
+				assert.True(t, isPatch)
+				assert.Nil(t, patch)
+			},
+		},
+		{
+			Name: "patch without ops field",
+			Manifest: `{
+				"apiVersion": "eno.azure.io/v1",
+				"kind": "Patch",
+				"metadata": {
+					"name": "foo",
+					"namespace": "bar"
+				},
+				"patch": {
+					"apiVersion": "v1",
+					"kind": "ConfigMap"
+				}
+			}`,
+			Assert: func(t *testing.T, s *Snapshot) {
+				patch, isPatch, err := s.Patch()
+				require.NoError(t, err)
+				assert.True(t, isPatch)
+				assert.Nil(t, patch)
+			},
+		},
+		{
+			Name: "patch with single operation",
+			Manifest: `{
+				"apiVersion": "eno.azure.io/v1",
+				"kind": "Patch",
+				"metadata": {
+					"name": "foo",
+					"namespace": "bar"
+				},
+				"patch": {
+					"apiVersion": "v1",
+					"kind": "ConfigMap",
+					"ops": [
+						{ "op": "remove", "path": "/data/unwanted" }
+					]
+				}
+			}`,
+			Assert: func(t *testing.T, s *Snapshot) {
+				patch, isPatch, err := s.Patch()
+				require.NoError(t, err)
+				assert.True(t, isPatch)
+				assert.NotNil(t, patch)
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.Name, func(t *testing.T) {
+			r, err := NewResource(ctx, &apiv1.ResourceSlice{
+				Spec: apiv1.ResourceSliceSpec{
+					Resources: []apiv1.Manifest{{Manifest: tc.Manifest}},
+				},
+			}, 0)
+			require.NoError(t, err)
+
+			snapshot, err := r.Snapshot(ctx, &apiv1.Composition{}, nil)
+			require.NoError(t, err)
+			tc.Assert(t, snapshot)
+		})
+	}
+}
+
 func TestComparisons(t *testing.T) {
 	env := &envtest.Environment{}
 	t.Cleanup(func() {

@@ -156,6 +156,9 @@ func (r *Snapshot) Patch() ([]byte, bool, error) {
 	}
 
 	ops, _, _ := unstructured.NestedSlice(r.parsed.Object, "patch", "ops")
+	if len(ops) == 0 {
+		return nil, true, nil // empty patch == empty json
+	}
 	js, err := json.Marshal(&ops)
 	if err != nil {
 		return nil, false, err
