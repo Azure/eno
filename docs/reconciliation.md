@@ -2,17 +2,17 @@
 
 Synthesized compositions are reconciled into real k8s resources by the `eno-reconciler` process.
 
-## Merge Semantics
-
-By default, Eno uses [server-side apply](https://kubernetes.io/docs/reference/using-api/server-side-apply/) with `--force-conflicts=true` to write resources it manages.
-
-> Client-side patching is supported by setting `--disable-ssa`. But beware that Eno can only add and update fields. Fields no longer returned from the synthesizer will not be removed.
-
 ## Opacity
 
 Eno is designed to treat the resources it manages as completely opaque - it doesn't "understand" their schema, infer dependencies, etc..
 
 There is one exception to this rule: CRDs are always reconciled before CRs of the kind they define.
+
+## Merge Semantics
+
+By default, Eno uses [server-side apply](https://kubernetes.io/docs/reference/using-api/server-side-apply/) with `--force-conflicts=true` to write resources it manages.
+
+> Client-side patching is supported by setting `--disable-ssa`. But beware that Eno can only add and update fields. Fields no longer returned from the synthesizer will not be removed.
 
 ## Annotations
 
