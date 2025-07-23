@@ -1,6 +1,11 @@
-# Patch Meta-Resource
+# Patch
 
-Use jsonpatch to modify resources that are not managed by Eno.
+Patch resources are special meta-resources that can be returned by synthesizers but do not actually exist as Kubernetes APIs. 
+They're used to configure the `eno-reconciler` process to modify resources it doesn't otherwise manage.
+
+> NOTE:
+>
+> Most use-cases don't need Patch resources. Only use them if you're sure it's the right option!
 
 ```yaml
 apiVersion: eno.azure.io/v1
