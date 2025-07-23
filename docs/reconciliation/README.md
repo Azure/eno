@@ -35,3 +35,9 @@ Syncing the resource will correct any drift, re-evaluate any conditional overrid
 annotations:
   eno.azure.io/reconcile-interval: "15m" # supports any value parsable by Go's `time.ParseDuration`
 ```
+
+## Advanced Concepts
+
+- [Readiness](./readiness.md)
+- [Overrides](./overrides.md)
+- [Patch](./patch.md)
