@@ -1,7 +1,8 @@
 # Reconciliation
 
-Once a composition has been synthesized, the resulting resources are reconciled with a running k8s cluster by the `eno-reconciler` process.
+Once a composition has been synthesized, the resulting synthesis is reconciled against a k8s cluster by the `eno-reconciler` process.
 
+Reconciliation uses a standard controller-runtime controller to sync each resource returned by the synthesizer.
 
 ## Merge Semantics
 

@@ -47,4 +47,3 @@ annotations:
   eno.azure.io/synthesizer-generation: "123" # Will block synthesis if < the synthesizer's metadata.generation
   eno.azure.io/composition-generation: "321" # Will block synthesis if < the composition's metadata.generation
 ```
-
