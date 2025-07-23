@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -12,6 +13,8 @@ import (
 
 	enocel "github.com/Azure/eno/internal/cel"
 )
+
+var quotedStringRegex = regexp.MustCompile(`^(['"])(.*?)(['"])$`)
 
 // Op is an operation that conditionally assigns a value to a path within an object.
 // Designed to be sent over the wire as JSON.
@@ -71,16 +74,17 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 
 // unquoteKey removes quotes from a key string, handling both single and double quotes
 func unquoteKey(key string) string {
-	if len(key) >= 2 {
-		if (key[0] == '"' && key[len(key)-1] == '"') || (key[0] == '\'' && key[len(key)-1] == '\'') {
+	if matches := quotedStringRegex.FindStringSubmatch(key); matches != nil {
+		// Ensure opening and closing quotes match
+		if matches[1] == matches[3] {
 			// For double quotes, use strconv.Unquote to handle escape sequences properly
-			if key[0] == '"' {
+			if matches[1] == `"` {
 				if unquoted, err := strconv.Unquote(key); err == nil {
 					return unquoted
 				}
 			}
-			// For single quotes or if strconv.Unquote fails, use simple slicing
-			return key[1 : len(key)-1]
+			// For single quotes or if strconv.Unquote fails, return the content between quotes
+			return matches[2]
 		}
 	}
 	return key
