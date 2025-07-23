@@ -14,6 +14,12 @@ By default, Eno uses [server-side apply](https://kubernetes.io/docs/reference/us
 
 > Client-side patching is supported by setting `--disable-ssa`. But beware that Eno can only add and update fields. Fields no longer returned from the synthesizer will not be removed.
 
+## Deletion
+
+Resources are automatically deleted if they are no longer synthesized (returned by the synthesizer) for a given composition.
+
+> This can be disabled by setting the `eno.azure.io/deletion-strategy: orphan` annotation on the composition.
+
 ## Annotations
 
 Eno synthesizers can use special annotations to configure the Eno reconciler.
@@ -136,18 +142,6 @@ Useful for resources that logically have a single reader (e.g. CRDs).
 annotations:
   eno.azure.io/replace: "true"
 ```
-
-### Orphaning
-
-The `orphan` deletion strategy disables deletion caused by composition deletion.
-The resource will still be deleted if it's not included in the latest synthesis, or if a `Patch` resource explicitly deletes it.
-Note that this annotation must be applied to the composition itself.
-
-```yaml
-annotations:
-  eno.azure.io/deletion-strategy: orphan
-```
-
 
 ## Meta Resources
 
