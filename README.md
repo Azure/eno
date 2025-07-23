@@ -27,7 +27,7 @@ kubectl apply -f "https://github.com/Azure/eno/releases/download/${TAG}/manifest
 
 Synthesizers model a reusable set of resources, similar to an `apt` package or Helm chart.
 
-This example uses a simple bash script but real applications should use [Helm](./examples/03-helm-shim), [Go](./examples/02-go-synthesizer/main.go), or [KCL](./pkg/kclshim/) (currently beta-ish) or any other process that implements the [KRM function API](https://github.com/kubernetes-sigs/kustomize/blob/master/cmd/config/docs/api-conventions/functions-spec.md).
+> ⚠️ This example uses a simple bash script but real applications should use [Helm](./examples/03-helm-shim), [Go](./examples/02-go-synthesizer/main.go), or [KCL](./pkg/kclshim/) (currently beta-ish) or any other process that implements the [KRM function API](https://github.com/kubernetes-sigs/kustomize/blob/master/cmd/config/docs/api-conventions/functions-spec.md).
 
 ```yaml
 kubectl apply -f - <<YAML
@@ -100,7 +100,7 @@ kubectl apply -f - <<YAML
     synthesizer:
       name: getting-started # references the name of the Synthesizer object
 
-    # Bindings assign a specific object to `refs` exposed by the Synthesizer.
+    # Bindings assign a specific object to refs exposed by the Synthesizer.
     # Many compositions can use the one synthesizer while passing unique inputs.
     bindings:
       - key: config

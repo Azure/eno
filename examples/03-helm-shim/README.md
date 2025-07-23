@@ -16,4 +16,4 @@ The final, non-templated resources are then transformed into the KRM ResourceLis
 - `main.go`: Transform Eno inputs into Helm values, execute the chart
 - `chart/`: A minimal but otherwise standard Helm chart
 - `example.yaml`: An example Composition that uses the helm-shim synth
-- `build-sh.sh`: Build/push/deploy script for main.go - creates the Synthesizer CR
+- `build.sh`: Build/push/deploy script for main.go - creates the Synthesizer CR
