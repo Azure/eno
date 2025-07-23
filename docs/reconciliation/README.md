@@ -8,11 +8,15 @@ Eno is designed to treat the resources it manages as completely opaque - it does
 
 There is one exception to this rule: CRDs are always reconciled before CRs of the kind they define.
 
-## Merge Semantics
+## Updates
 
 By default, Eno uses [server-side apply](https://kubernetes.io/docs/reference/using-api/server-side-apply/) with `--force-conflicts=true` to write resources it manages.
 
-> Client-side patching is supported by setting `--disable-ssa`. But beware that Eno can only add and update fields. Fields no longer returned from the synthesizer will not be removed.
+Exceptions:
+
+- The eno-reconciler process can fall back to client-side three-way merge patch by setting `--disable-ssa`
+- Merge can be disabled for a resource by setting the `eno.azure.io/replace: "true"` annotation (a full `update` request will be used instead of a `patch`)
+- All updates can be disabled for a resource by setting the `eno.azure.io/disable-updates: "true"` annotation
 
 ## Deletion
 
@@ -30,31 +34,4 @@ Syncing the resource will correct any drift, re-evaluate any conditional overrid
 ```yaml
 annotations:
   eno.azure.io/reconcile-interval: "15m" # supports any value parsable by Go's `time.ParseDuration`
-```
-
-## Annotations
-
-Eno synthesizers can use special annotations to configure the Eno reconciler.
-
-> Any labels/annotations prefixed with `eno.azure.io/` will not be included in the final materialized/reconciled resource.
-
-
-### Disable Updates
-
-Disabling updates means Eno will create the resource when missing, delete it when no longer part of an active composition, but never update it in any way.
-
-```yaml
-annotations:
-  eno.azure.io/disable-updates: "true"
-```
-
-### Replace
-
-Designating a resource to be replaced means that updates will use the normal update endpoint instead of server-side apply.
-Like `kubectl replace`, any fields not managed by Eno will be removed.
-Useful for resources that logically have a single reader (e.g. CRDs).
-
-```yaml
-annotations:
-  eno.azure.io/replace: "true"
 ```
