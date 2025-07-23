@@ -124,6 +124,7 @@ annotations:
 Overrides use a CEL-like syntax to reference properties.
 
 - `field.anotherfield`: Traverse object fields
+- `field["key"]` or `field['key']`: Access object fields by key (supports any field name including hyphens)
 - `field[2]`: Access array elements by index
 - `field[*]`: Match all elements in an array
 - `field[someKey="value"]`: Match array elements by a key-value pair
