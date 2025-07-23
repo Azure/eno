@@ -1,7 +1,7 @@
 # Synthesis
 
-Eno uses short-lived synthesizer pods to synthesize compositions.
-This process and its results are often referred to as `synthesis` (not necessarily in a [Hegelian sense](https://en.wikipedia.org/wiki/Dialectic)).
+Eno uses short-lived pods to synthesize compositions using any process that implements the [KRM function API](https://github.com/kubernetes-sigs/kustomize/blob/master/cmd/config/docs/api-conventions/functions-spec.md)
+This process and its results are referred to as `synthesis`.
 
 ## Dispatch
 
@@ -47,3 +47,4 @@ annotations:
   eno.azure.io/synthesizer-generation: "123" # Will block synthesis if < the synthesizer's metadata.generation
   eno.azure.io/composition-generation: "321" # Will block synthesis if < the composition's metadata.generation
 ```
+

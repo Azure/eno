@@ -8,8 +8,8 @@ Compose Kubernetes deployments.
 
 ## Docs
 
-- [Reconciliation](./docs/reconciliation.md)
 - [Synthesis](./docs/synthesis.md)
+- [Reconciliation](./docs/reconciliation.md)
 - [Symphony](./docs/symphony.md)
 - [Synthesizer API](./docs/synthesizer-api.md)
 - [Generated API Docs](./docs/api.md)
