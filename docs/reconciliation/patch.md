@@ -4,7 +4,7 @@
 
 Use Patch resources to modify or delete resources Eno doesn't manage.
 
-The `Patch` kind isn't an API registered with the Kubernetes apiserver. Patches a kind of "meta-resource" used to configure Eno.
+The `Patch` kind isn't an API registered with the Kubernetes apiserver. Patches are a kind of "meta-resource" used to configure Eno.
 They are not accessible to other clients.
 
 
