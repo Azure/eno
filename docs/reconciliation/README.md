@@ -20,9 +20,9 @@ Exceptions:
 
 ## Deletion
 
-Resources are automatically deleted if they are no longer synthesized (returned by the synthesizer) for a given composition.
+Resources are automatically deleted if they are no longer synthesized (returned by the synthesizer) for a given composition, or the composition was deleted.
 
-> This can be disabled by setting the `eno.azure.io/deletion-strategy: orphan` annotation on the composition.
+> Cascading resource cleanup caused by composition deletion can be disabled by setting the `eno.azure.io/deletion-strategy: orphan` annotation on the composition.
 
 ## Drift Detection
 
