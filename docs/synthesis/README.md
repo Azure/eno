@@ -1,15 +1,15 @@
 # Synthesis
 
-Eno uses short-lived synthesizer pods to synthesize compositions.
-This process and its results are often referred to as `synthesis` (not necessarily in a [Hegelian sense](https://en.wikipedia.org/wiki/Dialectic)).
+Eno uses short-lived pods to synthesize compositions using [a simple stdio protocol](./synthesizer-api.md).
+This process and its results are referred to as `synthesis`.
 
 ## Dispatch
 
-Synthesis will be dispatched in these scenarios unless blocked by one of the conditions described later:
+Synthesis will occur in these scenarios unless blocked by one of the conditions described later:
 
-- The composition has been modified
-- The composition's synthesizer has been modified
-- Any inputs of the composition have been modified
+- The composition changed
+- The composition's synthesizer changed
+- An input of the composition changed
 
 ### Deferral
 
@@ -20,7 +20,7 @@ Deferred changes are subject to a global cooldown period to avoid suddenly chang
 The cooldown period can be configured with `--rollout-cooldown`.
 
 Compositions can opt-out of any deferred syntheses.
-Only composition updates will cause synthesis when this annotation is set.
+Only composition updates will cause synthesis when this annotation is set on the composition.
 
 ```yaml
 annotations:
@@ -44,6 +44,9 @@ This is useful in cases where another controller generates input resources based
 
 ```yaml
 annotations:
-  eno.azure.io/synthesizer-generation: "123" # Will block synthesis if < the synthesizer's metadata.generation
-  eno.azure.io/composition-generation: "321" # Will block synthesis if < the composition's metadata.generation
+  # Will block synthesis if < the synthesizer's metadata.generation
+  eno.azure.io/synthesizer-generation: "123"
+
+  # Will block synthesis if < the composition's metadata.generation
+  eno.azure.io/composition-generation: "321"
 ```
