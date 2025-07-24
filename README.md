@@ -8,9 +8,9 @@ Compose Kubernetes deployments.
 
 ## Docs
 
-- [Synthesis](./docs/synthesis.md)
-- [Reconciliation](./docs/reconciliation/README.md)
-- [Symphony](./docs/symphony.md)
+- [Synthesis](./docs/synthesis)
+- [Reconciliation](./docs/reconciliation)
+- [Symphony](./docs/symphony)
 - [Synthesizer API](./docs/synthesizer-api.md)
 - [Generated API Docs](./docs/api.md)
 
