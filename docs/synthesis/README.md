@@ -1,6 +1,6 @@
 # Synthesis
 
-Eno uses short-lived pods to synthesize compositions using any process that implements the [KRM function API](https://github.com/kubernetes-sigs/kustomize/blob/master/cmd/config/docs/api-conventions/functions-spec.md).
+Eno uses short-lived pods to synthesize compositions using [a simple stdio protocol](./synthesizer-api.md).
 This process and its results are referred to as `synthesis`.
 
 ## Dispatch
