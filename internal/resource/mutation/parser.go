@@ -3,7 +3,6 @@ package mutation
 import (
 	"bytes"
 	"context"
-	"strconv"
 
 	"github.com/alecthomas/participle/v2"
 	"github.com/alecthomas/participle/v2/lexer"
@@ -121,10 +120,10 @@ func (s *section) toPathElement() fieldpath.PathElement {
 		case s.Index.Element != nil:
 			return fieldpath.PathElement{Index: s.Index.Element}
 		case s.Index.Key != nil:
-			unquoted, _ := strconv.Unquote(*s.Index.Key)
+			unquoted := unquoteKey(*s.Index.Key)
 			return fieldpath.PathElement{FieldName: &unquoted}
 		case s.Index.Matcher != nil:
-			unquotedValue, _ := strconv.Unquote(s.Index.Matcher.Value)
+			unquotedValue := unquoteKey(s.Index.Matcher.Value)
 			fieldList := value.FieldList{{
 				Name:  s.Index.Matcher.Key,
 				Value: value.NewValueInterface(unquotedValue),

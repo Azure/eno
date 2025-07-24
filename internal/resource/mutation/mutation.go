@@ -75,15 +75,7 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 // unquoteKey removes quotes from a key string, handling both single and double quotes
 func unquoteKey(key string) string {
 	if matches := quotedStringRegex.FindStringSubmatch(key); matches != nil {
-		// Ensure opening and closing quotes match
 		if matches[1] == matches[3] {
-			// For double quotes, use strconv.Unquote to handle escape sequences properly
-			if matches[1] == `"` {
-				if unquoted, err := strconv.Unquote(key); err == nil {
-					return unquoted
-				}
-			}
-			// For single quotes or if strconv.Unquote fails, return the content between quotes
 			return matches[2]
 		}
 	}

@@ -32,6 +32,34 @@ func TestPathExprManagedByEno(t *testing.T) {
 			expected: true,
 		},
 		{
+			name: "FieldOwnedByEno_SingleQuotedIndex",
+			path: "self.data['foo']",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:   "eno",
+					Operation: metav1.ManagedFieldsOperationApply,
+					FieldsV1: &metav1.FieldsV1{
+						Raw: createFieldSetJSON(t, "data", "foo"),
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "FieldOwnedByEno_DoubleQuotedIndex",
+			path: `self.data["foo"]`,
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:   "eno",
+					Operation: metav1.ManagedFieldsOperationApply,
+					FieldsV1: &metav1.FieldsV1{
+						Raw: createFieldSetJSON(t, "data", "foo"),
+					},
+				},
+			},
+			expected: true,
+		},
+		{
 			name: "FieldOwnedByOther",
 			path: "self.data.foo",
 			managedFields: []metav1.ManagedFieldsEntry{
