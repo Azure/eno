@@ -2,7 +2,7 @@
 
 > ⚠️ Most use-cases don't need Patch resources. Only use them if you're sure it's the right option!
 
-Patch resources Eno to modify or delete resources that it doesn't manage.
+Use Patch resources to modify or delete resources Eno doesn't manage.
 
 The `Patch` kind isn't an API registered with the Kubernetes apiserver. Patches a kind of "meta-resource" used to configure Eno.
 They are not accessible to other clients.
