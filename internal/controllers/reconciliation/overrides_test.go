@@ -8,7 +8,9 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/testutil"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/retry"
@@ -440,4 +442,94 @@ func TestOverrideHyphenatedFieldNames(t *testing.T) {
 		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
 		return cm.Data["polling-var"] == "polling-applied"
 	})
+}
+
+func TestOverrideFieldNotStomped(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	requireSSA(t, mgr)
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]any{
+						"eno.azure.io/reconcile-interval": "10ms",
+						"foo":                             "bar",
+					},
+				},
+				"spec": map[string]any{
+					"selector": map[string]any{
+						"matchLabels": map[string]any{
+							"foo": "bar",
+						},
+					},
+					"template": map[string]any{
+						"metadata": map[string]any{
+							"labels": map[string]any{
+								"foo": "bar",
+							},
+						},
+						"spec": map[string]any{
+							"containers": []any{
+								map[string]any{
+									"name":  "foo",
+									"image": "foo",
+								},
+							},
+						},
+					},
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	// Wait for initial reconciliation
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	deploy := &appsv1.Deployment{}
+	deploy.Name = "test-obj"
+	deploy.Namespace = "default"
+
+	// Add a field not managed by Eno
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(deploy), deploy)
+		if err != nil {
+			return err
+		}
+		deploy.Spec.Template.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "foo", Value: "bar"}}
+		return mgr.DownstreamClient.Update(ctx, deploy)
+	})
+	require.NoError(t, err)
+
+	// Mutate a field managed by Eno
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(deploy), deploy)
+		if err != nil {
+			return err
+		}
+		deploy.Annotations["foo"] = "baz"
+		return mgr.DownstreamClient.Update(ctx, deploy)
+	})
+	require.NoError(t, err)
+
+	// Wait for eno to sync (TODO: get rid of sleep), then confirm that the env var wasn't pruned
+	time.Sleep(time.Millisecond * 100)
+	mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(deploy), deploy)
+	assert.Equal(t, "bar", deploy.Spec.Template.Spec.Containers[0].Env[0].Value)
+	assert.Equal(t, "bar", deploy.Annotations["foo"])
 }
