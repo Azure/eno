@@ -186,7 +186,6 @@ func TestApply(t *testing.T) {
 				map[string]any{"name": 234},
 			}},
 		},
-
 		{
 			name: "Slice_MapMatcherEscapedQuote",
 			path: "self.foo[name=\"test-\\\"-1\"].bar",
@@ -229,6 +228,72 @@ func TestApply(t *testing.T) {
 				map[string]any{"name": "test-2"},
 				map[string]any{"name": 234},
 			}},
+		},
+		{
+			name:  "Complex_Nil",
+			path:  "self.spec.template.spec.containers[name='foo'].resources.limits.cpu",
+			value: nil,
+			obj: map[string]any{
+				"spec": map[string]any{
+					"selector": map[string]any{
+						"matchLabels": map[string]any{
+							"foo": "bar",
+						},
+					},
+					"template": map[string]any{
+						"metadata": map[string]any{
+							"labels": map[string]any{
+								"foo": "bar",
+							},
+						},
+						"spec": map[string]any{
+							"containers": []any{
+								map[string]any{
+									"name":  "foo",
+									"image": "bar",
+									"resources": map[string]any{
+										"requests": map[string]any{
+											"cpu": "5m",
+										},
+										"limits": map[string]any{
+											"cpu": "10m",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: map[string]any{
+				"spec": map[string]any{
+					"selector": map[string]any{
+						"matchLabels": map[string]any{
+							"foo": "bar",
+						},
+					},
+					"template": map[string]any{
+						"metadata": map[string]any{
+							"labels": map[string]any{
+								"foo": "bar",
+							},
+						},
+						"spec": map[string]any{
+							"containers": []any{
+								map[string]any{
+									"name":  "foo",
+									"image": "bar",
+									"resources": map[string]any{
+										"requests": map[string]any{
+											"cpu": "5m",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
 		},
 		{
 			name:    "Empty",
