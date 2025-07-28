@@ -450,6 +450,7 @@ func TestOverrideContainerResources(t *testing.T) {
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
 
+	requireSSA(t, mgr)
 	registerControllers(t, mgr)
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 		output := &krmv1.ResourceList{}
