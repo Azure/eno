@@ -10,7 +10,6 @@ import (
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/retry"
@@ -455,37 +454,21 @@ func TestOverrideFieldNotStomped(t *testing.T) {
 		output := &krmv1.ResourceList{}
 		output.Items = []*unstructured.Unstructured{{
 			Object: map[string]any{
-				"apiVersion": "apps/v1",
-				"kind":       "Deployment",
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
 				"metadata": map[string]any{
 					"name":      "test-obj",
 					"namespace": "default",
 					"annotations": map[string]any{
 						"eno.azure.io/reconcile-interval": "10ms",
-						"foo":                             "bar",
+						"eno.azure.io/overrides": `[
+							{"path": "self.data.foo", "value": null, "condition": "has(self.data.foo) && !pathManagedByEno"}
+						]`,
 					},
 				},
-				"spec": map[string]any{
-					"selector": map[string]any{
-						"matchLabels": map[string]any{
-							"foo": "bar",
-						},
-					},
-					"template": map[string]any{
-						"metadata": map[string]any{
-							"labels": map[string]any{
-								"foo": "bar",
-							},
-						},
-						"spec": map[string]any{
-							"containers": []any{
-								map[string]any{
-									"name":  "foo",
-									"image": "foo",
-								},
-							},
-						},
-					},
+				"data": map[string]any{
+					"foo": "initial-foo",
+					"bar": "initial-bar",
 				},
 			},
 		}}
@@ -501,35 +484,37 @@ func TestOverrideFieldNotStomped(t *testing.T) {
 		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
 	})
 
-	deploy := &appsv1.Deployment{}
-	deploy.Name = "test-obj"
-	deploy.Namespace = "default"
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
 
-	// Add a field not managed by Eno
+	// Mutate a field allowed by override
 	err := retry.RetryOnConflict(testutil.Backoff, func() error {
-		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(deploy), deploy)
+		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
 		if err != nil {
 			return err
 		}
-		deploy.Spec.Template.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "foo", Value: "bar"}}
-		return mgr.DownstreamClient.Update(ctx, deploy)
+		cm.Data["foo"] = "updated-foo"
+		return mgr.DownstreamClient.Update(ctx, cm)
 	})
 	require.NoError(t, err)
 
-	// Mutate a field managed by Eno
+	// Mutate a field not allowed by override
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
-		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(deploy), deploy)
+		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
 		if err != nil {
 			return err
 		}
-		deploy.Annotations["foo"] = "baz"
-		return mgr.DownstreamClient.Update(ctx, deploy)
+		cm.Data["bar"] = "updated-bar"
+		return mgr.DownstreamClient.Update(ctx, cm)
 	})
 	require.NoError(t, err)
 
 	// Wait for eno to sync (TODO: get rid of sleep), then confirm that the env var wasn't pruned
-	time.Sleep(time.Millisecond * 100)
-	mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(deploy), deploy)
-	assert.Equal(t, "bar", deploy.Spec.Template.Spec.Containers[0].Env[0].Value)
-	assert.Equal(t, "bar", deploy.Annotations["foo"])
+	time.Sleep(time.Millisecond * 250)
+	mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+	assert.Equal(t, map[string]string{
+		"foo": "updated-foo",
+		"bar": "initial-bar",
+	}, cm.Data)
 }
