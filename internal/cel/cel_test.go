@@ -20,3 +20,27 @@ func TestEvalCompositionBasics(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "test-comp", val.Value())
 }
+
+func TestEvalIntTypeCoersion(t *testing.T) {
+	p, err := Parse("int(composition.metadata.name) > 100")
+	require.NoError(t, err)
+
+	comp := &apiv1.Composition{}
+	comp.Name = "123"
+
+	val, err := Eval(t.Context(), p, comp, &unstructured.Unstructured{}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, true, val.Value())
+}
+
+func TestEvalFloatTypeCoersion(t *testing.T) {
+	p, err := Parse("double(composition.metadata.name) < 101.9")
+	require.NoError(t, err)
+
+	comp := &apiv1.Composition{}
+	comp.Name = "101.8"
+
+	val, err := Eval(t.Context(), p, comp, &unstructured.Unstructured{}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, true, val.Value())
+}
