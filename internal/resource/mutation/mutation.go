@@ -111,14 +111,12 @@ func Apply(path *PathExpr, obj, value any) error {
 }
 
 func apply(path *PathExpr, startIndex int, obj any, value any) error {
-	state := obj
-
 	for i, section := range path.ast.Sections[startIndex:] {
 		isLastSection := startIndex+i == len(path.ast.Sections)-1
 
 		// Map field indexing
 		if section.Field != nil || (section.Index != nil && section.Index.Key != nil) {
-			m, ok := state.(map[string]any)
+			m, ok := obj.(map[string]any)
 			if !ok {
 				continue
 			}
@@ -139,14 +137,14 @@ func apply(path *PathExpr, startIndex int, obj any, value any) error {
 				return nil
 			}
 
-			nextState := m[keyStr]
-			if nextState != nil {
-				err := apply(path, startIndex+i+1, nextState, value)
+			child := m[keyStr]
+			if child != nil {
+				err := apply(path, startIndex+i+1, child, value)
 				if err != nil {
 					return err
 				}
 				if value == nil {
-					if nextMap, ok := nextState.(map[string]any); ok && len(nextMap) == 0 {
+					if nextMap, ok := child.(map[string]any); ok && len(nextMap) == 0 {
 						delete(m, keyStr)
 					}
 				}
@@ -158,7 +156,7 @@ func apply(path *PathExpr, startIndex int, obj any, value any) error {
 			continue
 		}
 
-		slice, ok := state.([]any)
+		slice, ok := obj.([]any)
 		if !ok {
 			return fmt.Errorf("cannot apply wildcard to non-slice value")
 		}
