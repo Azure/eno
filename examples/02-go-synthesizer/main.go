@@ -24,7 +24,7 @@ func synthesize(inputs Inputs) ([]client.Object, error) {
 	deploy.Kind = "Deployment"
 	deploy.Name = "example-nginx-deployment"
 	deploy.Namespace = "default"
-	deploy.Spec.Replicas = ptr.To(replicas)
+	deploy.Spec.Replicas = ptr.To(int32(replicas))
 	deploy.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"app": "nginx-example"}}
 	deploy.Spec.Template = corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
