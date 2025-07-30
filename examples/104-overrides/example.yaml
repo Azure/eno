@@ -18,7 +18,7 @@ spec:
             "data":{"someKey":"someVal"},
             "kind":"ConfigMap",
             "metadata":{
-              "name":"some-config",
+              "name":"overridden-config",
               "namespace": "default",
               "annotations": {
                 "eno.azure.io/overrides": "[{ \"path\": \"self.data.someKey\", \"value\": \"overrideValue\", \"condition\": \"!has(self.data.disableOverrides)\" }]"
