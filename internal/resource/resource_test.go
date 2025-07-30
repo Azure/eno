@@ -26,6 +26,7 @@ import (
 var newResourceTests = []struct {
 	Name     string
 	Manifest string
+	Invalid  bool
 	Assert   func(*testing.T, *Snapshot)
 }{
 	{
@@ -298,7 +299,8 @@ var newResourceTests = []struct {
 		},
 	},
 	{
-		Name: "invalid-override-json",
+		Name:    "invalid-override-json",
+		Invalid: true,
 		Manifest: `{
 			"apiVersion": "v1",
 			"kind": "ConfigMap",
@@ -309,9 +311,6 @@ var newResourceTests = []struct {
 				}
 			}
 		}`,
-		Assert: func(t *testing.T, r *Snapshot) {
-			assert.Len(t, r.overrides, 0)
-		},
 	},
 	{
 		Name: "labels",
@@ -352,11 +351,16 @@ func TestNewResource(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range newResourceTests {
 		t.Run(tc.Name, func(t *testing.T) {
-			r, err := NewResource(ctx, &apiv1.ResourceSlice{
+			r, err := FromSlice(ctx, &apiv1.ResourceSlice{
 				Spec: apiv1.ResourceSliceSpec{
 					Resources: []apiv1.Manifest{{Manifest: tc.Manifest}},
 				},
 			}, 0)
+
+			if tc.Invalid {
+				require.Error(t, err)
+				return
+			}
 			require.NoError(t, err)
 
 			rs, err := r.Snapshot(t.Context(), &apiv1.Composition{}, nil)
@@ -805,7 +809,7 @@ func TestSnapshotPatch(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.Name, func(t *testing.T) {
-			r, err := NewResource(ctx, &apiv1.ResourceSlice{
+			r, err := FromSlice(ctx, &apiv1.ResourceSlice{
 				Spec: apiv1.ResourceSliceSpec{
 					Resources: []apiv1.Manifest{{Manifest: tc.Manifest}},
 				},

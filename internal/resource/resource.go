@@ -17,7 +17,6 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/readiness"
 	"github.com/Azure/eno/internal/resource/mutation"
-	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -114,10 +113,10 @@ func (r *Resource) Snapshot(ctx context.Context, comp *apiv1.Composition, actual
 	snap.Replace = anno[replaceKey] == "true"
 
 	const reconcileIntervalKey = "eno.azure.io/reconcile-interval"
-	if str, ok := anno[reconcileIntervalKey]; ok {
+	if str := anno[reconcileIntervalKey]; str != "" {
 		reconcileInterval, err := time.ParseDuration(str)
-		if anno[reconcileIntervalKey] != "" && err != nil {
-			logr.FromContextOrDiscard(ctx).V(0).Info("invalid reconcile interval - ignoring")
+		if err != nil {
+			return nil, fmt.Errorf("invalid reconcile interval: %w", err)
 		}
 		snap.ReconcileInterval = &metav1.Duration{Duration: reconcileInterval}
 	}
@@ -180,30 +179,36 @@ func (r *Snapshot) patchSetsDeletionTimestamp() bool {
 	return false
 }
 
-func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*Resource, error) {
-	logger := logr.FromContextOrDiscard(ctx)
-	resource := slice.Spec.Resources[index]
-	res := &Resource{
-		manifestDeleted: resource.Deleted,
-		ManifestRef: ManifestRef{
-			Slice: types.NamespacedName{
-				Namespace: slice.Namespace,
-				Name:      slice.Name,
-			},
-			Index: index,
-		},
-	}
-
-	hash := fnv.New64()
-	hash.Write([]byte(resource.Manifest))
-	res.manifestHash = hash.Sum(nil)
+// FromSlice constructs a new Resource from the manifest defined at the given index of the resource slice.
+func FromSlice(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*Resource, error) {
+	manifest := slice.Spec.Resources[index]
 
 	parsed := &unstructured.Unstructured{}
-	res.parsed = parsed
-	err := parsed.UnmarshalJSON([]byte(resource.Manifest))
+	err := parsed.UnmarshalJSON([]byte(manifest.Manifest))
 	if err != nil {
 		return nil, fmt.Errorf("invalid json: %w", err)
 	}
+
+	resource, err := FromUnstructured(ctx, parsed)
+	if err != nil {
+		return nil, err
+	}
+
+	hash := fnv.New64()
+	hash.Write([]byte(manifest.Manifest))
+	resource.manifestHash = hash.Sum(nil)
+
+	resource.manifestDeleted = manifest.Deleted
+	resource.ManifestRef.Slice = types.NamespacedName{Namespace: slice.Namespace, Name: slice.Name}
+	resource.ManifestRef.Index = index
+
+	return resource, nil
+}
+
+// FromUnstructured constructs a new Resource from a given parsed, unstructured object.
+// Does not set the ManifestRef, manifestDeleted, or manifestHash fields.
+func FromUnstructured(ctx context.Context, parsed *unstructured.Unstructured) (*Resource, error) {
+	res := &Resource{parsed: parsed}
 
 	// Prune out the status/creation time.
 	// This is a pragmatic choice to make Eno behave in expected ways for synthesizers written using client-go structs,
@@ -219,7 +224,6 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 	res.Ref.Namespace = parsed.GetNamespace()
 	res.Ref.Group = parsed.GroupVersionKind().Group
 	res.Ref.Kind = parsed.GetKind()
-	logger = logger.WithValues("resourceKind", parsed.GetKind(), "resourceName", parsed.GetName(), "resourceNamespace", parsed.GetNamespace())
 
 	if res.Ref.Name == "" || res.Ref.Kind == "" || parsed.GetAPIVersion() == "" {
 		return nil, fmt.Errorf("missing name, kind, or apiVersion")
@@ -253,9 +257,9 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 
 	const overridesKey = "eno.azure.io/overrides"
 	if js, ok := anno[overridesKey]; ok {
-		err = json.Unmarshal([]byte(js), &res.overrides)
+		err := json.Unmarshal([]byte(js), &res.overrides)
 		if err != nil {
-			logger.Error(err, "invalid override json")
+			return nil, fmt.Errorf("invalid overrides json: %w", err)
 		}
 	}
 
@@ -263,10 +267,9 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 	if str, ok := anno[readinessGroupKey]; ok {
 		rg, err := strconv.Atoi(str)
 		if err != nil {
-			logger.V(0).Info("invalid readiness group - ignoring")
-		} else {
-			res.readinessGroup = rg
+			return nil, fmt.Errorf("invalid readiness group: %w", err)
 		}
+		res.readinessGroup = rg
 	}
 
 	for key, value := range anno {
@@ -281,8 +284,7 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 
 		check, err := readiness.ParseCheck(value)
 		if err != nil {
-			logger.Error(err, "invalid cel expression")
-			continue
+			return nil, fmt.Errorf("invalid readiness expression in annotation %q: %w", key, err)
 		}
 		check.Name = name
 		res.ReadinessChecks = append(res.ReadinessChecks, check)

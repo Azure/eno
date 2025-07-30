@@ -64,6 +64,11 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 	}
 	resultErr := findResultError(output)
 
+	err = e.preflightValidateResources(ctx, output)
+	if err != nil {
+		return err
+	}
+
 	var sliceRefs []*apiv1.ResourceSliceRef
 	if resultErr == nil {
 		sliceRefs, err = e.writeSlices(ctx, comp, output)
@@ -127,6 +132,20 @@ func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, s
 	}
 
 	return rl, revs, nil
+}
+
+func (e *Executor) preflightValidateResources(ctx context.Context, rl *krmv1.ResourceList) error {
+	for i, obj := range rl.Items {
+		res, err := resource.FromUnstructured(ctx, obj)
+		if err != nil {
+			return fmt.Errorf("parsing resource at index %d: %w", i, err)
+		}
+		_, err = res.Snapshot(ctx, &apiv1.Composition{}, obj)
+		if err != nil {
+			return fmt.Errorf("snapshotting resource at index %d: %w", i, err)
+		}
+	}
+	return nil
 }
 
 func (e *Executor) writeSlices(ctx context.Context, comp *apiv1.Composition, rl *krmv1.ResourceList) ([]*apiv1.ResourceSliceRef, error) {
