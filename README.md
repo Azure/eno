@@ -1,5 +1,7 @@
 # Eno
 
+![logo](docs/logo.png | width=200)
+
 Compose Kubernetes deployments.
 
 - 🎹 **Synthesize**: generate manifests dynamically in short-lived pods
