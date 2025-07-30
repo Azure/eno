@@ -17,7 +17,6 @@ import (
 	"github.com/Azure/eno/internal/resource"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/require"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -79,19 +78,6 @@ func setupTestSubjectForOptions(t *testing.T, mgr *testutil.Manager, opts Option
 
 	err := New(mgr.Manager, opts)
 	require.NoError(t, err)
-}
-
-func mapToResource(t *testing.T, res map[string]any) (*unstructured.Unstructured, *resource.Resource) {
-	obj := &unstructured.Unstructured{Object: res}
-	js, err := obj.MarshalJSON()
-	require.NoError(t, err)
-
-	slice := &apiv1.ResourceSlice{}
-	slice.Spec.Resources = []apiv1.Manifest{{Manifest: string(js)}}
-	rr, err := resource.NewResource(context.Background(), slice, 0)
-	require.NoError(t, err)
-
-	return obj, rr
 }
 
 func requireSSA(t *testing.T, mgr *testutil.Manager) {
