@@ -1,6 +1,8 @@
 # Eno
 
-![logo](docs/logo.png | width=200)
+<img src="docs/logo.png" width="500">
+
+---
 
 Compose Kubernetes deployments.
 
