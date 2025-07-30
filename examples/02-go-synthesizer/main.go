@@ -16,7 +16,7 @@ type Inputs struct {
 }
 
 func synthesize(inputs Inputs) ([]client.Object, error) {
-	replicas, _ := strconv.Atoi(inputs.Config.Data["replicas"])
+	replicas, _ := strconv.ParseInt(inputs.Config.Data["replicas"], 10, 32)
 
 	deploy := &appsv1.Deployment{}
 	deploy.APIVersion = "apps/v1"
