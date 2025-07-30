@@ -16,10 +16,7 @@ type Inputs struct {
 }
 
 func synthesize(inputs Inputs) ([]client.Object, error) {
-	replicas64, err := strconv.ParseInt(inputs.Config.Data["replicas"], 10, 32)
-	if err != nil {
-		return nil, err
-	}
+	replicas, _ := strconv.ParseInt(inputs.Config.Data["replicas"], 10, 32)
 	replicas := int32(replicas64)
 
 	deploy := &appsv1.Deployment{}
