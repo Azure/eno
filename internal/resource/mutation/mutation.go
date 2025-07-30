@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"strconv"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/google/cel-go/cel"
@@ -14,7 +13,11 @@ import (
 	enocel "github.com/Azure/eno/internal/cel"
 )
 
-var quotedStringRegex = regexp.MustCompile(`^(['"])(.*?)(['"])$`)
+var (
+	quotedStringRegex       = regexp.MustCompile(`^(['"])(.*?)(['"])$`)
+	escapedDoubleQuoteRegex = regexp.MustCompile(`\\"`)
+	escapedSingleQuoteRegex = regexp.MustCompile(`\\'`)
+)
 
 // Op is an operation that conditionally assigns a value to a path within an object.
 // Designed to be sent over the wire as JSON.
@@ -74,12 +77,20 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 
 // unquoteKey removes quotes from a key string, handling both single and double quotes
 func unquoteKey(key string) string {
-	if matches := quotedStringRegex.FindStringSubmatch(key); matches != nil {
-		if matches[1] == matches[3] {
-			return matches[2]
-		}
+	matches := quotedStringRegex.FindStringSubmatch(key)
+	if matches == nil || matches[1] != matches[3] {
+		return key
 	}
-	return key
+
+	content := matches[2]
+	switch matches[1] {
+	case `"`:
+		return escapedDoubleQuoteRegex.ReplaceAllString(content, `"`)
+	case `'`:
+		return escapedSingleQuoteRegex.ReplaceAllString(content, `'`)
+	default:
+		return content
+	}
 }
 
 // Apply applies a mutation i.e. sets the value(s) referred to by the path expression.
@@ -100,39 +111,24 @@ func Apply(path *PathExpr, obj, value any) error {
 }
 
 func apply(path *PathExpr, startIndex int, obj any, value any) error {
-	state := obj
-
 	for i, section := range path.ast.Sections[startIndex:] {
+		isLastSection := startIndex+i == len(path.ast.Sections)-1
+
 		// Map field indexing
-		if section.Field != nil {
-			m, ok := state.(map[string]any)
+		if section.Field != nil || (section.Index != nil && section.Index.Key != nil) {
+			m, ok := obj.(map[string]any)
 			if !ok {
 				continue
 			}
-			if startIndex+i == len(path.ast.Sections)-1 {
-				if value == nil {
-					delete(m, *section.Field)
-				} else {
-					m[*section.Field] = value
-				}
-				return nil
-			}
-			state = m[*section.Field]
-			continue
-		}
 
-		if section.Index == nil {
-			continue // should be impossible
-		}
-
-		// Alternative map field indexing
-		if key := section.Index.Key; key != nil {
-			m, ok := state.(map[string]any)
-			if !ok {
-				continue
+			var keyStr string
+			if section.Field != nil {
+				keyStr = *section.Field
+			} else {
+				keyStr = unquoteKey(*section.Index.Key)
 			}
-			keyStr := unquoteKey(*key)
-			if startIndex+i == len(path.ast.Sections)-1 {
+
+			if isLastSection {
 				if value == nil {
 					delete(m, keyStr)
 				} else {
@@ -140,11 +136,27 @@ func apply(path *PathExpr, startIndex int, obj any, value any) error {
 				}
 				return nil
 			}
-			state = m[keyStr]
+
+			child := m[keyStr]
+			if child != nil {
+				err := apply(path, startIndex+i+1, child, value)
+				if err != nil {
+					return err
+				}
+				if value == nil {
+					if nextMap, ok := child.(map[string]any); ok && len(nextMap) == 0 {
+						delete(m, keyStr)
+					}
+				}
+			}
+			return nil
+		}
+
+		if section.Index == nil {
 			continue
 		}
 
-		slice, ok := state.([]any)
+		slice, ok := obj.([]any)
 		if !ok {
 			return fmt.Errorf("cannot apply wildcard to non-slice value")
 		}
@@ -154,12 +166,18 @@ func apply(path *PathExpr, startIndex int, obj any, value any) error {
 			if *el < 0 || *el >= len(slice) {
 				return fmt.Errorf("index %d out of range for slice of length %d", *el, len(slice))
 			}
-			if startIndex+i == len(path.ast.Sections)-1 {
+			if isLastSection {
 				slice[*el] = value
 				return nil
 			}
-			state = slice[*el]
-			continue
+			nextState := slice[*el]
+			if nextState != nil {
+				err := apply(path, startIndex+i+1, nextState, value)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
 		}
 
 		// Complex array indexing (wildcard or matcher)
@@ -175,14 +193,14 @@ func apply(path *PathExpr, startIndex int, obj any, value any) error {
 				}
 				val := m[section.Index.Matcher.Key]
 				str, ok := val.(string)
-				expected, _ := strconv.Unquote(section.Index.Matcher.Value)
+				expected := unquoteKey(section.Index.Matcher.Value)
 				if !ok || str != expected {
 					continue // not matched by the matcher
 				}
 			}
 
-			if isMap && startIndex+i < len(path.ast.Sections)-1 {
-				err := apply(path, i+1, cur, value) // recurse into object
+			if isMap && !isLastSection {
+				err := apply(path, startIndex+i+1, cur, value)
 				if err != nil {
 					return err
 				}
