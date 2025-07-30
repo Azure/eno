@@ -16,14 +16,18 @@ type Inputs struct {
 }
 
 func synthesize(inputs Inputs) ([]client.Object, error) {
-	replicas, _ := strconv.Atoi(inputs.Config.Data["replicas"])
+	replicas64, err := strconv.ParseInt(inputs.Config.Data["replicas"], 10, 32)
+	if err != nil {
+		return nil, err
+	}
+	replicas := int32(replicas64)
 
 	deploy := &appsv1.Deployment{}
 	deploy.APIVersion = "apps/v1"
 	deploy.Kind = "Deployment"
 	deploy.Name = "example-nginx-deployment"
 	deploy.Namespace = "default"
-	deploy.Spec.Replicas = ptr.To(int32(replicas))
+	deploy.Spec.Replicas = ptr.To(replicas)
 	deploy.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"app": "nginx-example"}}
 	deploy.Spec.Template = corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
