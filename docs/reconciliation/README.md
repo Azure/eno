@@ -16,6 +16,17 @@ Exceptions:
 
 - The eno-reconciler process can fall back to client-side three-way merge patch by setting `--disable-ssa`
 - Merge can be disabled for a resource by setting the `eno.azure.io/replace: "true"` annotation (a full `update` request will be used instead of a `patch`)
+- Merge can be disabled conditionally by setting the `eno.azure.io/replace-when` annotation with a CEL expression:
+  ```yaml
+  apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: foo
+    annotations:
+      eno.azure.io/replace-when: "has(self.data.replaceMe)"
+  data:
+    replaceMe: "yes"
+  ```
 - All updates can be disabled for a resource by setting the `eno.azure.io/disable-updates: "true"` annotation
 
 ## Deletion
