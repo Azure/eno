@@ -70,13 +70,6 @@ type Resource struct {
 
 func (r *Resource) State() *apiv1.ResourceState { return r.latestKnownState.Load() }
 
-func (r *Resource) UnstructuredWithoutOverrides() *unstructured.Unstructured {
-	copy := r.parsed.DeepCopy()
-	copy.SetAnnotations(pruneMetadata(copy.GetAnnotations()))
-	copy.SetLabels(pruneMetadata(copy.GetLabels()))
-	return copy
-}
-
 // Less returns true when r < than.
 // Used to establish determinstic ordering for conflicting resources.
 func (r *Resource) Less(than *Resource) bool {

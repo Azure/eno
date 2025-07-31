@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -362,13 +361,6 @@ func TestNewResource(t *testing.T) {
 			rs, err := r.Snapshot(t.Context(), &apiv1.Composition{}, nil)
 			require.NoError(t, err)
 			tc.Assert(t, rs)
-
-			noOverrides := r.UnstructuredWithoutOverrides()
-			for key := range noOverrides.GetAnnotations() {
-				if strings.HasPrefix(key, "eno.azure.io/") {
-					t.Errorf("expected no overrides in unstructured, but found %s", key)
-				}
-			}
 		})
 	}
 }
