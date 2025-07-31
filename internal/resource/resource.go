@@ -331,24 +331,19 @@ func MergeEnoManagedFields(prev, current, next []metav1.ManagedFieldsEntry) (cop
 		return nil, "", false
 	}
 
-	currentEnoSet := parseEnoFields(current)
-
-	var expectedFields *fieldpath.Set
-	if !nextEnoSet.Empty() && currentEnoSet.Empty() {
-		expectedFields = prevEnoSet
-	} else {
-		expectedFields = prevEnoSet.Difference(nextEnoSet)
-		if expectedFields.Empty() {
-			return nil, "", false
-		}
-
-		expectedFields = expectedFields.Intersection(parseAllFields(current))
-		if expectedFields.Empty() {
-			return nil, "", false
-		}
+	expectedFields := prevEnoSet.Difference(nextEnoSet)
+	if expectedFields.Empty() {
+		// No fields have been removed from eno's management
+		return nil, "", false
 	}
 
-	return adjustManagedFields(prev, expectedFields), expectedFields.String(), true
+	expectedFields = expectedFields.Intersection(parseAllFields(current))
+	if expectedFields.Empty() {
+		// No removed fields have a current field manager
+		return nil, "", false
+	}
+
+	return adjustManagedFields(current, expectedFields), expectedFields.String(), true
 }
 
 func adjustManagedFields(entries []metav1.ManagedFieldsEntry, expected *fieldpath.Set) []metav1.ManagedFieldsEntry {

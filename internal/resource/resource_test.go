@@ -419,7 +419,7 @@ func TestManagedFields(t *testing.T) {
 		},
 		{
 			Name:           "all eno managed fields lost",
-			ExpectModified: true,
+			ExpectModified: false,
 			Previous: []metav1.ManagedFieldsEntry{
 				makeFields(t, "eno", []string{"foo", "bar"}),
 				makeFields(t, "notEno", []string{"baz"}),
@@ -431,14 +431,10 @@ func TestManagedFields(t *testing.T) {
 				makeFields(t, "eno", []string{"foo", "bar"}),
 				makeFields(t, "notEno", []string{"baz"}),
 			},
-			Expected: []metav1.ManagedFieldsEntry{
-				makeFields(t, "eno", []string{"foo", "bar"}),
-				makeFields(t, "notEno", []string{"baz"}),
-			},
 		},
 		{
 			Name:           "all eno managed fields lost, some fields collide with another manager",
-			ExpectModified: true,
+			ExpectModified: false,
 			Previous: []metav1.ManagedFieldsEntry{
 				makeFields(t, "eno", []string{"foo", "bar"}),
 				makeFields(t, "notEno", []string{"baz", "foo"}),
@@ -447,10 +443,6 @@ func TestManagedFields(t *testing.T) {
 				makeFields(t, "notEno", []string{"baz"}),
 			},
 			Next: []metav1.ManagedFieldsEntry{
-				makeFields(t, "eno", []string{"foo", "bar"}),
-				makeFields(t, "notEno", []string{"baz"}),
-			},
-			Expected: []metav1.ManagedFieldsEntry{
 				makeFields(t, "eno", []string{"foo", "bar"}),
 				makeFields(t, "notEno", []string{"baz"}),
 			},
@@ -470,6 +462,7 @@ func TestManagedFields(t *testing.T) {
 			},
 			Expected: []metav1.ManagedFieldsEntry{
 				makeFields(t, "eno", []string{"foo", "bar"}),
+				makeFields(t, "notEno", []string{}),
 			},
 		},
 		{
@@ -615,7 +608,7 @@ func TestManagedFields(t *testing.T) {
 		},
 		{
 			Name:           "special branch: prevEno not empty, nextEno not empty, currentEno empty",
-			ExpectModified: true,
+			ExpectModified: false,
 			Previous: []metav1.ManagedFieldsEntry{
 				makeFields(t, "eno", []string{"foo", "bar"}),
 				makeFields(t, "other", []string{"baz"}),
@@ -625,10 +618,6 @@ func TestManagedFields(t *testing.T) {
 			},
 			Next: []metav1.ManagedFieldsEntry{
 				makeFields(t, "eno", []string{"foo"}),
-				makeFields(t, "other", []string{"baz"}),
-			},
-			Expected: []metav1.ManagedFieldsEntry{
-				makeFields(t, "eno", []string{"foo", "bar"}),
 				makeFields(t, "other", []string{"baz"}),
 			},
 		},
