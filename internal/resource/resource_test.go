@@ -314,6 +314,92 @@ var newResourceTests = []struct {
 		},
 	},
 	{
+		Name: "replace-when-condition-true",
+		Manifest: `{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "foo",
+				"annotations": {
+					"eno.azure.io/replace-when": "true"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Snapshot) {
+			assert.True(t, r.Replace)
+		},
+	},
+	{
+		Name: "replace-when-condition-false",
+		Manifest: `{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "foo",
+				"annotations": {
+					"eno.azure.io/replace-when": "false"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Snapshot) {
+			assert.False(t, r.Replace)
+		},
+	},
+	{
+		Name: "replace-when-with-self-condition",
+		Manifest: `{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "foo",
+				"annotations": {
+					"eno.azure.io/replace-when": "has(self.data.replaceMe)"
+				}
+			},
+			"data": {
+				"replaceMe": "yes"
+			}
+		}`,
+		Assert: func(t *testing.T, r *Snapshot) {
+			assert.True(t, r.Replace)
+		},
+	},
+	{
+		Name: "replace-when-invalid-condition",
+		Manifest: `{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "foo",
+				"annotations": {
+					"eno.azure.io/replace-when": "invalid CEL expression !@#$"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Snapshot) {
+			// Should remain false when condition parsing fails
+			assert.False(t, r.Replace)
+		},
+	},
+	{
+		Name: "replace-when-overrides-replace",
+		Manifest: `{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "foo",
+				"annotations": {
+					"eno.azure.io/replace": "false",
+					"eno.azure.io/replace-when": "true"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Snapshot) {
+			// replace-when should override the replace annotation when condition is true
+			assert.True(t, r.Replace)
+		},
+	},
+	{
 		Name: "labels",
 		Manifest: `{
 			"apiVersion": "v1",
@@ -359,7 +445,12 @@ func TestNewResource(t *testing.T) {
 			}, 0)
 			require.NoError(t, err)
 
-			rs, err := r.Snapshot(t.Context(), &apiv1.Composition{}, nil)
+			// Create actual resource for snapshot evaluation
+			actual := &unstructured.Unstructured{}
+			err = actual.UnmarshalJSON([]byte(tc.Manifest))
+			require.NoError(t, err)
+
+			rs, err := r.Snapshot(t.Context(), &apiv1.Composition{}, actual)
 			require.NoError(t, err)
 			tc.Assert(t, rs)
 
