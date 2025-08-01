@@ -65,7 +65,7 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 	if o.Condition != nil {
 		val, err := enocel.Eval(ctx, o.Condition, comp, current, o.Path)
 		if err != nil {
-			return nil // fail closed (too noisy to log)
+			return fmt.Errorf("evaluating condition: %w", err)
 		}
 		if b, ok := val.Value().(bool); !ok || !b {
 			return nil // condition not met
