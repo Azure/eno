@@ -7,7 +7,9 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -23,7 +25,15 @@ func init() {
 
 func initDefaultEnv() {
 	var err error
-	Env, err = cel.NewEnv(cel.Variable("self", cel.DynType), cel.Variable("composition", cel.DynType), cel.Variable("pathManagedByEno", cel.BoolType))
+	Env, err = cel.NewEnv(
+		cel.Variable("self", cel.DynType),
+		cel.Variable("composition", cel.DynType),
+		cel.Variable("pathManagedByEno", cel.BoolType),
+		cel.Function("compareResourceQuantities",
+			cel.Overload("compare_resource_quantities_equal_string_string",
+				[]*cel.Type{cel.StringType, cel.StringType}, cel.IntType,
+				cel.BinaryBinding(compareResources))),
+	)
 	if err != nil {
 		panic(fmt.Sprintf("failed to create default CEL environment: %v", err))
 	}
@@ -64,4 +74,21 @@ func newCompositionMap(comp *apiv1.Composition) map[string]any {
 	}
 
 	return map[string]any{"metadata": m}
+}
+
+func compareResources(lhs ref.Val, rhs ref.Val) ref.Val {
+	lStr, _ := lhs.Value().(string)
+	rStr, _ := rhs.Value().(string)
+
+	l, err := resource.ParseQuantity(lStr)
+	if err != nil {
+		return types.WrapErr(fmt.Errorf("parsing left quantity: %w", err))
+	}
+
+	r, err := resource.ParseQuantity(rStr)
+	if err != nil {
+		return types.WrapErr(fmt.Errorf("parsing right quantity: %w", err))
+	}
+
+	return types.Int(l.Cmp(r))
 }
