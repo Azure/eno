@@ -539,3 +539,91 @@ func TestOverrideContainerResources(t *testing.T) {
 	assert.True(t, deploy.Spec.Template.Spec.Containers[0].Resources.Limits["cpu"].Equal(resource.MustParse("20m")))
 	assert.True(t, deploy.Spec.Template.Spec.Containers[0].Resources.Requests["cpu"].Equal(resource.MustParse("5m")))
 }
+
+func TestOverrideFieldWithDoubleCondition(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]any{
+						"eno.azure.io/reconcile-interval": "2ms",
+						"eno.azure.io/overrides": `[
+							{"path": "self.data['foo']", "value": null, "condition": "self.data['foo'] != null && !pathManagedByEno  && double(self.data['foo']) <= 0.01"}
+						]`,
+					},
+				},
+				"data": map[string]any{
+					"foo": "0.0025",
+					"bar": "value",
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	// Wait for initial reconciliation
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+
+	// Verify initial state
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		t.Log("Initial ConfigMap data:", cm.Data)
+		return cm.Data["bar"] == "value" && cm.Data["foo"] == "0.0025"
+	})
+
+	// Externally modify foo field - this should trigger 1 override conditions
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		if err != nil {
+			return err
+		}
+		cm.Data["foo"] = "0.0023"
+		return mgr.DownstreamClient.Update(ctx, cm)
+	})
+	require.NoError(t, err)
+	// Wait for reconciliation to stabilize, then check final state
+	time.Sleep(time.Millisecond * 50) // Wait longer than reconcile interval
+
+	// Get the final state and verify it's stable
+	var finalData map[string]string
+	err = mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+	require.NoError(t, err)
+	finalData = make(map[string]string)
+	for k, v := range cm.Data {
+		finalData[k] = v
+	}
+
+	// Wait another reconcile cycle and verify state hasn't changed
+	time.Sleep(time.Millisecond * 20)
+	err = mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+	require.NoError(t, err)
+
+	// Assert the final stable state
+	assert.Equal(t, "value", cm.Data["bar"], "debug field should remain as default")
+	assert.Equal(t, "0.0023", cm.Data["foo"], "bpf field should remain as externally set")
+
+	// Verify state is stable (hasn't changed between checks)
+	for k, v := range finalData {
+		assert.Equal(t, v, cm.Data[k], "ConfigMap data should be stable")
+	}
+}
