@@ -82,6 +82,23 @@ var newResourceTests = []struct {
 		},
 	},
 	{
+		Name: "replace override",
+		Manifest: `{
+			"apiVersion": "apps/v1",
+			"kind": "Deployment",
+			"metadata": {
+				"name": "foo",
+				"namespace": "bar",
+				"annotations": {
+					"eno.azure.io/overrides": "[{\"path\":\".self.metadata.annotations[\\\"eno.azure.io/replace\\\"]\", \"value\":\"true\"}]"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Snapshot) {
+			assert.True(t, r.Replace)
+		},
+	},
+	{
 		Name: "zero-readiness-group",
 		Manifest: `{
 			"apiVersion": "v1",
