@@ -90,12 +90,48 @@ var newResourceTests = []struct {
 				"name": "foo",
 				"namespace": "bar",
 				"annotations": {
-					"eno.azure.io/overrides": "[{\"path\":\".self.metadata.annotations[\\\"eno.azure.io/replace\\\"]\", \"value\":\"true\"}]"
+					"eno.azure.io/overrides": "[{\"path\":\"self.metadata.annotations[\\\"eno.azure.io/replace\\\"]\", \"value\":\"true\"}]"
 				}
 			}
 		}`,
 		Assert: func(t *testing.T, r *Snapshot) {
 			assert.True(t, r.Replace)
+		},
+	},
+	{
+		Name: "conditional replace override, positive",
+		Manifest: `{
+			"apiVersion": "apps/v1",
+			"kind": "Deployment",
+			"metadata": {
+				"name": "foo",
+				"namespace": "bar",
+				"annotations": {
+					"trigger-replace": "yespls",
+					"eno.azure.io/overrides": "[{\"path\":\"self.metadata.annotations[\\\"eno.azure.io/replace\\\"]\", \"value\":\"true\", \"condition\": \"self.metadata.annotations[\\\"trigger-replace\\\"] == 'yespls'\"}]"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Snapshot) {
+			assert.True(t, r.Replace)
+		},
+	},
+	{
+		Name: "conditional replace override, negative",
+		Manifest: `{
+			"apiVersion": "apps/v1",
+			"kind": "Deployment",
+			"metadata": {
+				"name": "foo",
+				"namespace": "bar",
+				"annotations": {
+					"trigger-replace": "nothx",
+					"eno.azure.io/overrides": "[{\"path\":\"self.metadata.annotations[\\\"eno.azure.io/replace\\\"]\", \"value\":\"true\", \"condition\": \"self.metadata.annotations[\\\"trigger-replace\\\"] == 'yespls'\"}]"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Snapshot) {
+			assert.False(t, r.Replace)
 		},
 	},
 	{
@@ -376,7 +412,7 @@ func TestNewResource(t *testing.T) {
 			}, 0)
 			require.NoError(t, err)
 
-			rs, err := r.Snapshot(t.Context(), &apiv1.Composition{}, nil)
+			rs, err := r.Snapshot(t.Context(), &apiv1.Composition{}, r.UnstructuredWithoutOverrides())
 			require.NoError(t, err)
 			tc.Assert(t, rs)
 
