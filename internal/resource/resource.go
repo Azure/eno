@@ -81,9 +81,15 @@ func (r *Resource) Less(than *Resource) bool {
 // The snapshot should only be used to progress the resource's state from the given resourceVersion.
 // Call this function again to get an updated snapshot with the latest state if applying the current snapshot results in a conflict.
 func (r *Resource) Snapshot(ctx context.Context, comp *apiv1.Composition, actual *unstructured.Unstructured) (*Snapshot, error) {
+	return r.SnapshotWithOverrides(ctx, comp, actual, r)
+}
+
+// SnapshotWithOverrides is identical to Snapshot but applies the overrides from another resource
+// (presumably a newer version of the same object).
+func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Composition, actual *unstructured.Unstructured, overrideRes *Resource) (*Snapshot, error) {
 	copy := r.parsed.DeepCopy()
 
-	for i, op := range r.overrides {
+	for i, op := range overrideRes.overrides {
 		err := op.Apply(ctx, comp, actual, copy)
 		if err != nil {
 			return nil, fmt.Errorf("applying override %d: %w", i+1, err)

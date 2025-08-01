@@ -245,7 +245,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		// When using server side apply, make sure we haven't lost any managedFields metadata.
 		// Eno should always remove fields that are no longer set by the synthesizer, even if another client messed with managedFields.
 		if current != nil && prev != nil && !res.Replace {
-			snap, err := prev.Snapshot(ctx, comp, current)
+			snap, err := prev.SnapshotWithOverrides(ctx, comp, current, res.Resource)
 			if err != nil {
 				return false, fmt.Errorf("snapshotting previous version: %w", err)
 			}
