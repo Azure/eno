@@ -23,6 +23,9 @@ import (
 	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
 )
 
+var isovalentOverride = `[{"path": "self.metadata.annotations[\"eno.azure.io/replace\"]", "value": "true", "condition": "self.metadata.labels != nil && string(self.metadata.labels[\"billing\"]).startsWith(\"Isovalent\")"}]`
+var escapedOverride = strings.ReplaceAll(strings.ReplaceAll(isovalentOverride, `\`, `\\`), `"`, `\"`)
+
 var newResourceTests = []struct {
 	Name     string
 	Manifest string
@@ -109,6 +112,26 @@ var newResourceTests = []struct {
 				"annotations": {
 					"trigger-replace": "yespls",
 					"eno.azure.io/overrides": "[{\"path\":\"self.metadata.annotations[\\\"eno.azure.io/replace\\\"]\", \"value\":\"true\", \"condition\": \"self.metadata.annotations[\\\"trigger-replace\\\"] == 'yespls'\"}]"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Snapshot) {
+			assert.True(t, r.Replace)
+		},
+	},
+	{
+		Name: "isovalent override",
+		Manifest: `{
+			"apiVersion": "apps/v1",
+			"kind": "Deployment",
+			"metadata": {
+				"name": "foo",
+				"namespace": "bar",
+				"labels": {
+					"billing": "Isovalent.CiliumEnterprise" 
+				},
+				"annotations": {
+					"eno.azure.io/overrides": "` + escapedOverride + `"
 				}
 			}
 		}`,
@@ -405,6 +428,7 @@ func TestNewResource(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range newResourceTests {
 		t.Run(tc.Name, func(t *testing.T) {
+			//fmt.Println("Manifest:", tc.Manifest)
 			r, err := NewResource(ctx, &apiv1.ResourceSlice{
 				Spec: apiv1.ResourceSliceSpec{
 					Resources: []apiv1.Manifest{{Manifest: tc.Manifest}},
