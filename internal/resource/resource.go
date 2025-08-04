@@ -15,6 +15,7 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	enocel "github.com/Azure/eno/internal/cel"
 	"github.com/Azure/eno/internal/readiness"
 	"github.com/Azure/eno/internal/resource/mutation"
 	"github.com/go-logr/logr"
@@ -25,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
+	"github.com/google/cel-go/cel"
 )
 
 var patchGVK = schema.GroupVersionKind{
@@ -65,6 +67,7 @@ type Resource struct {
 	manifestDeleted  bool
 	readinessGroup   int
 	overrides        []*mutation.Op
+	replaceWhen      cel.Program
 	latestKnownState atomic.Pointer[apiv1.ResourceState]
 }
 
@@ -111,6 +114,17 @@ func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Compos
 
 	const replaceKey = "eno.azure.io/replace"
 	snap.Replace = anno[replaceKey] == "true"
+
+	// Handle replace-when annotation
+	if r.replaceWhen != nil {
+		// Evaluate the condition
+		val, err := enocel.Eval(ctx, r.replaceWhen, comp, actual, nil)
+		if err != nil {
+			logr.FromContextOrDiscard(ctx).V(0).Info("error evaluating replace-when condition", "error", err)
+		} else if b, ok := val.Value().(bool); ok && b {
+			snap.Replace = true
+		}
+	}
 
 	const reconcileIntervalKey = "eno.azure.io/reconcile-interval"
 	if str, ok := anno[reconcileIntervalKey]; ok {
@@ -255,6 +269,17 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 		err = json.Unmarshal([]byte(js), &res.overrides)
 		if err != nil {
 			logger.Error(err, "invalid override json")
+		}
+	}
+
+	// Parse replace-when condition
+	const replaceWhenKey = "eno.azure.io/replace-when"
+	if condition, ok := anno[replaceWhenKey]; ok {
+		prgm, err := enocel.Parse(condition)
+		if err != nil {
+			logger.Error(err, "invalid replace-when condition")
+		} else {
+			res.replaceWhen = prgm
 		}
 	}
 
