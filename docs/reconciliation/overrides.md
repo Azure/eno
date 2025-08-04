@@ -44,6 +44,27 @@ annotations:
     ]
 ```
 
+## Kubernetes Resource Quantity Comparisons
+
+Eno `cel` expressions support a special function for comparing Kubernetes resource quantity strings.
+For example: the string representation of values in a container's `resources.limits.cpu`.
+
+- Returns 0 when values are equal
+- Returns -1 when left < right
+- Returns 1 when left > right
+
+```yaml
+annotations:
+  eno.azure.io/overrides: |
+    [
+      {
+        "path": "self.spec.resources.requests.memory",
+        "value": "2Gi",
+        "condition": "compareResourceQuantities(self.spec.resources.requests.memory, '1Gi') < 0"
+      }
+    ]
+```
+
 ## Path Expression Syntax
 
 Overrides use a CEL-like syntax to reference properties.
