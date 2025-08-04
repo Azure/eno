@@ -552,3 +552,239 @@ func TestReplacePropertyAndRemoveOwnership(t *testing.T) {
 	assert.Equal(t, map[string]string{"foo": "bar", "baz": "qux"}, cm.Labels)
 	assert.Equal(t, map[string]string{"foo": "bar", "baz": "qux"}, cm.Data)
 }
+
+// TestExternallyManagedPropertyPreserved proves that a property not managed by Eno (due to an override)
+// will not be stomped on when Eno modifies other properties in the same resource.
+func TestExternallyManagedPropertyPreserved(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	requireSSA(t, mgr)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]any{
+						"eno.azure.io/overrides": `[{ "path": "self.data.foo", "value": null, "condition": "has(self.data.foo) && !pathManagedByEno" }]`,
+					},
+				},
+				"data": map[string]any{"foo": "bar", "baz": "qux"},
+			},
+		}}
+		return output, nil
+	})
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	syn, comp := writeGenericComposition(t, upstream)
+
+	// Creation
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
+
+	// Hand off ownership of 'foo'
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		cm.ManagedFields = nil
+		cm.Data["foo"] = "another-value"
+		cm.Data["baz"] = "updated-to-force-apply" // this is important - otherwise resources will match and skip reconciliation
+		cm.APIVersion = "v1"
+		cm.Kind = "ConfigMap" // the downstream client doesn't have a scheme
+		return mgr.DownstreamClient.Patch(ctx, cm, client.Apply, client.ForceOwnership, client.FieldOwner("test"))
+	})
+	require.NoError(t, err)
+
+	// Update
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+		syn.Spec.Image = "anything"
+		return upstream.Update(ctx, syn)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
+
+	// Prove the resource was reconciled correctly
+	err = mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"foo": "another-value", "baz": "qux"}, cm.Data)
+}
+
+// TestExternallyManagedPropertyRemoved proves that removing a property not managed by Eno (due to an override)
+// will not cause Eno to take back its ownership and cause the property to be pruned.
+func TestExternallyManagedPropertyRemoved(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	requireSSA(t, mgr)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]any{
+						"eno.azure.io/overrides": `[{ "path": "self.data.foo", "value": null, "condition": "has(self.data.foo) && !pathManagedByEno" }]`,
+					},
+				},
+				"data": map[string]any{"foo": "bar"},
+			},
+		}}
+		if s.Spec.Image == "updated" {
+			delete(output.Items[0].Object, "data")
+		}
+		return output, nil
+	})
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	syn, comp := writeGenericComposition(t, upstream)
+
+	// Creation
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
+
+	// Hand off ownership of 'foo'
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		cm.ManagedFields = nil
+		cm.Data["foo"] = "another-value"
+		cm.APIVersion = "v1"
+		cm.Kind = "ConfigMap" // the downstream client doesn't have a scheme
+		return mgr.DownstreamClient.Patch(ctx, cm, client.Apply, client.ForceOwnership, client.FieldOwner("test"))
+	})
+	require.NoError(t, err)
+
+	// Update
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+		syn.Spec.Image = "updated"
+		return upstream.Update(ctx, syn)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
+
+	// Prove the resource was reconciled correctly
+	err = mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"foo": "another-value"}, cm.Data)
+}
+
+// TestExternallyManagedPropertyAndOverrideRemoved is the negative case of TestExternallyManagedPropertyRemoved.
+// It proves that removing a property managed by another field manager AND removing the override that allowed it
+// will cause the property to be pruned from the resource.
+func TestExternallyManagedPropertyAndOverrideRemoved(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	requireSSA(t, mgr)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]any{
+						"eno.azure.io/overrides": `[{ "path": "self.data.foo", "value": null, "condition": "has(self.data.foo) && !pathManagedByEno" }]`,
+					},
+				},
+				"data": map[string]any{"foo": "bar"},
+			},
+		}}
+		if s.Spec.Image == "updated" {
+			delete(output.Items[0].Object, "data")
+			output.Items[0].SetAnnotations(map[string]string{
+				// NOTE(jordan): The test will fail if we don't positively change a value.
+				// This is because of the dryrun/current comparison optimization
+				// i.e. because from Eno's perspective nothing changes between the current and next version.
+				// From it's perspective the field being removed was already null due to the override.
+				//
+				// We may want to add special handling for this, but honestly I think it's better
+				// that we just document it as a known shortcoming. Pruning a property not managed by
+				// Eno without also modifying another property is... not going to happen every day.
+				// And this fix to the comparison logic would be costly/complicated.
+				"anything": "foo",
+			})
+		}
+		return output, nil
+	})
+
+	// Test subject
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	syn, comp := writeGenericComposition(t, upstream)
+
+	// Creation
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
+
+	// Hand off ownership of 'foo'
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		cm.ManagedFields = nil
+		cm.Data["foo"] = "another-value"
+		cm.APIVersion = "v1"
+		cm.Kind = "ConfigMap" // the downstream client doesn't have a scheme
+		return mgr.DownstreamClient.Patch(ctx, cm, client.Apply, client.ForceOwnership, client.FieldOwner("test"))
+	})
+	require.NoError(t, err)
+
+	// Update
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+		syn.Spec.Image = "updated"
+		return upstream.Update(ctx, syn)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
+
+	// Prove the resource was reconciled correctly
+	err = mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+	require.NoError(t, err)
+	assert.Len(t, cm.Data, 0)
+}
