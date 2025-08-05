@@ -53,6 +53,10 @@ spec:
                 items:
                   type: string
                 type: array
+              execTimeout:
+                default: 10s
+                description: Timeout for each execution of the synthesizer command.
+                type: string
               image:
                 description: Copied opaquely into the container's image property.
                 type: string
@@ -1048,6 +1052,12 @@ spec:
                         type: object
                     type: object
                 type: object
+              podTimeout:
+                default: 2m
+                description: |-
+                  Pods are recreated after they've existed for at least the pod timeout interval.
+                  This helps close the loop in failure modes where a pod may be considered ready but not actually able to run.
+                type: string
               refs:
                 description: |-
                   Refs define the Synthesizer's input schema without binding it to specific

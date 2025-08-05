@@ -6,6 +6,7 @@ package v1
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -760,6 +761,16 @@ func (in *SynthesizerSpec) DeepCopyInto(out *SynthesizerSpec) {
 		in, out := &in.Command, &out.Command
 		*out = make([]string, len(*in))
 		copy(*out, *in)
+	}
+	if in.ExecTimeout != nil {
+		in, out := &in.ExecTimeout, &out.ExecTimeout
+		*out = new(metav1.Duration)
+		**out = **in
+	}
+	if in.PodTimeout != nil {
+		in, out := &in.PodTimeout, &out.PodTimeout
+		*out = new(metav1.Duration)
+		**out = **in
 	}
 	if in.Refs != nil {
 		in, out := &in.Refs, &out.Refs
