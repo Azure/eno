@@ -44,12 +44,6 @@ func NewExecHandler() SynthesizerHandle {
 			command = []string{"synthesize"}
 		}
 
-		if s.Spec.ExecTimeout != nil {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, s.Spec.ExecTimeout.Duration)
-			defer cancel()
-		}
-
 		cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 		cmd.Stdin = stdin
 		cmd.Stderr = os.Stdout // logger uses stderr, so use stdout to avoid race condition

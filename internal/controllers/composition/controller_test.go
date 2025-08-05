@@ -95,7 +95,6 @@ func TestFinalizerSynthesisOutdated(t *testing.T) {
 func TestTimeoutDeferral(t *testing.T) {
 	synth := &apiv1.Synthesizer{}
 	synth.Name = "test"
-	synth.Spec.PodTimeout = &metav1.Duration{Duration: time.Hour}
 
 	comp := &apiv1.Composition{}
 	comp.Name = "test-comp"
@@ -107,7 +106,7 @@ func TestTimeoutDeferral(t *testing.T) {
 
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t, comp, synth)
-	c := &compositionController{client: cli}
+	c := &compositionController{client: cli, podTimeout: time.Hour}
 
 	res, err := c.Reconcile(ctx, req) // status update
 	require.NoError(t, err)
@@ -124,7 +123,6 @@ func TestTimeoutDeferral(t *testing.T) {
 func TestTimeoutCancelation(t *testing.T) {
 	synth := &apiv1.Synthesizer{}
 	synth.Name = "test"
-	synth.Spec.PodTimeout = &metav1.Duration{Duration: time.Minute}
 
 	comp := &apiv1.Composition{}
 	comp.Name = "test-comp"
@@ -136,7 +134,7 @@ func TestTimeoutCancelation(t *testing.T) {
 
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t, comp, synth)
-	c := &compositionController{client: cli}
+	c := &compositionController{client: cli, podTimeout: time.Minute}
 
 	res, err := c.Reconcile(ctx, req) // status update
 	require.NoError(t, err)

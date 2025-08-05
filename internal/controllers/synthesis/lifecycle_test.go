@@ -48,7 +48,7 @@ func TestCompositionDeletion(t *testing.T) {
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, resourceslice.NewCleanupController(mgr.Manager))
 	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
-	require.NoError(t, composition.NewController(mgr.Manager))
+	require.NoError(t, composition.NewController(mgr.Manager, time.Minute))
 	require.NoError(t, NewPodGC(mgr.Manager, 0))
 	mgr.Start(t)
 

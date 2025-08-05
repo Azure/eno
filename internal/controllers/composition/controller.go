@@ -25,12 +25,14 @@ import (
 )
 
 type compositionController struct {
-	client client.Client
+	client     client.Client
+	podTimeout time.Duration
 }
 
-func NewController(mgr ctrl.Manager) error {
+func NewController(mgr ctrl.Manager, podTimeout time.Duration) error {
 	c := &compositionController{
-		client: mgr.GetClient(),
+		client:     mgr.GetClient(),
+		podTimeout: podTimeout,
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
@@ -114,8 +116,8 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Enforce the synthesis timeout period
-	if syn := comp.Status.InFlightSynthesis; syn != nil && syn.Canceled == nil && syn.Initialized != nil && synth.Spec.PodTimeout != nil {
-		delta := time.Until(syn.Initialized.Time.Add(synth.Spec.PodTimeout.Duration))
+	if syn := comp.Status.InFlightSynthesis; syn != nil && syn.Canceled == nil && syn.Initialized != nil {
+		delta := time.Until(syn.Initialized.Time.Add(c.podTimeout))
 		if delta > 0 {
 			return ctrl.Result{RequeueAfter: delta}, nil
 		}

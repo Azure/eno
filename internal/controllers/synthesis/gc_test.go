@@ -54,7 +54,6 @@ func TestPodGCContainerCreationTimeout(t *testing.T) {
 	synth := &apiv1.Synthesizer{}
 	synth.Name = "test-syn"
 	synth.Spec.Image = "test-syn-image"
-	synth.Spec.PodTimeout = &metav1.Duration{Duration: time.Hour}
 	require.NoError(t, cli.Create(ctx, synth))
 
 	comp := &apiv1.Composition{}
