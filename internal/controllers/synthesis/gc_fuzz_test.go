@@ -50,7 +50,6 @@ func TestPodGCDoesNotPanic(t *testing.T) {
 
 			state.Synth.Name = "test-synth"
 			state.Synth.Namespace = "test-ns"
-			state.Synth.Spec.PodTimeout = &metav1.Duration{Duration: time.Minute}
 
 			state.Comp.Name = "test-comp"
 			state.Comp.Namespace = state.Synth.Namespace
@@ -101,18 +100,6 @@ func TestPodGCDoesNotPanic(t *testing.T) {
 		}).
 		WithMutation("synth deleted", func(pg *podGCState) *podGCState {
 			pg.Synth = nil
-			return pg
-		}).
-		WithMutation("nil pod timeout", func(pg *podGCState) *podGCState {
-			if pg.Synth != nil {
-				pg.Synth.Spec.PodTimeout = nil
-			}
-			return pg
-		}).
-		WithMutation("timeout", func(pg *podGCState) *podGCState {
-			if pg.Synth != nil && pg.Synth.Spec.PodTimeout != nil {
-				pg.Synth.Spec.PodTimeout.Duration = -1
-			}
 			return pg
 		}).
 		WithMutation("no labels", func(pg *podGCState) *podGCState {

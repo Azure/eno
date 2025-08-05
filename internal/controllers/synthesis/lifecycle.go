@@ -3,6 +3,7 @@ package synthesis
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -25,6 +26,7 @@ type Config struct {
 	ExecutorImage     string
 	PodNamespace      string
 	PodServiceAccount string
+	PodTimeout        time.Duration
 
 	TaintTolerationKey   string
 	TaintTolerationValue string
