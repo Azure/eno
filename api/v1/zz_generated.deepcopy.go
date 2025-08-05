@@ -623,10 +623,6 @@ func (in *Synthesis) DeepCopyInto(out *Synthesis) {
 		in, out := &in.Initialized, &out.Initialized
 		*out = (*in).DeepCopy()
 	}
-	if in.PodCreation != nil {
-		in, out := &in.PodCreation, &out.PodCreation
-		*out = (*in).DeepCopy()
-	}
 	if in.Synthesized != nil {
 		in, out := &in.Synthesized, &out.Synthesized
 		*out = (*in).DeepCopy()

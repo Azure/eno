@@ -169,11 +169,6 @@ spec:
                       This is a min i.e. a newer composition may have been used.
                     format: int64
                     type: integer
-                  podCreation:
-                    description: Time at which the most recent synthesizer pod was
-                      created.
-                    format: date-time
-                    type: string
                   ready:
                     description: Time at which the synthesis's reconciled resources
                       became ready.
@@ -276,11 +271,6 @@ spec:
                       This is a min i.e. a newer composition may have been used.
                     format: int64
                     type: integer
-                  podCreation:
-                    description: Time at which the most recent synthesizer pod was
-                      created.
-                    format: date-time
-                    type: string
                   ready:
                     description: Time at which the synthesis's reconciled resources
                       became ready.
@@ -400,11 +390,6 @@ spec:
                       This is a min i.e. a newer composition may have been used.
                     format: int64
                     type: integer
-                  podCreation:
-                    description: Time at which the most recent synthesizer pod was
-                      created.
-                    format: date-time
-                    type: string
                   ready:
                     description: Time at which the synthesis's reconciled resources
                       became ready.
