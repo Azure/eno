@@ -32,7 +32,6 @@ import (
 var defaultConf = &synthesis.Config{
 	PodNamespace:  "default",
 	ExecutorImage: "test-image",
-	PodTimeout:    time.Minute * 10,
 }
 
 type crudTestCase struct {

@@ -25,7 +25,6 @@ import (
 var minimalTestConfig = &Config{
 	PodNamespace:  "default",
 	ExecutorImage: "test-image",
-	PodTimeout:    time.Minute * 10,
 }
 
 // TestControllerHappyPath proves that pods are eventually created and synthesizers are eventually executed
