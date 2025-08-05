@@ -20,84 +20,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-type newOpTestState struct {
-	synth          *apiv1.Synthesizer
-	comp, original *apiv1.Composition
-}
-
-// Helper functions to check common conditions
-func (s newOpTestState) hasInvalidState() bool {
-	return s.hasInputsOutOfLockstep() || s.hasInsufficientInputs() || s.isCompositionDeleting() || s.isMissingFinalizer()
-}
-
-func (s newOpTestState) hasInputsOutOfLockstep() bool {
-	return len(s.comp.Status.InputRevisions) >= 2 &&
-		s.comp.Status.InputRevisions[0].Revision != nil &&
-		s.comp.Status.InputRevisions[1].Revision != nil
-}
-
-func (s newOpTestState) hasInsufficientInputs() bool {
-	return len(s.comp.Status.InputRevisions) < 2
-}
-
-func (s newOpTestState) isCompositionDeleting() bool {
-	return s.comp.DeletionTimestamp != nil
-}
-
-func (s newOpTestState) isMissingFinalizer() bool {
-	return len(s.comp.Finalizers) == 0
-}
-
-func (s newOpTestState) hasNilSynthesis() bool {
-	return s.comp.Status.CurrentSynthesis == nil && s.comp.Status.InFlightSynthesis == nil
-}
-
-func (s newOpTestState) isCompositionModified() bool {
-	if s.comp.Status.InFlightSynthesis != nil {
-		return s.comp.Status.InFlightSynthesis.ObservedCompositionGeneration != s.comp.Generation
-	}
-	if s.comp.Status.CurrentSynthesis != nil {
-		return s.comp.Status.CurrentSynthesis.ObservedCompositionGeneration != s.comp.Generation
-	}
-	return false
-}
-
-func (s newOpTestState) getCurrentSynthesis() *apiv1.Synthesis {
-	if s.comp.Status.InFlightSynthesis != nil {
-		return s.comp.Status.InFlightSynthesis
-	}
-	return s.comp.Status.CurrentSynthesis
-}
-
-func (s newOpTestState) hasInputModified() bool {
-	syn := s.getCurrentSynthesis()
-	if syn == nil {
-		return false
-	}
-	return len(s.comp.Status.InputRevisions) >= 1 &&
-		len(syn.InputRevisions) >= 1 &&
-		s.comp.Status.InputRevisions[0].ResourceVersion != syn.InputRevisions[0].ResourceVersion
-}
-
-func (s newOpTestState) hasDeferredInputModified() bool {
-	syn := s.getCurrentSynthesis()
-	if syn == nil {
-		return false
-	}
-	return len(s.comp.Status.InputRevisions) >= 2 &&
-		len(syn.InputRevisions) >= 2 &&
-		s.comp.Status.InputRevisions[1].ResourceVersion != syn.InputRevisions[1].ResourceVersion
-}
-
-func (s newOpTestState) isSynthesizerModified() bool {
-	syn := s.getCurrentSynthesis()
-	if syn == nil {
-		return false
-	}
-	return s.synth.Generation != 11 && s.synth.Generation != 0 &&
-		syn.ObservedSynthesizerGeneration > 0 && syn.ObservedSynthesizerGeneration < s.synth.Generation
-}
-
 func TestFuzzNewOp(t *testing.T) {
 	ctx := testutil.NewContext(t)
 
@@ -241,8 +163,6 @@ func TestFuzzNewOp(t *testing.T) {
 		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || state.hasInputModified() || !state.hasDeferredInputModified() {
 			return true
 		}
-		
-		// Deferred ops won't replace an in-flight synthesis
 		if state.comp.Synthesizing() {
 			return op == nil
 		}
@@ -256,14 +176,11 @@ func TestFuzzNewOp(t *testing.T) {
 		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || state.hasInputModified() || state.hasDeferredInputModified() || state.synth.Generation == 0 || !state.isSynthesizerModified() {
 			return true
 		}
-		
-		// Deferred ops won't replace an in-flight synthesis
 		if state.comp.Synthesizing() {
 			return op == nil
 		}
 		return op != nil && op.Reason == synthesizerModifiedOp && op.Reason.Deferred()
 	}).WithInvariant("returns nil when no conditions are met", func(state newOpTestState, op *op) bool {
-		// If any condition that would create an operation is met, this invariant doesn't apply
 		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || state.hasInputModified() || state.hasDeferredInputModified() || state.synth.Generation == 0 || state.isSynthesizerModified() {
 			return true
 		}
@@ -297,6 +214,73 @@ func TestFuzzNewOp(t *testing.T) {
 
 		return newOp(state.synth, comp, time.Time{}) == nil
 	}).Evaluate(t)
+}
+
+type newOpTestState struct {
+	synth          *apiv1.Synthesizer
+	comp, original *apiv1.Composition
+}
+
+func (s newOpTestState) hasInsufficientInputs() bool { return len(s.comp.Status.InputRevisions) < 2 }
+func (s newOpTestState) isCompositionDeleting() bool { return s.comp.DeletionTimestamp != nil }
+func (s newOpTestState) isMissingFinalizer() bool    { return len(s.comp.Finalizers) == 0 }
+
+func (s newOpTestState) hasNilSynthesis() bool {
+	return s.comp.Status.CurrentSynthesis == nil && s.comp.Status.InFlightSynthesis == nil
+}
+
+func (s newOpTestState) hasInvalidState() bool {
+	return s.hasInputsOutOfLockstep() || s.hasInsufficientInputs() || s.isCompositionDeleting() || s.isMissingFinalizer()
+}
+
+func (s newOpTestState) hasInputsOutOfLockstep() bool {
+	return len(s.comp.Status.InputRevisions) >= 2 && s.comp.Status.InputRevisions[0].Revision != nil && s.comp.Status.InputRevisions[1].Revision != nil
+}
+
+func (s newOpTestState) isCompositionModified() bool {
+	if s.comp.Status.InFlightSynthesis != nil {
+		return s.comp.Status.InFlightSynthesis.ObservedCompositionGeneration != s.comp.Generation
+	}
+	if s.comp.Status.CurrentSynthesis != nil {
+		return s.comp.Status.CurrentSynthesis.ObservedCompositionGeneration != s.comp.Generation
+	}
+	return false
+}
+
+func (s newOpTestState) getCurrentSynthesis() *apiv1.Synthesis {
+	if s.comp.Status.InFlightSynthesis != nil {
+		return s.comp.Status.InFlightSynthesis
+	}
+	return s.comp.Status.CurrentSynthesis
+}
+
+func (s newOpTestState) hasInputModified() bool {
+	syn := s.getCurrentSynthesis()
+	if syn == nil {
+		return false
+	}
+	return len(s.comp.Status.InputRevisions) >= 1 &&
+		len(syn.InputRevisions) >= 1 &&
+		s.comp.Status.InputRevisions[0].ResourceVersion != syn.InputRevisions[0].ResourceVersion
+}
+
+func (s newOpTestState) hasDeferredInputModified() bool {
+	syn := s.getCurrentSynthesis()
+	if syn == nil {
+		return false
+	}
+	return len(s.comp.Status.InputRevisions) >= 2 &&
+		len(syn.InputRevisions) >= 2 &&
+		s.comp.Status.InputRevisions[1].ResourceVersion != syn.InputRevisions[1].ResourceVersion
+}
+
+func (s newOpTestState) isSynthesizerModified() bool {
+	syn := s.getCurrentSynthesis()
+	if syn == nil {
+		return false
+	}
+	return s.synth.Generation != 11 && s.synth.Generation != 0 &&
+		syn.ObservedSynthesizerGeneration > 0 && syn.ObservedSynthesizerGeneration < s.synth.Generation
 }
 
 func TestFuzzInputChangeCount(t *testing.T) {
