@@ -114,52 +114,52 @@ func TestFuzzNewOp(t *testing.T) {
 	}).WithMutation("nilSynthesis", func(state newOpTestState) newOpTestState {
 		state.comp.Status.CurrentSynthesis = nil
 		return state
-	}).WithInvariant("returns nil for inputs out of lockstep", func(state newOpTestState, op *op) bool {
+	}).WithInvariant("returns nil when input revisions are out of lockstep with different revision numbers", func(state newOpTestState, op *op) bool {
 		if !state.hasInputsOutOfLockstep() {
 			return true
 		}
 		return op == nil
-	}).WithInvariant("returns nil for insufficient inputs", func(state newOpTestState, op *op) bool {
+	}).WithInvariant("returns nil when composition has fewer input revisions than required", func(state newOpTestState, op *op) bool {
 		if !state.hasInsufficientInputs() {
 			return true
 		}
 		return op == nil
-	}).WithInvariant("returns nil for composition being deleted", func(state newOpTestState, op *op) bool {
+	}).WithInvariant("returns nil when composition has deletion timestamp set", func(state newOpTestState, op *op) bool {
 		if !state.isCompositionDeleting() {
 			return true
 		}
 		return op == nil
-	}).WithInvariant("returns nil for composition missing finalizer", func(state newOpTestState, op *op) bool {
+	}).WithInvariant("returns nil when composition has no finalizers", func(state newOpTestState, op *op) bool {
 		if !state.isMissingFinalizer() {
 			return true
 		}
 		return op == nil
-	}).WithInvariant("creates initial synthesis when no synthesis exists", func(state newOpTestState, op *op) bool {
+	}).WithInvariant("creates initial synthesis operation when current and in-flight synthesis are both nil", func(state newOpTestState, op *op) bool {
 		if state.hasInvalidState() || !state.hasNilSynthesis() {
 			return true
 		}
 		return op != nil && op.Reason == initialSynthesisOp && !op.Reason.Deferred()
-	}).WithInvariant("creates forced resynthesis when requested", func(state newOpTestState, op *op) bool {
+	}).WithInvariant("creates forced resynthesis operation when composition force resynthesis flag is set", func(state newOpTestState, op *op) bool {
 		if state.hasInvalidState() || state.hasNilSynthesis() || !state.comp.ShouldForceResynthesis() {
 			return true
 		}
 		return op != nil && op.Reason == forcedResynthesisOp && !op.Reason.Deferred()
-	}).WithInvariant("creates composition modified op when generation changed", func(state newOpTestState, op *op) bool {
+	}).WithInvariant("creates composition modified operation when composition generation differs from observed generation", func(state newOpTestState, op *op) bool {
 		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || !state.isCompositionModified() {
 			return true
 		}
 		return op != nil && op.Reason == compositionModifiedOp && !op.Reason.Deferred()
-	}).WithInvariant("returns nil when ignoring side effects", func(state newOpTestState, op *op) bool {
+	}).WithInvariant("returns nil when composition has ignore side effects flag enabled", func(state newOpTestState, op *op) bool {
 		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || !state.comp.ShouldIgnoreSideEffects() {
 			return true
 		}
 		return op == nil
-	}).WithInvariant("creates input modified op when regular input changed", func(state newOpTestState, op *op) bool {
+	}).WithInvariant("creates input modified operation when non-deferred input resource version changed", func(state newOpTestState, op *op) bool {
 		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || !state.hasInputModified() {
 			return true
 		}
 		return op != nil && op.Reason == inputModifiedOp && !op.Reason.Deferred()
-	}).WithInvariant("handles deferred input changes correctly", func(state newOpTestState, op *op) bool {
+	}).WithInvariant("creates deferred input modified operation when deferred input changed and not synthesizing", func(state newOpTestState, op *op) bool {
 		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || state.hasInputModified() || !state.hasDeferredInputModified() {
 			return true
 		}
@@ -167,12 +167,12 @@ func TestFuzzNewOp(t *testing.T) {
 			return op == nil
 		}
 		return op != nil && op.Reason == deferredInputModifiedOp && op.Reason.Deferred()
-	}).WithInvariant("returns nil when synthesizer generation is zero", func(state newOpTestState, op *op) bool {
+	}).WithInvariant("returns nil when synthesizer generation is zero indicating uninitialized state", func(state newOpTestState, op *op) bool {
 		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || state.hasInputModified() || state.hasDeferredInputModified() || state.synth.Generation != 0 {
 			return true
 		}
 		return op == nil
-	}).WithInvariant("handles synthesizer modifications correctly", func(state newOpTestState, op *op) bool {
+	}).WithInvariant("creates synthesizer modified operation when synthesizer generation increased and not synthesizing", func(state newOpTestState, op *op) bool {
 		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || state.hasInputModified() || state.hasDeferredInputModified() || state.synth.Generation == 0 || !state.isSynthesizerModified() {
 			return true
 		}
@@ -180,12 +180,12 @@ func TestFuzzNewOp(t *testing.T) {
 			return op == nil
 		}
 		return op != nil && op.Reason == synthesizerModifiedOp && op.Reason.Deferred()
-	}).WithInvariant("returns nil when no conditions are met", func(state newOpTestState, op *op) bool {
+	}).WithInvariant("returns nil when no operation conditions are satisfied in valid state", func(state newOpTestState, op *op) bool {
 		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || state.hasInputModified() || state.hasDeferredInputModified() || state.synth.Generation == 0 || state.isSynthesizerModified() {
 			return true
 		}
 		return op == nil
-	}).WithInvariant("op patch creates idempotent state", func(state newOpTestState, op *op) bool {
+	}).WithInvariant("operation patch applied to composition creates idempotent state with no further operations", func(state newOpTestState, op *op) bool {
 		if op == nil {
 			return true
 		}
