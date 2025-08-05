@@ -76,7 +76,7 @@ func (c *namespaceController) Reconcile(ctx context.Context, req ctrl.Request) (
 			logger.Error(err, "failed to delete namespace")
 			return ctrl.Result{}, err
 		}
-		logger.V(0).Info("deleting recreated namespace")
+		logger.V(1).Info("deleting recreated namespace")
 		return ctrl.Result{}, nil
 	}
 	if err == nil {

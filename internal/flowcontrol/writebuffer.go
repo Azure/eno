@@ -174,7 +174,7 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, insertionTim
 		return false
 	}
 
-	logger.V(0).Info(fmt.Sprintf("updated the status of %d resources in slice", len(updates)), "latency", time.Since(insertionTime).Abs().Milliseconds())
+	logger.V(1).Info(fmt.Sprintf("updated the status of %d resources in slice", len(updates)), "latency", time.Since(insertionTime).Abs().Milliseconds())
 	sliceStatusUpdates.Inc()
 	return true
 }

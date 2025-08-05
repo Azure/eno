@@ -50,7 +50,7 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 	logger = logger.WithValues("podName", pod.Name, "podNamespace", pod.Namespace)
 
 	if pod.Labels == nil {
-		logger.V(0).Info("saw a pod without any labels - this shouldn't be possible!")
+		logger.Error(nil, "saw a pod without any labels - this shouldn't be possible!")
 		return ctrl.Result{}, nil
 	}
 
