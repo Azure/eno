@@ -40,9 +40,19 @@ type SymphonyStatus struct {
 }
 
 type Variation struct {
-	Labels       map[string]string `json:"labels,omitempty"`
-	Annotations  map[string]string `json:"annotations,omitempty"`
-	Synthesizer  SynthesizerRef    `json:"synthesizer,omitempty"`
-	Bindings     []Binding         `json:"bindings,omitempty"`
-	SynthesisEnv []EnvVar          `json:"synthesisEnv,omitempty"`
+	// Used to populate the composition's metadata.labels.
+	Labels map[string]string `json:"labels,omitempty"`
+
+	// Used to populate the composition's medatada.annotations.
+	Annotations map[string]string `json:"annotations,omitempty"`
+
+	// Used to populate the composition's spec.synthesizer.
+	Synthesizer SynthesizerRef `json:"synthesizer,omitempty"`
+
+	// Used to populate the composition's spec.bindings.
+	Bindings []Binding `json:"bindings,omitempty"`
+
+	// Used to populate the composition's spec.synthesisEnv.
+	// +kubebuilder:validation:MaxItems:=25
+	SynthesisEnv []EnvVar `json:"synthesisEnv,omitempty"`
 }
