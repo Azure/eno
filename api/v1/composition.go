@@ -91,9 +91,6 @@ type Synthesis struct {
 	// Initialized is set when the synthesis process is initiated.
 	Initialized *metav1.Time `json:"initialized,omitempty"`
 
-	// Time at which the most recent synthesizer pod was created.
-	PodCreation *metav1.Time `json:"podCreation,omitempty"`
-
 	// Time at which the synthesis completed i.e. resourceSlices was written
 	Synthesized *metav1.Time `json:"synthesized,omitempty"`
 
