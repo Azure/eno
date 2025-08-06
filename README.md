@@ -1,10 +1,17 @@
 # Eno
 
-Compose Kubernetes deployments.
+Dynamic configuration management for Kubernetes.
 
 - 🎹 **Synthesize**: generate manifests dynamically in short-lived pods
 - ♻️ **Reconcile**: apply the generated configurations and rapidly correct any drift
 - 🏃‍➡️ **React**: re-synthesize when input resources are modified
+
+## What is Eno?
+
+Eno deploys applications to Kubernetes using code instead of static YAML files or templates.
+
+The Eno controllers handle executing your deployment code in short-lived pods and reconciling the results into Kubernetes resources.
+Just print JSON objects to stdout and Eno will handle the rest.
 
 ## Docs
 
