@@ -195,7 +195,7 @@ func (s *statusSnapshot) GetReconciled(comp *apiv1.Composition, now *metav1.Time
 		}
 	}
 
-	logger.V(0).Info("composition was reconciled")
+	logger.V(1).Info("composition was reconciled")
 	return now
 }
 
@@ -211,6 +211,6 @@ func (s *statusSnapshot) GetReady(comp *apiv1.Composition, logger logr.Logger) *
 		}
 	}
 
-	logger.V(0).Info("composition became ready")
+	logger.V(1).Info("composition became ready")
 	return s.ReadyTime
 }

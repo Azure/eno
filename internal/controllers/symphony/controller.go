@@ -143,7 +143,7 @@ func (c *symphonyController) reconcileReverse(ctx context.Context, symph *apiv1.
 			if err != nil {
 				return false, fmt.Errorf("updating composition labels: %w", err)
 			}
-			logger.V(0).Info("labeled composition before deleting it", "compositionName", comp.Name, "compositionNamespace", comp.Namespace)
+			logger.V(1).Info("labeled composition before deleting it", "compositionName", comp.Name, "compositionNamespace", comp.Namespace)
 			return true, nil
 		}
 
@@ -213,7 +213,7 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 
 			err = c.client.Create(ctx, comp)
 			if k8serrors.IsForbidden(err) && k8serrors.HasStatusCause(err, corev1.NamespaceTerminatingCause) {
-				logger.V(0).Info("skipping composition creation because the namespace is being terminated")
+				logger.V(1).Info("skipping composition creation because the namespace is being terminated")
 				return false, nil
 			}
 			if err != nil {
@@ -233,7 +233,7 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		if err != nil {
 			return false, fmt.Errorf("updating existing composition: %w", err)
 		}
-		logger.V(0).Info("updated composition because its variation changed")
+		logger.V(1).Info("updated composition because its variation changed")
 		return true, nil
 	}
 

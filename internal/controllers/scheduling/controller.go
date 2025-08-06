@@ -164,7 +164,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	op.Dispatched = time.Now()
 	c.lastApplied = op
-	logger.V(0).Info("dispatched synthesis", "synthesisUUID", op.id)
+	logger.V(1).Info("dispatched synthesis", "synthesisUUID", op.id)
 
 	return ctrl.Result{}, nil
 }

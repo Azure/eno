@@ -248,7 +248,7 @@ func (k *KindWatchController) updateCompositions(ctx context.Context, logger log
 		if err != nil {
 			return false, fmt.Errorf("updating input revisions: %w", err)
 		}
-		logger.V(0).Info("noticed input resource change", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key)
+		logger.V(1).Info("noticed input resource change", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key)
 		return true, nil // wait for requeue
 	}
 

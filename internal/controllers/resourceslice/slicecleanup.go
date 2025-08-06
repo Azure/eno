@@ -198,7 +198,7 @@ func (c *cleanupController) removeFinalizer(ctx context.Context, slice *apiv1.Re
 	if err := c.client.Patch(ctx, slice, client.RawPatch(types.JSONPatchType, patchJSON)); err != nil {
 		return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
 	}
-	logger.V(0).Info("removed resource slice finalizers")
+	logger.V(1).Info("removed resource slice finalizers")
 
 	return ctrl.Result{}, nil
 }

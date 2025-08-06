@@ -126,7 +126,7 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 			logger.Error(err, "failed to update composition status to reflect synthesis timeout")
 			return ctrl.Result{}, err
 		}
-		logger.V(0).Info("synthesis timed out")
+		logger.Error(nil, "synthesis timed out")
 		return ctrl.Result{}, nil
 	}
 
@@ -153,7 +153,7 @@ func (c *compositionController) reconcileDeletedComposition(ctx context.Context,
 				logger.Error(err, "failed to update current composition generation")
 				return ctrl.Result{}, err
 			}
-			logger.V(0).Info("updated composition status to reflect deletion", "synthesisUUID", comp.Status.CurrentSynthesis.UUID)
+			logger.V(1).Info("updated composition status to reflect deletion", "synthesisUUID", comp.Status.CurrentSynthesis.UUID)
 			return ctrl.Result{}, nil
 		}
 
@@ -170,7 +170,7 @@ func (c *compositionController) reconcileDeletedComposition(ctx context.Context,
 			return ctrl.Result{}, err
 		}
 
-		logger.V(0).Info("removed finalizer from composition")
+		logger.V(1).Info("removed finalizer from composition")
 	}
 
 	return ctrl.Result{}, nil

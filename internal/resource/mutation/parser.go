@@ -74,7 +74,7 @@ func (p *PathExpr) ManagedByEno(ctx context.Context, current *unstructured.Unstr
 
 	smdPath, err := p.toSMDPath()
 	if err != nil {
-		logr.FromContextOrDiscard(ctx).V(0).Info("error while converting path expression to structured-merge-diff representation", "error", err)
+		logr.FromContextOrDiscard(ctx).Error(err, "error while converting path expression to structured-merge-diff representation")
 		return true
 	}
 
