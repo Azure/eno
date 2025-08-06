@@ -596,6 +596,57 @@ func TestCoalesceMetadata(t *testing.T) {
 			},
 			expectedChange: true,
 		},
+		{
+			name: "empty string label does not exist - no change",
+			variation: &apiv1.Variation{
+				Labels: map[string]string{
+					"label1": "",
+					"label2": "value2",
+				},
+				Annotations: map[string]string{},
+			},
+			existing: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"label3": "value3",
+					},
+					Annotations: map[string]string{},
+				},
+			},
+			expectedLabels: map[string]string{
+				"label2": "value2",
+				"label3": "value3",
+			},
+			expectedAnnos:  map[string]string{},
+			expectedChange: true,
+		},
+		{
+			name: "multiple empty string labels pruned",
+			variation: &apiv1.Variation{
+				Labels: map[string]string{
+					"label1": "",
+					"label2": "",
+					"label3": "value3",
+				},
+				Annotations: map[string]string{},
+			},
+			existing: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"label1": "value1",
+						"label2": "value2",
+						"label4": "value4",
+					},
+					Annotations: map[string]string{},
+				},
+			},
+			expectedLabels: map[string]string{
+				"label3": "value3",
+				"label4": "value4",
+			},
+			expectedAnnos:  map[string]string{},
+			expectedChange: true,
+		},
 	}
 
 	for _, tt := range tests {

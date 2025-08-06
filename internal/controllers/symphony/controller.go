@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"slices"
 	"sort"
-	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
@@ -198,13 +197,6 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 			}
 			logger.V(1).Info("pruned annotations from composition", "compositionName", existing.Name, "compositionNamespace", existing.Namespace)
 
-			// It's possible that the reconciler has already read the composition and not yet
-			// reconciled a resource with override conditions that read annotation we just removed.
-			//
-			// While we explicitly do not (cannot) guarantee strict ordering in this case,
-			// it's worth hedging against the race by sleeping a bit.
-			time.Sleep(time.Millisecond * 250)
-
 			return true, nil
 		}
 	}
@@ -338,6 +330,13 @@ func coalesceMetadata(variation *apiv1.Variation, existing *apiv1.Composition) b
 		existing.Labels = map[string]string{}
 	}
 	for key, val := range variation.Labels {
+		if val == "" {
+			if _, exists := existing.Labels[key]; exists {
+				metaChanged = true
+				delete(existing.Labels, key)
+			}
+			continue
+		}
 		if existing.Labels[key] != val {
 			metaChanged = true
 		}
