@@ -2,7 +2,6 @@ package scheduling
 
 import (
 	"encoding/json"
-	"fmt"
 	"math/rand"
 	"slices"
 	"sort"
@@ -12,9 +11,9 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/testutil"
+	"github.com/Azure/eno/internal/testutil/statespace"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
@@ -24,36 +23,9 @@ import (
 func TestFuzzNewOp(t *testing.T) {
 	ctx := testutil.NewContext(t)
 
-	// Generate all possible test cases
-	var testCases [][13]bool
-	for i := 0; i < 1<<13; i++ {
-		var args [13]bool
-		for j := 0; j < 13; j++ {
-			args[j] = (i>>j)&1 == 1
-		}
-		testCases = append(testCases, args)
-	}
-
-	for _, args := range testCases {
-		var (
-			inputModified         = args[0]
-			deferredInputModified = args[1]
-			inputsMissing         = args[2]
-			inputsOutOfLockstep   = args[3]
-			ignoreSideEffects     = args[4]
-			missingFinalizer      = args[5]
-			synthModified         = args[6]
-			synthGenZero          = args[7]
-			forceResynth          = args[8]
-			synthesizing          = args[9]
-			compDeleting          = args[10]
-			compModified          = args[11]
-			nilSynthesis          = args[12]
-		)
-
-		// We purposefully do not log every set of args because doing so would generate copious amounts of log output
-		args := fmt.Sprintf("inputModified=%t,deferredInputModified=%t,inputsMissing=%t,inputsOutOfLockstep=%t,ignoreSideEffects=%t,missingFinalizer=%t,synthModified=%t,synthGenZero=%t,forceResynth=%t,synthesizing=%t,compDeleting=%t,compModified=%t,nilSynthesis=%t", inputModified, deferredInputModified, inputsMissing, inputsOutOfLockstep, ignoreSideEffects, missingFinalizer, synthModified, synthGenZero, forceResynth, synthesizing, compDeleting, compModified, nilSynthesis)
-
+	statespace.Test(func(state newOpTestState) *op {
+		return newOp(state.synth, state.comp, time.Time{})
+	}).WithInitialState(func() newOpTestState {
 		synth := &apiv1.Synthesizer{
 			ObjectMeta: metav1.ObjectMeta{Name: "test-synth", Generation: 11},
 			Spec: apiv1.SynthesizerSpec{
@@ -91,137 +63,224 @@ func TestFuzzNewOp(t *testing.T) {
 				},
 			},
 		}
-		original := comp.DeepCopy()
 
-		// Mutate the composition/synthesizer based on the test case
-		if inputModified {
-			comp.Status.InputRevisions[0].ResourceVersion = "modified"
+		return newOpTestState{
+			synth:    synth,
+			comp:     comp.DeepCopy(),
+			original: comp,
 		}
-		if deferredInputModified {
-			comp.Status.InputRevisions[1].ResourceVersion = "modified"
+	}).WithMutation("inputModified", func(state newOpTestState) newOpTestState {
+		state.comp.Status.InputRevisions[0].ResourceVersion = "modified"
+		return state
+	}).WithMutation("deferredInputModified", func(state newOpTestState) newOpTestState {
+		if len(state.comp.Status.InputRevisions) >= 2 {
+			state.comp.Status.InputRevisions[1].ResourceVersion = "modified"
 		}
-		if inputsOutOfLockstep {
-			comp.Status.InputRevisions[0].Revision = ptr.To(123)
-			comp.Status.InputRevisions[1].Revision = ptr.To(234)
+		return state
+	}).WithMutation("inputsMissing", func(state newOpTestState) newOpTestState {
+		state.comp.Status.InputRevisions = state.comp.Status.InputRevisions[:1]
+		return state
+	}).WithMutation("inputsOutOfLockstep", func(state newOpTestState) newOpTestState {
+		if len(state.comp.Status.InputRevisions) >= 2 {
+			state.comp.Status.InputRevisions[0].Revision = ptr.To(123)
+			state.comp.Status.InputRevisions[1].Revision = ptr.To(234)
 		}
-		if inputsMissing {
-			comp.Status.InputRevisions = comp.Status.InputRevisions[:1]
+		return state
+	}).WithMutation("ignoreSideEffects", func(state newOpTestState) newOpTestState {
+		state.comp.EnableIgnoreSideEffects()
+		return state
+	}).WithMutation("missingFinalizer", func(state newOpTestState) newOpTestState {
+		state.comp.Finalizers = nil
+		return state
+	}).WithMutation("synthModified", func(state newOpTestState) newOpTestState {
+		state.synth.Generation = 234
+		return state
+	}).WithMutation("synthGenZero", func(state newOpTestState) newOpTestState {
+		state.synth.Generation = 0
+		return state
+	}).WithMutation("forceResynth", func(state newOpTestState) newOpTestState {
+		state.comp.ForceResynthesis()
+		return state
+	}).WithMutation("synthesizing", func(state newOpTestState) newOpTestState {
+		state.comp.Status.InFlightSynthesis = state.comp.Status.CurrentSynthesis
+		state.comp.Status.CurrentSynthesis = nil
+		return state
+	}).WithMutation("compDeleting", func(state newOpTestState) newOpTestState {
+		state.comp.DeletionTimestamp = ptr.To(metav1.Now())
+		return state
+	}).WithMutation("compModified", func(state newOpTestState) newOpTestState {
+		state.comp.Generation = 345
+		return state
+	}).WithMutation("nilSynthesis", func(state newOpTestState) newOpTestState {
+		state.comp.Status.CurrentSynthesis = nil
+		return state
+	}).WithInvariant("returns nil when input revisions are out of lockstep with different revision numbers", func(state newOpTestState, op *op) bool {
+		if !state.hasInputsOutOfLockstep() {
+			return true
 		}
-		if ignoreSideEffects {
-			comp.EnableIgnoreSideEffects()
+		return op == nil
+	}).WithInvariant("returns nil when composition has fewer input revisions than required", func(state newOpTestState, op *op) bool {
+		if !state.hasInsufficientInputs() {
+			return true
 		}
-		if missingFinalizer {
-			comp.Finalizers = nil
+		return op == nil
+	}).WithInvariant("returns nil when composition has deletion timestamp set", func(state newOpTestState, op *op) bool {
+		if !state.isCompositionDeleting() {
+			return true
 		}
-		if synthModified {
-			synth.Generation = 234
+		return op == nil
+	}).WithInvariant("returns nil when composition has no finalizers", func(state newOpTestState, op *op) bool {
+		if !state.isMissingFinalizer() {
+			return true
 		}
-		if synthGenZero {
-			synth.Generation = 0
+		return op == nil
+	}).WithInvariant("creates initial synthesis operation when current and in-flight synthesis are both nil", func(state newOpTestState, op *op) bool {
+		if state.hasInvalidState() || !state.hasNilSynthesis() {
+			return true
 		}
-		if forceResynth {
-			comp.ForceResynthesis()
+		return op != nil && op.Reason == initialSynthesisOp && !op.Reason.Deferred()
+	}).WithInvariant("creates forced resynthesis operation when composition force resynthesis flag is set", func(state newOpTestState, op *op) bool {
+		if state.hasInvalidState() || state.hasNilSynthesis() || !state.comp.ShouldForceResynthesis() {
+			return true
 		}
-		if nilSynthesis {
-			comp.Status.CurrentSynthesis = nil
+		return op != nil && op.Reason == forcedResynthesisOp && !op.Reason.Deferred()
+	}).WithInvariant("creates composition modified operation when composition generation differs from observed generation", func(state newOpTestState, op *op) bool {
+		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || !state.isCompositionModified() {
+			return true
 		}
-		if synthesizing {
-			comp.Status.InFlightSynthesis = comp.Status.CurrentSynthesis
-			comp.Status.CurrentSynthesis = nil
+		return op != nil && op.Reason == compositionModifiedOp && !op.Reason.Deferred()
+	}).WithInvariant("returns nil when composition has ignore side effects flag enabled", func(state newOpTestState, op *op) bool {
+		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || !state.comp.ShouldIgnoreSideEffects() {
+			return true
 		}
-		if compDeleting {
-			comp.DeletionTimestamp = ptr.To(metav1.Now())
+		return op == nil
+	}).WithInvariant("creates input modified operation when non-deferred input resource version changed", func(state newOpTestState, op *op) bool {
+		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || !state.hasInputModified() {
+			return true
 		}
-		if compModified {
-			comp.Generation = 345
+		return op != nil && op.Reason == inputModifiedOp && !op.Reason.Deferred()
+	}).WithInvariant("creates deferred input modified operation when deferred input changed and not synthesizing", func(state newOpTestState, op *op) bool {
+		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || state.hasInputModified() || !state.hasDeferredInputModified() {
+			return true
 		}
-
-		op := newOp(synth, comp, time.Time{})
-
-		// Prove out the invariants
-		switch {
-		case inputsOutOfLockstep || inputsMissing || compDeleting || missingFinalizer:
-			assert.Nil(t, op)
-
-		case nilSynthesis:
-			require.NotNil(t, op, args)
-			assert.Equal(t, initialSynthesisOp, op.Reason, args)
-			assert.False(t, op.Reason.Deferred(), args)
-
-		case forceResynth:
-			require.NotNil(t, op, args)
-			assert.Equal(t, forcedResynthesisOp, op.Reason, args)
-			assert.False(t, op.Reason.Deferred(), args)
-
-		case compModified:
-			require.NotNil(t, op, args)
-			assert.Equal(t, compositionModifiedOp, op.Reason, args)
-			assert.False(t, op.Reason.Deferred(), args)
-
-		case ignoreSideEffects:
-			require.Nil(t, op, args)
-
-		case inputModified:
-			require.NotNil(t, op, args)
-			assert.Equal(t, inputModifiedOp, op.Reason, args)
-			assert.False(t, op.Reason.Deferred(), args)
-
-		case deferredInputModified:
-			if synthesizing {
-				require.Nil(t, op, args)
-			} else {
-				require.NotNil(t, op, args)
-				assert.Equal(t, deferredInputModifiedOp, op.Reason, args)
-				assert.True(t, op.Reason.Deferred(), args)
-			}
-
-		case synthGenZero:
-			require.Nil(t, op, args)
-
-		case synthModified:
-			if synthesizing {
-				require.Nil(t, op, args)
-			} else {
-				require.NotNil(t, op, args)
-				assert.Equal(t, synthesizerModifiedOp, op.Reason, args)
-				assert.True(t, op.Reason.Deferred(), args)
-			}
+		if state.comp.Synthesizing() {
+			return op == nil
 		}
-
+		return op != nil && op.Reason == deferredInputModifiedOp && op.Reason.Deferred()
+	}).WithInvariant("returns nil when synthesizer generation is zero indicating uninitialized state", func(state newOpTestState, op *op) bool {
+		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || state.hasInputModified() || state.hasDeferredInputModified() || state.synth.Generation != 0 {
+			return true
+		}
+		return op == nil
+	}).WithInvariant("creates synthesizer modified operation when synthesizer generation increased and not synthesizing", func(state newOpTestState, op *op) bool {
+		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || state.hasInputModified() || state.hasDeferredInputModified() || state.synth.Generation == 0 || !state.isSynthesizerModified() {
+			return true
+		}
+		if state.comp.Synthesizing() {
+			return op == nil
+		}
+		return op != nil && op.Reason == synthesizerModifiedOp && op.Reason.Deferred()
+	}).WithInvariant("returns nil when no operation conditions are satisfied in valid state", func(state newOpTestState, op *op) bool {
+		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || state.hasInputModified() || state.hasDeferredInputModified() || state.synth.Generation == 0 || state.isSynthesizerModified() {
+			return true
+		}
+		return op == nil
+	}).WithInvariant("operation patch applied to composition creates idempotent state with no further operations", func(state newOpTestState, op *op) bool {
 		if op == nil {
-			continue
+			return true
 		}
 
-		// newOp always returns nil when given the same composition immediately after the op patch has been applied
-		// (proves synthesis cannot get stuck in a positive feedback loop)
-		{
-			cli := testutil.NewClient(t)
-			comp.ResourceVersion = ""
-			require.NoError(t, cli.Create(ctx, comp))
-			require.NoError(t, cli.Status().Update(ctx, comp))
-
-			patchJS, err := json.Marshal(op.BuildPatch())
-			require.NoError(t, err)
-			err = cli.Status().Patch(ctx, comp, client.RawPatch(types.JSONPatchType, patchJS))
-			require.NoError(t, err)
-
-			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
-			assert.Nil(t, newOp(synth, comp, time.Time{}), args)
+		cli := testutil.NewClient(t)
+		comp := state.comp.DeepCopy()
+		comp.ResourceVersion = ""
+		if err := cli.Create(ctx, comp); err != nil {
+			return false
+		}
+		if err := cli.Status().Update(ctx, comp); err != nil {
+			return false
 		}
 
-		// Patches against the original, non-mutated test composition should always fail.
-		// This proves that the patch contains a `test` op for each field considered by newOp.
-		{
-			cli := testutil.NewClient(t)
-			require.NoError(t, cli.Create(ctx, original))
-			require.NoError(t, cli.Status().Update(ctx, original))
-
-			patchJS, err := json.Marshal(op.BuildPatch())
-			require.NoError(t, err)
-			err = cli.Status().Patch(ctx, original, client.RawPatch(types.JSONPatchType, patchJS))
-			assert.Error(t, err, args)
+		patchJS, err := json.Marshal(op.BuildPatch())
+		if err != nil {
+			return false
 		}
+		if err := cli.Status().Patch(ctx, comp, client.RawPatch(types.JSONPatchType, patchJS)); err != nil {
+			return false
+		}
+
+		if err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp); err != nil {
+			return false
+		}
+
+		return newOp(state.synth, comp, time.Time{}) == nil
+	}).Evaluate(t)
+}
+
+type newOpTestState struct {
+	synth          *apiv1.Synthesizer
+	comp, original *apiv1.Composition
+}
+
+func (s newOpTestState) hasInsufficientInputs() bool { return len(s.comp.Status.InputRevisions) < 2 }
+func (s newOpTestState) isCompositionDeleting() bool { return s.comp.DeletionTimestamp != nil }
+func (s newOpTestState) isMissingFinalizer() bool    { return len(s.comp.Finalizers) == 0 }
+
+func (s newOpTestState) hasNilSynthesis() bool {
+	return s.comp.Status.CurrentSynthesis == nil && s.comp.Status.InFlightSynthesis == nil
+}
+
+func (s newOpTestState) hasInvalidState() bool {
+	return s.hasInputsOutOfLockstep() || s.hasInsufficientInputs() || s.isCompositionDeleting() || s.isMissingFinalizer()
+}
+
+func (s newOpTestState) hasInputsOutOfLockstep() bool {
+	return len(s.comp.Status.InputRevisions) >= 2 && s.comp.Status.InputRevisions[0].Revision != nil && s.comp.Status.InputRevisions[1].Revision != nil
+}
+
+func (s newOpTestState) isCompositionModified() bool {
+	if s.comp.Status.InFlightSynthesis != nil {
+		return s.comp.Status.InFlightSynthesis.ObservedCompositionGeneration != s.comp.Generation
 	}
+	if s.comp.Status.CurrentSynthesis != nil {
+		return s.comp.Status.CurrentSynthesis.ObservedCompositionGeneration != s.comp.Generation
+	}
+	return false
+}
+
+func (s newOpTestState) getCurrentSynthesis() *apiv1.Synthesis {
+	if s.comp.Status.InFlightSynthesis != nil {
+		return s.comp.Status.InFlightSynthesis
+	}
+	return s.comp.Status.CurrentSynthesis
+}
+
+func (s newOpTestState) hasInputModified() bool {
+	syn := s.getCurrentSynthesis()
+	if syn == nil {
+		return false
+	}
+	return len(s.comp.Status.InputRevisions) >= 1 &&
+		len(syn.InputRevisions) >= 1 &&
+		s.comp.Status.InputRevisions[0].ResourceVersion != syn.InputRevisions[0].ResourceVersion
+}
+
+func (s newOpTestState) hasDeferredInputModified() bool {
+	syn := s.getCurrentSynthesis()
+	if syn == nil {
+		return false
+	}
+	return len(s.comp.Status.InputRevisions) >= 2 &&
+		len(syn.InputRevisions) >= 2 &&
+		s.comp.Status.InputRevisions[1].ResourceVersion != syn.InputRevisions[1].ResourceVersion
+}
+
+func (s newOpTestState) isSynthesizerModified() bool {
+	syn := s.getCurrentSynthesis()
+	if syn == nil {
+		return false
+	}
+	return s.synth.Generation != 11 && s.synth.Generation != 0 &&
+		syn.ObservedSynthesizerGeneration > 0 && syn.ObservedSynthesizerGeneration < s.synth.Generation
 }
 
 func TestFuzzInputChangeCount(t *testing.T) {
