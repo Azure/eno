@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
@@ -179,14 +180,43 @@ func (c *symphonyController) reconcileReverse(ctx context.Context, symph *apiv1.
 func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.Symphony, comps *apiv1.CompositionList) (modified bool, err error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
+	// Prune any annotations that are currently set to empty strings.
+	// This happens before populating other values to enable workflows where an annotation can only be set on (at most) one composition.
 	for _, variation := range symph.Spec.Variations {
-		variation := variation
+		idx := slices.IndexFunc(comps.Items, func(existing apiv1.Composition) bool {
+			return existing.Spec.Synthesizer.Name == variation.Synthesizer.Name
+		})
+		if idx == -1 {
+			continue // composition doesn't exist yet, nothing to remove
+		}
+
+		existing := &comps.Items[idx]
+		if pruneAnnotations(&variation, existing) {
+			err := c.client.Update(ctx, existing)
+			if err != nil {
+				return false, fmt.Errorf("pruning annotations: %w", err)
+			}
+			logger.V(1).Info("pruned annotations from composition", "compositionName", existing.Name, "compositionNamespace", existing.Namespace)
+
+			// It's possible that the reconciler has already read the composition and not yet
+			// reconciled a resource with override conditions that read annotation we just removed.
+			//
+			// While we explicitly do not (cannot) guarantee strict ordering in this case,
+			// it's worth hedging against the race by sleeping a bit.
+			time.Sleep(time.Millisecond * 250)
+
+			return true, nil
+		}
+	}
+
+	// Sync forward (create/update)
+	for _, variation := range symph.Spec.Variations {
 		comp := &apiv1.Composition{}
 		comp.Namespace = symph.Namespace
 		comp.GenerateName = variation.Synthesizer.Name + "-"
-		comp.Spec.Bindings = getBindings(symph, &variation)
+		comp.Spec.Bindings = variation.Bindings
 		comp.Spec.Synthesizer = variation.Synthesizer
-		comp.Spec.SynthesisEnv = getSynthesisEnv(symph, &variation)
+		comp.Spec.SynthesisEnv = variation.SynthesisEnv
 		comp.Labels = variation.Labels
 		comp.Annotations = variation.Annotations
 		err := controllerutil.SetControllerReference(symph, comp, c.client.Scheme())
@@ -301,43 +331,6 @@ func (c *symphonyController) buildStatus(symph *apiv1.Symphony, comps *apiv1.Com
 	return newStatus
 }
 
-// getBindings generates the bindings for a variation given it's symphony.
-// Bindings specified by a variation take precedence over the symphony.
-func getBindings(symph *apiv1.Symphony, vrn *apiv1.Variation) []apiv1.Binding {
-	res := append([]apiv1.Binding(nil), symph.Spec.Bindings...)
-	for _, bnd := range vrn.Bindings {
-		i := slices.IndexFunc(res, func(b apiv1.Binding) bool { return b.Key == bnd.Key })
-		if i >= 0 {
-			res[i] = bnd
-		} else {
-			res = append(res, bnd)
-		}
-	}
-	deduped := []apiv1.Binding{}
-	for i, bnd := range res {
-		j := slices.IndexFunc(res, func(b apiv1.Binding) bool { return b.Key == bnd.Key })
-		if i > j {
-			continue // duplicate
-		}
-		deduped = append(deduped, bnd)
-	}
-	return deduped
-}
-
-func getSynthesisEnv(symph *apiv1.Symphony, vrn *apiv1.Variation) []apiv1.EnvVar {
-	res := append([]apiv1.EnvVar(nil), vrn.SynthesisEnv...)
-	for _, evar := range symph.Spec.SynthesisEnv {
-		i := slices.IndexFunc(res, func(e apiv1.EnvVar) bool {
-			return evar.Name == e.Name
-		})
-		// Only use symhony var if the variation didn't specify it.
-		if i == -1 {
-			res = append(res, evar)
-		}
-	}
-	return res
-}
-
 func coalesceMetadata(variation *apiv1.Variation, existing *apiv1.Composition) bool {
 	var metaChanged bool
 
@@ -355,10 +348,32 @@ func coalesceMetadata(variation *apiv1.Variation, existing *apiv1.Composition) b
 		existing.Annotations = map[string]string{}
 	}
 	for key, val := range variation.Annotations {
+		if val == "" {
+			// Skip empty string annotations
+			// They've already been removed from the composition by pruneAnnotations
+			continue
+		}
 		if existing.Annotations[key] != val {
 			metaChanged = true
+			existing.Annotations[key] = val
 		}
-		existing.Annotations[key] = val
 	}
 	return metaChanged
+}
+
+func pruneAnnotations(variation *apiv1.Variation, existing *apiv1.Composition) bool {
+	if existing.Annotations == nil {
+		return false
+	}
+
+	var changed bool
+	for key, val := range variation.Annotations {
+		if val == "" {
+			if _, exists := existing.Annotations[key]; exists {
+				changed = true
+				delete(existing.Annotations, key)
+			}
+		}
+	}
+	return changed
 }

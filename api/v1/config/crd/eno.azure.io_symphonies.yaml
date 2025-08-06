@@ -44,50 +44,6 @@ spec:
             type: object
           spec:
             properties:
-              bindings:
-                description: Bindings are inherited by all compositions managed by
-                  this symphony.
-                items:
-                  description: |-
-                    Bindings map a specific Kubernetes resource to a ref exposed by a synthesizer.
-                    Compositions use bindings to populate inputs supported by their synthesizer.
-                  properties:
-                    key:
-                      description: Key determines which ref this binding binds to.
-                        Opaque.
-                      type: string
-                    resource:
-                      description: A reference to a specific resource name and optionally
-                        namespace.
-                      properties:
-                        name:
-                          type: string
-                        namespace:
-                          type: string
-                      required:
-                      - name
-                      type: object
-                  required:
-                  - key
-                  - resource
-                  type: object
-                type: array
-              synthesisEnv:
-                description: |-
-                  SynthesisEnv
-                  Copied opaquely into the compositions managed by this symphony.
-                items:
-                  properties:
-                    name:
-                      maxLength: 100
-                      type: string
-                    value:
-                      type: string
-                  required:
-                  - name
-                  type: object
-                maxItems: 50
-                type: array
               variations:
                 description: |-
                   Each variation will result in the creation of a composition.

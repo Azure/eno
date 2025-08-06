@@ -28,32 +28,48 @@ func TestBasics(t *testing.T) {
 	sym := &apiv1.Symphony{}
 	sym.Name = "test-symphony"
 	sym.Namespace = "default"
-	sym.Spec.Bindings = []apiv1.Binding{
-		{
-			Key:      "foo",
-			Resource: apiv1.ResourceBinding{Name: "test-resource-1"},
-		},
-		{
-			Key:      "bar",
-			Resource: apiv1.ResourceBinding{Name: "test-resource-2"},
-		},
-	}
 	sym.Spec.Variations = []apiv1.Variation{
 		{
 			Synthesizer: apiv1.SynthesizerRef{Name: "foosynth"},
 			Labels:      map[string]string{"foo": "bar"},
 			Annotations: map[string]string{"foo": "bar"},
+			Bindings: []apiv1.Binding{
+				{
+					Key:      "foo",
+					Resource: apiv1.ResourceBinding{Name: "test-resource-1"},
+				},
+				{
+					Key:      "bar",
+					Resource: apiv1.ResourceBinding{Name: "test-resource-2"},
+				},
+			},
+			SynthesisEnv: []apiv1.EnvVar{
+				{
+					Name:  "some_env",
+					Value: "some-value",
+				},
+			},
 		},
 		{
 			Synthesizer: apiv1.SynthesizerRef{Name: "barsynth"},
 			Labels:      map[string]string{"foo": "bar"},
 			Annotations: map[string]string{"foo": "bar"},
-		},
-	}
-	sym.Spec.SynthesisEnv = []apiv1.EnvVar{
-		{
-			Name:  "some_env",
-			Value: "some-value",
+			Bindings: []apiv1.Binding{
+				{
+					Key:      "foo",
+					Resource: apiv1.ResourceBinding{Name: "test-resource-1"},
+				},
+				{
+					Key:      "bar",
+					Resource: apiv1.ResourceBinding{Name: "test-resource-2"},
+				},
+			},
+			SynthesisEnv: []apiv1.EnvVar{
+				{
+					Name:  "some_env",
+					Value: "some-value",
+				},
+			},
 		},
 	}
 	err = cli.Create(ctx, sym)
@@ -69,10 +85,22 @@ func TestBasics(t *testing.T) {
 		synthsSeen := map[string]struct{}{}
 		for _, comp := range comps.Items {
 			comp := comp
-			if !reflect.DeepEqual(sym.Spec.Bindings, comp.Spec.Bindings) ||
+
+			// Find the matching variation for this composition
+			var expectedBindings []apiv1.Binding
+			var expectedSynthesisEnv []apiv1.EnvVar
+			for _, variation := range sym.Spec.Variations {
+				if variation.Synthesizer.Name == comp.Spec.Synthesizer.Name {
+					expectedBindings = variation.Bindings
+					expectedSynthesisEnv = variation.SynthesisEnv
+					break
+				}
+			}
+
+			if !reflect.DeepEqual(expectedBindings, comp.Spec.Bindings) ||
 				!reflect.DeepEqual(comp.Annotations, map[string]string{"foo": "bar"}) ||
 				!reflect.DeepEqual(comp.Labels, map[string]string{"foo": "bar"}) ||
-				!reflect.DeepEqual(comp.Spec.SynthesisEnv, []apiv1.EnvVar{{Name: "some_env", Value: "some-value"}}) {
+				!reflect.DeepEqual(comp.Spec.SynthesisEnv, expectedSynthesisEnv) {
 				t.Logf("composition %q was not replicated correctly", comp.Name)
 				return false
 			}
@@ -110,7 +138,10 @@ func TestBasics(t *testing.T) {
 	// Update the bindings and prove the new bindings are replicated to the compositions
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		cli.Get(ctx, client.ObjectKeyFromObject(sym), sym)
-		sym.Spec.Bindings = []apiv1.Binding{{Key: "new-binding", Resource: apiv1.ResourceBinding{Name: "foo"}}}
+		newBinding := []apiv1.Binding{{Key: "new-binding", Resource: apiv1.ResourceBinding{Name: "foo"}}}
+		for i := range sym.Spec.Variations {
+			sym.Spec.Variations[i].Bindings = newBinding
+		}
 		return cli.Update(ctx, sym)
 	})
 	require.NoError(t, err)
@@ -121,8 +152,9 @@ func TestBasics(t *testing.T) {
 		if err != nil && len(comps.Items) < 2 {
 			return false
 		}
+		expectedBindings := []apiv1.Binding{{Key: "new-binding", Resource: apiv1.ResourceBinding{Name: "foo"}}}
 		for _, comp := range comps.Items {
-			if !reflect.DeepEqual(sym.Spec.Bindings, comp.Spec.Bindings) {
+			if !reflect.DeepEqual(expectedBindings, comp.Spec.Bindings) {
 				t.Logf("composition %q has incorrect bindings", comp.Name)
 				return false
 			}
@@ -329,170 +361,74 @@ func TestBuildStatus(t *testing.T) {
 	})
 }
 
-func TestGetBindings(t *testing.T) {
-	tcs := []struct {
-		name             string
-		symph            apiv1.Symphony
-		variation        apiv1.Variation
-		expectedBindings []apiv1.Binding
-	}{
-		{
-			name: "just symphony bindings",
-			symph: apiv1.Symphony{
-				Spec: apiv1.SymphonySpec{
-					Bindings: []apiv1.Binding{
-						{Key: "bnd-1"},
-					},
-				},
-			},
-			expectedBindings: []apiv1.Binding{
-				{Key: "bnd-1"},
-			},
-		},
-		{
-			name: "just variation bindings",
-			variation: apiv1.Variation{
-				Bindings: []apiv1.Binding{
-					{Key: "bnd-1"},
-				},
-			},
-			expectedBindings: []apiv1.Binding{
-				{Key: "bnd-1"},
-			},
-		},
-		{
-			name: "symphony and variation bindings",
-			variation: apiv1.Variation{
-				Bindings: []apiv1.Binding{
-					{Key: "bnd-1"},
-				},
-			},
-			symph: apiv1.Symphony{
-				Spec: apiv1.SymphonySpec{
-					Bindings: []apiv1.Binding{
-						{Key: "bnd-2"},
-					},
-				},
-			},
-			expectedBindings: []apiv1.Binding{
-				{Key: "bnd-1"},
-				{Key: "bnd-2"},
-			},
-		},
-		{
-			name: "symphony and variation bindings with dups",
-			variation: apiv1.Variation{
-				Bindings: []apiv1.Binding{
-					{Key: "bnd-1"},
-					{Key: "bnd-1"},
-				},
-			},
-			symph: apiv1.Symphony{
-				Spec: apiv1.SymphonySpec{
-					Bindings: []apiv1.Binding{
-						{Key: "bnd-2"},
-						{Key: "bnd-2"},
-					},
-				},
-			},
-			expectedBindings: []apiv1.Binding{
-				{Key: "bnd-1"},
-				{Key: "bnd-2"},
-			},
-		},
-		{
-			name: "variation takes precedence over symphony",
-			variation: apiv1.Variation{
-				Bindings: []apiv1.Binding{
-					{Key: "bnd-1", Resource: apiv1.ResourceBinding{Name: "from-variation"}},
-				},
-			},
-			symph: apiv1.Symphony{
-				Spec: apiv1.SymphonySpec{
-					Bindings: []apiv1.Binding{
-						{Key: "bnd-1", Resource: apiv1.ResourceBinding{Name: "from-symphony"}},
-					},
-				},
-			},
-			expectedBindings: []apiv1.Binding{
-				{Key: "bnd-1", Resource: apiv1.ResourceBinding{Name: "from-variation"}},
-			},
-		},
-	}
-	for _, tc := range tcs {
-		t.Run(tc.name, func(t *testing.T) {
-			actualBindings := getBindings(&tc.symph, &tc.variation)
-			require.ElementsMatch(t, tc.expectedBindings, actualBindings)
-		})
-	}
-}
+func TestPruneAnnotationsOrdering(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	cli := mgr.GetClient()
+	err := NewController(mgr.Manager)
+	require.NoError(t, err)
+	mgr.Start(t)
 
-func TestGetSynthesisEnv(t *testing.T) {
-	tcs := []struct {
-		name        string
-		symph       apiv1.Symphony
-		variation   apiv1.Variation
-		expectedEnv []apiv1.EnvVar
-	}{
+	sym := &apiv1.Symphony{}
+	sym.Name = "test-symphony"
+	sym.Namespace = "default"
+	sym.Spec.Variations = []apiv1.Variation{
 		{
-			name: "just symphony env",
-			symph: apiv1.Symphony{
-				Spec: apiv1.SymphonySpec{
-					SynthesisEnv: []apiv1.EnvVar{{Name: "var1", Value: "val1"}},
-				},
-			},
-			expectedEnv: []apiv1.EnvVar{{Name: "var1", Value: "val1"}},
+			Synthesizer: apiv1.SynthesizerRef{Name: "synth1"},
+			Annotations: map[string]string{"shared-annotation": ""},
 		},
 		{
-			name: "just variation env",
-			variation: apiv1.Variation{
-				SynthesisEnv: []apiv1.EnvVar{{Name: "var1", Value: "val1"}},
-			},
-			expectedEnv: []apiv1.EnvVar{{Name: "var1", Value: "val1"}},
-		},
-		{
-			name: "symphony and variation env",
-			variation: apiv1.Variation{
-				SynthesisEnv: []apiv1.EnvVar{{Name: "var1", Value: "val1"}},
-			},
-			symph: apiv1.Symphony{
-				Spec: apiv1.SymphonySpec{
-					SynthesisEnv: []apiv1.EnvVar{{Name: "var2", Value: "val2"}},
-				},
-			},
-			expectedEnv: []apiv1.EnvVar{{Name: "var1", Value: "val1"}, {Name: "var2", Value: "val2"}},
-		},
-		{
-			name: "symphony and variation env with dups",
-			variation: apiv1.Variation{
-				SynthesisEnv: []apiv1.EnvVar{{Name: "var1", Value: "val1"}, {Name: "val2", Value: "var2"}},
-			},
-			symph: apiv1.Symphony{
-				Spec: apiv1.SymphonySpec{
-					SynthesisEnv: []apiv1.EnvVar{{Name: "var1", Value: "val1"}, {Name: "val2", Value: "var2"}},
-				},
-			},
-			expectedEnv: []apiv1.EnvVar{{Name: "var1", Value: "val1"}, {Name: "val2", Value: "var2"}},
-		},
-		{
-			name: "variation takes precedence over symphony",
-			variation: apiv1.Variation{
-				SynthesisEnv: []apiv1.EnvVar{{Name: "var1", Value: "comp-override"}, {Name: "val2", Value: "var2"}},
-			},
-			symph: apiv1.Symphony{
-				Spec: apiv1.SymphonySpec{
-					SynthesisEnv: []apiv1.EnvVar{{Name: "var1", Value: "val1"}, {Name: "val2", Value: "var2"}},
-				},
-			},
-			expectedEnv: []apiv1.EnvVar{{Name: "var1", Value: "comp-override"}, {Name: "val2", Value: "var2"}},
+			Synthesizer: apiv1.SynthesizerRef{Name: "synth2"},
+			Annotations: map[string]string{"shared-annotation": "value"},
 		},
 	}
-	for _, tc := range tcs {
-		t.Run(tc.name, func(t *testing.T) {
-			actualEnv := getSynthesisEnv(&tc.symph, &tc.variation)
-			require.ElementsMatch(t, tc.expectedEnv, actualEnv)
-		})
-	}
+	err = cli.Create(ctx, sym)
+	require.NoError(t, err)
+
+	// Wait for compositions to be created
+	comps := &apiv1.CompositionList{}
+	testutil.Eventually(t, func() bool {
+		cli.List(ctx, comps)
+		return len(comps.Items) == 2
+	})
+
+	// Update symphony to remove annotation from synth2 and add it to synth1
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(sym), sym)
+		sym.Spec.Variations = []apiv1.Variation{
+			{
+				Synthesizer: apiv1.SynthesizerRef{Name: "synth1"},
+				Annotations: map[string]string{"shared-annotation": "value"},
+			},
+			{
+				Synthesizer: apiv1.SynthesizerRef{Name: "synth2"},
+				Annotations: map[string]string{"shared-annotation": ""},
+			},
+		}
+		return cli.Update(ctx, sym)
+	})
+	require.NoError(t, err)
+
+	// Prove the annotations were added/removed as expected
+	testutil.Eventually(t, func() bool {
+		cli.List(ctx, comps)
+
+		var setOn1, setOn2 bool
+		for _, comp := range comps.Items {
+			if comp.GetAnnotations()["shared-annotation"] == "value" {
+				switch comp.Spec.Synthesizer.Name {
+				case "synth1":
+					setOn1 = true
+				case "synth2":
+					setOn2 = true
+				}
+			}
+		}
+		if setOn1 && setOn2 {
+			t.Fatalf("annotation should never be set on both compositions!")
+		}
+		return setOn1
+	})
 }
 
 func TestCoalesceMetadata(t *testing.T) {
@@ -631,6 +567,34 @@ func TestCoalesceMetadata(t *testing.T) {
 				"anno1": "value1",
 			},
 			expectedChange: false,
+		},
+		{
+			name: "empty string annotations are skipped",
+			variation: &apiv1.Variation{
+				Labels: map[string]string{
+					"label1": "value1",
+				},
+				Annotations: map[string]string{
+					"anno1": "value1",
+					"anno2": "", // Empty string should be skipped
+				},
+			},
+			existing: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{},
+					Annotations: map[string]string{
+						"anno2": "existingValue", // Should remain unchanged
+					},
+				},
+			},
+			expectedLabels: map[string]string{
+				"label1": "value1",
+			},
+			expectedAnnos: map[string]string{
+				"anno1": "value1",
+				"anno2": "existingValue", // Should not be overwritten by empty string
+			},
+			expectedChange: true,
 		},
 	}
 
