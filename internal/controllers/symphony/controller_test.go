@@ -632,6 +632,85 @@ func TestCoalesceMetadata(t *testing.T) {
 			},
 			expectedChange: false,
 		},
+		{
+			name: "empty string annotations are skipped",
+			variation: &apiv1.Variation{
+				Labels: map[string]string{
+					"label1": "value1",
+				},
+				Annotations: map[string]string{
+					"anno1": "value1",
+					"anno2": "", // Empty string should be skipped
+				},
+			},
+			existing: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{},
+					Annotations: map[string]string{
+						"anno2": "existingValue", // Should remain unchanged
+					},
+				},
+			},
+			expectedLabels: map[string]string{
+				"label1": "value1",
+			},
+			expectedAnnos: map[string]string{
+				"anno1": "value1",
+				"anno2": "existingValue", // Should not be overwritten by empty string
+			},
+			expectedChange: true,
+		},
+		{
+			name: "empty string label does not exist - no change",
+			variation: &apiv1.Variation{
+				Labels: map[string]string{
+					"label1": "",
+					"label2": "value2",
+				},
+				Annotations: map[string]string{},
+			},
+			existing: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"label3": "value3",
+					},
+					Annotations: map[string]string{},
+				},
+			},
+			expectedLabels: map[string]string{
+				"label2": "value2",
+				"label3": "value3",
+			},
+			expectedAnnos:  map[string]string{},
+			expectedChange: true,
+		},
+		{
+			name: "multiple empty string labels pruned",
+			variation: &apiv1.Variation{
+				Labels: map[string]string{
+					"label1": "",
+					"label2": "",
+					"label3": "value3",
+				},
+				Annotations: map[string]string{},
+			},
+			existing: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"label1": "value1",
+						"label2": "value2",
+						"label4": "value4",
+					},
+					Annotations: map[string]string{},
+				},
+			},
+			expectedLabels: map[string]string{
+				"label3": "value3",
+				"label4": "value4",
+			},
+			expectedAnnos:  map[string]string{},
+			expectedChange: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -643,4 +722,74 @@ func TestCoalesceMetadata(t *testing.T) {
 			assert.Equal(t, tt.expectedAnnos, tt.existing.Annotations)
 		})
 	}
+}
+
+func TestPruneAnnotationsOrdering(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	cli := mgr.GetClient()
+	err := NewController(mgr.Manager)
+	require.NoError(t, err)
+	mgr.Start(t)
+
+	sym := &apiv1.Symphony{}
+	sym.Name = "test-symphony"
+	sym.Namespace = "default"
+	sym.Spec.Variations = []apiv1.Variation{
+		{
+			Synthesizer: apiv1.SynthesizerRef{Name: "synth1"},
+			Annotations: map[string]string{"shared-annotation": ""},
+		},
+		{
+			Synthesizer: apiv1.SynthesizerRef{Name: "synth2"},
+			Annotations: map[string]string{"shared-annotation": "value"},
+		},
+	}
+	err = cli.Create(ctx, sym)
+	require.NoError(t, err)
+
+	// Wait for compositions to be created
+	comps := &apiv1.CompositionList{}
+	testutil.Eventually(t, func() bool {
+		cli.List(ctx, comps)
+		return len(comps.Items) == 2
+	})
+
+	// Update symphony to remove annotation from synth2 and add it to synth1
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(sym), sym)
+		sym.Spec.Variations = []apiv1.Variation{
+			{
+				Synthesizer: apiv1.SynthesizerRef{Name: "synth1"},
+				Annotations: map[string]string{"shared-annotation": "value"},
+			},
+			{
+				Synthesizer: apiv1.SynthesizerRef{Name: "synth2"},
+				Annotations: map[string]string{"shared-annotation": ""},
+			},
+		}
+		return cli.Update(ctx, sym)
+	})
+	require.NoError(t, err)
+
+	// Prove the annotations were added/removed as expected
+	testutil.Eventually(t, func() bool {
+		cli.List(ctx, comps)
+
+		var setOn1, setOn2 bool
+		for _, comp := range comps.Items {
+			if comp.GetAnnotations()["shared-annotation"] == "value" {
+				switch comp.Spec.Synthesizer.Name {
+				case "synth1":
+					setOn1 = true
+				case "synth2":
+					setOn2 = true
+				}
+			}
+		}
+		if setOn1 && setOn2 {
+			t.Fatalf("annotation should never be set on both compositions!")
+		}
+		return setOn1
+	})
 }
