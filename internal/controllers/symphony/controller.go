@@ -206,9 +206,9 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		comp := &apiv1.Composition{}
 		comp.Namespace = symph.Namespace
 		comp.GenerateName = variation.Synthesizer.Name + "-"
-		comp.Spec.Bindings = variation.Bindings
+		comp.Spec.Bindings = getBindings(symph, &variation)
 		comp.Spec.Synthesizer = variation.Synthesizer
-		comp.Spec.SynthesisEnv = variation.SynthesisEnv
+		comp.Spec.SynthesisEnv = getSynthesisEnv(symph, &variation)
 		comp.Labels = variation.Labels
 		comp.Annotations = variation.Annotations
 		err := controllerutil.SetControllerReference(symph, comp, c.client.Scheme())
@@ -321,6 +321,43 @@ func (c *symphonyController) buildStatus(symph *apiv1.Symphony, comps *apiv1.Com
 	}
 
 	return newStatus
+}
+
+// getBindings generates the bindings for a variation given it's symphony.
+// Bindings specified by a variation take precedence over the symphony.
+func getBindings(symph *apiv1.Symphony, vrn *apiv1.Variation) []apiv1.Binding {
+	res := append([]apiv1.Binding(nil), symph.Spec.Bindings...)
+	for _, bnd := range vrn.Bindings {
+		i := slices.IndexFunc(res, func(b apiv1.Binding) bool { return b.Key == bnd.Key })
+		if i >= 0 {
+			res[i] = bnd
+		} else {
+			res = append(res, bnd)
+		}
+	}
+	deduped := []apiv1.Binding{}
+	for i, bnd := range res {
+		j := slices.IndexFunc(res, func(b apiv1.Binding) bool { return b.Key == bnd.Key })
+		if i > j {
+			continue // duplicate
+		}
+		deduped = append(deduped, bnd)
+	}
+	return deduped
+}
+
+func getSynthesisEnv(symph *apiv1.Symphony, vrn *apiv1.Variation) []apiv1.EnvVar {
+	res := append([]apiv1.EnvVar(nil), vrn.SynthesisEnv...)
+	for _, evar := range symph.Spec.SynthesisEnv {
+		i := slices.IndexFunc(res, func(e apiv1.EnvVar) bool {
+			return evar.Name == e.Name
+		})
+		// Only use symhony var if the variation didn't specify it.
+		if i == -1 {
+			res = append(res, evar)
+		}
+	}
+	return res
 }
 
 func coalesceMetadata(variation *apiv1.Variation, existing *apiv1.Composition) bool {

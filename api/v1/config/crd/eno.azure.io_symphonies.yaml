@@ -19,6 +19,7 @@ spec:
       openAPIV3Schema:
         description: |-
           Symphony is a set of variations on a composition.
+          Useful for creating several compositions that use a common set of bindings but different synthesizers.
 
           This pattern is highly opinionated for use-cases in which a single "unit of management"
           includes multiple distinct components. For example: deploying many instances of an application that
@@ -43,6 +44,50 @@ spec:
             type: object
           spec:
             properties:
+              bindings:
+                description: Bindings are inherited by all compositions managed by
+                  this symphony.
+                items:
+                  description: |-
+                    Bindings map a specific Kubernetes resource to a ref exposed by a synthesizer.
+                    Compositions use bindings to populate inputs supported by their synthesizer.
+                  properties:
+                    key:
+                      description: Key determines which ref this binding binds to.
+                        Opaque.
+                      type: string
+                    resource:
+                      description: A reference to a specific resource name and optionally
+                        namespace.
+                      properties:
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                      required:
+                      - name
+                      type: object
+                  required:
+                  - key
+                  - resource
+                  type: object
+                type: array
+              synthesisEnv:
+                description: |-
+                  SynthesisEnv
+                  Copied opaquely into the compositions managed by this symphony.
+                items:
+                  properties:
+                    name:
+                      maxLength: 100
+                      type: string
+                    value:
+                      type: string
+                  required:
+                  - name
+                  type: object
+                maxItems: 50
+                type: array
               variations:
                 description: |-
                   Each variation will result in the creation of a composition.
@@ -56,7 +101,9 @@ spec:
                       description: Used to populate the composition's medatada.annotations.
                       type: object
                     bindings:
-                      description: Used to populate the composition's spec.bindings.
+                      description: |-
+                        Variation-specific bindings get merged with Symphony bindings and take
+                        precedence over them.
                       items:
                         description: |-
                           Bindings map a specific Kubernetes resource to a ref exposed by a synthesizer.
@@ -88,7 +135,10 @@ spec:
                       description: Used to populate the composition's metadata.labels.
                       type: object
                     synthesisEnv:
-                      description: Used to populate the composition's spec.synthesisEnv.
+                      description: |-
+                        SynthesisEnv
+                        Copied opaquely into the compositions that's derived from this variation.
+                        It gets merged with the Symhony environment and takes precedence over it.
                       items:
                         properties:
                           name:

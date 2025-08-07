@@ -10,6 +10,7 @@ type SymphonyList struct {
 }
 
 // Symphony is a set of variations on a composition.
+// Useful for creating several compositions that use a common set of bindings but different synthesizers.
 //
 // This pattern is highly opinionated for use-cases in which a single "unit of management"
 // includes multiple distinct components. For example: deploying many instances of an application that
@@ -30,6 +31,14 @@ type SymphonySpec struct {
 	// Synthesizer refs must be unique across variations.
 	// Removing a variation will cause the composition to be deleted!
 	Variations []Variation `json:"variations,omitempty"`
+
+	// Bindings are inherited by all compositions managed by this symphony.
+	Bindings []Binding `json:"bindings,omitempty"`
+
+	// SynthesisEnv
+	// Copied opaquely into the compositions managed by this symphony.
+	// +kubebuilder:validation:MaxItems:=50
+	SynthesisEnv []EnvVar `json:"synthesisEnv,omitempty"` // deprecated synthesis env should always be variation scoped.
 }
 
 type SymphonyStatus struct {
@@ -49,10 +58,13 @@ type Variation struct {
 	// Used to populate the composition's spec.synthesizer.
 	Synthesizer SynthesizerRef `json:"synthesizer,omitempty"`
 
-	// Used to populate the composition's spec.bindings.
+	// Variation-specific bindings get merged with Symphony bindings and take
+	// precedence over them.
 	Bindings []Binding `json:"bindings,omitempty"`
 
-	// Used to populate the composition's spec.synthesisEnv.
+	// SynthesisEnv
+	// Copied opaquely into the compositions that's derived from this variation.
+	// It gets merged with the Symhony environment and takes precedence over it.
 	// +kubebuilder:validation:MaxItems:=25
 	SynthesisEnv []EnvVar `json:"synthesisEnv,omitempty"`
 }
