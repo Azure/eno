@@ -49,8 +49,10 @@ func Parse(expr string) (cel.Program, error) {
 
 func Eval(ctx context.Context, prgm cel.Program, comp *apiv1.Composition, self *unstructured.Unstructured, fm FieldMetadata) (ref.Val, error) {
 	args := map[string]any{
-		"self":        self.Object,
-		"composition": func() any { return newCompositionMap(comp) }, // cel will only execute this is the composition is referenced in the expression
+		"composition": func() any { return newCompositionMap(comp) }, // cel will only execute this if the composition is referenced in the expression
+	}
+	if self != nil {
+		args["self"] = self.Object
 	}
 	if fm != nil {
 		args["pathManagedByEno"] = func() any { return fm.ManagedByEno(ctx, self) }
