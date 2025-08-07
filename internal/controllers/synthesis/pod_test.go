@@ -211,6 +211,89 @@ var newPodTests = []struct {
 			},
 		},
 	},
+	{
+		Name: "config overrides are applied",
+		Cfg: &Config{
+			PodNamespace:           "test-ns",
+			ExecutorImage:         "test-executor:latest",
+			PodLabelOverrides:     map[string]string{"config-label": "config-value", "env": "test"},
+			PodAnnotationOverrides: map[string]string{"config-annotation": "config-value", "version": "1.0"},
+		},
+		Synth: &apiv1.Synthesizer{
+			Spec: apiv1.SynthesizerSpec{
+				Image: "test:latest",
+				PodOverrides: apiv1.PodOverrides{
+					Labels:      map[string]string{},
+					Annotations: map[string]string{},
+				},
+			},
+		},
+		Assert: func(t *testing.T, p *corev1.Pod) {
+			// Verify config overrides are applied.
+			assert.Equal(t, "config-value", p.Labels["config-label"])
+			assert.Equal(t, "test", p.Labels["env"])
+			assert.Equal(t, "config-value", p.Annotations["config-annotation"])
+			assert.Equal(t, "1.0", p.Annotations["version"])
+
+			// Verify required labels are still present.
+			assert.Equal(t, "test-composition", p.Labels[compositionNameLabelKey])
+			assert.Equal(t, manager.ManagerLabelValue, p.Labels[manager.ManagerLabelKey])
+		},
+	},
+	{
+		Name: "synthesizer overrides take precedence over config overrides",
+		Cfg: &Config{
+			PodNamespace:           "test-ns",
+			ExecutorImage:         "test-executor:latest",
+			PodLabelOverrides:     map[string]string{"shared-label": "config-value", "config-only": "config"},
+			PodAnnotationOverrides: map[string]string{"shared-annotation": "config-value", "config-only": "config"},
+		},
+		Synth: &apiv1.Synthesizer{
+			Spec: apiv1.SynthesizerSpec{
+				Image: "test:latest",
+				PodOverrides: apiv1.PodOverrides{
+					Labels:      map[string]string{"shared-label": "synthesizer-value", "syn-only": "synthesizer"},
+					Annotations: map[string]string{"shared-annotation": "synthesizer-value", "syn-only": "synthesizer"},
+				},
+			},
+		},
+		Assert: func(t *testing.T, p *corev1.Pod) {
+			// Verify synthesizer overrides take precedence.
+			assert.Equal(t, "synthesizer-value", p.Labels["shared-label"])
+			assert.Equal(t, "synthesizer-value", p.Annotations["shared-annotation"])
+
+			// Verify config-only values are still present.
+			assert.Equal(t, "config", p.Labels["config-only"])
+			assert.Equal(t, "config", p.Annotations["config-only"])
+
+			// Verify synthesizer-only values are present.
+			assert.Equal(t, "synthesizer", p.Labels["syn-only"])
+			assert.Equal(t, "synthesizer", p.Annotations["syn-only"])
+		},
+	},
+	{
+		Name: "nil config overrides don't cause panic",
+		Cfg: &Config{
+			PodNamespace:           "test-ns",
+			ExecutorImage:         "test-executor:latest",
+			PodLabelOverrides:     nil,
+			PodAnnotationOverrides: nil,
+		},
+		Synth: &apiv1.Synthesizer{
+			Spec: apiv1.SynthesizerSpec{
+				Image: "test:latest",
+				PodOverrides: apiv1.PodOverrides{
+					Labels:      map[string]string{"test": "value"},
+					Annotations: map[string]string{"test": "value"},
+				},
+			},
+		},
+		Assert: func(t *testing.T, p *corev1.Pod) {
+			// Verify synthesizer overrides still work.
+			assert.Equal(t, "value", p.Labels["test"])
+			assert.Equal(t, "value", p.Annotations["test"])
+		},
+	},
 }
 
 func TestNewPod(t *testing.T) {

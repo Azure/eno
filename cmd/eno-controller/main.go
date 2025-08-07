@@ -55,8 +55,8 @@ func runController() error {
 		selfHealingGracePeriod   time.Duration
 		taintToleration          string
 		nodeAffinity             string
-		synthesisPodLabels       string
-		synthesisPodAnnotations  string
+		synthesizerPodLabels       string
+		synthesizerPodAnnotations  string
 		concurrencyLimit         int
 		inputRateLimit           int
 		podTimeout               time.Duration
@@ -70,8 +70,8 @@ func runController() error {
 	flag.StringVar(&synconf.PodNamespace, "synthesizer-pod-namespace", os.Getenv("POD_NAMESPACE"), "Namespace to create synthesizer pods in. Defaults to POD_NAMESPACE.")
 	flag.StringVar(&synconf.ExecutorImage, "executor-image", os.Getenv("EXECUTOR_IMAGE"), "Reference to the image that will be used to execute synthesizers. Defaults to EXECUTOR_IMAGE.")
 	flag.StringVar(&synconf.PodServiceAccount, "synthesizer-pod-service-account", "", "Service account name to be assigned to synthesizer Pods.")
-	flag.StringVar(&synthesisPodLabels, "synthesis-pod-labels", "", "Default labels to apply to synthesis pods (comma-separated key=value pairs)")
-	flag.StringVar(&synthesisPodAnnotations, "synthesis-pod-annotations", "", "Default annotations to apply to synthesis pods (comma-separated key=value pairs)")
+	flag.StringVar(&synthesizerPodLabels, "synthesizer-pod-labels", "", "Default labels to apply to synthesizer pods (comma-separated key=value pairs)")
+	flag.StringVar(&synthesizerPodAnnotations, "synthesizer-pod-annotations", "", "Default annotations to apply to synthesizer pods (comma-separated key=value pairs)")
 	flag.DurationVar(&podTimeout, "pod-timeout", time.Second*30, "Max TTL for synthesizer pods")
 	flag.DurationVar(&containerCreationTimeout, "container-creation-ttl", time.Second*3, "Timeout when waiting for kubelet to ack scheduled pods. Protects tail latency from kubelet network partitions")
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
@@ -88,8 +88,8 @@ func runController() error {
 
 	synconf.NodeAffinityKey, synconf.NodeAffinityValue = config.ParseKeyValue(nodeAffinity)
 	synconf.TaintTolerationKey, synconf.TaintTolerationValue = config.ParseKeyValue(taintToleration)
-	synconf.PodLabelOverrides = config.ParseKeyValuePairs(synthesisPodLabels)
-	synconf.PodAnnotationOverrides = config.ParseKeyValuePairs(synthesisPodAnnotations)
+	synconf.PodLabelOverrides = config.ParseKeyValuePairs(synthesizerPodLabels)
+	synconf.PodAnnotationOverrides = config.ParseKeyValuePairs(synthesizerPodAnnotations)
 
 	if synconf.ExecutorImage == "" {
 		return fmt.Errorf("a value is required in --executor-image or EXECUTOR_IMAGE")
