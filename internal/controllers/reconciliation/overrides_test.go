@@ -539,3 +539,97 @@ func TestOverrideContainerResources(t *testing.T) {
 	assert.True(t, deploy.Spec.Template.Spec.Containers[0].Resources.Limits["cpu"].Equal(resource.MustParse("20m")))
 	assert.True(t, deploy.Spec.Template.Spec.Containers[0].Resources.Requests["cpu"].Equal(resource.MustParse("5m")))
 }
+
+func TestOverrideReplaceAnnotation(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]any{
+						"eno.azure.io/overrides": `[{"path": "self.metadata.annotations['eno.azure.io/replace']", "value": "true", "condition": "self.metadata.annotations['should-replace'].startsWith('tru')"}]`,
+						"unrelated":              "annotation", // just to avoid a nil map
+					},
+				},
+				"data": map[string]any{"eno-field": "eno-value"},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	// Wait for initial reconciliation
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	// Another client adds a field and signals replacement
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		if err != nil {
+			return err
+		}
+		cm.Annotations["should-replace"] = "true"
+		cm.Data["other-client-field"] = "other-value"
+		return mgr.DownstreamClient.Update(ctx, cm)
+	})
+	require.NoError(t, err)
+
+	// Resynthesize to trigger reconciliation
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Spec.SynthesisEnv = []apiv1.EnvVar{{Name: "FORCE_SYNTHESIS", Value: "true"}}
+		return upstream.Update(ctx, comp)
+	})
+	require.NoError(t, err)
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	// The resource should have been replaced
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		_, ok := cm.Data["other-client-field"]
+		return !ok
+	})
+
+	// Add a field again - this time without replacement
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		if err != nil {
+			return err
+		}
+		cm.Data["other-client-field"] = "other-value"
+		return mgr.DownstreamClient.Update(ctx, cm)
+	})
+	require.NoError(t, err)
+
+	// Resynthesize to trigger reconciliation
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Spec.SynthesisEnv = []apiv1.EnvVar{{Name: "FORCE_SYNTHESIS", Value: "true"}}
+		return upstream.Update(ctx, comp)
+	})
+	require.NoError(t, err)
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	require.NoError(t, mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm))
+	assert.Equal(t, "other-value", cm.Data["other-client-field"])
+}
