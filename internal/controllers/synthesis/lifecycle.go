@@ -31,6 +31,9 @@ type Config struct {
 
 	NodeAffinityKey   string
 	NodeAffinityValue string
+
+	PodLabelOverrides      map[string]string
+	PodAnnotationOverrides map[string]string
 }
 
 type podLifecycleController struct {
