@@ -1,6 +1,6 @@
 # Symphony
 
-> ⚠️ This is an advanced Eno concept, most use-cases should not use it.
+> ⚠️ This is an advanced Eno concept, most use-cases can be addressed by managing individual compositions.
 
 Symphonies are higher-order units of configuration that involve multiple synthesizers.
 
