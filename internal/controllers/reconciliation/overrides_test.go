@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/retry"
@@ -632,4 +633,65 @@ func TestOverrideReplaceAnnotation(t *testing.T) {
 
 	require.NoError(t, mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm))
 	assert.Equal(t, "other-value", cm.Data["other-client-field"])
+}
+
+func TestOverrideDisableReconciliation(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]any{
+						"eno.azure.io/disable-updates": "true",
+					},
+				},
+			},
+		}}
+		if s.Spec.Image == "updated" {
+			anno := output.Items[0].GetAnnotations()
+			anno["eno.azure.io/overrides"] = `[{"path": "self.metadata.annotations['eno.azure.io/disable-updates']", "value": "false"}]`
+			output.Items[0].SetAnnotations(anno)
+		}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	synth, comp := writeGenericComposition(t, upstream)
+
+	// Wait for initial reconciliation
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	// Configmap should not exist
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	assert.True(t, errors.IsNotFound(mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)))
+
+	// Resynthesize
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(synth), synth)
+		synth.Spec.Image = "updated"
+		return upstream.Update(ctx, synth)
+	})
+	require.NoError(t, err)
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	// The resource should have been created
+	testutil.Eventually(t, func() bool {
+		return mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm) == nil
+	})
 }

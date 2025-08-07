@@ -197,6 +197,10 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		return false, nil
 	}
 
+	if res.DisableUpdates {
+		return false, nil
+	}
+
 	// Create the resource when it doesn't exist, should exist, and wouldn't be created later by server-side apply
 	if current == nil && (res.DisableUpdates || res.Replace || c.disableSSA) {
 		reconciliationActions.WithLabelValues("create").Inc()
@@ -206,10 +210,6 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		}
 		logger.V(0).Info("created resource")
 		return true, nil
-	}
-
-	if res.DisableUpdates {
-		return false, nil
 	}
 
 	// Apply Eno patches
