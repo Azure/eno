@@ -25,9 +25,9 @@ import (
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/controllers/watch"
 
+	"github.com/Azure/eno/internal/config"
 	"github.com/Azure/eno/internal/execution"
 	"github.com/Azure/eno/internal/manager"
-	"github.com/Azure/eno/pkg/config"
 )
 
 func main() {
