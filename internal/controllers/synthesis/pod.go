@@ -28,11 +28,21 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 		synthesisIDLabelKey:          comp.Status.InFlightSynthesis.UUID,
 		manager.ManagerLabelKey:      manager.ManagerLabelValue,
 	}
+	// Apply controller flag overrides first.
+	for k, v := range cfg.PodLabelOverrides {
+		pod.Labels[k] = v
+	}
+	// Apply synthesizer-specific overrides last (they take precedence).
 	for k, v := range syn.Spec.PodOverrides.Labels {
 		pod.Labels[k] = v
 	}
 
 	pod.Annotations = map[string]string{}
+	// Apply controller flag overrides first.
+	for k, v := range cfg.PodAnnotationOverrides {
+		pod.Annotations[k] = v
+	}
+	// Apply synthesizer-specific overrides last (they take precedence).
 	for k, v := range syn.Spec.PodOverrides.Annotations {
 		pod.Annotations[k] = v
 	}

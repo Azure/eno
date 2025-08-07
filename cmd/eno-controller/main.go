@@ -25,6 +25,7 @@ import (
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/controllers/watch"
 
+	"github.com/Azure/eno/internal/config"
 	"github.com/Azure/eno/internal/execution"
 	"github.com/Azure/eno/internal/manager"
 )
@@ -54,6 +55,8 @@ func runController() error {
 		selfHealingGracePeriod   time.Duration
 		taintToleration          string
 		nodeAffinity             string
+		synthesizerPodLabels       string
+		synthesizerPodAnnotations  string
 		concurrencyLimit         int
 		inputRateLimit           int
 		podTimeout               time.Duration
@@ -67,6 +70,8 @@ func runController() error {
 	flag.StringVar(&synconf.PodNamespace, "synthesizer-pod-namespace", os.Getenv("POD_NAMESPACE"), "Namespace to create synthesizer pods in. Defaults to POD_NAMESPACE.")
 	flag.StringVar(&synconf.ExecutorImage, "executor-image", os.Getenv("EXECUTOR_IMAGE"), "Reference to the image that will be used to execute synthesizers. Defaults to EXECUTOR_IMAGE.")
 	flag.StringVar(&synconf.PodServiceAccount, "synthesizer-pod-service-account", "", "Service account name to be assigned to synthesizer Pods.")
+	flag.StringVar(&synthesizerPodLabels, "synthesizer-pod-labels", "", "Default labels to apply to synthesizer pods (comma-separated key=value pairs)")
+	flag.StringVar(&synthesizerPodAnnotations, "synthesizer-pod-annotations", "", "Default annotations to apply to synthesizer pods (comma-separated key=value pairs)")
 	flag.DurationVar(&podTimeout, "pod-timeout", time.Second*30, "Max TTL for synthesizer pods")
 	flag.DurationVar(&containerCreationTimeout, "container-creation-ttl", time.Second*3, "Timeout when waiting for kubelet to ack scheduled pods. Protects tail latency from kubelet network partitions")
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
@@ -81,8 +86,10 @@ func runController() error {
 	flag.Parse()
 	watch.SetKindWatchRateLimit(inputRateLimit)
 
-	synconf.NodeAffinityKey, synconf.NodeAffinityValue = parseKeyValue(nodeAffinity)
-	synconf.TaintTolerationKey, synconf.TaintTolerationValue = parseKeyValue(taintToleration)
+	synconf.NodeAffinityKey, synconf.NodeAffinityValue = config.ParseKeyValue(nodeAffinity)
+	synconf.TaintTolerationKey, synconf.TaintTolerationValue = config.ParseKeyValue(taintToleration)
+	synconf.PodLabelOverrides = config.ParseKeyValuePairs(synthesizerPodLabels)
+	synconf.PodAnnotationOverrides = config.ParseKeyValuePairs(synthesizerPodAnnotations)
 
 	if synconf.ExecutorImage == "" {
 		return fmt.Errorf("a value is required in --executor-image or EXECUTOR_IMAGE")
@@ -151,14 +158,6 @@ func runController() error {
 	return mgr.Start(ctx)
 }
 
-func parseKeyValue(input string) (key, val string) {
-	chunks := strings.SplitN(input, "=", 2)
-	key = chunks[0]
-	if len(chunks) > 1 {
-		val = chunks[1]
-	}
-	return
-}
 
 func installExecutor() {
 	self := os.Args[0]
