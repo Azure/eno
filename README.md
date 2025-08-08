@@ -10,7 +10,7 @@ Dynamic configuration management for Kubernetes.
 
 Eno deploys applications to Kubernetes using code instead of static YAML files or templates.
 
-The Eno controllers handle executing your deployment code in short-lived pods and reconciling the results into Kubernetes resources.
+The Eno controllers execute your deployment code in short-lived pods and reconcile the results into Kubernetes resources.
 Just print JSON objects to stdout and Eno will handle the rest.
 
 ## Docs
