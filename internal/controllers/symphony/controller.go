@@ -179,8 +179,30 @@ func (c *symphonyController) reconcileReverse(ctx context.Context, symph *apiv1.
 func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.Symphony, comps *apiv1.CompositionList) (modified bool, err error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
+	// Prune any annotations that are currently set to empty strings.
+	// This happens before populating other values to enable workflows where an annotation can only be set on (at most) one composition.
 	for _, variation := range symph.Spec.Variations {
-		variation := variation
+		idx := slices.IndexFunc(comps.Items, func(existing apiv1.Composition) bool {
+			return existing.Spec.Synthesizer.Name == variation.Synthesizer.Name
+		})
+		if idx == -1 {
+			continue // composition doesn't exist yet, nothing to remove
+		}
+
+		existing := &comps.Items[idx]
+		if pruneAnnotations(&variation, existing) {
+			err := c.client.Update(ctx, existing)
+			if err != nil {
+				return false, fmt.Errorf("pruning annotations: %w", err)
+			}
+			logger.V(1).Info("pruned annotations from composition", "compositionName", existing.Name, "compositionNamespace", existing.Namespace)
+
+			return true, nil
+		}
+	}
+
+	// Sync forward (create/update)
+	for _, variation := range symph.Spec.Variations {
 		comp := &apiv1.Composition{}
 		comp.Namespace = symph.Namespace
 		comp.GenerateName = variation.Synthesizer.Name + "-"
@@ -345,6 +367,13 @@ func coalesceMetadata(variation *apiv1.Variation, existing *apiv1.Composition) b
 		existing.Labels = map[string]string{}
 	}
 	for key, val := range variation.Labels {
+		if val == "" {
+			if _, exists := existing.Labels[key]; exists {
+				metaChanged = true
+				delete(existing.Labels, key)
+			}
+			continue
+		}
 		if existing.Labels[key] != val {
 			metaChanged = true
 		}
@@ -355,10 +384,32 @@ func coalesceMetadata(variation *apiv1.Variation, existing *apiv1.Composition) b
 		existing.Annotations = map[string]string{}
 	}
 	for key, val := range variation.Annotations {
+		if val == "" {
+			// Skip empty string annotations
+			// They've already been removed from the composition by pruneAnnotations
+			continue
+		}
 		if existing.Annotations[key] != val {
 			metaChanged = true
+			existing.Annotations[key] = val
 		}
-		existing.Annotations[key] = val
 	}
 	return metaChanged
+}
+
+func pruneAnnotations(variation *apiv1.Variation, existing *apiv1.Composition) bool {
+	if existing.Annotations == nil {
+		return false
+	}
+
+	var changed bool
+	for key, val := range variation.Annotations {
+		if val == "" {
+			if _, exists := existing.Annotations[key]; exists {
+				changed = true
+				delete(existing.Annotations, key)
+			}
+		}
+	}
+	return changed
 }
