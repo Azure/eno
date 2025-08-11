@@ -119,3 +119,22 @@ func ReplaceIf(condition string) (Override, error) {
 	}
 	return o, nil
 }
+
+// Let VPA or external actor raise resources/requests for a given container
+func AllowVPA(container, value, rtype string) (Override, error) {
+	if rtype != "cpu" && rtype != "memory" {
+		return Override{}, fmt.Errorf("invalid type %s, must be 'cpu' or 'memory'", rtype)
+	}
+	path := fmt.Sprintf("self.spec.template.spec.containers[name='%s'].resources.requests.%s", container, rtype)
+	condition := fmt.Sprintf("has(self.spec.template.spec.containers[name='%s'].resources.requests.%s) && compareResourceQuantities(self.spec.template.spec.containers[name='%s'].resources.requests.%s, '%s') >= 0 && !pathManagedByEno",
+		container, rtype, container, rtype, value)
+	o := Override{
+		Path:      path,
+		Value:     nil,
+		Condition: condition,
+	}
+	if err := o.Validate(); err != nil {
+		return Override{}, fmt.Errorf("validating override: %w", err)
+	}
+	return o, nil
+}
