@@ -110,17 +110,21 @@ func loadSynthesizerRefs(synthesizerPath string) ([]string, error) {
 // e.g. contain only valid metadata like eno.azure.io/* annotations.
 func ValidateResourceMeta[T function.Inputs]() Assertion[T] {
 	return func(t *testing.T, s *Scenario[T], outputs []client.Object) {
-		for i, output := range outputs {
-			obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(output)
-			if err != nil {
-				t.Errorf("resource at index=%d, kind=%s, name=%s could not be converted to unstructured: %s", i, output.GetObjectKind(), output.GetName(), err)
-				continue
-			}
+		validateResourceMeta(t, outputs)
+	}
+}
 
-			_, err = resource.FromUnstructured(&unstructured.Unstructured{Object: obj})
-			if err != nil {
-				t.Errorf("resource at index=%d, kind=%s, name=%s is invalid: %s", i, output.GetObjectKind(), output.GetName(), err)
-			}
+func validateResourceMeta(t require.TestingT, outputs []client.Object) {
+	for i, output := range outputs {
+		obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(output)
+		if err != nil {
+			t.Errorf("resource at index=%d, kind=%s, name=%s could not be converted to unstructured: %s", i, output.GetObjectKind(), output.GetName(), err)
+			continue
+		}
+
+		_, err = resource.FromUnstructured(&unstructured.Unstructured{Object: obj})
+		if err != nil {
+			t.Errorf("resource at index=%d, kind=%s, name=%s is invalid: %s", i, output.GetObjectKind(), output.GetName(), err)
 		}
 	}
 }

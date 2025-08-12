@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -75,6 +76,13 @@ func TestEvaluateValidateResourceMeta(t *testing.T) {
 		Inputs:    struct{}{},
 		Assertion: ValidateResourceMeta[struct{}](),
 	})
+}
+
+func TestValidateResourceMetaFailure(t *testing.T) {
+	mockT := &mockTestingT{}
+	validateResourceMeta(mockT, []client.Object{&unstructured.Unstructured{}})
+	assert.True(t, mockT.failed)
+	assert.Contains(t, mockT.errorMsg, "missing")
 }
 
 // Mock implementation of require.TestingT to capture test failures
