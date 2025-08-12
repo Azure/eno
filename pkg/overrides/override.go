@@ -132,7 +132,8 @@ func AllowVPA(container, value, rtype string) (Override, error) {
 		return Override{}, fmt.Errorf("invalid type %s, must be 'cpu' or 'memory'", rtype)
 	}
 	path := fmt.Sprintf("self.spec.template.spec.containers[name='%s'].resources.requests.%s", container, rtype)
-	condition := fmt.Sprintf("has(%s) && compareResourceQuantities(%s, '%s') >= 0 && !pathManagedByEno", path, path, value)
+
+	condition := fmt.Sprintf("self.spec.template.spec.containers.exists(c, c.name == '%s' &&  has(c.resources.requests) &&  '%s' in c.resources.requests &&  compareResourceQuantities(c.resources.requests['%s'], '%s') >= 0) && !pathManagedByEno", container, rtype, rtype, value)
 	o := Override{
 		Path:      path,
 		Value:     nil,

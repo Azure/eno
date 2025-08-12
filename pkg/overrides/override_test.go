@@ -298,12 +298,15 @@ func TestAllowVPA(t *testing.T) {
 			name: "don't replace its the same",
 			data: map[string]any{
 				"self": map[string]any{
-					"spec.": map[string]any{
-						"containers": map[string]any{
-							"retina": map[string]any{
-								"resources": map[string]any{
-									"requests": map[string]any{
-										"cpu": "100m",
+					"spec": map[string]any{
+						"template": map[string]any{
+							"spec": map[string]any{
+								"containers": map[string]any{
+									"name": "retina",
+									"resources": map[string]any{
+										"requests": map[string]any{
+											"cpu": "100m",
+										},
 									},
 								},
 							},
@@ -318,12 +321,15 @@ func TestAllowVPA(t *testing.T) {
 			name: "replace with null when higher",
 			data: map[string]any{
 				"self": map[string]any{
-					"spec.": map[string]any{
-						"containers": map[string]any{
-							"retina": map[string]any{
-								"resources": map[string]any{
-									"requests": map[string]any{
-										"cpu": "500m",
+					"spec": map[string]any{
+						"template": map[string]any{
+							"spec": map[string]any{
+								"containers": map[string]any{
+									"name": "retina",
+									"resources": map[string]any{
+										"requests": map[string]any{
+											"cpu": "500m",
+										},
 									},
 								},
 							},
