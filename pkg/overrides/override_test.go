@@ -277,6 +277,13 @@ func TestReplaceIf(t *testing.T) {
 	}
 }
 
+func TestAllowVPA_BadResource(t *testing.T) {
+	_, err := overrides.AllowVPA("retina", "1000", "graphicscards")
+	if err == nil {
+		t.Fatalf("AllowVPA() should error = %v", err)
+	}
+}
+
 func TestAllowVPA(t *testing.T) {
 	retinacpu, err := overrides.AllowVPA("retina", "100m", "cpu")
 	if err != nil {
