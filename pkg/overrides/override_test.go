@@ -65,16 +65,16 @@ func TestReplaceIf(t *testing.T) {
 	tests := []struct {
 		name        string
 		condition   string
-		data        map[string]interface{}
+		data        map[string]any
 		expected    bool
 		expectError bool
 	}{
 		{
 			name: "simple null check - true case",
-			data: map[string]interface{}{
-				"self": map[string]interface{}{
-					"metadata": map[string]interface{}{
-						"labels": map[string]interface{}{
+			data: map[string]any{
+				"self": map[string]any{
+					"metadata": map[string]any{
+						"labels": map[string]any{
 							"billing": "Isovalent-Enterprise",
 						},
 					},
@@ -85,9 +85,9 @@ func TestReplaceIf(t *testing.T) {
 		},
 		{
 			name: "simple null check - false case",
-			data: map[string]interface{}{
-				"self": map[string]interface{}{
-					"metadata": map[string]interface{}{
+			data: map[string]any{
+				"self": map[string]any{
+					"metadata": map[string]any{
 						"labels": nil,
 					},
 				},
@@ -97,10 +97,10 @@ func TestReplaceIf(t *testing.T) {
 		},
 		{
 			name: "string startsWith - true case",
-			data: map[string]interface{}{
-				"self": map[string]interface{}{
-					"metadata": map[string]interface{}{
-						"labels": map[string]interface{}{
+			data: map[string]any{
+				"self": map[string]any{
+					"metadata": map[string]any{
+						"labels": map[string]any{
 							"billing": "Isovalent-Enterprise",
 						},
 					},
@@ -111,10 +111,10 @@ func TestReplaceIf(t *testing.T) {
 		},
 		{
 			name: "string startsWith - false case",
-			data: map[string]interface{}{
-				"self": map[string]interface{}{
-					"metadata": map[string]interface{}{
-						"labels": map[string]interface{}{
+			data: map[string]any{
+				"self": map[string]any{
+					"metadata": map[string]any{
+						"labels": map[string]any{
 							"billing": "Standard",
 						},
 					},
@@ -125,10 +125,10 @@ func TestReplaceIf(t *testing.T) {
 		},
 		{
 			name: "complex condition - true case",
-			data: map[string]interface{}{
-				"self": map[string]interface{}{
-					"metadata": map[string]interface{}{
-						"labels": map[string]interface{}{
+			data: map[string]any{
+				"self": map[string]any{
+					"metadata": map[string]any{
+						"labels": map[string]any{
 							"billing": "Isovalent-Enterprise",
 						},
 					},
@@ -139,9 +139,9 @@ func TestReplaceIf(t *testing.T) {
 		},
 		{
 			name: "complex condition - false case (null labels)",
-			data: map[string]interface{}{
-				"self": map[string]interface{}{
-					"metadata": map[string]interface{}{
+			data: map[string]any{
+				"self": map[string]any{
+					"metadata": map[string]any{
 						"labels": nil,
 					},
 				},
@@ -151,10 +151,10 @@ func TestReplaceIf(t *testing.T) {
 		},
 		{
 			name: "billing label not present",
-			data: map[string]interface{}{
-				"self": map[string]interface{}{
-					"metadata": map[string]interface{}{
-						"labels": map[string]interface{}{
+			data: map[string]any{
+				"self": map[string]any{
+					"metadata": map[string]any{
+						"labels": map[string]any{
 							"totallyfree": "Isovalent-Enterprise",
 						},
 					},
@@ -165,10 +165,10 @@ func TestReplaceIf(t *testing.T) {
 		},
 		{
 			name: "integer label value - should fail without string conversion",
-			data: map[string]interface{}{
-				"self": map[string]interface{}{
-					"metadata": map[string]interface{}{
-						"labels": map[string]interface{}{
+			data: map[string]any{
+				"self": map[string]any{
+					"metadata": map[string]any{
+						"labels": map[string]any{
 							"billing": 12345, // integer instead of string
 						},
 					},
