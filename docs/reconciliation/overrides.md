@@ -2,13 +2,10 @@
 
 > ⚠️ This is an advanced Eno concept
 
-Overrides let you modify specific fields of a resource during reconciliation.
-These modifications are applied on top of the synthesized resource and can be conditional.
-Conditions are CEL expressions that are evaluated against the current state of the resource at reconciliation time.
+Overrides modify specific fields of a resource during reconciliation without requiring resynthesis.
+They apply conditional modifications on top of synthesized resources using CEL expressions evaluated against the resource's current state.
 
-This allows Eno synthesizers to specify basic runtime behavior without requiring resynthesis.
-
-> Overrides are applied during reconciliation, so in most cases they should be used alongside `eno.azure.io/reconcile-interval`.
+Overrides are applied during reconciliation, so in most cases they should be used alongside `eno.azure.io/reconcile-interval`.
 
 ```yaml
 annotations:
@@ -18,9 +15,9 @@ annotations:
     ]
 ```
 
-## Path Expression Syntax
+## Path Syntax
 
-Overrides use a simple syntax to reference properties.
+Reference resource properties using these path expressions:
 
 - `field.anotherfield`: Traverse object fields
 - `field["key"]` or `field['key']`: Access object fields by key (supports any field name including hyphens)
@@ -28,13 +25,12 @@ Overrides use a simple syntax to reference properties.
 - `field[*]`: Match all elements in an array
 - `field[someKey="value"]`: Match array elements by a key-value pair
 
-Paths can be chained, e.g., `self.field.anotherfield[2].yetAnotherField`.
-If any segment of the path is nil or missing, the override will not be applied.
+Chain path segments like: `self.field.anotherfield[2].yetAnotherField`. Overrides are skipped gracefully if any path segment has a nil value.
 
 
 ## Composition Metadata
 
-Some metadata of the resource's associated `Composition` resource is available to the condition's CEL expression.
+CEL expressions can access metadata from the resource's associated `Composition`:
 
 ```yaml
 annotations:
@@ -53,9 +49,9 @@ Supported fields:
 
 ## Overriding Annotations
 
-Certain Eno annotations can be overridden to modify the behavior of `eno-reconciler` at runtime.
+Override these Eno annotations to modify `eno-reconciler` behavior at runtime:
 
-> The behavior of the annotations are documented elsewhere, this list serves only to document which can be targeted by overrides.
+> The behavior of the annotations are documented separately
 
 - `eno.azure.io/disable-updates`
 - `eno.azure.io/replace`
@@ -63,10 +59,9 @@ Certain Eno annotations can be overridden to modify the behavior of `eno-reconci
 
 ## Field Manager
 
-Conditions can check if the field matched by the override's `path` is currently managed by Eno according to the object's `metadata.managedFields`.
-The most common use-case is conditionally "unsetting" fields in order to avoid stomping on expected changes from other controllers.
+Use `pathManagedByEno` to check if Eno currently manages the field specified by `path`. This prevents conflicts with other controllers by conditionally unsetting fields.
 
-This example causes the `data.foo` field to only be set by Eno when the field is empty or already managed by Eno.
+This example sets `data.foo` to null only when the field exists but isn't managed by Eno:
 
 ```yaml
 annotations:
@@ -76,24 +71,18 @@ annotations:
     ]
 ```
 
-### Caveats
-
-Eno looks up the manager of the field specified by `path` using internal Kubernetes libraries that read directly from `metadata.managedFields`.
-So it's important to reference paths using the same structure as the managed fields metadata.
-
-For example: most arrays are indexed by key - not numeric index.
+Use the same path structure as Kubernetes `metadata.managedFields`. Arrays are typically indexed by key, not numeric index:
 
 - ✅ `self.spec.template.spec.containers[name='myContainer'].image`
 - ❌ `self.spec.template.spec.containers[0].image`
 
-## Kubernetes Resource Quantity Comparisons
+## Resource Quantity Comparisons
 
-Eno `cel` expressions support a special function for comparing Kubernetes resource quantity strings.
-For example: the string representation of values in a container's `resources.limits.cpu`.
+Use `compareResourceQuantities()` to compare Kubernetes resource quantity strings like `resources.limits.cpu` values:
 
-- Returns 0 when values are equal
-- Returns -1 when left < right
-- Returns 1 when left > right
+- Returns `0` when values are equal
+- Returns `-1` when left < right  
+- Returns `1` when left > right
 
 ```yaml
 annotations:
