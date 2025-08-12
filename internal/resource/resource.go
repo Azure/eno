@@ -180,7 +180,6 @@ func (r *Snapshot) patchSetsDeletionTimestamp() bool {
 }
 
 func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*Resource, error) {
-	logger := logr.FromContextOrDiscard(ctx)
 	resource := slice.Spec.Resources[index]
 	res := &Resource{
 		manifestDeleted: resource.Deleted,
@@ -218,7 +217,6 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 	res.Ref.Namespace = parsed.GetNamespace()
 	res.Ref.Group = parsed.GroupVersionKind().Group
 	res.Ref.Kind = parsed.GetKind()
-	logger = logger.WithValues("resourceKind", parsed.GetKind(), "resourceName", parsed.GetName(), "resourceNamespace", parsed.GetNamespace())
 
 	if res.Ref.Name == "" || res.Ref.Kind == "" || parsed.GetAPIVersion() == "" {
 		return nil, fmt.Errorf("missing name, kind, or apiVersion")
@@ -254,7 +252,7 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 	if js, ok := anno[overridesKey]; ok {
 		err = json.Unmarshal([]byte(js), &res.overrides)
 		if err != nil {
-			logger.Error(err, "invalid override json")
+			return nil, fmt.Errorf("invalid override: %w", err)
 		}
 	}
 
@@ -262,7 +260,7 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 	if str, ok := anno[readinessGroupKey]; ok {
 		rg, err := strconv.Atoi(str)
 		if err != nil {
-			logger.V(0).Info("invalid readiness group - ignoring")
+			return nil, fmt.Errorf("invalid readiness group value: %q", str)
 		} else {
 			res.readinessGroup = rg
 		}
@@ -280,8 +278,7 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 
 		check, err := readiness.ParseCheck(value)
 		if err != nil {
-			logger.Error(err, "invalid cel expression")
-			continue
+			return nil, fmt.Errorf("invalid readiness expression: %w", err)
 		}
 		check.Name = name
 		res.ReadinessChecks = append(res.ReadinessChecks, check)
