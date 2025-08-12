@@ -98,7 +98,7 @@ func (c *Cache) Fill(ctx context.Context, comp types.NamespacedName, synUUID str
 	for _, slice := range items {
 		slice := slice
 		for i := range slice.Spec.Resources {
-			res, err := NewResource(ctx, &slice, i)
+			res, err := FromSlice(ctx, &slice, i)
 			if err != nil {
 				// This should be impossible since the synthesis executor process will not produce invalid resources
 				logger.Error(err, "invalid resource - cannot load into cache", "resourceSliceName", slice.Name, "resourceIndex", i)
