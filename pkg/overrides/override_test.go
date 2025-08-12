@@ -1,9 +1,12 @@
 package overrides_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/Azure/eno/pkg/overrides"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func TestOverrideValidate(t *testing.T) {
@@ -53,6 +56,87 @@ func TestOverrideValidate(t *testing.T) {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestAnnotateOverrides_Success(t *testing.T) {
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+		},
+	}
+	ov1 := overrides.Override{
+		Path:      "metadata.name",
+		Condition: "true",
+	}
+	ov2 := overrides.Override{
+		Path:      "metadata.namespace",
+		Condition: "false",
+	}
+	ovs := []overrides.Override{ov1, ov2}
+	err := overrides.AnnotateOverrides(obj, ovs)
+	if err != nil {
+		t.Fatalf("AnnotateOverrides() unexpected error: %v", err)
+	}
+
+	anns := obj.GetAnnotations()
+	val, ok := anns["eno.azure.io/overrides"]
+	if !ok {
+		t.Fatalf("expected annotation eno.azure.io/overrides to be set")
+	}
+
+	var got []overrides.Override
+	if err := json.Unmarshal([]byte(val), &got); err != nil {
+		t.Fatalf("failed to unmarshal annotation value: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 overrides, got %d", len(got))
+	}
+	if got[0].Path != ov1.Path || got[0].Condition != ov1.Condition {
+		t.Errorf("unexpected first override marshaled, want %+v, got %+v", ov1, got[0])
+	}
+	if got[1].Path != ov2.Path || got[1].Condition != ov2.Condition {
+		t.Errorf("unexpected second override marshaled, want %+v, got %+v", ov2, got[1])
+	}
+}
+
+func TestAnnotateOverrides_ExistingAnnotation(t *testing.T) {
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+		},
+	}
+	// Pre-set the annotation to simulate duplicate
+	obj.SetAnnotations(map[string]string{
+		"eno.azure.io/overrides": "[]",
+	})
+	ov := overrides.Override{
+		Path:      "metadata.name",
+		Condition: "true",
+	}
+	err := overrides.AnnotateOverrides(obj, []overrides.Override{ov})
+	if err == nil {
+		t.Fatal("AnnotateOverrides() expected error when annotation exists, got nil")
+	}
+}
+
+func TestAnnotateOverrides_InvalidOverride(t *testing.T) {
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+		},
+	}
+	// Invalid override: empty Path
+	ov := overrides.Override{
+		Path:      "",
+		Condition: "true",
+	}
+	err := overrides.AnnotateOverrides(obj, []overrides.Override{ov})
+	if err == nil {
+		t.Fatal("AnnotateOverrides() expected validation error for invalid override, got nil")
 	}
 }
 
@@ -191,4 +275,78 @@ func TestReplaceIf(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAllowVPA(t *testing.T) {
+	retinacpu, err := overrides.AllowVPA("retina", "100m", "cpu")
+	if err != nil {
+		t.Fatalf("AllowVPA() error = %v", err)
+	}
+	/*retinaMemory, err := overrides.AllowVPA("retina", "100Mi", "memory")
+	if err != nil {
+		t.Fatalf("ReplaceIf() error = %v", err)
+	}*/
+
+	tests := []struct {
+		name        string
+		condition   string
+		data        map[string]any
+		expected    bool
+		expectError bool
+	}{
+		{
+			name: "don't replace its the same",
+			data: map[string]any{
+				"self": map[string]any{
+					"spec.": map[string]any{
+						"containers": map[string]any{
+							"retina": map[string]any{
+								"resources": map[string]any{
+									"requests": map[string]any{
+										"cpu": "100m",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			expected:    true,
+			expectError: false,
+		},
+		{
+			name: "replace with null when higher",
+			data: map[string]any{
+				"self": map[string]any{
+					"spec.": map[string]any{
+						"containers": map[string]any{
+							"retina": map[string]any{
+								"resources": map[string]any{
+									"requests": map[string]any{
+										"cpu": "500m",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			expected:    false,
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := retinacpu.Test(tt.data)
+			if (err != nil) != tt.expectError {
+				t.Errorf("ReplaceIf() error = %v, expectError %v", err, tt.expectError)
+				return
+			}
+			if got != tt.expected {
+				t.Errorf("ReplaceIf() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+
 }

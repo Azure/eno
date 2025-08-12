@@ -98,8 +98,13 @@ func AnnotateOverrides(obj *unstructured.Unstructured, overrides []Override) err
 
 	jsonBytes, err := json.Marshal(overrides)
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("failed to marshal overrides: %w", err)
 	}
+
+	if _, exists := annotations["eno.azure.io/overrides"]; exists {
+		return fmt.Errorf("annotation eno.azure.io/overrides already exists, cannot overwrite")
+	}
+
 	//should we append to existing annoations or panic if they exist?
 	annotations["eno.azure.io/overrides"] = string(jsonBytes)
 
@@ -120,14 +125,14 @@ func ReplaceIf(condition string) (Override, error) {
 	return o, nil
 }
 
-// Let VPA or external actor raise resources/requests for a given container
+// Let VPA or external actor raise resources/requests for a given container (need to do limit too)
+// USe https://pkg.go.dev/golang.org/x/tools/cmd/stringer to pass enums instead of strings
 func AllowVPA(container, value, rtype string) (Override, error) {
 	if rtype != "cpu" && rtype != "memory" {
 		return Override{}, fmt.Errorf("invalid type %s, must be 'cpu' or 'memory'", rtype)
 	}
 	path := fmt.Sprintf("self.spec.template.spec.containers[name='%s'].resources.requests.%s", container, rtype)
-	condition := fmt.Sprintf("has(self.spec.template.spec.containers[name='%s'].resources.requests.%s) && compareResourceQuantities(self.spec.template.spec.containers[name='%s'].resources.requests.%s, '%s') >= 0 && !pathManagedByEno",
-		container, rtype, container, rtype, value)
+	condition := fmt.Sprintf("has(%s) && compareResourceQuantities(%s, '%s') >= 0 && !pathManagedByEno", path, path, value)
 	o := Override{
 		Path:      path,
 		Value:     nil,
