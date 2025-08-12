@@ -1,5 +1,7 @@
 # Overrides
 
+> ⚠️ This is an advanced Eno concept
+
 Overrides let you modify specific fields of a resource during reconciliation.
 These modifications are applied on top of the synthesized resource and can be conditional.
 Conditions are CEL expressions that are evaluated against the current state of the resource at reconciliation time.
@@ -16,14 +18,23 @@ annotations:
     ]
 ```
 
-This is commonly used to make a subset of properties managed by Eno optional i.e. allow other clients to override them.
-For example:
+## Path Expression Syntax
 
-```json
-{ "path": "self.data.foo", "value": "default value", "condition": "!has(self.data.foo)" }
-```
+Overrides use a simple syntax to reference properties.
 
-It's also possible to access composition metadata in condition expressions.
+- `field.anotherfield`: Traverse object fields
+- `field["key"]` or `field['key']`: Access object fields by key (supports any field name including hyphens)
+- `field[2]`: Access array elements by index
+- `field[*]`: Match all elements in an array
+- `field[someKey="value"]`: Match array elements by a key-value pair
+
+Paths can be chained, e.g., `self.field.anotherfield[2].yetAnotherField`.
+If any segment of the path is nil or missing, the override will not be applied.
+
+
+## Composition Metadata
+
+Some metadata of the resource's associated `Composition` resource is available to the condition's CEL expression.
 
 ```yaml
 annotations:
@@ -33,8 +44,29 @@ annotations:
     ]
 ```
 
-Conditions can match on the ownership status of the field matched by `path`.
-This is useful for dropping particular fields when another field manager has set a value.
+Supported fields:
+
+- `composition.metadata.name`
+- `composition.metadata.namespace`
+- `composition.metadata.labels`
+- `composition.metadata.annotations`
+
+## Overriding Annotations
+
+Certain Eno annotations can be overridden to modify the behavior of `eno-reconciler` at runtime.
+
+> The behavior of the annotations are documented elsewhere, this list serves only to document which can be targeted by overrides.
+
+- `eno.azure.io/disable-updates`
+- `eno.azure.io/replace`
+- `eno.azure.io/reconcile-interval`
+
+## Field Manager
+
+Conditions can check if the field matched by the override's `path` is currently managed by Eno according to the object's `metadata.managedFields`.
+The most common use-case is conditionally "unsetting" fields in order to avoid stomping on expected changes from other controllers.
+
+This example causes the `data.foo` field to only be set by Eno when the field is empty or already managed by Eno.
 
 ```yaml
 annotations:
@@ -43,6 +75,16 @@ annotations:
       { "path": "self.data.foo", "value": null, "condition": "has(self.data.foo) && !pathManagedByEno" }
     ]
 ```
+
+### Caveats
+
+Eno looks up the manager of the field specified by `path` using internal Kubernetes libraries that read directly from `metadata.managedFields`.
+So it's important to reference paths using the same structure as the managed fields metadata.
+
+For example: most arrays are indexed by key - not numeric index.
+
+- ✅ `self.spec.template.spec.containers[name='myContainer'].image`
+- ❌ `self.spec.template.spec.containers[0].image`
 
 ## Kubernetes Resource Quantity Comparisons
 
@@ -64,16 +106,3 @@ annotations:
       }
     ]
 ```
-
-## Path Expression Syntax
-
-Overrides use a CEL-like syntax to reference properties.
-
-- `field.anotherfield`: Traverse object fields
-- `field["key"]` or `field['key']`: Access object fields by key (supports any field name including hyphens)
-- `field[2]`: Access array elements by index
-- `field[*]`: Match all elements in an array
-- `field[someKey="value"]`: Match array elements by a key-value pair
-
-Paths can be chained, e.g., `self.field.anotherfield[2].yetAnotherField`.
-If any segment of the path is nil or missing, the override will not be applied.
