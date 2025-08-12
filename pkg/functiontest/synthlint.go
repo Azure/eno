@@ -4,11 +4,17 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"testing"
 
 	enov1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/resource"
+	"github.com/Azure/eno/pkg/function"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type KeyMatchMode int
@@ -98,4 +104,23 @@ func loadSynthesizerRefs(synthesizerPath string) ([]string, error) {
 	}
 
 	return refKeys, nil
+}
+
+// ValidateResourceMeta is an Assertion that proves the outputs are valid resources from Eno's perspective
+// e.g. contain only valid metadata like eno.azure.io/* annotations.
+func ValidateResourceMeta[T function.Inputs]() Assertion[T] {
+	return func(t *testing.T, s *Scenario[T], outputs []client.Object) {
+		for i, output := range outputs {
+			obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(output)
+			if err != nil {
+				t.Errorf("resource at index=%d, kind=%s, name=%s could not be converted to unstructured: %s", i, output.GetObjectKind(), output.GetName(), err)
+				continue
+			}
+
+			_, err = resource.FromUnstructured(&unstructured.Unstructured{Object: obj})
+			if err != nil {
+				t.Errorf("resource at index=%d, kind=%s, name=%s is invalid: %s", i, output.GetObjectKind(), output.GetName(), err)
+			}
+		}
+	}
 }
