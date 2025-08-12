@@ -87,3 +87,19 @@ func TestLoadSnapshots(t *testing.T) {
 	scenarios := LoadScenarios(t, "fixtures", assertion)
 	Evaluate(t, fn, scenarios...)
 }
+
+func TestEvaluateValidateResourceMeta(t *testing.T) {
+	fn := func(inputs struct{}) ([]client.Object, error) {
+		output := &corev1.Pod{}
+		output.APIVersion = "v1"
+		output.Kind = "Pod"
+		output.Name = "test-pod"
+		return []client.Object{output}, nil
+	}
+
+	Evaluate(t, fn, Scenario[struct{}]{
+		Name:      "example-test",
+		Inputs:    struct{}{},
+		Assertion: ValidateResourceMeta[struct{}](),
+	})
+}
