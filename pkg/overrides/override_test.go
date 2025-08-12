@@ -301,34 +301,13 @@ func TestAllowVPA(t *testing.T) {
 					"spec": map[string]any{
 						"template": map[string]any{
 							"spec": map[string]any{
-								"containers": map[string]any{
-									"name": "retina",
-									"resources": map[string]any{
-										"requests": map[string]any{
-											"cpu": "100m",
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			expected:    true,
-			expectError: false,
-		},
-		{
-			name: "replace with null when higher",
-			data: map[string]any{
-				"self": map[string]any{
-					"spec": map[string]any{
-						"template": map[string]any{
-							"spec": map[string]any{
-								"containers": map[string]any{
-									"name": "retina",
-									"resources": map[string]any{
-										"requests": map[string]any{
-											"cpu": "500m",
+								"containers": []map[string]any{
+									{
+										"name": "retina",
+										"resources": map[string]any{
+											"requests": map[string]any{
+												"cpu": "100m",
+											},
 										},
 									},
 								},
@@ -340,17 +319,43 @@ func TestAllowVPA(t *testing.T) {
 			expected:    false,
 			expectError: false,
 		},
+		{
+			name: "replace with null when higher",
+			data: map[string]any{
+				"self": map[string]any{
+					"spec": map[string]any{
+						"template": map[string]any{
+							"spec": map[string]any{
+								"containers": []map[string]any{
+									{
+										"name": "retina",
+										"resources": map[string]any{
+											"requests": map[string]any{
+												"cpu": "500m",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+
+			expected:    true,
+			expectError: false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := retinacpu.Test(tt.data)
 			if (err != nil) != tt.expectError {
-				t.Errorf("ReplaceIf() error = %v, expectError %v", err, tt.expectError)
+				t.Errorf("AllowVPA() error = %v, expectError %v", err, tt.expectError)
 				return
 			}
 			if got != tt.expected {
-				t.Errorf("ReplaceIf() = %v, want %v", got, tt.expected)
+				t.Errorf("AllowVPA() = %v, want %v", got, tt.expected)
 			}
 		})
 	}
