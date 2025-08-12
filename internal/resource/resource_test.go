@@ -23,9 +23,10 @@ import (
 )
 
 var newResourceTests = []struct {
-	Name     string
-	Manifest string
-	Assert   func(*testing.T, *Snapshot)
+	Name                   string
+	Manifest               string
+	ExpectConstructorError bool
+	Assert                 func(*testing.T, *Snapshot)
 }{
 	{
 		Name: "configmap",
@@ -314,7 +315,8 @@ var newResourceTests = []struct {
 		},
 	},
 	{
-		Name: "invalid-override-json",
+		Name:                   "invalid-override-json",
+		ExpectConstructorError: true,
 		Manifest: `{
 			"apiVersion": "v1",
 			"kind": "ConfigMap",
@@ -325,9 +327,6 @@ var newResourceTests = []struct {
 				}
 			}
 		}`,
-		Assert: func(t *testing.T, r *Snapshot) {
-			assert.Len(t, r.overrides, 0)
-		},
 	},
 	{
 		Name: "labels",
@@ -373,6 +372,10 @@ func TestNewResource(t *testing.T) {
 					Resources: []apiv1.Manifest{{Manifest: tc.Manifest}},
 				},
 			}, 0)
+			if tc.ExpectConstructorError {
+				assert.Error(t, err)
+				return
+			}
 			require.NoError(t, err)
 
 			rs, err := r.Snapshot(t.Context(), &apiv1.Composition{}, nil)
