@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Azure/eno/pkg/overrides"
+	"github.com/Azure/eno/pkg/function/overrides"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
