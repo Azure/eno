@@ -6,6 +6,7 @@ import (
 
 	intcel "github.com/Azure/eno/internal/cel"
 	intmut "github.com/Azure/eno/internal/resource/mutation"
+	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -18,64 +19,51 @@ type Override struct {
 	Condition string `json:"condition"`
 }
 
-func (o *Override) Validate() error {
+func (o *Override) validate() (cel.Program, error) {
 
 	if o.Path == "" {
-		return fmt.Errorf("path is required")
+		return nil, fmt.Errorf("path is required")
 	}
 
 	//Not taking a dependency
 	_, err := intmut.ParsePathExpr(o.Path)
 	if err != nil {
-		return fmt.Errorf("failed to parse path: %w", err)
+		return nil, fmt.Errorf("failed to parse path: %w", err)
 	}
 
 	if o.Condition == "" {
-		return fmt.Errorf("condition is required")
+		return nil, fmt.Errorf("condition is required")
 	}
 	// Parse the expression
 	celEnv := intcel.Env
 	ast, issues := celEnv.Parse(o.Condition)
 	if issues != nil && issues.Err() != nil {
-		return fmt.Errorf("failed to parse condition: %w", issues.Err())
+		return nil, fmt.Errorf("failed to parse condition: %w", issues.Err())
 	}
 
 	// Type-check the expression
 	checked, issues := celEnv.Check(ast)
 	if issues != nil && issues.Err() != nil {
-		return fmt.Errorf("failed to type-check condition: %w", issues.Err())
+		return nil, fmt.Errorf("failed to type-check condition: %w", issues.Err())
 	}
 
 	// Create the program
-	_, err = celEnv.Program(checked)
+	p, err := celEnv.Program(checked)
 	if err != nil {
-		return fmt.Errorf("failed to create program: %w", err)
+		return nil, fmt.Errorf("failed to create program: %w", err)
 	}
 
 	//Value can be null which is abit wierd.
-	return nil
+	return p, nil
+
 }
 
 func (o *Override) Test(data map[string]interface{}) (bool, error) {
 	// Evaluate with the input data
 
-	celEnv := intcel.Env
-	// Parse the expression
-	ast, issues := celEnv.Parse(o.Condition)
-	if issues != nil && issues.Err() != nil {
-		return false, fmt.Errorf("failed to parse condition: %w", issues.Err())
-	}
-
-	// Type-check the expression
-	checked, issues := celEnv.Check(ast)
-	if issues != nil && issues.Err() != nil {
-		return false, fmt.Errorf("failed to type-check condition: %w", issues.Err())
-	}
-
-	// Create the program
-	prg, err := celEnv.Program(checked)
+	prg, err := o.validate()
 	if err != nil {
-		return false, fmt.Errorf("failed to create program: %w", err)
+		return false, fmt.Errorf("failed to validate override: %w", err)
 	}
 
 	result, _, err := prg.Eval(data)
@@ -93,7 +81,7 @@ func (o *Override) Test(data map[string]interface{}) (bool, error) {
 
 func AnnotateOverrides(obj *unstructured.Unstructured, overrides []Override) error {
 	for _, override := range overrides {
-		if err := override.Validate(); err != nil {
+		if _, err := override.validate(); err != nil {
 			return fmt.Errorf("validating override: %w", err)
 		}
 	}
@@ -127,7 +115,8 @@ func ReplaceIf(condition string) (Override, error) {
 		Value:     &true,
 		Condition: condition,
 	}
-	if err := o.Validate(); err != nil {
+	//even if they didn't test ensure it valdiates
+	if _, err := o.validate(); err != nil {
 		return Override{}, fmt.Errorf("validating override: %w", err)
 	}
 	return o, nil
@@ -149,7 +138,7 @@ func AllowVPA(container, value, rtype string) (Override, error) {
 		Value:     nil,
 		Condition: condition,
 	}
-	if err := o.Validate(); err != nil {
+	if _, err := o.validate(); err != nil {
 		return Override{}, fmt.Errorf("validating override: %w", err)
 	}
 	return o, nil

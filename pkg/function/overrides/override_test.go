@@ -59,7 +59,7 @@ func TestOverrideValidate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.o.Validate()
+			_, err := tt.o.Test(map[string]any{})
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
