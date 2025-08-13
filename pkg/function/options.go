@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // option defines an option for configuring/augmenting the Main function.
@@ -12,6 +13,29 @@ type Option func(*mainConfig)
 // mainConfig holds configuration options for the Main function.
 type mainConfig struct {
 	mungers []MungeFunc
+	scheme  *runtime.Scheme
+}
+
+// WithScheme configures the runtime.Scheme used for automatic type metadata inference.
+//
+// The scheme enables automatic population of TypeMeta (apiVersion and kind) fields
+// for Kubernetes objects based on their Go types. When an object is processed and
+// its GroupVersionKind is empty, the scheme will be consulted to determine the
+// appropriate apiVersion and kind values.
+//
+// If no scheme is provided, or if an object's type is not registered in the scheme,
+// the object will be processed without modification.
+//
+// Example usage:
+//
+//	scheme := runtime.NewScheme()
+//	corev1.AddToScheme(scheme)
+//	appsv1.AddToScheme(scheme)
+//	Main(synthesizer, WithScheme(scheme))
+func WithScheme(scheme *runtime.Scheme) Option {
+	return func(mc *mainConfig) {
+		mc.scheme = scheme
+	}
 }
 
 // WithMunger adds a munge function that will be applied to each output object.

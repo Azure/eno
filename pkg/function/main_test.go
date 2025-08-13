@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -35,7 +37,7 @@ func ExampleInputs() {
 	}
 
 	ir := newTestInputReader()
-	main(fn, ir, NewDefaultOutputWriter())
+	main(fn, &mainConfig{}, ir, NewDefaultOutputWriter())
 	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"creationTimestamp":null,"name":"foobar\n"},"spec":{"containers":null},"status":{}}]}
 }
 
@@ -61,7 +63,7 @@ func ExampleAddCustomInputType() {
 	}
 
 	ir := newTestInputReader()
-	main(fn, ir, NewDefaultOutputWriter())
+	main(fn, &mainConfig{}, ir, NewDefaultOutputWriter())
 	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"creationTimestamp":null,"name":"foobar\n"},"spec":{"containers":null},"status":{}}]}
 }
 
@@ -87,7 +89,7 @@ func ExampleAddCustomInputType_slice() {
 	}
 
 	ir := newTestInputReader()
-	main(fn, ir, NewDefaultOutputWriter())
+	main(fn, &mainConfig{}, ir, NewDefaultOutputWriter())
 	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"creationTimestamp":null,"name":"foobar\n"},"spec":{"containers":null},"status":{}}]}
 }
 
@@ -106,7 +108,7 @@ func TestMain(t *testing.T) {
 		return []client.Object{output}, nil
 	}
 
-	require.NoError(t, main(fn, ir, ow))
+	require.NoError(t, main(fn, &mainConfig{}, ir, ow))
 	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[{\"apiVersion\":\"v1\",\"kind\":\"Pod\",\"metadata\":{\"annotations\":{\"cm-value\":\"foo\",\"secret-value\":\"foobar\\n\"},\"creationTimestamp\":null,\"name\":\"test-pod\"},\"spec\":{\"containers\":null},\"status\":{}}]}\n", outBuf.String())
 }
 
@@ -123,7 +125,7 @@ func TestMainInputMissing(t *testing.T) {
 		return []client.Object{output}, nil
 	}
 
-	require.NoError(t, main(fn, ir, ow))
+	require.NoError(t, main(fn, &mainConfig{}, ir, ow))
 	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[],\"results\":[{\"message\":\"error while reading input with key \\\"test-cm\\\": input \\\"test-cm\\\" was not found\",\"severity\":\"error\"}]}\n", outBuf.String())
 }
 
@@ -139,7 +141,7 @@ func TestMainError(t *testing.T) {
 		return []client.Object{}, fmt.Errorf("foobar")
 	}
 
-	require.NoError(t, main(fn, ir, ow))
+	require.NoError(t, main(fn, &mainConfig{}, ir, ow))
 	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[],\"results\":[{\"message\":\"foobar\",\"severity\":\"error\"}]}\n", outBuf.String())
 }
 
@@ -201,7 +203,7 @@ func TestMungerError(t *testing.T) {
 		return []client.Object{output}, nil
 	}
 
-	require.NoError(t, main(fn, ir, ow))
+	require.NoError(t, main(fn, &mainConfig{}, ir, ow))
 
 	// Verify that munging occurred
 	output := outBuf.String()
@@ -231,9 +233,92 @@ func TestMungerErrorFailure(t *testing.T) {
 		return []client.Object{output}, nil
 	}
 
-	err := main(fn, ir, ow)
+	err := main(fn, &mainConfig{}, ir, ow)
 
 	// Verify that the error from Munge() is returned
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "munging failed")
+}
+
+func TestMainWithScheme(t *testing.T) {
+	outBuf := &bytes.Buffer{}
+	scheme := runtime.NewScheme()
+	err := corev1.AddToScheme(scheme)
+	require.NoError(t, err)
+
+	options := &mainConfig{scheme: scheme}
+	ow := NewOutputWriter(outBuf, nil)
+	ir := newTestInputReader()
+
+	fn := func(inputs testSimpleInputs) ([]client.Object, error) {
+		output := &corev1.Pod{}
+		output.Name = "test-pod"
+		output.Namespace = "default"
+		return []client.Object{output}, nil
+	}
+
+	require.NoError(t, main(fn, options, ir, ow))
+
+	// Verify the output contains proper apiVersion and kind
+	output := outBuf.String()
+	assert.Contains(t, output, `"apiVersion":"v1"`)
+	assert.Contains(t, output, `"kind":"Pod"`)
+}
+
+func TestMainWithSchemePresetGVK(t *testing.T) {
+	outBuf := &bytes.Buffer{}
+	scheme := runtime.NewScheme()
+	err := corev1.AddToScheme(scheme)
+	require.NoError(t, err)
+
+	options := &mainConfig{scheme: scheme}
+	ow := NewOutputWriter(outBuf, nil)
+	ir := newTestInputReader()
+
+	fn := func(inputs testSimpleInputs) ([]client.Object, error) {
+		output := &corev1.Pod{}
+		output.Name = "test-pod"
+		output.Kind = "NotPod"
+		output.APIVersion = "v1"
+		return []client.Object{output}, nil
+	}
+
+	require.NoError(t, main(fn, options, ir, ow))
+
+	// Verify the output contains the GVK we set
+	output := outBuf.String()
+	assert.Contains(t, output, `"apiVersion":"v1"`)
+	assert.Contains(t, output, `"kind":"NotPod"`)
+}
+
+func TestMainWithSchemeMissing(t *testing.T) {
+	outBuf := &bytes.Buffer{}
+	options := &mainConfig{scheme: runtime.NewScheme()} // nothing registered to scheme
+	ow := NewOutputWriter(outBuf, nil)
+	ir := newTestInputReader()
+
+	fn := func(inputs testSimpleInputs) ([]client.Object, error) {
+		output := &corev1.Pod{}
+		output.Name = "test-pod"
+		output.Namespace = "default"
+		return []client.Object{output}, nil
+	}
+
+	require.NoError(t, main(fn, options, ir, ow))
+}
+
+func TestMainWithSchemeUnstructured(t *testing.T) {
+	outBuf := &bytes.Buffer{}
+	options := &mainConfig{scheme: runtime.NewScheme()}
+	ow := NewOutputWriter(outBuf, nil)
+	ir := newTestInputReader()
+
+	fn := func(inputs testSimpleInputs) ([]client.Object, error) {
+		output := &unstructured.Unstructured{}
+		output.SetName("name")
+		output.SetNamespace("namespace")
+		return []client.Object{output}, nil
+	}
+
+	require.NoError(t, main(fn, options, ir, ow))
 }

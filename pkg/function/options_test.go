@@ -56,7 +56,7 @@ func TestCompositeMunger(t *testing.T) {
 	compositeMunge := opts.CompositeMungeFunc()
 
 	ow = NewOutputWriter(outBuf, compositeMunge)
-	require.NoError(t, main(fn, ir, ow))
+	require.NoError(t, main(fn, opts, ir, ow))
 
 	// Verify that both mungers were applied
 	output := outBuf.String()
