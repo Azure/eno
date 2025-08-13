@@ -38,13 +38,13 @@ func Main[T Inputs](fn SynthFunc[T], opts ...Option) {
 		panic(fmt.Sprintf("failed to create default input reader: %s", err))
 	}
 
-	err = main(fn, ir, ow)
+	err = main(fn, options, ir, ow)
 	if err != nil {
 		panic(fmt.Sprintf("error while calling synthesizer function: %s", err))
 	}
 }
 
-func main[T Inputs](fn SynthFunc[T], ir *InputReader, ow *OutputWriter) error {
+func main[T Inputs](fn SynthFunc[T], options *mainConfig, ir *InputReader, ow *OutputWriter) error {
 	var inputs T
 	v := reflect.ValueOf(&inputs).Elem()
 	t := v.Type()
@@ -96,6 +96,12 @@ func main[T Inputs](fn SynthFunc[T], ir *InputReader, ow *OutputWriter) error {
 
 	// Write the outputs
 	for _, out := range outputs {
+		if options.scheme != nil && out.GetObjectKind().GroupVersionKind().Empty() {
+			gvks, _, err := options.scheme.ObjectKinds(out)
+			if err == nil && len(gvks) > 0 {
+				out.GetObjectKind().SetGroupVersionKind(gvks[0])
+			}
+		}
 		ow.Add(out)
 	}
 	return ow.Write()

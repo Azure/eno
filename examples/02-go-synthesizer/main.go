@@ -7,6 +7,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/kubectl/pkg/scheme"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -19,8 +20,6 @@ func synthesize(inputs Inputs) ([]client.Object, error) {
 	replicas, _ := strconv.ParseInt(inputs.Config.Data["replicas"], 10, 32)
 
 	deploy := &appsv1.Deployment{}
-	deploy.APIVersion = "apps/v1"
-	deploy.Kind = "Deployment"
 	deploy.Name = "example-nginx-deployment"
 	deploy.Namespace = "default"
 	deploy.Spec.Replicas = ptr.To(int32(replicas))
@@ -42,5 +41,5 @@ func synthesize(inputs Inputs) ([]client.Object, error) {
 }
 
 func main() {
-	function.Main(synthesize)
+	function.Main(synthesize, function.WithScheme(scheme.Scheme))
 }
