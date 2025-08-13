@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	intcel "github.com/Azure/eno/internal/cel"
+	intmut "github.com/Azure/eno/internal/resource/mutation"
 	"github.com/google/cel-go/common/types"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -12,21 +13,28 @@ import (
 // mirror of type Op struct  and type jsonOp struct  in internal/resource/mutation/mutation.go
 // could pull those out
 type Override struct {
-	Path      string  `json:"path"`
-	Value     *string `json:"value"`
-	Condition string  `json:"condition"`
+	Path      string `json:"path"`
+	Value     any    `json:"value"`
+	Condition string `json:"condition"`
 }
 
 func (o *Override) Validate() error {
+
 	if o.Path == "" {
 		return fmt.Errorf("path is required")
+	}
+
+	//Not taking a dependency
+	_, err := intmut.ParsePathExpr(o.Path)
+	if err != nil {
+		return fmt.Errorf("failed to parse path: %w", err)
 	}
 
 	if o.Condition == "" {
 		return fmt.Errorf("condition is required")
 	}
-	celEnv := intcel.Env
 	// Parse the expression
+	celEnv := intcel.Env
 	ast, issues := celEnv.Parse(o.Condition)
 	if issues != nil && issues.Err() != nil {
 		return fmt.Errorf("failed to parse condition: %w", issues.Err())
@@ -39,7 +47,7 @@ func (o *Override) Validate() error {
 	}
 
 	// Create the program
-	_, err := celEnv.Program(checked)
+	_, err = celEnv.Program(checked)
 	if err != nil {
 		return fmt.Errorf("failed to create program: %w", err)
 	}

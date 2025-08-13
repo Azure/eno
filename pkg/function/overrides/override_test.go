@@ -47,6 +47,14 @@ func TestOverrideValidate(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "InvalidPath",
+			o: overrides.Override{
+				Path:      "I <3 Candy",
+				Condition: "true",
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
