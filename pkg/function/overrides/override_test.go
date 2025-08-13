@@ -118,15 +118,29 @@ func TestAnnotateOverrides_ExistingAnnotation(t *testing.T) {
 	}
 	// Pre-set the annotation to simulate duplicate
 	obj.SetAnnotations(map[string]string{
-		"eno.azure.io/overrides": "[]",
+		"eno.azure.io/overrides": "[{\"path\":\"metadata.name2\",\"condition\":\"true\"}]",
 	})
 	ov := overrides.Override{
 		Path:      "metadata.name",
 		Condition: "true",
 	}
 	err := overrides.AnnotateOverrides(obj, []overrides.Override{ov})
-	if err == nil {
-		t.Fatal("AnnotateOverrides() expected error when annotation exists, got nil")
+	if err != nil {
+		t.Fatalf("expected to merge %s", err)
+	}
+
+	anns := obj.GetAnnotations()
+	val, ok := anns["eno.azure.io/overrides"]
+	if !ok {
+		t.Fatalf("expected annotation eno.azure.io/overrides to be set")
+	}
+
+	var got []overrides.Override
+	if err := json.Unmarshal([]byte(val), &got); err != nil {
+		t.Fatalf("failed to unmarshal annotation value: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 overrides, got %d", len(got))
 	}
 }
 

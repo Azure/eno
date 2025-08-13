@@ -79,26 +79,31 @@ func (o *Override) Test(data map[string]interface{}) (bool, error) {
 	return false, fmt.Errorf("condition did not evaluate to boolean, got: %T", result)
 }
 
+// AnnotateOverrides will take care of appropriatly serializng your overrides to annotations
+// merging them with others that exist
 func AnnotateOverrides(obj *unstructured.Unstructured, overrides []Override) error {
-	for _, override := range overrides {
-		if _, err := override.validate(); err != nil {
-			return fmt.Errorf("validating override: %w", err)
-		}
-	}
 
 	// Add Helm annotations that are required for Helm to recognize the resources
 	annotations := obj.GetAnnotations()
 	if annotations == nil {
 		annotations = make(map[string]string)
 	}
-
-	jsonBytes, err := json.Marshal(overrides)
-	if err != nil {
-		return fmt.Errorf("failed to marshal overrides: %w", err)
+	merged := overrides
+	if existingStr, exists := annotations["eno.azure.io/overrides"]; exists {
+		var existing []Override
+		json.Unmarshal([]byte(existingStr), &existing)
+		merged = append(merged, overrides...)
 	}
 
-	if _, exists := annotations["eno.azure.io/overrides"]; exists {
-		return fmt.Errorf("annotation eno.azure.io/overrides already exists, cannot overwrite")
+	for _, override := range merged {
+		if _, err := override.validate(); err != nil {
+			return fmt.Errorf("validating override: %w", err)
+		}
+	}
+
+	jsonBytes, err := json.Marshal(merged)
+	if err != nil {
+		return fmt.Errorf("failed to marshal overrides: %w", err)
 	}
 
 	//should we append to existing annoations or panic if they exist?
