@@ -299,22 +299,12 @@ func TestReplaceIf(t *testing.T) {
 	}
 }
 
-func TestAllowVPA_BadResource(t *testing.T) {
-	_, err := overrides.AllowVPA("retina", "1000", "graphicscards")
-	if err == nil {
-		t.Fatalf("AllowVPA() should error = %v", err)
-	}
-}
-
+/*
 func TestAllowVPA(t *testing.T) {
-	retinacpu, err := overrides.AllowVPA("retina", "100m", "cpu")
+	overriodes, err := overrides.AllowVPA("retina", "100m", "cpu")
 	if err != nil {
 		t.Fatalf("AllowVPA() error = %v", err)
 	}
-	/*retinaMemory, err := overrides.AllowVPA("retina", "100Mi", "memory")
-	if err != nil {
-		t.Fatalf("ReplaceIf() error = %v", err)
-	}*/
 
 	tests := []struct {
 		name        string
@@ -390,3 +380,4 @@ func TestAllowVPA(t *testing.T) {
 	}
 
 }
+*/

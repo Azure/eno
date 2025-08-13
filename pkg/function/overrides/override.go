@@ -8,6 +8,7 @@ import (
 	intmut "github.com/Azure/eno/internal/resource/mutation"
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -129,17 +130,41 @@ func ReplaceIf(condition string) (Override, error) {
 	return o, nil
 }
 
-// Let VPA or external actor raise resources/requests for a given container (need to do limit too)
-// USe https://pkg.go.dev/golang.org/x/tools/cmd/stringer to pass enums instead of strings
-func AllowVPA(container, value, rtype string) (Override, error) {
-	if rtype != "cpu" && rtype != "memory" {
-		return Override{}, fmt.Errorf("invalid type %s, must be 'cpu' or 'memory'", rtype)
+// AllowVPA lets VPA or external actor raise resources/requests for a given container (need to do limit too)
+func AllowVPA(container string, req corev1.ResourceRequirements) ([]Override, error) {
+	overrides := []Override{}
+	for rtype, value := range req.Requests {
+		if value.IsZero() {
+			continue // skip zero values
+		}
+		o, err := allowVPA(container, rtype.String(), "requests", value.String())
+		if err != nil {
+			return nil, fmt.Errorf("creating override for requests: %w", err)
+		}
+		overrides = append(overrides, o)
 	}
-	path := fmt.Sprintf("self.spec.template.spec.containers[name='%s'].resources.requests.%s", container, rtype)
+	for rtype, value := range req.Limits {
+		if value.IsZero() {
+			continue // skip zero values
+		}
+		o, err := allowVPA(container, rtype.String(), "limits", value.String())
+		if err != nil {
+			return nil, fmt.Errorf("creating override for limits: %w", err)
+		}
+		overrides = append(overrides, o)
+	}
+	return overrides, nil
+}
+
+func allowVPA(container, resourceType, reqType, value string) (Override, error) {
+
+	path := fmt.Sprintf("self.spec.template.spec.containers[name='%s'].resources.%s.%s", container, reqType, resourceType)
 
 	//to get && !pathManagedByEno to work need to passs ina  field manager to Test
 	// also changed >= 0 to > 0
-	condition := fmt.Sprintf("self.spec.template.spec.containers.exists(c, c.name == '%s' &&  has(c.resources.requests) &&  '%s' in c.resources.requests &&  compareResourceQuantities(c.resources.requests['%s'], '%s') > 0)", container, rtype, rtype, value)
+	// this is pretty unreadable.
+	condition := fmt.Sprintf("self.spec.template.spec.containers.exists(c, c.name == '%s' &&  has(c.resources.%s) &&  '%s' in c.resources.%s &&  compareResourceQuantities(c.resources.%s['%s'], '%s') > 0)",
+		container, resourceType, reqType, resourceType, resourceType, reqType, value)
 	o := Override{
 		Path:      path,
 		Value:     nil,
