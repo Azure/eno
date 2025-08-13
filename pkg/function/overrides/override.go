@@ -160,7 +160,7 @@ func allowVPA(container, resourceType, reqType, value string) (Override, error) 
 
 	path := fmt.Sprintf("self.spec.template.spec.containers[name='%s'].resources.%s.%s", container, reqType, resourceType)
 
-	//to get && !pathManagedByEno to work need to passs ina  field manager to Test
+	//to get && !pathManagedByEno to work need to pass in a  field manager to Test
 	// also changed >= 0 to > 0
 	// this is pretty unreadable.
 	condition := fmt.Sprintf("self.spec.template.spec.containers.exists(c, c.name == '%s' &&  has(c.resources.%s) &&  '%s' in c.resources.%s &&  compareResourceQuantities(c.resources.%s['%s'], '%s') > 0)",
