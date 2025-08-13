@@ -108,6 +108,8 @@ func AnnotateOverrides(obj *unstructured.Unstructured, overrides []Override) err
 	return nil
 }
 
+// ReplaceIf uses overrides to create a conditonal eno.azure.io/replace that only applies when some condition is met
+// useful if you want server side apply most of the time except for some corner cases
 func ReplaceIf(condition string) (Override, error) {
 	true := "true"
 	o := Override{
