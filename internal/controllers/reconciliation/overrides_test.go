@@ -633,3 +633,70 @@ func TestOverrideReplaceAnnotation(t *testing.T) {
 	require.NoError(t, mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm))
 	assert.Equal(t, "other-value", cm.Data["other-client-field"])
 }
+
+func TestOverrideSecretData(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Secret",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]any{
+						"eno.azure.io/overrides":          `[{"path": "self.data['field-1']", "value": null, "condition": "self.data['field-1'] != null && !pathManagedByEno"}, {"path": "self.data['field-2']", "value": null, "condition": "self.data['field-2'] != null && !pathManagedByEno"}]`,
+						"eno.azure.io/reconcile-interval": "1ms",
+						"unrelated":                       "annotation",
+					},
+				},
+				"data": map[string]any{"field-1": "", "field-2": ""},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	// Mutate both fields
+	secret := &corev1.Secret{}
+	secret.Name = "test-obj"
+	secret.Namespace = "default"
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(secret), secret)
+		if err != nil {
+			return err
+		}
+		secret.Data = map[string][]byte{"field-1": []byte("value-1"), "field-2": []byte("value-2")}
+		return mgr.DownstreamClient.Update(ctx, secret)
+	})
+	require.NoError(t, err)
+
+	// Resynthesize to guarantee another reconciliation
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Spec.SynthesisEnv = []apiv1.EnvVar{{Name: "FORCE_SYNTHESIS", Value: "true"}}
+		return upstream.Update(ctx, comp)
+	})
+	require.NoError(t, err)
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	// The values should still be present
+	testutil.Eventually(t, func() bool {
+		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(secret), secret)
+		return err == nil && string(secret.Data["field-1"]) == "value-1" && string(secret.Data["field-2"]) == "value-2"
+	})
+}
