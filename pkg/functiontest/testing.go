@@ -2,14 +2,19 @@ package functiontest
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/yaml"
 
+	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/resource"
 	"github.com/Azure/eno/pkg/function"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -137,4 +142,66 @@ func walkFiles(t *testing.T, dir string, fn func(path, name string) error) {
 	if err != nil {
 		t.Errorf("error while walking files: %s", err)
 	}
+}
+
+func WithOverrides[T function.Inputs](next function.SynthFunc[T], args ...any) function.SynthFunc[T] {
+	return func(inputs T) ([]client.Object, error) {
+		outputs, err := next(inputs)
+		if err != nil {
+			return nil, err
+		}
+		return applyOverrides(args, outputs)
+	}
+}
+
+func applyOverrides(options []any, outputs []client.Object) ([]client.Object, error) {
+	comp := &apiv1.Composition{}
+	for _, opt := range options {
+		if c, ok := opt.(*apiv1.Composition); ok {
+			comp = c
+		}
+	}
+
+	copy := []client.Object{}
+	for _, output := range outputs {
+		obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(output)
+		if err != nil {
+			return nil, err
+		}
+		u := &unstructured.Unstructured{Object: obj}
+
+		res, err := resource.FromUnstructured(u)
+		if err != nil {
+			return nil, err
+		}
+
+		// Find the current state of this object if specified by the options
+		current := u
+		for _, opt := range options {
+			c, ok := opt.(client.Object)
+			if !ok || c.GetObjectKind().GroupVersionKind() != u.GroupVersionKind() || c.GetName() != u.GetName() || c.GetNamespace() != u.GetNamespace() {
+				continue
+			}
+			obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(c)
+			if err != nil {
+				return nil, err
+			}
+			current = &unstructured.Unstructured{Object: obj}
+			continue
+		}
+
+		snap, err := res.Snapshot(context.Background(), comp, current)
+		if err != nil {
+			return nil, err
+		}
+
+		structCopy := output.DeepCopyObject()
+		err = runtime.DefaultUnstructuredConverter.FromUnstructured(snap.Unstructured().Object, structCopy)
+		if err != nil {
+			return nil, err
+		}
+		copy = append(copy, structCopy.(client.Object))
+	}
+
+	return copy, nil
 }
