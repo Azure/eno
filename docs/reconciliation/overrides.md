@@ -59,9 +59,11 @@ Override these Eno annotations to modify `eno-reconciler` behavior at runtime:
 
 ## Field Manager
 
-Use `pathManagedByEno` to check if Eno currently manages the field specified by `path`. This prevents conflicts with other controllers by conditionally unsetting fields.
+Use `pathManagedByEno` to check if Eno manages a field. This prevents conflicts by conditionally unsetting fields only when another controller manages them.
 
 This example sets `data.foo` to null only when the field exists but isn't managed by Eno:
+
+> ⚠️ Setting a value to null causes Eno to omit it. If Eno currently manages the field, omitting it would cause apiserver to prune the value. But here we only nullify when `!pathManagedByEno`, preserving values managed by other controllers.
 
 ```yaml
 annotations:
