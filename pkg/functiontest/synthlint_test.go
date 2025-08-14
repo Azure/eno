@@ -5,6 +5,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Test structures with eno_key tags
@@ -57,6 +60,29 @@ func TestInputsMatchSynthesizerRefs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEvaluateValidateResourceMeta(t *testing.T) {
+	fn := func(inputs struct{}) ([]client.Object, error) {
+		output := &corev1.Pod{}
+		output.APIVersion = "v1"
+		output.Kind = "Pod"
+		output.Name = "test-pod"
+		return []client.Object{output}, nil
+	}
+
+	Evaluate(t, fn, Scenario[struct{}]{
+		Name:      "example-test",
+		Inputs:    struct{}{},
+		Assertion: ValidateResourceMeta[struct{}](),
+	})
+}
+
+func TestValidateResourceMetaFailure(t *testing.T) {
+	mockT := &mockTestingT{}
+	validateResourceMeta(mockT, []client.Object{&unstructured.Unstructured{}})
+	assert.True(t, mockT.failed)
+	assert.Contains(t, mockT.errorMsg, "missing")
 }
 
 // Mock implementation of require.TestingT to capture test failures

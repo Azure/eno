@@ -179,26 +179,15 @@ func (r *Snapshot) patchSetsDeletionTimestamp() bool {
 	return false
 }
 
-func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*Resource, error) {
-	logger := logr.FromContextOrDiscard(ctx)
+// FromSlice constructs a resource out of the given resource slice.
+// Some invalid metadata is tolerated. See FromUnstructured for strict validation.
+func FromSlice(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*Resource, error) {
 	resource := slice.Spec.Resources[index]
-	res := &Resource{
-		manifestDeleted: resource.Deleted,
-		ManifestRef: ManifestRef{
-			Slice: types.NamespacedName{
-				Namespace: slice.Namespace,
-				Name:      slice.Name,
-			},
-			Index: index,
-		},
-	}
 
 	hash := fnv.New64()
 	hash.Write([]byte(resource.Manifest))
-	res.manifestHash = hash.Sum(nil)
 
 	parsed := &unstructured.Unstructured{}
-	res.parsed = parsed
 	err := parsed.UnmarshalJSON([]byte(resource.Manifest))
 	if err != nil {
 		return nil, fmt.Errorf("invalid json: %w", err)
@@ -211,6 +200,30 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 		delete(parsed.Object, "status")
 		parsed.SetCreationTimestamp(metav1.Time{})
 	}
+
+	res, err := newResource(ctx, parsed, false)
+	if err != nil {
+		return nil, err
+	}
+
+	res.manifestHash = hash.Sum(nil)
+	res.manifestDeleted = resource.Deleted
+	res.ManifestRef.Slice.Name = slice.Name
+	res.ManifestRef.Slice.Namespace = slice.Namespace
+	res.ManifestRef.Index = index
+
+	return res, nil
+}
+
+// FromUnstructured constructs a new resource with strict validation of any Eno metadata such as annotations.
+func FromUnstructured(parsed *unstructured.Unstructured) (*Resource, error) {
+	return newResource(context.Background(), parsed, true)
+}
+
+func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict bool) (*Resource, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+	res := &Resource{}
+	res.parsed = parsed
 
 	gvk := parsed.GroupVersionKind()
 	res.GVK = gvk
@@ -252,7 +265,10 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 
 	const overridesKey = "eno.azure.io/overrides"
 	if js, ok := anno[overridesKey]; ok {
-		err = json.Unmarshal([]byte(js), &res.overrides)
+		err := json.Unmarshal([]byte(js), &res.overrides)
+		if strict && err != nil {
+			return nil, fmt.Errorf("invalid override: %w", err)
+		}
 		if err != nil {
 			logger.Error(err, "invalid override json")
 		}
@@ -261,6 +277,9 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 	const readinessGroupKey = "eno.azure.io/readiness-group"
 	if str, ok := anno[readinessGroupKey]; ok {
 		rg, err := strconv.Atoi(str)
+		if strict && err != nil {
+			return nil, fmt.Errorf("invalid readiness group value: %q", str)
+		}
 		if err != nil {
 			logger.V(0).Info("invalid readiness group - ignoring")
 		} else {
@@ -279,6 +298,9 @@ func NewResource(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*R
 		}
 
 		check, err := readiness.ParseCheck(value)
+		if strict && err != nil {
+			return nil, fmt.Errorf("invalid readiness expression: %w", err)
+		}
 		if err != nil {
 			logger.Error(err, "invalid cel expression")
 			continue
