@@ -61,9 +61,9 @@ Override these Eno annotations to modify `eno-reconciler` behavior at runtime:
 
 Use `pathManagedByEno` to check if Eno manages a field. This prevents conflicts by conditionally unsetting fields only when another controller manages them.
 
-This example sets `data.foo` to null only when the field exists but isn't managed by Eno:
+This example sets `data.foo` to null when the field exists but isn't managed by Eno:
 
-> ⚠️ Setting a value to null causes Eno to omit it. If Eno currently manages the field, omitting it would cause apiserver to prune the value. But here we only nullify when `!pathManagedByEno`, preserving values managed by other controllers.
+> ⚠️ Setting a value to null causes Eno to omit it from the resource. This is safe when `!pathManagedByEno` because it preserves values managed by other controllers while preventing pruning of fields Eno manages.
 
 ```yaml
 annotations:
@@ -73,10 +73,12 @@ annotations:
     ]
 ```
 
-Use the same path structure as Kubernetes `metadata.managedFields`. Arrays are typically indexed by key, not numeric index:
+Use the same path structure as Kubernetes `metadata.managedFields`. Index arrays by key rather than numeric position:
 
 - ✅ `self.spec.template.spec.containers[name='myContainer'].image`
 - ❌ `self.spec.template.spec.containers[0].image`
+
+> ⚠️ CEL expressions don't support key-based indexing, use the `filter()` function to match on keys in override conditions instead.
 
 ## Resource Quantity Comparisons
 
