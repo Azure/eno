@@ -132,8 +132,9 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 }
 
 func (p *podGarbageCollector) deletePod(ctx context.Context, pod *corev1.Pod, logger logr.Logger) error {
-	if len(pod.Status.ContainerStatuses) > 0 {
-		logger = logger.WithValues("restarts", pod.Status.ContainerStatuses[0].RestartCount)
+	logger = logger.WithValues("podPhase", string(pod.Status.Phase), "podNodeName", pod.Spec.NodeName)
+	if cs := pod.Status.ContainerStatuses; len(cs) > 0 {
+		logger = logger.WithValues("restarts", cs[0].RestartCount, "containerStarted", cs[0].Started, "containerImage", cs[0].Image)
 	}
 	err := p.client.Delete(ctx, pod, &client.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &pod.UID, ResourceVersion: &pod.ResourceVersion}})
 	if err != nil {
