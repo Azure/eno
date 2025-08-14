@@ -675,6 +675,8 @@ func TestOverrideSecretData(t *testing.T) {
 	cli, err := kubernetes.NewForConfig(mgr.DownstreamRestConfig)
 	require.NoError(t, err)
 
+	time.Sleep(time.Second * 2)
+
 	// Mutate both fields
 	secret := &corev1.Secret{}
 	secret.Name = "test-obj"
@@ -693,7 +695,7 @@ func TestOverrideSecretData(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	time.Sleep(time.Second * 5)
+	time.Sleep(time.Second * 2)
 
 	// The values should still be present
 	err = mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(secret), secret)
