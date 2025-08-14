@@ -1,12 +1,11 @@
 # Overrides
 
-Overrides let you modify specific fields of a resource during reconciliation.
-These modifications are applied on top of the synthesized resource and can be conditional.
-Conditions are CEL expressions that are evaluated against the current state of the resource at reconciliation time.
+> ⚠️ This is an advanced Eno concept
 
-This allows Eno synthesizers to specify basic runtime behavior without requiring resynthesis.
+Overrides modify specific fields of a resource during reconciliation without requiring resynthesis.
+They apply conditional modifications on top of synthesized resources using CEL expressions evaluated against the resource's current state.
 
-> Overrides are applied during reconciliation, so in most cases they should be used alongside `eno.azure.io/reconcile-interval`.
+Overrides are applied during reconciliation, so in most cases they should be used alongside `eno.azure.io/reconcile-interval`.
 
 ```yaml
 annotations:
@@ -16,14 +15,22 @@ annotations:
     ]
 ```
 
-This is commonly used to make a subset of properties managed by Eno optional i.e. allow other clients to override them.
-For example:
+## Path Syntax
 
-```json
-{ "path": "self.data.foo", "value": "default value", "condition": "!has(self.data.foo)" }
-```
+Reference resource properties using these path expressions:
 
-It's also possible to access composition metadata in condition expressions.
+- `field.anotherfield`: Traverse object fields
+- `field["key"]` or `field['key']`: Access object fields by key (supports any field name including hyphens)
+- `field[2]`: Access array elements by index
+- `field[*]`: Match all elements in an array
+- `field[someKey="value"]`: Match array elements by a key-value pair
+
+Chain path segments like: `self.field.anotherfield[2].yetAnotherField`. Overrides are skipped gracefully if any path segment has a nil value.
+
+
+## Composition Metadata
+
+CEL expressions can access metadata from the resource's associated `Composition`:
 
 ```yaml
 annotations:
@@ -33,8 +40,30 @@ annotations:
     ]
 ```
 
-Conditions can match on the ownership status of the field matched by `path`.
-This is useful for dropping particular fields when another field manager has set a value.
+Supported fields:
+
+- `composition.metadata.name`
+- `composition.metadata.namespace`
+- `composition.metadata.labels`
+- `composition.metadata.annotations`
+
+## Overriding Annotations
+
+Override these Eno annotations to modify `eno-reconciler` behavior at runtime:
+
+> The behavior of the annotations are documented separately
+
+- `eno.azure.io/disable-updates`
+- `eno.azure.io/replace`
+- `eno.azure.io/reconcile-interval`
+
+## Field Manager
+
+Use `pathManagedByEno` to check if Eno manages a field. This prevents conflicts by conditionally unsetting fields only when another controller manages them.
+
+This example sets `data.foo` to null when the field exists but isn't managed by Eno:
+
+> ⚠️ Setting a value to null causes Eno to omit it from the resource. This is safe when `!pathManagedByEno` because it preserves values managed by other controllers while preventing pruning of fields Eno manages.
 
 ```yaml
 annotations:
@@ -44,14 +73,20 @@ annotations:
     ]
 ```
 
-## Kubernetes Resource Quantity Comparisons
+Use the same path structure as Kubernetes `metadata.managedFields`. Index arrays by key rather than numeric position:
 
-Eno `cel` expressions support a special function for comparing Kubernetes resource quantity strings.
-For example: the string representation of values in a container's `resources.limits.cpu`.
+- ✅ `self.spec.template.spec.containers[name='myContainer'].image`
+- ❌ `self.spec.template.spec.containers[0].image`
 
-- Returns 0 when values are equal
-- Returns -1 when left < right
-- Returns 1 when left > right
+> ⚠️ CEL expressions don't support key-based indexing, use the `filter()` function to match on keys in override conditions instead.
+
+## Resource Quantity Comparisons
+
+Use `compareResourceQuantities()` to compare Kubernetes resource quantity strings like `resources.limits.cpu` values:
+
+- Returns `0` when values are equal
+- Returns `-1` when left < right  
+- Returns `1` when left > right
 
 ```yaml
 annotations:
@@ -64,16 +99,3 @@ annotations:
       }
     ]
 ```
-
-## Path Expression Syntax
-
-Overrides use a CEL-like syntax to reference properties.
-
-- `field.anotherfield`: Traverse object fields
-- `field["key"]` or `field['key']`: Access object fields by key (supports any field name including hyphens)
-- `field[2]`: Access array elements by index
-- `field[*]`: Match all elements in an array
-- `field[someKey="value"]`: Match array elements by a key-value pair
-
-Paths can be chained, e.g., `self.field.anotherfield[2].yetAnotherField`.
-If any segment of the path is nil or missing, the override will not be applied.
