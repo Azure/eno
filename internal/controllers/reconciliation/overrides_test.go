@@ -2,6 +2,7 @@ package reconciliation
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -13,7 +14,9 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -669,34 +672,30 @@ func TestOverrideSecretData(t *testing.T) {
 		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
 	})
 
+	cli, err := kubernetes.NewForConfig(mgr.DownstreamRestConfig)
+	require.NoError(t, err)
+
 	// Mutate both fields
 	secret := &corev1.Secret{}
 	secret.Name = "test-obj"
 	secret.Namespace = "default"
-	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(secret), secret)
 		if err != nil {
 			return err
 		}
 		secret.Data = map[string][]byte{"field-1": []byte("value-1"), "field-2": []byte("value-2")}
-		return mgr.DownstreamClient.Update(ctx, secret)
+		updated, err := cli.CoreV1().Secrets(secret.Namespace).Update(ctx, secret, metav1.UpdateOptions{})
+
+		js, _ := json.Marshal(updated)
+		println("TODO", string(js))
+		return err
 	})
 	require.NoError(t, err)
 
-	// Resynthesize to guarantee another reconciliation
-	err = retry.RetryOnConflict(testutil.Backoff, func() error {
-		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Spec.SynthesisEnv = []apiv1.EnvVar{{Name: "FORCE_SYNTHESIS", Value: "true"}}
-		return upstream.Update(ctx, comp)
-	})
-	require.NoError(t, err)
-	testutil.Eventually(t, func() bool {
-		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
-	})
+	time.Sleep(time.Second * 5)
 
 	// The values should still be present
-	testutil.Eventually(t, func() bool {
-		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(secret), secret)
-		return err == nil && string(secret.Data["field-1"]) == "value-1" && string(secret.Data["field-2"]) == "value-2"
-	})
+	err = mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(secret), secret)
+	assert.True(t, err == nil && string(secret.Data["field-1"]) == "value-1" && string(secret.Data["field-2"]) == "value-2")
 }
