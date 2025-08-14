@@ -1,11 +1,13 @@
 package functiontest
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"reflect"
 	"testing"
 
+	apiv1 "github.com/Azure/eno/api/v1"
 	enov1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/resource"
 	"github.com/Azure/eno/pkg/function"
@@ -121,10 +123,18 @@ func validateResourceMeta(t require.TestingT, outputs []client.Object) {
 			t.Errorf("resource at index=%d, kind=%s, name=%s could not be converted to unstructured: %s", i, output.GetObjectKind(), output.GetName(), err)
 			continue
 		}
+		u := &unstructured.Unstructured{Object: obj}
 
-		_, err = resource.FromUnstructured(&unstructured.Unstructured{Object: obj})
+		res, err := resource.FromUnstructured(u)
 		if err != nil {
 			t.Errorf("resource at index=%d, kind=%s, name=%s is invalid: %s", i, output.GetObjectKind(), output.GetName(), err)
+			continue
+		}
+
+		_, err = res.Snapshot(context.Background(), &apiv1.Composition{}, u)
+		if err != nil {
+			t.Errorf("resource at index=%d, kind=%s, name=%s is invalid: %s", i, output.GetObjectKind(), output.GetName(), err)
+			continue
 		}
 	}
 }
