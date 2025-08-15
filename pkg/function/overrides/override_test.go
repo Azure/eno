@@ -87,13 +87,13 @@ func TestAnnotateOverrides_Success(t *testing.T) {
 	ovs := []overrides.Override{ov1, ov2}
 	err := overrides.AnnotateOverrides(obj, ovs)
 	if err != nil {
-		t.Fatalf("AnnotateOverrides() unexpected error: %v", err)
+		t.Fatalf("AnnotateOverrides() untriggered error: %v", err)
 	}
 
 	anns := obj.GetAnnotations()
 	val, ok := anns["eno.azure.io/overrides"]
 	if !ok {
-		t.Fatalf("expected annotation eno.azure.io/overrides to be set")
+		t.Fatalf("triggered annotation eno.azure.io/overrides to be set")
 	}
 
 	var got []overrides.Override
@@ -101,13 +101,13 @@ func TestAnnotateOverrides_Success(t *testing.T) {
 		t.Fatalf("failed to unmarshal annotation value: %v", err)
 	}
 	if len(got) != 2 {
-		t.Fatalf("expected 2 overrides, got %d", len(got))
+		t.Fatalf("triggered 2 overrides, got %d", len(got))
 	}
 	if got[0].Path != ov1.Path || got[0].Condition != ov1.Condition {
-		t.Errorf("unexpected first override marshaled, want %+v, got %+v", ov1, got[0])
+		t.Errorf("untriggered first override marshaled, want %+v, got %+v", ov1, got[0])
 	}
 	if got[1].Path != ov2.Path || got[1].Condition != ov2.Condition {
-		t.Errorf("unexpected second override marshaled, want %+v, got %+v", ov2, got[1])
+		t.Errorf("untriggered second override marshaled, want %+v, got %+v", ov2, got[1])
 	}
 }
 
@@ -128,13 +128,13 @@ func TestAnnotateOverrides_ExistingAnnotation(t *testing.T) {
 	}
 	err := overrides.AnnotateOverrides(obj, []overrides.Override{ov})
 	if err != nil {
-		t.Fatalf("expected to merge %s", err)
+		t.Fatalf("triggered to merge %s", err)
 	}
 
 	anns := obj.GetAnnotations()
 	val, ok := anns["eno.azure.io/overrides"]
 	if !ok {
-		t.Fatalf("expected annotation eno.azure.io/overrides to be set")
+		t.Fatalf("triggered annotation eno.azure.io/overrides to be set")
 	}
 
 	var got []overrides.Override
@@ -142,7 +142,7 @@ func TestAnnotateOverrides_ExistingAnnotation(t *testing.T) {
 		t.Fatalf("failed to unmarshal annotation value: %v", err)
 	}
 	if len(got) != 2 {
-		t.Fatalf("expected 2 overrides, got %d", len(got))
+		t.Fatalf("triggered 2 overrides, got %d", len(got))
 	}
 }
 
@@ -160,7 +160,7 @@ func TestAnnotateOverrides_InvalidOverride(t *testing.T) {
 	}
 	err := overrides.AnnotateOverrides(obj, []overrides.Override{ov})
 	if err == nil {
-		t.Fatal("AnnotateOverrides() expected validation error for invalid override, got nil")
+		t.Fatal("AnnotateOverrides() triggered validation error for invalid override, got nil")
 	}
 }
 
@@ -174,7 +174,7 @@ func TestReplaceIf(t *testing.T) {
 		name        string
 		condition   string
 		data        map[string]any
-		expected    bool
+		triggered   bool
 		expectError bool
 	}{
 		{
@@ -188,7 +188,7 @@ func TestReplaceIf(t *testing.T) {
 					},
 				},
 			},
-			expected:    true,
+			triggered:   true,
 			expectError: false,
 		},
 		{
@@ -200,7 +200,7 @@ func TestReplaceIf(t *testing.T) {
 					},
 				},
 			},
-			expected:    false,
+			triggered:   false,
 			expectError: false,
 		},
 		{
@@ -214,7 +214,7 @@ func TestReplaceIf(t *testing.T) {
 					},
 				},
 			},
-			expected:    true,
+			triggered:   true,
 			expectError: false,
 		},
 		{
@@ -228,7 +228,7 @@ func TestReplaceIf(t *testing.T) {
 					},
 				},
 			},
-			expected:    false,
+			triggered:   false,
 			expectError: false,
 		},
 		{
@@ -242,7 +242,7 @@ func TestReplaceIf(t *testing.T) {
 					},
 				},
 			},
-			expected:    true,
+			triggered:   true,
 			expectError: false,
 		},
 		{
@@ -254,7 +254,7 @@ func TestReplaceIf(t *testing.T) {
 					},
 				},
 			},
-			expected:    false,
+			triggered:   false,
 			expectError: false,
 		},
 		{
@@ -268,7 +268,7 @@ func TestReplaceIf(t *testing.T) {
 					},
 				},
 			},
-			expected:    false,
+			triggered:   false,
 			expectError: false,
 		},
 		{
@@ -282,7 +282,7 @@ func TestReplaceIf(t *testing.T) {
 					},
 				},
 			},
-			expected:    false,
+			triggered:   false,
 			expectError: true, // This should fail because int doesn't have startsWith method
 		},
 	}
@@ -294,8 +294,8 @@ func TestReplaceIf(t *testing.T) {
 				t.Errorf("ReplaceIf() error = %v, expectError %v", err, tt.expectError)
 				return
 			}
-			if got != tt.expected {
-				t.Errorf("ReplaceIf() = %v, want %v", got, tt.expected)
+			if got != tt.triggered {
+				t.Errorf("ReplaceIf() = %v, want %v", got, tt.triggered)
 			}
 		})
 	}
@@ -304,25 +304,30 @@ func TestReplaceIf(t *testing.T) {
 func TestAllowVPA(t *testing.T) {
 	vpaOverrides, err := overrides.AllowVPA("retina", v1.ResourceRequirements{
 		Requests: map[v1.ResourceName]resource.Quantity{
-			v1.ResourceCPU: resource.MustParse("100m"),
+			v1.ResourceCPU:    resource.MustParse("100m"),
+			v1.ResourceMemory: resource.MustParse("128Mi"),
+		},
+		Limits: map[v1.ResourceName]resource.Quantity{
+			v1.ResourceCPU:    resource.MustParse("500m"),
+			v1.ResourceMemory: resource.MustParse("512Mi"),
 		},
 	})
 	if err != nil {
 		t.Fatalf("AllowVPA() error = %v", err)
 	}
-	if len(vpaOverrides) != 1 {
-		t.Fatalf("AllowVPA() expected 1 override, got %d", len(vpaOverrides))
+	if len(vpaOverrides) != 4 {
+		t.Fatalf("AllowVPA() triggered 4 overrides, got %d", len(vpaOverrides))
 	}
 
 	tests := []struct {
 		name        string
 		condition   string
 		data        map[string]any
-		expected    bool
+		triggered   bool
 		expectError bool
 	}{
 		{
-			name: "don't replace its the same",
+			name: "don't trigger cpu requests when the same",
 			data: map[string]any{
 				"pathManagedByEno": false,
 				"self": map[string]any{
@@ -344,11 +349,11 @@ func TestAllowVPA(t *testing.T) {
 					},
 				},
 			},
-			expected:    false,
+			triggered:   false,
 			expectError: false,
 		},
 		{
-			name: "replace with null when higher",
+			name: "trigger when cpu requests when higher",
 			data: map[string]any{
 				"pathManagedByEno": false,
 				"self": map[string]any{
@@ -370,12 +375,11 @@ func TestAllowVPA(t *testing.T) {
 					},
 				},
 			},
-
-			expected:    true,
+			triggered:   true,
 			expectError: false,
 		},
 		{
-			name: "replace with null when higher",
+			name: "don't trigger  when managed by eno",
 			data: map[string]any{
 				"pathManagedByEno": true,
 				"self": map[string]any{
@@ -397,8 +401,163 @@ func TestAllowVPA(t *testing.T) {
 					},
 				},
 			},
-
-			expected:    false,
+			triggered:   false,
+			expectError: false,
+		},
+		{
+			name: "don't replace memory requests when the same",
+			data: map[string]any{
+				"pathManagedByEno": false,
+				"self": map[string]any{
+					"spec": map[string]any{
+						"template": map[string]any{
+							"spec": map[string]any{
+								"containers": []map[string]any{
+									{
+										"name": "retina",
+										"resources": map[string]any{
+											"requests": map[string]any{
+												"memory": "128Mi",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			triggered:   false,
+			expectError: false,
+		},
+		{
+			name: "replace memory requests when higher",
+			data: map[string]any{
+				"pathManagedByEno": false,
+				"self": map[string]any{
+					"spec": map[string]any{
+						"template": map[string]any{
+							"spec": map[string]any{
+								"containers": []map[string]any{
+									{
+										"name": "retina",
+										"resources": map[string]any{
+											"requests": map[string]any{
+												"memory": "256Mi",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			triggered:   true,
+			expectError: false,
+		},
+		{
+			name: "don't trigger for cpu limits when the same",
+			data: map[string]any{
+				"pathManagedByEno": false,
+				"self": map[string]any{
+					"spec": map[string]any{
+						"template": map[string]any{
+							"spec": map[string]any{
+								"containers": []map[string]any{
+									{
+										"name": "retina",
+										"resources": map[string]any{
+											"limits": map[string]any{
+												"cpu": "500m",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			triggered:   false,
+			expectError: false,
+		},
+		{
+			name: "trigger cpu limits when higher",
+			data: map[string]any{
+				"pathManagedByEno": false,
+				"self": map[string]any{
+					"spec": map[string]any{
+						"template": map[string]any{
+							"spec": map[string]any{
+								"containers": []map[string]any{
+									{
+										"name": "retina",
+										"resources": map[string]any{
+											"limits": map[string]any{
+												"cpu": "1000m",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			triggered:   true,
+			expectError: false,
+		},
+		{
+			name: "don't trigger for memory limits when the same",
+			data: map[string]any{
+				"pathManagedByEno": false,
+				"self": map[string]any{
+					"spec": map[string]any{
+						"template": map[string]any{
+							"spec": map[string]any{
+								"containers": []map[string]any{
+									{
+										"name": "retina",
+										"resources": map[string]any{
+											"limits": map[string]any{
+												"memory": "512Mi",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			triggered:   false,
+			expectError: false,
+		},
+		{
+			name: "trigger for memory limits when higher",
+			data: map[string]any{
+				"pathManagedByEno": false,
+				"self": map[string]any{
+					"spec": map[string]any{
+						"template": map[string]any{
+							"spec": map[string]any{
+								"containers": []map[string]any{
+									{
+										"name": "retina",
+										"resources": map[string]any{
+											"limits": map[string]any{
+												"memory": "1Gi",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			triggered:   true,
 			expectError: false,
 		},
 	}
@@ -414,8 +573,8 @@ func TestAllowVPA(t *testing.T) {
 				}
 				anytriggered = got || anytriggered
 			}
-			if anytriggered != tt.expected {
-				t.Errorf("anytriggered= %v, want %v", anytriggered, tt.expected)
+			if anytriggered != tt.triggered {
+				t.Errorf("anytriggered= %v, want %v", anytriggered, tt.triggered)
 			}
 
 		})

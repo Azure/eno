@@ -59,6 +59,10 @@ func (o *Override) validate() (cel.Program, error) {
 
 }
 
+// Test lets you unittest your overrides Condition agains some data kid of like unstructerd.unstructered.
+// variables like pathManagedByEno can also be mocked at top level of data along with self.
+// it does NOT actually test api server logic as it doesn't have fieldmanger two sets of data.
+// Still it can be helpful in finding bugs in Conditions. See examples in unittest.
 func (o *Override) Test(data map[string]interface{}) (bool, error) {
 	// Evaluate with the input data
 
