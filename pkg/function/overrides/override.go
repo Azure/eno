@@ -13,6 +13,8 @@ import (
 )
 
 // mirror of type Op struct  and type jsonOp struct  in internal/resource/mutation/mutation.go
+// trying to do type Override = intmut.Op will get you an erro about extending methods.
+// could make it a composition but not going down that path yet
 type Override struct {
 	Path      string `json:"path"`
 	Value     any    `json:"value"`
