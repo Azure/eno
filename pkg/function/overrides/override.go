@@ -9,11 +9,10 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // mirror of type Op struct  and type jsonOp struct  in internal/resource/mutation/mutation.go
-// could pull those out
 type Override struct {
 	Path      string `json:"path"`
 	Value     any    `json:"value"`
@@ -92,7 +91,7 @@ func (o *Override) String() string {
 
 // AnnotateOverrides will take care of appropriatly serializng your overrides to annotations
 // merging them with others that exist
-func AnnotateOverrides(obj *unstructured.Unstructured, overrides []Override) error {
+func AnnotateOverrides(obj client.Object, overrides []Override) error {
 
 	// Add Helm annotations that are required for Helm to recognize the resources
 	annotations := obj.GetAnnotations()
@@ -144,26 +143,24 @@ func ReplaceIf(condition string) (Override, error) {
 // are higher and also that the path is not managed by eno (so eno can lower if eno was the last updater)
 func AllowVPA(container string, req corev1.ResourceRequirements) ([]Override, error) {
 	overrides := []Override{}
-	for rtype, value := range req.Requests {
-		if value.IsZero() {
-			continue // skip zero values
-		}
-		o, err := allowVPA(container, rtype.String(), "requests", value.String())
-		if err != nil {
-			return nil, fmt.Errorf("creating override for requests: %w", err)
-		}
-		overrides = append(overrides, o)
+	requirementsMap := map[string]corev1.ResourceList{
+		"requests": req.Requests,
+		"limits":   req.Limits,
 	}
-	for rtype, value := range req.Limits {
-		if value.IsZero() {
-			continue // skip zero values
+
+	for name, resourceList := range requirementsMap {
+		for rtype, value := range resourceList {
+			if value.IsZero() {
+				continue // skip zero values
+			}
+			o, err := allowVPA(container, rtype.String(), name, value.String())
+			if err != nil {
+				return nil, fmt.Errorf("creating override for %s: %w", name, err)
+			}
+			overrides = append(overrides, o)
 		}
-		o, err := allowVPA(container, rtype.String(), "limits", value.String())
-		if err != nil {
-			return nil, fmt.Errorf("creating override for limits: %w", err)
-		}
-		overrides = append(overrides, o)
 	}
+
 	return overrides, nil
 }
 
