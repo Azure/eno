@@ -136,7 +136,8 @@ func ReplaceIf(condition string) (Override, error) {
 	return o, nil
 }
 
-// AllowVPA lets VPA or external actor raise resources/requests for a given container
+// AllowVPA lets VPA or external actor raise resources/requests for a given container. It checks if the requests and limits
+// are higher and also that the path is not managed by eno (so eno can lower if eno was the last updater)
 func AllowVPA(container string, req corev1.ResourceRequirements) ([]Override, error) {
 	overrides := []Override{}
 	for rtype, value := range req.Requests {
