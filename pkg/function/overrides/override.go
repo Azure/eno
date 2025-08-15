@@ -80,6 +80,12 @@ func (o *Override) Test(data map[string]interface{}) (bool, error) {
 	return false, fmt.Errorf("condition did not evaluate to boolean, got: %T", result)
 }
 
+// String is for debugging only because escaped json cel is hard to read.
+func (o *Override) String() string {
+	//not actual json becuse escaping is hard to read.
+	return fmt.Sprintf("{Path: %s,\n Value: %v,\n Condition: %s}", o.Path, o.Value, o.Condition)
+}
+
 // AnnotateOverrides will take care of appropriatly serializng your overrides to annotations
 // merging them with others that exist
 func AnnotateOverrides(obj *unstructured.Unstructured, overrides []Override) error {
@@ -156,15 +162,17 @@ func AllowVPA(container string, req corev1.ResourceRequirements) ([]Override, er
 	return overrides, nil
 }
 
-func allowVPA(container, resourceType, reqType, value string) (Override, error) {
+func allowVPA(container, resourceType, reqOrLimits, value string) (Override, error) {
 
-	path := fmt.Sprintf("self.spec.template.spec.containers[name='%s'].resources.%s.%s", container, reqType, resourceType)
+	path := fmt.Sprintf("self.spec.template.spec.containers[name='%s'].resources.%s.%s", container, reqOrLimits, resourceType)
 
+	//"self.spec.template.spec.containers.exists(c, c.name == '%s' &&  has(c.resources.requests) &&  '%s' in c.resources.requests &&  compareResourceQuantities(c.resources.requests['%s'], '%s') > 0)"
+	// self.spec.template.spec.containers.exists(c, c.name == 'retina' && has(c.resources.requests) && 'cpu' in c.resources.requests &&  compareResourceQuantities(c.resources.requests['cpu'], '100') > 0)}
 	//to get && !pathManagedByEno to work need to pass in a  field manager to Test
 	// also changed >= 0 to > 0
-	// this is pretty unreadable.
-	condition := fmt.Sprintf("self.spec.template.spec.containers.exists(c, c.name == '%s' &&  has(c.resources.%s) &&  '%s' in c.resources.%s &&  compareResourceQuantities(c.resources.%s['%s'], '%s') > 0)",
-		container, resourceType, reqType, resourceType, resourceType, reqType, value)
+	// this is pretty unreadable use go text templating instead?
+	cel := `self.spec.template.spec.containers.exists(c, c.name == '%s' && has(c.resources.%s) && '%s' in c.resources.%s && compareResourceQuantities(c.resources.%s['%s'], '%s') > 0)`
+	condition := fmt.Sprintf(cel, container, reqOrLimits, resourceType, reqOrLimits, reqOrLimits, resourceType, value)
 	o := Override{
 		Path:      path,
 		Value:     nil,

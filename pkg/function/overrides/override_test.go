@@ -304,11 +304,14 @@ func TestReplaceIf(t *testing.T) {
 func TestAllowVPA(t *testing.T) {
 	vpaOverrides, err := overrides.AllowVPA("retina", v1.ResourceRequirements{
 		Requests: map[v1.ResourceName]resource.Quantity{
-			v1.ResourceCPU: *resource.NewQuantity(100, resource.DecimalSI),
+			v1.ResourceCPU: resource.MustParse("100m"),
 		},
 	})
 	if err != nil {
 		t.Fatalf("AllowVPA() error = %v", err)
+	}
+	if len(vpaOverrides) != 1 {
+		t.Fatalf("AllowVPA() expected 1 override, got %d", len(vpaOverrides))
 	}
 
 	tests := []struct {
@@ -373,16 +376,19 @@ func TestAllowVPA(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			anytriggered := false
 			for _, ov := range vpaOverrides {
 				got, err := ov.Test(tt.data)
 				if (err != nil) != tt.expectError {
 					t.Errorf("AllowVPA() error = %v, expectError %v", err, tt.expectError)
 					return
 				}
-				if got != tt.expected {
-					t.Errorf("AllowVPA() = %v, want %v", got, tt.expected)
-				}
+				anytriggered = got || anytriggered
 			}
+			if anytriggered != tt.expected {
+				t.Errorf("anytriggered= %v, want %v", anytriggered, tt.expected)
+			}
+
 		})
 	}
 
