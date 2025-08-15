@@ -324,6 +324,7 @@ func TestAllowVPA(t *testing.T) {
 		{
 			name: "don't replace its the same",
 			data: map[string]any{
+				"pathManagedByEno": false,
 				"self": map[string]any{
 					"spec": map[string]any{
 						"template": map[string]any{
@@ -349,6 +350,7 @@ func TestAllowVPA(t *testing.T) {
 		{
 			name: "replace with null when higher",
 			data: map[string]any{
+				"pathManagedByEno": false,
 				"self": map[string]any{
 					"spec": map[string]any{
 						"template": map[string]any{
@@ -370,6 +372,33 @@ func TestAllowVPA(t *testing.T) {
 			},
 
 			expected:    true,
+			expectError: false,
+		},
+		{
+			name: "replace with null when higher",
+			data: map[string]any{
+				"pathManagedByEno": true,
+				"self": map[string]any{
+					"spec": map[string]any{
+						"template": map[string]any{
+							"spec": map[string]any{
+								"containers": []map[string]any{
+									{
+										"name": "retina",
+										"resources": map[string]any{
+											"requests": map[string]any{
+												"cpu": "500m",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+
+			expected:    false,
 			expectError: false,
 		},
 	}

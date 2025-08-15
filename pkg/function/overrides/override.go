@@ -136,7 +136,7 @@ func ReplaceIf(condition string) (Override, error) {
 	return o, nil
 }
 
-// AllowVPA lets VPA or external actor raise resources/requests for a given container (need to do limit too)
+// AllowVPA lets VPA or external actor raise resources/requests for a given container
 func AllowVPA(container string, req corev1.ResourceRequirements) ([]Override, error) {
 	overrides := []Override{}
 	for rtype, value := range req.Requests {
@@ -171,7 +171,7 @@ func allowVPA(container, resourceType, reqOrLimits, value string) (Override, err
 	//to get && !pathManagedByEno to work need to pass in a  field manager to Test
 	// also changed >= 0 to > 0
 	// this is pretty unreadable use go text templating instead?
-	cel := `self.spec.template.spec.containers.exists(c, c.name == '%s' && has(c.resources.%s) && '%s' in c.resources.%s && compareResourceQuantities(c.resources.%s['%s'], '%s') > 0)`
+	cel := `!pathManagedByEno && self.spec.template.spec.containers.exists(c, c.name == '%s' && has(c.resources.%s) && '%s' in c.resources.%s && compareResourceQuantities(c.resources.%s['%s'], '%s') > 0)`
 	condition := fmt.Sprintf(cel, container, reqOrLimits, resourceType, reqOrLimits, reqOrLimits, resourceType, value)
 	o := Override{
 		Path:      path,
