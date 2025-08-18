@@ -102,16 +102,16 @@ func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Compos
 	}
 
 	const disableUpdatesKey = "eno.azure.io/disable-updates"
-	snap.DisableUpdates = readAnnotation(comp, copy, disableUpdatesKey) == "true"
+	snap.DisableUpdates = cascadeAnnotation(comp, copy, disableUpdatesKey) == "true"
 
 	const replaceKey = "eno.azure.io/replace"
-	snap.Replace = readAnnotation(comp, copy, replaceKey) == "true"
+	snap.Replace = cascadeAnnotation(comp, copy, replaceKey) == "true"
 
 	const deletionStratKey = "eno.azure.io/deletion-strategy"
-	snap.Orphan = readAnnotation(comp, copy, deletionStratKey) == "orphan"
+	snap.Orphan = cascadeAnnotation(comp, copy, deletionStratKey) == "orphan"
 
 	const reconcileIntervalKey = "eno.azure.io/reconcile-interval"
-	if str := readAnnotation(comp, copy, reconcileIntervalKey); str != "" {
+	if str := cascadeAnnotation(comp, copy, reconcileIntervalKey); str != "" {
 		reconcileInterval, err := time.ParseDuration(str)
 		if err != nil {
 			logr.FromContextOrDiscard(ctx).V(0).Info("invalid reconcile interval - ignoring")
@@ -488,8 +488,9 @@ func stripInsignificantFields(u *unstructured.Unstructured) *unstructured.Unstru
 	return u
 }
 
-func readAnnotation(comp *apiv1.Composition, actual *unstructured.Unstructured, key string) string {
-	if anno := actual.GetAnnotations(); anno != nil {
+// cascadeAnnotation looks up an annotation value from either the composition or resource. Resource wins.
+func cascadeAnnotation(comp *apiv1.Composition, res *unstructured.Unstructured, key string) string {
+	if anno := res.GetAnnotations(); anno != nil {
 		if val, ok := anno[key]; ok {
 			return val
 		}
