@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"maps"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,8 +22,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
 )
 
 var patchGVK = schema.GroupVersionKind{
@@ -66,116 +63,6 @@ type Resource struct {
 	readinessGroup   int
 	overrides        []*mutation.Op
 	latestKnownState atomic.Pointer[apiv1.ResourceState]
-}
-
-func (r *Resource) State() *apiv1.ResourceState { return r.latestKnownState.Load() }
-
-// Less returns true when r < than.
-// Used to establish determinstic ordering for conflicting resources.
-func (r *Resource) Less(than *Resource) bool {
-	return bytes.Compare(r.manifestHash, than.manifestHash) < 0
-}
-
-// Snapshot evaluates the resource against its current/actual state and returns the resulting "snapshot".
-//
-// The snapshot should only be used to progress the resource's state from the given resourceVersion.
-// Call this function again to get an updated snapshot with the latest state if applying the current snapshot results in a conflict.
-func (r *Resource) Snapshot(ctx context.Context, comp *apiv1.Composition, actual *unstructured.Unstructured) (*Snapshot, error) {
-	return r.SnapshotWithOverrides(ctx, comp, actual, r)
-}
-
-// SnapshotWithOverrides is identical to Snapshot but applies the overrides from another resource
-// (presumably a newer version of the same object).
-func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Composition, actual *unstructured.Unstructured, overrideRes *Resource) (*Snapshot, error) {
-	copy := r.parsed.DeepCopy()
-
-	for i, op := range overrideRes.overrides {
-		err := op.Apply(ctx, comp, actual, copy)
-		if err != nil {
-			return nil, fmt.Errorf("applying override %d: %w", i+1, err)
-		}
-	}
-
-	snap := &Snapshot{
-		Resource: r,
-		parsed:   copy,
-	}
-
-	const disableUpdatesKey = "eno.azure.io/disable-updates"
-	snap.DisableUpdates = cascadeAnnotation(comp, copy, disableUpdatesKey) == "true"
-
-	const replaceKey = "eno.azure.io/replace"
-	snap.Replace = cascadeAnnotation(comp, copy, replaceKey) == "true"
-
-	const deletionStratKey = "eno.azure.io/deletion-strategy"
-	snap.Orphan = cascadeAnnotation(comp, copy, deletionStratKey) == "orphan"
-
-	const reconcileIntervalKey = "eno.azure.io/reconcile-interval"
-	if str := cascadeAnnotation(comp, copy, reconcileIntervalKey); str != "" {
-		reconcileInterval, err := time.ParseDuration(str)
-		if err != nil {
-			logr.FromContextOrDiscard(ctx).V(0).Info("invalid reconcile interval - ignoring")
-		}
-		snap.ReconcileInterval = &metav1.Duration{Duration: reconcileInterval}
-	}
-
-	// Remove any eno.azure.io annotations and labels
-	copy.SetAnnotations(pruneMetadata(copy.GetAnnotations()))
-	copy.SetLabels(pruneMetadata(copy.GetLabels()))
-
-	return snap, nil
-}
-
-// Snapshot is a representation of a resource in the context of its current state.
-// Practically speaking this means it's a Resource that has had any overrides applied.
-type Snapshot struct {
-	*Resource
-
-	ReconcileInterval *metav1.Duration
-	DisableUpdates    bool
-	Replace           bool
-	Orphan            bool
-
-	parsed *unstructured.Unstructured
-}
-
-func (r *Snapshot) Unstructured() *unstructured.Unstructured {
-	// NOTE(jordan): This probably doesn't need to be deep copied. Leaving it during some refactoring, maybe carefully remove it for perf later.
-	return r.parsed.DeepCopy()
-}
-
-func (r *Snapshot) Deleted(comp *apiv1.Composition) bool {
-	return (comp.DeletionTimestamp != nil && !r.Orphan) || r.manifestDeleted || (r.isPatch && r.patchSetsDeletionTimestamp())
-}
-
-func (r *Snapshot) Patch() ([]byte, bool, error) {
-	if !r.isPatch {
-		return nil, false, nil
-	}
-
-	ops, _, _ := unstructured.NestedSlice(r.parsed.Object, "patch", "ops")
-	if len(ops) == 0 {
-		return nil, true, nil // empty patch == empty json
-	}
-	js, err := json.Marshal(&ops)
-	if err != nil {
-		return nil, false, err
-	}
-	return js, true, nil
-}
-
-func (r *Snapshot) patchSetsDeletionTimestamp() bool {
-	ops, _, _ := unstructured.NestedSlice(r.parsed.Object, "patch", "ops")
-	for _, op := range ops {
-		op, _ := op.(map[string]any)
-		if str, ok := op["value"].(string); !ok || str == "" {
-			continue
-		}
-		if op["path"] == "/metadata/deletionTimestamp" {
-			return true
-		}
-	}
-	return false
 }
 
 // FromSlice constructs a resource out of the given resource slice.
@@ -312,6 +199,116 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 	return res, nil
 }
 
+func (r *Resource) State() *apiv1.ResourceState { return r.latestKnownState.Load() }
+
+// Less returns true when r < than.
+// Used to establish determinstic ordering for conflicting resources.
+func (r *Resource) Less(than *Resource) bool {
+	return bytes.Compare(r.manifestHash, than.manifestHash) < 0
+}
+
+// Snapshot evaluates the resource against its current/actual state and returns the resulting "snapshot".
+//
+// The snapshot should only be used to progress the resource's state from the given resourceVersion.
+// Call this function again to get an updated snapshot with the latest state if applying the current snapshot results in a conflict.
+func (r *Resource) Snapshot(ctx context.Context, comp *apiv1.Composition, actual *unstructured.Unstructured) (*Snapshot, error) {
+	return r.SnapshotWithOverrides(ctx, comp, actual, r)
+}
+
+// SnapshotWithOverrides is identical to Snapshot but applies the overrides from another resource
+// (presumably a newer version of the same object).
+func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Composition, actual *unstructured.Unstructured, overrideRes *Resource) (*Snapshot, error) {
+	copy := r.parsed.DeepCopy()
+
+	for i, op := range overrideRes.overrides {
+		err := op.Apply(ctx, comp, actual, copy)
+		if err != nil {
+			return nil, fmt.Errorf("applying override %d: %w", i+1, err)
+		}
+	}
+
+	snap := &Snapshot{
+		Resource: r,
+		parsed:   copy,
+	}
+
+	const disableUpdatesKey = "eno.azure.io/disable-updates"
+	snap.DisableUpdates = cascadeAnnotation(comp, copy, disableUpdatesKey) == "true"
+
+	const replaceKey = "eno.azure.io/replace"
+	snap.Replace = cascadeAnnotation(comp, copy, replaceKey) == "true"
+
+	const deletionStratKey = "eno.azure.io/deletion-strategy"
+	snap.Orphan = cascadeAnnotation(comp, copy, deletionStratKey) == "orphan"
+
+	const reconcileIntervalKey = "eno.azure.io/reconcile-interval"
+	if str := cascadeAnnotation(comp, copy, reconcileIntervalKey); str != "" {
+		reconcileInterval, err := time.ParseDuration(str)
+		if err != nil {
+			logr.FromContextOrDiscard(ctx).V(0).Info("invalid reconcile interval - ignoring")
+		}
+		snap.ReconcileInterval = &metav1.Duration{Duration: reconcileInterval}
+	}
+
+	// Remove any eno.azure.io annotations and labels
+	copy.SetAnnotations(pruneMetadata(copy.GetAnnotations()))
+	copy.SetLabels(pruneMetadata(copy.GetLabels()))
+
+	return snap, nil
+}
+
+// Snapshot is a representation of a resource in the context of its current state.
+// Practically speaking this means it's a Resource that has had any overrides applied.
+type Snapshot struct {
+	*Resource
+
+	ReconcileInterval *metav1.Duration
+	DisableUpdates    bool
+	Replace           bool
+	Orphan            bool
+
+	parsed *unstructured.Unstructured
+}
+
+func (r *Snapshot) Unstructured() *unstructured.Unstructured {
+	// NOTE(jordan): This probably doesn't need to be deep copied. Leaving it during some refactoring, maybe carefully remove it for perf later.
+	return r.parsed.DeepCopy()
+}
+
+func (r *Snapshot) Deleted(comp *apiv1.Composition) bool {
+	return (comp.DeletionTimestamp != nil && !r.Orphan) || r.manifestDeleted || (r.isPatch && r.patchSetsDeletionTimestamp())
+}
+
+func (r *Snapshot) Patch() ([]byte, bool, error) {
+	if !r.isPatch {
+		return nil, false, nil
+	}
+
+	ops, _, _ := unstructured.NestedSlice(r.parsed.Object, "patch", "ops")
+	if len(ops) == 0 {
+		return nil, true, nil // empty patch == empty json
+	}
+	js, err := json.Marshal(&ops)
+	if err != nil {
+		return nil, false, err
+	}
+	return js, true, nil
+}
+
+func (r *Snapshot) patchSetsDeletionTimestamp() bool {
+	ops, _, _ := unstructured.NestedSlice(r.parsed.Object, "patch", "ops")
+	for _, op := range ops {
+		op, _ := op.(map[string]any)
+		if str, ok := op["value"].(string); !ok || str == "" {
+			continue
+		}
+		if op["path"] == "/metadata/deletionTimestamp" {
+			return true
+		}
+	}
+	return false
+}
+
 func pruneMetadata(m map[string]string) map[string]string {
 	maps.DeleteFunc(m, func(key string, value string) bool {
 		return strings.HasPrefix(key, "eno.azure.io/")
@@ -320,127 +317,6 @@ func pruneMetadata(m map[string]string) map[string]string {
 		m = nil
 	}
 	return m
-}
-
-func NewInputRevisions(obj client.Object, refKey string) *apiv1.InputRevisions {
-	ir := apiv1.InputRevisions{
-		Key:             refKey,
-		ResourceVersion: obj.GetResourceVersion(),
-	}
-	if rev, _ := strconv.Atoi(obj.GetAnnotations()["eno.azure.io/revision"]); rev != 0 {
-		ir.Revision = &rev
-	}
-	if rev, _ := strconv.ParseInt(obj.GetAnnotations()["eno.azure.io/synthesizer-generation"], 10, 64); rev != 0 {
-		ir.SynthesizerGeneration = &rev
-	}
-	if rev, _ := strconv.ParseInt(obj.GetAnnotations()["eno.azure.io/composition-generation"], 10, 64); rev != 0 {
-		ir.CompositionGeneration = &rev
-	}
-	return &ir
-}
-
-// MergeEnoManagedFields corrects managed fields drift to ensure Eno can remove fields
-// that are no longer set by the synthesizer, even when another client corrupts the
-// managed fields metadata. Returns corrected managed fields, affected field paths,
-// and whether correction was needed.
-func MergeEnoManagedFields(prev, current, next []metav1.ManagedFieldsEntry) (copy []metav1.ManagedFieldsEntry, fields string, modified bool) {
-	prevEnoSet := parseEnoFields(prev)
-	nextEnoSet := parseEnoFields(next)
-
-	if prevEnoSet.Empty() {
-		return nil, "", false
-	}
-
-	currentEnoSet := parseEnoFields(current)
-
-	var expectedFields *fieldpath.Set
-	if !nextEnoSet.Empty() && currentEnoSet.Empty() {
-		expectedFields = prevEnoSet
-	} else {
-		expectedFields = prevEnoSet.Difference(nextEnoSet)
-		if expectedFields.Empty() {
-			return nil, "", false
-		}
-
-		expectedFields = expectedFields.Intersection(parseAllFields(current))
-		if expectedFields.Empty() {
-			return nil, "", false
-		}
-	}
-
-	return adjustManagedFields(prev, expectedFields), expectedFields.String(), true
-}
-
-func adjustManagedFields(entries []metav1.ManagedFieldsEntry, expected *fieldpath.Set) []metav1.ManagedFieldsEntry {
-	copy := make([]metav1.ManagedFieldsEntry, 0, len(entries))
-
-	for _, entry := range entries {
-		if entry.FieldsV1 == nil {
-			copy = append(copy, entry)
-			continue
-		}
-
-		set := parseFieldsEntry(entry)
-		if set == nil {
-			copy = append(copy, entry)
-			continue
-		}
-
-		var updated *fieldpath.Set
-		if entry.Manager == "eno" && entry.Operation == metav1.ManagedFieldsOperationApply {
-			updated = set.Union(expected)
-		} else {
-			updated = set.Difference(expected)
-		}
-
-		js, err := updated.ToJSON()
-		if err != nil {
-			copy = append(copy, entry)
-			continue
-		}
-
-		entry.FieldsV1 = &metav1.FieldsV1{Raw: js}
-		copy = append(copy, entry)
-	}
-
-	return copy
-}
-
-func parseEnoFields(entries []metav1.ManagedFieldsEntry) *fieldpath.Set {
-	for _, entry := range entries {
-		if entry.Manager == "eno" && entry.Operation == metav1.ManagedFieldsOperationApply {
-			if set := parseFieldsEntry(entry); set != nil {
-				return set
-			}
-		}
-	}
-	return &fieldpath.Set{}
-}
-
-func parseAllFields(entries []metav1.ManagedFieldsEntry) *fieldpath.Set {
-	result := &fieldpath.Set{}
-	for _, entry := range entries {
-		if entry.Manager != "eno" {
-			if set := parseFieldsEntry(entry); set != nil {
-				result = result.Union(set)
-			}
-		}
-	}
-	return result
-}
-
-// parseFieldsEntry safely parses a single managed fields entry
-func parseFieldsEntry(entry metav1.ManagedFieldsEntry) *fieldpath.Set {
-	if entry.FieldsV1 == nil {
-		return nil
-	}
-
-	set := &fieldpath.Set{}
-	err := set.FromJSON(bytes.NewBuffer(entry.FieldsV1.Raw))
-	if err != nil {
-		return nil
-	}
-	return set
 }
 
 // Compare compares two unstructured resources while ignoring:
@@ -462,20 +338,6 @@ func Compare(a, b *unstructured.Unstructured) bool {
 		return false
 	}
 	return equality.Semantic.DeepEqual(stripInsignificantFields(a), stripInsignificantFields(b))
-}
-
-// compareEnoManagedFields returns true when the Eno managed fields in both slices are equal.
-func compareEnoManagedFields(a, b []metav1.ManagedFieldsEntry) bool {
-	cmp := func(cur metav1.ManagedFieldsEntry) bool { return cur.Manager == "eno" }
-	ai := slices.IndexFunc(a, cmp)
-	ab := slices.IndexFunc(b, cmp)
-	if ai == -1 && ab == -1 {
-		return true
-	}
-	if ai == -1 || ab == -1 {
-		return false
-	}
-	return equality.Semantic.DeepEqual(a[ai].FieldsV1, b[ab].FieldsV1)
 }
 
 func stripInsignificantFields(u *unstructured.Unstructured) *unstructured.Unstructured {

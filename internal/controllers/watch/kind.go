@@ -11,7 +11,6 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
-	"github.com/Azure/eno/internal/resource"
 	"github.com/go-logr/logr"
 	"golang.org/x/time/rate"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -235,7 +234,7 @@ func (k *KindWatchController) updateCompositions(ctx context.Context, logger log
 			continue
 		}
 
-		revs := resource.NewInputRevisions(meta, key)
+		revs := apiv1.NewInputRevisions(meta, key)
 		if !setInputRevisions(&comp, revs) {
 			continue
 		}

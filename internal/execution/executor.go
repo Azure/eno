@@ -123,7 +123,7 @@ func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, s
 		logger.V(0).Info("retrieved input", "key", key, "latency", time.Since(start).Abs().Milliseconds())
 
 		// Store the revision to be written to the synthesis status later
-		revs = append(revs, *resource.NewInputRevisions(obj, key))
+		revs = append(revs, *apiv1.NewInputRevisions(obj, key))
 	}
 
 	return rl, revs, nil
