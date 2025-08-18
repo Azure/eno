@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // +kubebuilder:object:root=true
@@ -134,6 +135,23 @@ type InputRevisions struct {
 	Revision              *int   `json:"revision,omitempty"`
 	SynthesizerGeneration *int64 `json:"synthesizerGeneration,omitempty"`
 	CompositionGeneration *int64 `json:"compositionGeneration,omitempty"`
+}
+
+func NewInputRevisions(obj client.Object, refKey string) *InputRevisions {
+	ir := InputRevisions{
+		Key:             refKey,
+		ResourceVersion: obj.GetResourceVersion(),
+	}
+	if rev, _ := strconv.Atoi(obj.GetAnnotations()["eno.azure.io/revision"]); rev != 0 {
+		ir.Revision = &rev
+	}
+	if rev, _ := strconv.ParseInt(obj.GetAnnotations()["eno.azure.io/synthesizer-generation"], 10, 64); rev != 0 {
+		ir.SynthesizerGeneration = &rev
+	}
+	if rev, _ := strconv.ParseInt(obj.GetAnnotations()["eno.azure.io/composition-generation"], 10, 64); rev != 0 {
+		ir.CompositionGeneration = &rev
+	}
+	return &ir
 }
 
 func (i *InputRevisions) Less(b InputRevisions) bool {
