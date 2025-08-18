@@ -14,7 +14,7 @@ import (
 func TestCacheBasics(t *testing.T) {
 	ctx := context.Background()
 	var c Cache
-	queue := workqueue.NewTypedRateLimitingQueue[Request](workqueue.DefaultTypedControllerRateLimiter[Request]())
+	queue := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[Request]())
 	c.SetQueue(queue)
 
 	// Fill doesn't panic when given nil slices
@@ -92,7 +92,7 @@ func TestCachePurge(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		ctx := context.Background()
 		var c Cache
-		queue := workqueue.NewTypedRateLimitingQueue[Request](workqueue.DefaultTypedControllerRateLimiter[Request]())
+		queue := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[Request]())
 		c.SetQueue(queue)
 
 		comp := &apiv1.Composition{}
@@ -150,7 +150,7 @@ func TestCachePurge(t *testing.T) {
 func TestCacheReadinessGroups(t *testing.T) {
 	ctx := context.Background()
 	var c Cache
-	queue := workqueue.NewTypedRateLimitingQueue[Request](workqueue.DefaultTypedControllerRateLimiter[Request]())
+	queue := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[Request]())
 	c.SetQueue(queue)
 
 	comp := &apiv1.Composition{}
