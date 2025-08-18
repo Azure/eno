@@ -254,7 +254,7 @@ func TestManagedFields(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			merged, _, modified := MergeEnoManagedFields(tc.Previous, tc.Current, tc.Next)
 			assert.Equal(t, tc.ExpectModified, modified)
-			assert.Equal(t, parseFieldEntries(t, tc.Expected), parseFieldEntries(t, merged))
+			assert.Equal(t, parseFieldEntries(tc.Expected), parseFieldEntries(merged))
 
 			// Prove that the current slice wasn't mutated
 			if tc.ExpectModified {
@@ -281,7 +281,7 @@ func makeFields(t *testing.T, manager string, fields []string) metav1.ManagedFie
 	return entry
 }
 
-func parseFieldEntries(t *testing.T, entries []metav1.ManagedFieldsEntry) []*fieldpath.Set {
+func parseFieldEntries(entries []metav1.ManagedFieldsEntry) []*fieldpath.Set {
 	sets := make([]*fieldpath.Set, len(entries))
 	for i, entry := range entries {
 		if entry.FieldsV1 == nil {
