@@ -190,7 +190,7 @@ func (e *Executor) fetchPreviousSlices(ctx context.Context, comp *apiv1.Composit
 		slice.Namespace = comp.Namespace
 		err := e.Reader.Get(ctx, client.ObjectKeyFromObject(slice), slice)
 		if errors.IsNotFound(err) {
-			logger.V(0).Info("resource slice referenced by composition was not found - skipping", "resourceSliceName", slice.Name)
+			logger.Error(nil, "resource slice referenced by composition was not found - skipping", "resourceSliceName", slice.Name)
 			continue
 		}
 		if err != nil {
