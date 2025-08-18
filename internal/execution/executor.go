@@ -64,6 +64,11 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 	}
 	resultErr := findResultError(output)
 
+	err = e.preflightValidateResources(output)
+	if err != nil {
+		return err
+	}
+
 	var sliceRefs []*apiv1.ResourceSliceRef
 	if resultErr == nil {
 		sliceRefs, err = e.writeSlices(ctx, comp, output)
@@ -129,6 +134,16 @@ func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, s
 	return rl, revs, nil
 }
 
+func (e *Executor) preflightValidateResources(rl *krmv1.ResourceList) error {
+	for i, obj := range rl.Items {
+		_, err := resource.FromUnstructured(obj)
+		if err != nil {
+			return fmt.Errorf("parsing resource at index %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
 func (e *Executor) writeSlices(ctx context.Context, comp *apiv1.Composition, rl *krmv1.ResourceList) ([]*apiv1.ResourceSliceRef, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
@@ -175,7 +190,7 @@ func (e *Executor) fetchPreviousSlices(ctx context.Context, comp *apiv1.Composit
 		slice.Namespace = comp.Namespace
 		err := e.Reader.Get(ctx, client.ObjectKeyFromObject(slice), slice)
 		if errors.IsNotFound(err) {
-			logger.Error(nil, "resource slice referenced by composition was not found - skipping", "resourceSliceName", slice.Name)
+			logger.V(0).Info("resource slice referenced by composition was not found - skipping", "resourceSliceName", slice.Name)
 			continue
 		}
 		if err != nil {
