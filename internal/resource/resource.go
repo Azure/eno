@@ -101,21 +101,19 @@ func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Compos
 		parsed:   copy,
 	}
 
-	anno := copy.GetAnnotations()
-	if anno == nil {
-		anno = map[string]string{}
-	}
-
 	const disableUpdatesKey = "eno.azure.io/disable-updates"
-	snap.DisableUpdates = anno[disableUpdatesKey] == "true"
+	snap.DisableUpdates = cascadeAnnotation(comp, copy, disableUpdatesKey) == "true"
 
 	const replaceKey = "eno.azure.io/replace"
-	snap.Replace = anno[replaceKey] == "true"
+	snap.Replace = cascadeAnnotation(comp, copy, replaceKey) == "true"
+
+	const deletionStratKey = "eno.azure.io/deletion-strategy"
+	snap.Orphan = cascadeAnnotation(comp, copy, deletionStratKey) == "orphan"
 
 	const reconcileIntervalKey = "eno.azure.io/reconcile-interval"
-	if str, ok := anno[reconcileIntervalKey]; ok {
+	if str := cascadeAnnotation(comp, copy, reconcileIntervalKey); str != "" {
 		reconcileInterval, err := time.ParseDuration(str)
-		if anno[reconcileIntervalKey] != "" && err != nil {
+		if err != nil {
 			logr.FromContextOrDiscard(ctx).V(0).Info("invalid reconcile interval - ignoring")
 		}
 		snap.ReconcileInterval = &metav1.Duration{Duration: reconcileInterval}
@@ -136,6 +134,7 @@ type Snapshot struct {
 	ReconcileInterval *metav1.Duration
 	DisableUpdates    bool
 	Replace           bool
+	Orphan            bool
 
 	parsed *unstructured.Unstructured
 }
@@ -146,7 +145,7 @@ func (r *Snapshot) Unstructured() *unstructured.Unstructured {
 }
 
 func (r *Snapshot) Deleted(comp *apiv1.Composition) bool {
-	return (comp.DeletionTimestamp != nil && !comp.ShouldOrphanResources()) || r.manifestDeleted || (r.isPatch && r.patchSetsDeletionTimestamp())
+	return (comp.DeletionTimestamp != nil && !r.Orphan) || r.manifestDeleted || (r.isPatch && r.patchSetsDeletionTimestamp())
 }
 
 func (r *Snapshot) Patch() ([]byte, bool, error) {
@@ -487,4 +486,19 @@ func stripInsignificantFields(u *unstructured.Unstructured) *unstructured.Unstru
 	u.SetGeneration(0)
 	delete(u.Object, "status")
 	return u
+}
+
+// cascadeAnnotation looks up an annotation value from either the composition or resource. Resource wins.
+func cascadeAnnotation(comp *apiv1.Composition, res *unstructured.Unstructured, key string) string {
+	if anno := res.GetAnnotations(); anno != nil {
+		if val, ok := anno[key]; ok {
+			return val
+		}
+	}
+	if anno := comp.GetAnnotations(); anno != nil {
+		if val, ok := anno[key]; ok {
+			return val
+		}
+	}
+	return ""
 }

@@ -23,9 +23,10 @@ import (
 )
 
 var newResourceTests = []struct {
-	Name     string
-	Manifest string
-	Assert   func(*testing.T, *Snapshot)
+	Name        string
+	Manifest    string
+	Composition apiv1.Composition
+	Assert      func(*testing.T, *Snapshot)
 }{
 	{
 		Name: "configmap",
@@ -42,6 +43,7 @@ var newResourceTests = []struct {
 					"eno.azure.io/readiness-test": "false",
 					"eno.azure.io/replace": "true",
 					"eno.azure.io/disable-updates": "true",
+					"eno.azure.io/deletion-strategy": "orphan",
 					"eno.azure.io/overrides": "[{\"path\":\".self.foo\"}, {\"path\":\".self.bar\"}]"
 				}
 			}
@@ -58,6 +60,7 @@ var newResourceTests = []struct {
 			}, r.Ref)
 			assert.True(t, r.DisableUpdates)
 			assert.True(t, r.Replace)
+			assert.True(t, r.Orphan)
 			assert.Equal(t, int(250), r.readinessGroup)
 			assert.Len(t, r.overrides, 2)
 		},
@@ -113,6 +116,50 @@ var newResourceTests = []struct {
 			assert.Equal(t, int(0), r.readinessGroup)
 			assert.False(t, r.DisableUpdates)
 			assert.False(t, r.Replace)
+		},
+	},
+	{
+		Name: "composition-precedence-positive",
+		Manifest: `{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "foo",
+				"annotations": {
+				  "eno.azure.io/deletion-strategy": ""
+				}
+			}
+		}`,
+		Composition: apiv1.Composition{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"eno.azure.io/deletion-strategy": "orphan",
+				},
+			},
+		},
+		Assert: func(t *testing.T, r *Snapshot) {
+			assert.False(t, r.Orphan)
+		},
+	},
+	{
+		Name: "composition-precedence-negative",
+		Manifest: `{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "foo",
+				"annotations": {}
+			}
+		}`,
+		Composition: apiv1.Composition{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"eno.azure.io/deletion-strategy": "orphan",
+				},
+			},
+		},
+		Assert: func(t *testing.T, r *Snapshot) {
+			assert.True(t, r.Orphan)
 		},
 	},
 	{
@@ -375,7 +422,7 @@ func TestNewResource(t *testing.T) {
 			}, 0)
 			require.NoError(t, err)
 
-			rs, err := r.Snapshot(t.Context(), &apiv1.Composition{}, nil)
+			rs, err := r.Snapshot(t.Context(), &tc.Composition, nil)
 			require.NoError(t, err)
 			tc.Assert(t, rs)
 		})
