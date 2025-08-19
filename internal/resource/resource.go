@@ -232,6 +232,9 @@ func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Compos
 		parsed:   copy,
 	}
 
+	const disableKey = "eno.azure.io/disable-reconciliation"
+	snap.Disable = cascadeAnnotation(comp, copy, disableKey) == "true"
+
 	const disableUpdatesKey = "eno.azure.io/disable-updates"
 	snap.DisableUpdates = cascadeAnnotation(comp, copy, disableUpdatesKey) == "true"
 
@@ -263,6 +266,7 @@ type Snapshot struct {
 	*Resource
 
 	ReconcileInterval *metav1.Duration
+	Disable           bool
 	DisableUpdates    bool
 	Replace           bool
 	Orphan            bool
@@ -276,7 +280,7 @@ func (r *Snapshot) Unstructured() *unstructured.Unstructured {
 }
 
 func (r *Snapshot) Deleted(comp *apiv1.Composition) bool {
-	return (comp.DeletionTimestamp != nil && !r.Orphan) || r.manifestDeleted || (r.isPatch && r.patchSetsDeletionTimestamp())
+	return (comp.DeletionTimestamp != nil && !r.Orphan) || r.manifestDeleted || r.Disable || (r.isPatch && r.patchSetsDeletionTimestamp())
 }
 
 func (r *Snapshot) Patch() ([]byte, bool, error) {

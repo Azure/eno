@@ -699,6 +699,57 @@ func TestDisableUpdates(t *testing.T) {
 	assert.Equal(t, "baz", obj.Data["foo"])
 }
 
+func TestDisableReconciliation(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]string{
+						"eno.azure.io/reconcile-interval":     "10ms",
+						"eno.azure.io/disable-reconciliation": "true",
+					},
+				},
+				"data": map[string]string{"foo": "bar"},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	// Wait for readiness
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	// The resource should not have been created
+	obj := &corev1.ConfigMap{}
+	obj.SetName("test-obj")
+	obj.SetNamespace("default")
+	err := downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+	assert.True(t, errors.IsNotFound(err))
+
+	// Make sure deletion will eventually succeed
+	require.NoError(t, upstream.Delete(ctx, comp))
+	testutil.Eventually(t, func() bool {
+		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	})
+}
+
 func TestUpdateReplace(t *testing.T) {
 	scheme := runtime.NewScheme()
 	corev1.SchemeBuilder.AddToScheme(scheme)
