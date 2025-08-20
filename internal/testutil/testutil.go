@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/testr"
 	"github.com/stretchr/testify/require"
@@ -382,9 +384,28 @@ func WithFakeExecutor(t *testing.T, mgr *Manager, sh execution.SynthesizerHandle
 		}
 
 		e := &execution.Executor{
-			Reader:  cli,
-			Writer:  mgr.GetClient(),
-			Handler: sh,
+			Reader: cli,
+			Writer: mgr.GetClient(),
+			Handler: func(ctx context.Context, s *apiv1.Synthesizer, rl *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+				list, err := sh(ctx, s, rl)
+				if err != nil {
+					return nil, err
+				}
+
+				// Encode/decode the returned resource list just in case some of the unstructured maps
+				// have values that aren't supported by the unstructured helpers (like map[string]string).
+				js, err := json.Marshal(list)
+				if err != nil {
+					return nil, err
+				}
+				listCopy := &krmv1.ResourceList{}
+				err = json.Unmarshal(js, listCopy)
+				if err != nil {
+					return nil, err
+				}
+
+				return listCopy, nil
+			},
 		}
 		err = e.Synthesize(ctx, env)
 		if err != nil {

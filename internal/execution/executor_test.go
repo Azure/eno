@@ -723,3 +723,56 @@ func TestError(t *testing.T) {
 	require.Len(t, comp.Status.InFlightSynthesis.Results, 1)
 	assert.Equal(t, "foo", comp.Status.InFlightSynthesis.Results[0].Message)
 }
+
+func TestInvalidResource(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	require.NoError(t, apiv1.SchemeBuilder.AddToScheme(scheme))
+
+	cli := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&apiv1.ResourceSlice{}, &apiv1.Composition{}).
+		Build()
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-synth"
+	err := cli.Create(ctx, syn)
+	require.NoError(t, err)
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	err = cli.Create(ctx, comp)
+	require.NoError(t, err)
+
+	comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+	err = cli.Status().Update(ctx, comp)
+	require.NoError(t, err)
+
+	e := &Executor{
+		Reader: cli,
+		Writer: cli,
+		Handler: func(ctx context.Context, s *apiv1.Synthesizer, rl *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+			out := &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "", // missing
+					"metadata": map[string]any{
+						"name":      "test",
+						"namespace": "default",
+					},
+				},
+			}
+			return &krmv1.ResourceList{Items: []*unstructured.Unstructured{out}}, nil
+		},
+	}
+	env := &Env{
+		CompositionName:      comp.Name,
+		CompositionNamespace: comp.Namespace,
+		SynthesisUUID:        comp.Status.InFlightSynthesis.UUID,
+	}
+
+	err = e.Synthesize(ctx, env)
+	require.Error(t, err)
+}
