@@ -1,29 +1,36 @@
 # Readiness
 
+Readiness checks determine when resources are ready and control reconciliation order using CEL expressions.
+
 ## Readiness Expressions
 
 Resources can include [CEL](https://github.com/google/cel-go) expressions used to determine their readiness.
-Readiness signal is reflected in the status of the corresponding composition and can be used to order other resource operations.
 
 ```yaml
 annotations:
+  # Basic readiness check
   eno.azure.io/readiness: self.status.foo == 'bar'
 
-  # Any expressions with the `readiness-*` prefix are logically AND'd
-  eno.azure.io/readiness-foo: self.status.anotherField == 'ok'
+  # Multiple checks are AND'd together (all must be true)
+  # The latest transition time determines the resource's ready timestamp.
+  eno.azure.io/readiness-custom: self.status.anotherField == 'ok'
 
-  # Returning a condition object causes Eno to use its last transition time as the readiness timestamp, otherwise it uses the eno-reconciler pod's system time
-  eno.azure.io/readiness-condition: self.status.conditions.filter(item, item.type == 'Test' && item.status == 'False')
+  # Return condition objects to use the precise timestamp from `lastTransitionTime`.
+  # Boolean `true` results use the controller's current system time when readiness is first detected.
+  eno.azure.io/readiness-condition: self.status.conditions.filter(item, item.type == 'Ready' && item.status == 'True')
 ```
 
 ## Readiness Groups
 
-Resources produced by synthesizers can set this annotation to order their own reconciliation relative to other resources in the same composition.
+Assign resources to numbered groups to control reconciliation order:
 
 ```yaml
 annotations:
   eno.azure.io/readiness-group: "1"
 ```
 
-The default group is 0 and lower numbers are reconciled first.
-So the example above will cause its resource to not be reconciled until all resources without a readiness group have become ready.
+### Behavior
+
+- Resources without `eno.azure.io/readiness-group` default to group `0`
+- Lower-numbered groups reconcile first: `-2` → `-1` → `0` → `1` → `2`
+- Group `N+1` resources wait until all group `N` resources are ready
