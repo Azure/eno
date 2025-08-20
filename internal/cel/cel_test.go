@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/google/cel-go/common/types/ref"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -43,6 +44,22 @@ func TestEvalFloatTypeCoersion(t *testing.T) {
 	val, err := Eval(t.Context(), p, comp, &unstructured.Unstructured{}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, true, val.Value())
+}
+
+func TestEvalExtensions(t *testing.T) {
+	p, err := Parse("composition.metadata.name.split('-').distinct()")
+	require.NoError(t, err)
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-test-comp"
+
+	val, err := Eval(t.Context(), p, comp, nil, nil)
+	require.NoError(t, err)
+
+	list := val.Value().([]ref.Val)
+	assert.Len(t, list, 2)
+	assert.Equal(t, "test", list[0].Value())
+	assert.Equal(t, "comp", list[1].Value())
 }
 
 func TestCompareResourceQuantities(t *testing.T) {

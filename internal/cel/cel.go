@@ -9,6 +9,7 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/cel-go/ext"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -26,6 +27,9 @@ func init() {
 func initDefaultEnv() {
 	var err error
 	Env, err = cel.NewEnv(
+		ext.Encoders(),
+		ext.Lists(),
+		ext.Strings(),
 		cel.Variable("self", cel.DynType),
 		cel.Variable("composition", cel.DynType),
 		cel.Variable("pathManagedByEno", cel.BoolType),
