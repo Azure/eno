@@ -168,6 +168,10 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 }
 
 func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composition, prev *resource.Resource, res *resource.Snapshot, current *unstructured.Unstructured) (bool, error) {
+	if res.Disable {
+		return false, nil
+	}
+
 	logger := logr.FromContextOrDiscard(ctx)
 	start := time.Now()
 	defer func() {

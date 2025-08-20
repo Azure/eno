@@ -40,6 +40,7 @@ var newResourceTests = []struct {
 					"eno.azure.io/readiness": "true",
 					"eno.azure.io/readiness-test": "false",
 					"eno.azure.io/replace": "true",
+					"eno.azure.io/disable-reconciliation": "true",
 					"eno.azure.io/disable-updates": "true",
 					"eno.azure.io/deletion-strategy": "orphan",
 					"eno.azure.io/overrides": "[{\"path\":\".self.foo\"}, {\"path\":\".self.bar\"}]"
@@ -56,6 +57,7 @@ var newResourceTests = []struct {
 				Group:     "",
 				Kind:      "ConfigMap",
 			}, r.Ref)
+			assert.True(t, r.Disable)
 			assert.True(t, r.DisableUpdates)
 			assert.True(t, r.Replace)
 			assert.True(t, r.Orphan)
