@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/retry"
@@ -632,4 +633,126 @@ func TestOverrideReplaceAnnotation(t *testing.T) {
 
 	require.NoError(t, mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm))
 	assert.Equal(t, "other-value", cm.Data["other-client-field"])
+}
+
+func TestOverrideDeletionModeAnnotation_RemoveFromSynth(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		if s.Spec.Image == "empty" {
+			return output, nil
+		}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]any{
+						"eno.azure.io/overrides": `[{"path": "self.metadata.annotations['eno.azure.io/disable-reconciliation']", "value": "true", "condition": "string(composition.metadata.annotations['orphan-resources']).split(',').filter(val, val == 'this-resource').size() > 0"}]`,
+					},
+				},
+				"data": map[string]any{"eno-field": "eno-value"},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	synth, comp := writeGenericComposition(t, upstream)
+
+	// Wait for initial reconciliation
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	// Confirm that the resource was created
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	require.NoError(t, mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm))
+
+	// Set the annotation on the composition to signal that resource should be orphaned
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Annotations = map[string]string{"orphan-resources": "some-other-resource,this-resource"}
+		return upstream.Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	// Make the synth stop returning the resource and prove that is is not deleted by Eno
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(synth), synth)
+		synth.Spec.Image = "empty"
+		return upstream.Update(ctx, synth)
+	})
+	require.NoError(t, err)
+	testutil.Eventually(t, func() bool {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		syn := comp.Status.CurrentSynthesis
+		return syn != nil && syn.ObservedSynthesizerGeneration == synth.Generation
+	})
+	require.NoError(t, mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm))
+}
+
+func TestOverrideDeletionModeAnnotation_DeleteComposition(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]any{
+						"eno.azure.io/overrides": `[{"path": "self.metadata.annotations['eno.azure.io/disable-reconciliation']", "value": "true", "condition": "string(composition.metadata.annotations['orphan-resources']).split(',').filter(val, val == 'this-resource').size() > 0"}]`,
+					},
+				},
+				"data": map[string]any{"eno-field": "eno-value"},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	// Set the annotation on the composition to signal that resource should be orphaned
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Annotations = map[string]string{"orphan-resources": "some-other-resource,this-resource"}
+		return upstream.Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	// Wait for initial reconciliation
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	// Confirm that the resource was created
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	require.NoError(t, mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm))
+
+	// Delete the composition and prove that the resource is not deleted by Eno
+	require.NoError(t, upstream.Delete(ctx, comp))
+	testutil.Eventually(t, func() bool {
+		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	})
+	require.NoError(t, mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm))
 }
