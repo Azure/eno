@@ -730,14 +730,6 @@ func TestOverrideDeletionModeAnnotation_DeleteComposition(t *testing.T) {
 	mgr.Start(t)
 	_, comp := writeGenericComposition(t, upstream)
 
-	// Set the annotation on the composition to signal that resource should be orphaned
-	err := retry.RetryOnConflict(testutil.Backoff, func() error {
-		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Annotations = map[string]string{"orphan-resources": "some-other-resource,this-resource"}
-		return upstream.Update(ctx, comp)
-	})
-	require.NoError(t, err)
-
 	// Wait for initial reconciliation
 	testutil.Eventually(t, func() bool {
 		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
@@ -748,6 +740,14 @@ func TestOverrideDeletionModeAnnotation_DeleteComposition(t *testing.T) {
 	cm.Name = "test-obj"
 	cm.Namespace = "default"
 	require.NoError(t, mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm))
+
+	// Set the annotation on the composition to signal that resource should be orphaned
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Annotations = map[string]string{"orphan-resources": "some-other-resource,this-resource"}
+		return upstream.Update(ctx, comp)
+	})
+	require.NoError(t, err)
 
 	// Delete the composition and prove that the resource is not deleted by Eno
 	require.NoError(t, upstream.Delete(ctx, comp))
