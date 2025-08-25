@@ -358,7 +358,7 @@ func (c *Controller) requeue(logger logr.Logger, comp *apiv1.Composition, resour
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}
 
-	if resource == nil || resource.Deleted(comp) || resource.ReconcileInterval == nil {
+	if resource == nil || (resource.Deleted(comp) && !resource.Disable) || resource.ReconcileInterval == nil {
 		return ctrl.Result{}, nil
 	}
 

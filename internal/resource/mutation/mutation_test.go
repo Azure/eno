@@ -367,7 +367,7 @@ func TestOpApply(t *testing.T) {
 			expectedMutated: &unstructured.Unstructured{Object: map[string]any{}},
 		},
 		{
-			name: "NilCurrentWithCondition_NoMutation",
+			name: "NilCurrentWithStaticCondition_MutationApplied",
 			op: Op{
 				Path:      mustParsePathExpr("self.foo"),
 				Condition: mustParseCondition("true"),
@@ -375,7 +375,41 @@ func TestOpApply(t *testing.T) {
 			},
 			current:         nil,
 			mutated:         &unstructured.Unstructured{Object: map[string]any{}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{"foo": "bar"}},
+		},
+		{
+			name: "NilCurrentWithCondition_NoMutation",
+			op: Op{
+				Path:      mustParsePathExpr("self.foo"),
+				Condition: mustParseCondition("self.bar"),
+				Value:     "bar",
+			},
+			current:         nil,
+			mutated:         &unstructured.Unstructured{Object: map[string]any{}},
 			expectedMutated: &unstructured.Unstructured{Object: map[string]any{}},
+		},
+		{
+			name: "NilCurrentWithFalsyCondition_NoMutation",
+			op: Op{
+				Path:      mustParsePathExpr("self.foo"),
+				Condition: mustParseCondition("false"),
+				Value:     "bar",
+			},
+			current:         nil,
+			mutated:         &unstructured.Unstructured{Object: map[string]any{}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{}},
+		},
+		{
+			name: "NilCurrentWithNoCondition_MutationApplied",
+			op: Op{
+				Path:  mustParsePathExpr("self.foo"),
+				Value: "bar",
+			},
+			current: nil,
+			mutated: &unstructured.Unstructured{Object: map[string]any{}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{
+				"foo": "bar",
+			}},
 		},
 		{
 			name: "NoCondition_MutationApplied",
@@ -396,6 +430,16 @@ func TestOpApply(t *testing.T) {
 				Value: "bar",
 			},
 			current: &unstructured.Unstructured{Object: map[string]any{}},
+			mutated: &unstructured.Unstructured{Object: map[string]any{}},
+			wantErr: true,
+		},
+		{
+			name: "NilCurrent_InvalidPath_Error",
+			op: Op{
+				Path:  mustParsePathExpr("invalid.foo"),
+				Value: "bar",
+			},
+			current: nil,
 			mutated: &unstructured.Unstructured{Object: map[string]any{}},
 			wantErr: true,
 		},

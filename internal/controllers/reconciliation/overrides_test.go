@@ -756,3 +756,94 @@ func TestOverrideDeletionModeAnnotation_DeleteComposition(t *testing.T) {
 	})
 	require.NoError(t, mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm))
 }
+
+// TestOverrideTransferResource covers the basics of transferring a resource from one synth to another.
+// It doesn't attempt to verify that conflicting writes are not made by Eno - only that things eventually converge on the right state.
+// The temporal logic is verified through other tests.
+func TestOverrideTransferResource(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]any{
+						"eno.azure.io/reconcile-interval":     "2ms",
+						"eno.azure.io/disable-reconciliation": "true",
+						"eno.azure.io/overrides":              `[{"path": "self.metadata.annotations['eno.azure.io/disable-reconciliation']", "value": "false", "condition": "composition.metadata.annotations['current-winner'] == 'yes'"}]`,
+						"synthName":                           s.Name,
+					},
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	syn1 := &apiv1.Synthesizer{}
+	syn1.Name = "test-synth-1"
+	syn1.Spec.Image = "test-image"
+	require.NoError(t, upstream.Create(ctx, syn1))
+
+	syn2 := &apiv1.Synthesizer{}
+	syn2.Name = "test-synth-2"
+	syn2.Spec.Image = "test-image"
+	require.NoError(t, upstream.Create(ctx, syn2))
+
+	symph := &apiv1.Symphony{}
+	symph.Name = "test-symphony"
+	symph.Namespace = "default"
+	symph.Spec.Variations = []apiv1.Variation{
+		{
+			Annotations: map[string]string{"current-winner": ""},
+			Synthesizer: apiv1.SynthesizerRef{Name: syn1.Name},
+		},
+		{
+			Annotations: map[string]string{"current-winner": "yes"},
+			Synthesizer: apiv1.SynthesizerRef{Name: syn2.Name},
+		},
+	}
+	require.NoError(t, upstream.Create(ctx, symph))
+
+	// Wait for initial reconciliation
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph) == nil && symph.Status.ObservedGeneration == symph.Generation && symph.Status.Ready != nil
+	})
+
+	// Confirm that the resource is managed by the expected synthesizer
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return syn2.Name == cm.Annotations["synthName"]
+	})
+
+	// Update the symphony to flip ownership over to the other synth
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph)
+		symph.Spec.Variations[0].Annotations = map[string]string{"current-winner": "yes"}
+		symph.Spec.Variations[1].Annotations = map[string]string{"current-winner": ""}
+		return upstream.Update(ctx, symph)
+	})
+	require.NoError(t, err)
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph) == nil && symph.Status.ObservedGeneration == symph.Generation && symph.Status.Ready != nil
+	})
+
+	// Prove that the resource converges on the expected value
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return syn1.Name == cm.Annotations["synthName"]
+	})
+}
