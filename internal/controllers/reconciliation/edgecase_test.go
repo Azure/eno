@@ -570,3 +570,48 @@ func TestSynthesisErrorResult(t *testing.T) {
 		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.InFlightSynthesis == nil
 	})
 }
+
+// TestErrorStatusBasics proves that basic reconciliation errors are reported to the resource slice.
+func TestErrorStatusBasics(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+				"data": float64(123), // invalid type
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	writeGenericComposition(t, upstream)
+
+	var reason string
+	testutil.Eventually(t, func() bool {
+		list := &apiv1.ResourceSliceList{}
+		upstream.List(ctx, list)
+
+		for _, item := range list.Items {
+			for _, res := range item.Status.Resources {
+				if r := res.ErrorReason; r != nil {
+					reason = *r
+					return true
+				}
+			}
+		}
+		return false
+	})
+	assert.Equal(t, "Invalid", reason)
+}

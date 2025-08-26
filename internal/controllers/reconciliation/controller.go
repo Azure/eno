@@ -2,6 +2,7 @@ package reconciliation
 
 import (
 	"context"
+	goerrors "errors"
 	"fmt"
 	"strings"
 	"time"
@@ -153,6 +154,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	modified, err := c.reconcileResource(ctx, comp, prev, snap, current)
 	if err != nil {
 		logger.Error(err, "failed to reconcile resource")
+		c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceError(getErrReason(err)))
 		return ctrl.Result{}, err
 	}
 	if modified {
@@ -376,10 +378,20 @@ func patchResourceState(deleted bool, ready *metav1.Time) flowcontrol.StatusPatc
 			return nil
 		}
 		return &apiv1.ResourceState{
-			Deleted:    deleted,
-			Ready:      ready,
-			Reconciled: true,
+			Deleted:     deleted,
+			Ready:       ready,
+			Reconciled:  true,
+			ErrorReason: nil,
 		}
+	}
+}
+
+func patchResourceError(reason string) flowcontrol.StatusPatchFn {
+	return func(rs *apiv1.ResourceState) *apiv1.ResourceState {
+		if rs != nil && rs.ErrorReason != nil && *rs.ErrorReason == reason {
+			return nil
+		}
+		return &apiv1.ResourceState{ErrorReason: &reason}
 	}
 }
 
@@ -399,4 +411,24 @@ func isErrNoKindMatch(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "no matches for kind")
+}
+
+func getErrReason(err error) string {
+	var apiStatus errors.APIStatus
+	if !goerrors.As(err, &apiStatus) {
+		return "UnknownErr"
+	}
+	status := apiStatus.Status()
+
+	if r := status.Reason; r != metav1.StatusReasonUnknown {
+		return string(r)
+	}
+
+	switch {
+	case strings.Contains(status.Message, "failed to create typed patch object"):
+		return string(metav1.StatusReasonInvalid)
+
+	default:
+		return "Unknown"
+	}
 }

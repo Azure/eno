@@ -60,6 +60,8 @@ spec:
                   properties:
                     deleted:
                       type: boolean
+                    errorReason:
+                      type: string
                     ready:
                       format: date-time
                       type: string
