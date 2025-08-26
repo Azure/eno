@@ -1081,7 +1081,7 @@ func TestResourceSelector(t *testing.T) {
 	writeGenericComposition(t, upstream)
 
 	testutil.Eventually(t, func() bool {
-		return upstream.Get(ctx, types.NamespacedName{Namespace: "default", Name: "test-obj-2"}, &corev1.ConfigMap{}) == nil
+		return mgr.DownstreamClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: "test-obj-2"}, &corev1.ConfigMap{}) == nil
 	})
-	assert.True(t, errors.IsNotFound(upstream.Get(ctx, types.NamespacedName{Namespace: "default", Name: "test-obj-1"}, &corev1.ConfigMap{})))
+	assert.True(t, errors.IsNotFound(mgr.DownstreamClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: "test-obj-1"}, &corev1.ConfigMap{})))
 }
