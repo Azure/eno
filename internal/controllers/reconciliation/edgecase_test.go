@@ -613,5 +613,5 @@ func TestErrorStatusBasics(t *testing.T) {
 		}
 		return false
 	})
-	assert.Equal(t, "Invalid", reason)
+	assert.Equal(t, "BadRequest", reason)
 }

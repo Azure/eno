@@ -426,7 +426,7 @@ func getErrReason(err error) string {
 
 	switch {
 	case strings.Contains(status.Message, "failed to create typed patch object"):
-		return string(metav1.StatusReasonInvalid)
+		return string(metav1.StatusReasonBadRequest)
 
 	default:
 		return "Unknown"
