@@ -60,7 +60,7 @@ func (o *Op) UnmarshalJSON(data []byte) error {
 func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutated *unstructured.Unstructured) error {
 	if o.Condition != nil {
 		val, err := enocel.Eval(ctx, o.Condition, comp, current, o.Path)
-		if err != nil && current == nil { // fail open on eval errors during initial creation (since many exprs require a current state)
+		if err != nil && current == nil {
 			return nil // fail closed (too noisy to log)
 		}
 		if b, ok := val.Value().(bool); !ok || !b {
