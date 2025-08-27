@@ -14,7 +14,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -1031,4 +1033,55 @@ func TestImplicitBindings(t *testing.T) {
 		syn := comp.Status.CurrentSynthesis
 		return err == nil && syn != nil && syn.Synthesized != nil && syn.Results[0].Message == input.Name
 	})
+}
+
+func TestResourceSelector(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{
+			{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "test-obj-1",
+						"namespace": "default",
+						"labels":    map[string]any{"foo": "baz"},
+					},
+				},
+			},
+			{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "test-obj-2",
+						"namespace": "default",
+						"labels":    map[string]any{"foo": "bar"},
+					},
+				},
+			},
+		}
+		return output, nil
+	})
+
+	registerControllers(t, mgr)
+	setupTestSubjectForOptions(t, mgr, Options{
+		Manager:                mgr.Manager,
+		Timeout:                time.Minute,
+		ReadinessPollInterval:  time.Hour,
+		DisableServerSideApply: mgr.NoSsaSupport,
+		ResourceSelector:       labels.SelectorFromSet(labels.Set(map[string]string{"foo": "bar"})),
+	})
+	mgr.Start(t)
+	writeGenericComposition(t, upstream)
+
+	testutil.Eventually(t, func() bool {
+		return mgr.DownstreamClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: "test-obj-2"}, &corev1.ConfigMap{}) == nil
+	})
+	assert.True(t, errors.IsNotFound(mgr.DownstreamClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: "test-obj-1"}, &corev1.ConfigMap{})))
 }
