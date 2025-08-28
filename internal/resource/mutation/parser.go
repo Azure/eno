@@ -3,6 +3,7 @@ package mutation
 import (
 	"bytes"
 	"context"
+	"fmt"
 
 	"github.com/alecthomas/participle/v2"
 	"github.com/alecthomas/participle/v2/lexer"
@@ -14,7 +15,8 @@ import (
 
 // PathExpr represents an expression that can be used to access or modify values in a nested structure.
 type PathExpr struct {
-	ast *pathExprAST
+	ast  *pathExprAST
+	expr string
 }
 
 // ParsePathExpr parses a path expression string.
@@ -33,7 +35,10 @@ func ParsePathExpr(expr string) (*PathExpr, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &PathExpr{ast: ast}, nil
+	if s := ast.Sections; len(s) == 0 || s[0].Field == nil || *s[0].Field != "self" {
+		return nil, fmt.Errorf("paths must start with `self.`")
+	}
+	return &PathExpr{ast: ast, expr: expr}, nil
 }
 
 var pathExprLexer = lexer.MustSimple([]lexer.SimpleRule{
@@ -66,6 +71,8 @@ type indexMatcher struct {
 	Key   string `@Ident "="`
 	Value string `@String`
 }
+
+func (p *PathExpr) String() string { return p.expr }
 
 func (p *PathExpr) ManagedByEno(ctx context.Context, current *unstructured.Unstructured) bool {
 	if p == nil || current == nil {
@@ -132,4 +139,121 @@ func (s *section) toPathElement() fieldpath.PathElement {
 		}
 	}
 	return fieldpath.PathElement{}
+}
+
+// Apply applies a mutation i.e. sets the value(s) referred to by the path expression.
+// Missing or nil values in the path will not be created, and will cause an error.
+func (p *PathExpr) Apply(obj, value any) (Status, error) {
+	if p == nil {
+		return StatusInactive, nil
+	}
+
+	copy := &PathExpr{ast: &pathExprAST{}}
+	copy.ast.Sections = p.ast.Sections[1:] // remove the "self" section
+
+	return p.apply(copy, 0, obj, value)
+}
+
+func (p *PathExpr) apply(path *PathExpr, startIndex int, obj any, value any) (Status, error) {
+	for i, section := range path.ast.Sections[startIndex:] {
+		isLastSection := startIndex+i == len(path.ast.Sections)-1
+
+		// Map field indexing
+		if section.Field != nil || (section.Index != nil && section.Index.Key != nil) {
+			m, ok := obj.(map[string]any)
+			if !ok {
+				continue
+			}
+
+			var keyStr string
+			if section.Field != nil {
+				keyStr = *section.Field
+			} else {
+				keyStr = unquoteKey(*section.Index.Key)
+			}
+
+			if isLastSection {
+				if value == nil {
+					delete(m, keyStr)
+				} else {
+					m[keyStr] = value
+				}
+				return StatusActive, nil
+			}
+
+			child := m[keyStr]
+			if child != nil {
+				status, err := p.apply(path, startIndex+i+1, child, value)
+				if err != nil {
+					return status, err
+				}
+				if value == nil {
+					if nextMap, ok := child.(map[string]any); ok && len(nextMap) == 0 {
+						delete(m, keyStr)
+					}
+				}
+			}
+			return StatusActive, nil
+		}
+
+		if section.Index == nil {
+			continue
+		}
+
+		slice, ok := obj.([]any)
+		if !ok {
+			return StatusPathTypeMismatch, fmt.Errorf("cannot apply wildcard to non-slice value")
+		}
+
+		// Simple array indexing
+		if el := section.Index.Element; el != nil {
+			if *el < 0 || *el >= len(slice) {
+				return StatusIndexOutOfRange, fmt.Errorf("index %d out of range for slice of length %d", *el, len(slice))
+			}
+			if isLastSection {
+				slice[*el] = value
+				return StatusActive, nil
+			}
+			nextState := slice[*el]
+			if nextState != nil {
+				status, err := p.apply(path, startIndex+i+1, nextState, value)
+				if err != nil {
+					return status, err
+				}
+			}
+			return StatusActive, nil
+		}
+
+		// Complex array indexing (wildcard or matcher)
+		if !section.Index.Wildcard && section.Index.Matcher == nil {
+			continue // should be impossible
+		}
+		for j, cur := range slice {
+			m, isMap := cur.(map[string]any)
+
+			if section.Index.Matcher != nil {
+				if !isMap {
+					continue // can't apply matcher to non-map value
+				}
+				val := m[section.Index.Matcher.Key]
+				str, ok := val.(string)
+				expected := unquoteKey(section.Index.Matcher.Value)
+				if !ok || str != expected {
+					continue // not matched by the matcher
+				}
+			}
+
+			if isMap && !isLastSection {
+				status, err := p.apply(path, startIndex+i+1, cur, value)
+				if err != nil {
+					return status, err
+				}
+				continue
+			}
+			slice[j] = value
+		}
+		break
+	}
+
+	return StatusMissingParent, nil
 }

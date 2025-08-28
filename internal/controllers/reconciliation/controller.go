@@ -158,6 +158,10 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to create resource snapshot: %w", err)
 	}
+	if status := snap.OverrideStatus(); len(status) > 0 {
+		logger = logger.WithValues("overrideStatus", status)
+		ctx = logr.NewContext(ctx, logger)
+	}
 
 	modified, err := c.reconcileResource(ctx, comp, prev, snap, current)
 	if err != nil {

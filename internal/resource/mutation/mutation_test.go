@@ -22,6 +22,7 @@ func TestApply(t *testing.T) {
 		value                 any
 		expected              map[string]any
 		wantErr, wantParseErr bool
+		status                Status
 	}{
 		{
 			name:     "Map_TopLevel",
@@ -29,6 +30,7 @@ func TestApply(t *testing.T) {
 			obj:      map[string]any{},
 			value:    123,
 			expected: map[string]any{"foo": 123},
+			status:   StatusActive,
 		},
 		{
 			name:     "Map_Nil",
@@ -36,6 +38,7 @@ func TestApply(t *testing.T) {
 			obj:      map[string]any{},
 			value:    nil,
 			expected: map[string]any{},
+			status:   StatusActive,
 		},
 		{
 			name:     "Alternative_Map_Nil",
@@ -43,6 +46,7 @@ func TestApply(t *testing.T) {
 			obj:      map[string]any{},
 			value:    nil,
 			expected: map[string]any{},
+			status:   StatusActive,
 		},
 		{
 			name:     "Map_Nested",
@@ -50,6 +54,7 @@ func TestApply(t *testing.T) {
 			obj:      map[string]any{"foo": map[string]any{}, "another": "baz"},
 			value:    123,
 			expected: map[string]any{"foo": map[string]any{"bar": 123}, "another": "baz"},
+			status:   StatusActive,
 		},
 		{
 			name:     "Map_NestedNil",
@@ -57,6 +62,7 @@ func TestApply(t *testing.T) {
 			obj:      map[string]any{"foo": nil, "another": "baz"},
 			value:    123,
 			expected: map[string]any{"foo": nil, "another": "baz"},
+			status:   StatusActive,
 		},
 		{
 			name:     "Map_NestedMissing",
@@ -64,6 +70,7 @@ func TestApply(t *testing.T) {
 			obj:      map[string]any{"another": "baz"},
 			value:    123,
 			expected: map[string]any{"another": "baz"},
+			status:   StatusActive,
 		},
 		{
 			name:     "Map_NestedStringIndex",
@@ -71,6 +78,7 @@ func TestApply(t *testing.T) {
 			obj:      map[string]any{"foo": map[string]any{}, "another": "baz"},
 			value:    123,
 			expected: map[string]any{"foo": map[string]any{"ba.r": 123}, "another": "baz"},
+			status:   StatusActive,
 		},
 		{
 			name:     "Map_NestedStringIndexNil",
@@ -78,6 +86,7 @@ func TestApply(t *testing.T) {
 			obj:      map[string]any{"foo": nil, "another": "baz"},
 			value:    123,
 			expected: map[string]any{"foo": nil, "another": "baz"},
+			status:   StatusActive,
 		},
 		{
 			name:     "Map_NestedStringIndexMissing",
@@ -85,6 +94,7 @@ func TestApply(t *testing.T) {
 			obj:      map[string]any{"another": "baz"},
 			value:    123,
 			expected: map[string]any{"another": "baz"},
+			status:   StatusActive,
 		},
 		{
 			name:     "Map_NestedStringIndexSingleQuotes",
@@ -92,6 +102,7 @@ func TestApply(t *testing.T) {
 			obj:      map[string]any{"foo": map[string]any{"bar": "old"}, "another": "baz"},
 			value:    123,
 			expected: map[string]any{"foo": map[string]any{"bar": 123}, "another": "baz"},
+			status:   StatusActive,
 		},
 		{
 			name:     "Map_NestedStringIndexChain",
@@ -99,6 +110,7 @@ func TestApply(t *testing.T) {
 			obj:      map[string]any{"foo": map[string]any{}, "another": "baz"},
 			value:    123,
 			expected: map[string]any{"foo": map[string]any{"bar": 123}, "another": "baz"},
+			status:   StatusActive,
 		},
 		{
 			name:     "Map_BracketNotationWithHyphens",
@@ -106,6 +118,7 @@ func TestApply(t *testing.T) {
 			obj:      map[string]any{},
 			value:    123,
 			expected: map[string]any{"foo-bar": 123},
+			status:   StatusActive,
 		},
 		{
 			name:     "Map_SingleQuoteBracketNotationWithHyphens",
@@ -113,6 +126,7 @@ func TestApply(t *testing.T) {
 			obj:      map[string]any{},
 			value:    123,
 			expected: map[string]any{"foo-bar": 123},
+			status:   StatusActive,
 		},
 		{
 			name:     "Slice_ScalarIndex",
@@ -120,6 +134,7 @@ func TestApply(t *testing.T) {
 			obj:      map[string]any{"foo": []any{1, 2, 3}},
 			value:    123,
 			expected: map[string]any{"foo": []any{1, 123, 3}},
+			status:   StatusActive,
 		},
 		{
 			name:    "Slice_ScalarIndexOutOfRange",
@@ -127,6 +142,7 @@ func TestApply(t *testing.T) {
 			obj:     map[string]any{"foo": []any{1, 2, 3}},
 			value:   123,
 			wantErr: true,
+			status:  StatusIndexOutOfRange,
 		},
 		{
 			name:     "Slice_NestedMap",
@@ -134,6 +150,7 @@ func TestApply(t *testing.T) {
 			obj:      map[string]any{"foo": []any{map[string]any{"bar": 1}, map[string]any{"bar": 2}, map[string]any{"bar": 3}}},
 			value:    123,
 			expected: map[string]any{"foo": []any{map[string]any{"bar": 123}, map[string]any{"bar": 2}, map[string]any{"bar": 3}}},
+			status:   StatusActive,
 		},
 		{
 			name:     "Slice_ScalarWildcard",
@@ -141,6 +158,7 @@ func TestApply(t *testing.T) {
 			obj:      map[string]any{"foo": []any{1, 2, 3}},
 			value:    123,
 			expected: map[string]any{"foo": []any{123, 123, 123}},
+			status:   StatusActive,
 		},
 		{
 			name:     "Slice_MapWildcard",
@@ -148,6 +166,7 @@ func TestApply(t *testing.T) {
 			obj:      map[string]any{"foo": []any{map[string]any{"bar": 1}, map[string]any{"bar": 2}, map[string]any{"bar": 3}}},
 			value:    123,
 			expected: map[string]any{"foo": []any{map[string]any{"bar": 123}, map[string]any{"bar": 123}, map[string]any{"bar": 123}}},
+			status:   StatusActive,
 		},
 		{
 			name:    "Slice_NonMapWildcard",
@@ -155,6 +174,7 @@ func TestApply(t *testing.T) {
 			obj:     map[string]any{"foo": 1},
 			value:   123,
 			wantErr: true,
+			status:  StatusPathTypeMismatch,
 		},
 		{
 			name: "Slice_WildcardAndOutOfRange",
@@ -164,6 +184,7 @@ func TestApply(t *testing.T) {
 				map[string]any{"name": 234},
 			}},
 			wantErr: true,
+			status:  StatusPathTypeMismatch,
 		},
 		{
 			name: "Slice_MapMatcher",
@@ -176,7 +197,8 @@ func TestApply(t *testing.T) {
 				true,
 				map[string]any{"name": 234},
 			}},
-			value: 123,
+			value:  123,
+			status: StatusActive,
 			expected: map[string]any{"foo": []any{
 				map[string]any{"name": "test-2"},
 				map[string]any{"name": "test-1", "bar": 123},
@@ -194,7 +216,8 @@ func TestApply(t *testing.T) {
 				map[string]any{"name": `test-"-1`},
 				map[string]any{"name": 234},
 			}},
-			value: 123,
+			value:  123,
+			status: StatusActive,
 			expected: map[string]any{"foo": []any{
 				map[string]any{"name": "test-2"},
 				map[string]any{"name": `test-"-1`, "bar": 123},
@@ -209,7 +232,8 @@ func TestApply(t *testing.T) {
 				map[string]any{"name": `test-1`},
 				map[string]any{"name": 234},
 			}},
-			value: 123,
+			value:  123,
+			status: StatusActive,
 			expected: map[string]any{"foo": []any{
 				map[string]any{"name": "test-2"},
 				123,
@@ -223,16 +247,18 @@ func TestApply(t *testing.T) {
 				map[string]any{"name": "test-2"},
 				map[string]any{"name": 234},
 			}},
-			value: 123,
+			value:  123,
+			status: StatusActive,
 			expected: map[string]any{"foo": []any{
 				map[string]any{"name": "test-2"},
 				map[string]any{"name": 234},
 			}},
 		},
 		{
-			name:  "Complex_Nil",
-			path:  "self.spec.template.spec.containers[name='foo'].resources.limits.cpu",
-			value: nil,
+			name:   "Complex_Nil",
+			path:   "self.spec.template.spec.containers[name='foo'].resources.limits.cpu",
+			value:  nil,
+			status: StatusActive,
 			obj: map[string]any{
 				"spec": map[string]any{
 					"selector": map[string]any{
@@ -296,16 +322,12 @@ func TestApply(t *testing.T) {
 			},
 		},
 		{
-			name:    "Empty",
-			path:    "",
-			wantErr: true,
-		},
-		{
 			name:     "Root",
 			path:     "self",
 			obj:      map[string]any{},
 			value:    123,
 			expected: map[string]any{},
+			status:   StatusMissingParent,
 		},
 	}
 
@@ -319,7 +341,8 @@ func TestApply(t *testing.T) {
 				require.NoError(t, err)
 			}
 
-			err = Apply(expr, tc.obj, tc.value)
+			status, err := expr.Apply(tc.obj, tc.value)
+			assert.Equal(t, tc.status, status)
 
 			if tc.wantErr {
 				require.Error(t, err)
@@ -423,31 +446,11 @@ func TestOpApply(t *testing.T) {
 				"foo": "bar",
 			}},
 		},
-		{
-			name: "InvalidPath_Error",
-			op: Op{
-				Path:  mustParsePathExpr("invalid.foo"),
-				Value: "bar",
-			},
-			current: &unstructured.Unstructured{Object: map[string]any{}},
-			mutated: &unstructured.Unstructured{Object: map[string]any{}},
-			wantErr: true,
-		},
-		{
-			name: "NilCurrent_InvalidPath_Error",
-			op: Op{
-				Path:  mustParsePathExpr("invalid.foo"),
-				Value: "bar",
-			},
-			current: nil,
-			mutated: &unstructured.Unstructured{Object: map[string]any{}},
-			wantErr: true,
-		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.op.Apply(ctx, &apiv1.Composition{}, tc.current, tc.mutated)
+			_, err := tc.op.Apply(ctx, &apiv1.Composition{}, tc.current, tc.mutated)
 			if tc.wantErr {
 				require.Error(t, err)
 			} else {
@@ -471,7 +474,7 @@ func TestInvalidPathInJson(t *testing.T) {
 	assert.Len(t, ops, 1)
 	for _, op := range ops {
 		// The main goal is to ensure no panic occurs, errors are acceptable
-		_ = Apply(op.Path, map[string]any{}, op.Value)
+		op.Path.Apply(map[string]any{}, op.Value)
 	}
 }
 

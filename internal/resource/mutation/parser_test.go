@@ -16,6 +16,7 @@ func TestPathExprManagedByEno(t *testing.T) {
 		path          string
 		managedFields []metav1.ManagedFieldsEntry
 		expected      bool
+		expectedError bool
 	}{
 		{
 			name: "FieldOwnedByEno",
@@ -115,6 +116,12 @@ func TestPathExprManagedByEno(t *testing.T) {
 			expected:      false,
 		},
 		{
+			name:          "InvalidPath",
+			path:          "foo.bar",
+			managedFields: []metav1.ManagedFieldsEntry{},
+			expectedError: true,
+		},
+		{
 			name: "NilPath",
 			path: "",
 			managedFields: []metav1.ManagedFieldsEntry{
@@ -151,7 +158,11 @@ func TestPathExprManagedByEno(t *testing.T) {
 			if tc.path != "" {
 				var err error
 				pathExpr, err = ParsePathExpr(tc.path)
-				require.NoError(t, err)
+				if tc.expectedError {
+					require.Error(t, err)
+				} else {
+					require.NoError(t, err)
+				}
 			}
 
 			owned := pathExpr.ManagedByEno(t.Context(), obj)
