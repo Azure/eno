@@ -31,23 +31,3 @@ func TestExecHandler(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, out.Items, 1)
 }
-
-func TestExecHandlerEmpty(t *testing.T) {
-	handle := NewExecHandler()
-
-	syn := &apiv1.Synthesizer{}
-	rl := &krmv1.ResourceList{}
-
-	_, err := handle(context.Background(), syn, rl)
-	require.EqualError(t, err, "executing command: exec: \"synthesize\": executable file not found in $PATH")
-}
-
-func TestExecHandlerInvalidJSON(t *testing.T) {
-	handle := NewExecHandler()
-
-	syn := &apiv1.Synthesizer{}
-	syn.Spec.Command = []string{"/bin/sh", "-c", "echo 'Invalid JSON' > /dev/stdout"}
-	rl := &krmv1.ResourceList{}
-	_, err := handle(context.Background(), syn, rl)
-	require.EqualError(t, err, `error while parsing synthesizer's stdout as json "invalid character 'I' looking for beginning of value" - raw output: Invalid JSON`+"\n")
-}

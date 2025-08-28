@@ -58,31 +58,37 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 		return fmt.Errorf("building synthesizer input: %w", err)
 	}
 
+	var sliceRefs []*apiv1.ResourceSliceRef
 	output, err := e.Handler(ctx, syn, input)
 	if err != nil {
-		return fmt.Errorf("executing synthesizer: %w", err)
-	}
-	resultErr := findResultError(output)
+		logger.Error(err, "unable to execute synthesizer")
 
-	err = e.preflightValidateResources(output)
-	if err != nil {
+		output = &krmv1.ResourceList{Results: []*krmv1.Result{{
+			Message:  "Synthesizer error: " + err.Error(),
+			Severity: krmv1.ResultSeverityError,
+		}}}
+
+		if err := e.updateComposition(ctx, env, comp, syn, sliceRefs, revs, output); err != nil {
+			return err
+		}
 		return err
 	}
 
-	var sliceRefs []*apiv1.ResourceSliceRef
-	if resultErr == nil {
+	err = findResultError(output)
+	if err := e.preflightValidateResources(output); err != nil {
+		return err
+	}
+	if err == nil {
 		sliceRefs, err = e.writeSlices(ctx, comp, output)
 		if err != nil {
 			return err
 		}
 	}
 
-	err = e.updateComposition(ctx, env, comp, syn, sliceRefs, revs, output)
-	if err != nil {
+	if err := e.updateComposition(ctx, env, comp, syn, sliceRefs, revs, output); err != nil {
 		return err
 	}
-
-	return resultErr
+	return err
 }
 
 func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, syn *apiv1.Synthesizer) (*krmv1.ResourceList, []apiv1.InputRevisions, error) {

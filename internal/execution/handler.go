@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
+	"github.com/go-logr/logr"
 )
 
 type Env struct {
@@ -32,12 +34,13 @@ type SynthesizerHandle func(context.Context, *apiv1.Synthesizer, *krmv1.Resource
 
 func NewExecHandler() SynthesizerHandle {
 	return func(ctx context.Context, s *apiv1.Synthesizer, rl *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		logger := logr.FromContextOrDiscard(ctx)
 		stdin := &bytes.Buffer{}
 		stdout := &bytes.Buffer{}
 
 		err := json.NewEncoder(stdin).Encode(rl)
 		if err != nil {
-			return nil, fmt.Errorf("encoding stdin buffer: %w", err)
+			return nil, fmt.Errorf("encoding inputs before execution: %s", err)
 		}
 
 		command := s.Spec.Command
@@ -50,14 +53,19 @@ func NewExecHandler() SynthesizerHandle {
 		cmd.Stderr = os.Stdout // logger uses stderr, so use stdout to avoid race condition
 		cmd.Stdout = stdout
 		err = cmd.Run()
+		if errors.Is(err, exec.ErrNotFound) {
+			return nil, fmt.Errorf("%w (likely a mismatch between the Synthesizer object and container image)", err)
+		}
 		if err != nil {
-			return nil, fmt.Errorf("executing command: %w", err)
+			logger.V(0).Info("stdout buffer contents", "stdout", stdout)
+			return nil, fmt.Errorf("%w (see synthesis pod logs for more details)", err)
 		}
 
 		output := &krmv1.ResourceList{}
 		err = json.Unmarshal(stdout.Bytes(), output)
 		if err != nil {
-			return nil, fmt.Errorf("error while parsing synthesizer's stdout as json %q - raw output: %s", err, stdout)
+			logger.Error(err, "invalid json", "stdout", stdout)
+			return nil, fmt.Errorf("the synthesizer process wrote invalid json to stdout")
 		}
 
 		return output, nil
