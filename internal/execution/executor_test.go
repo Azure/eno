@@ -776,3 +776,73 @@ func TestInvalidResource(t *testing.T) {
 	err = e.Synthesize(ctx, env)
 	require.Error(t, err)
 }
+
+func TestExecErrors(t *testing.T) {
+	tests := []struct {
+		Name          string
+		Command       []string
+		ExpectedError string
+	}{
+		{
+			Name:          "invalid json",
+			Command:       []string{"/bin/sh", "-c", "echo 'Invalid JSON'"},
+			ExpectedError: "Synthesizer error: the synthesizer process wrote invalid json to stdout",
+		},
+		{
+			Name:          "missing command",
+			Command:       []string{"not-a-real-command"},
+			ExpectedError: `Synthesizer error: exec: "not-a-real-command": executable file not found in $PATH`,
+		},
+		{
+			Name:          "exit 2",
+			Command:       []string{"/bin/sh", "-c", "exit 2"},
+			ExpectedError: `Synthesizer error: exit status 2 (see synthesis pod logs for more details)`,
+		},
+	}
+
+	for _, test := range tests {
+		ctx := context.Background()
+		scheme := runtime.NewScheme()
+		require.NoError(t, apiv1.SchemeBuilder.AddToScheme(scheme))
+
+		cli := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithStatusSubresource(&apiv1.ResourceSlice{}, &apiv1.Composition{}).
+			Build()
+
+		syn := &apiv1.Synthesizer{}
+		syn.Name = "test-synth"
+		syn.Spec.Command = test.Command
+		err := cli.Create(ctx, syn)
+		require.NoError(t, err)
+
+		comp := &apiv1.Composition{}
+		comp.Name = "test-comp"
+		comp.Namespace = "default"
+		comp.Spec.Synthesizer.Name = syn.Name
+		err = cli.Create(ctx, comp)
+		require.NoError(t, err)
+
+		comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+		err = cli.Status().Update(ctx, comp)
+		require.NoError(t, err)
+
+		e := &Executor{Reader: cli, Writer: cli, Handler: NewExecHandler()}
+		env := &Env{
+			CompositionName:      comp.Name,
+			CompositionNamespace: comp.Namespace,
+			SynthesisUUID:        comp.Status.InFlightSynthesis.UUID,
+		}
+
+		err = e.Synthesize(ctx, env)
+		require.Error(t, err)
+
+		err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		require.NoError(t, err)
+		require.NotNil(t, comp.Status.InFlightSynthesis)
+		assert.Len(t, comp.Status.InFlightSynthesis.ResourceSlices, 0)
+		require.Len(t, comp.Status.InFlightSynthesis.Results, 1)
+		assert.Equal(t, krmv1.ResultSeverityError, comp.Status.InFlightSynthesis.Results[0].Severity)
+		assert.Equal(t, test.ExpectedError, comp.Status.InFlightSynthesis.Results[0].Message)
+	}
+}

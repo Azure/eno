@@ -58,22 +58,31 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 		return fmt.Errorf("building synthesizer input: %w", err)
 	}
 
-	output, err := e.Handler(ctx, syn, input)
-	if err != nil {
-		return fmt.Errorf("executing synthesizer: %w", err)
-	}
-	resultErr := findResultError(output)
-
-	err = e.preflightValidateResources(output)
-	if err != nil {
-		return err
-	}
-
 	var sliceRefs []*apiv1.ResourceSliceRef
-	if resultErr == nil {
-		sliceRefs, err = e.writeSlices(ctx, comp, output)
+	output, handlerErr := e.Handler(ctx, syn, input)
+
+	// The handler error is either the error result emitted by the synthesizer
+	// or the handler's underlying "transport" error e.g. exec, json, etc.
+	if handlerErr != nil {
+		logger.Error(handlerErr, "unable to execute synthesizer")
+
+		output = &krmv1.ResourceList{Results: []*krmv1.Result{{
+			Message:  "Synthesizer error: " + handlerErr.Error(),
+			Severity: krmv1.ResultSeverityError,
+		}}}
+	} else {
+		handlerErr = findResultError(output)
+
+		err = e.preflightValidateResources(output)
 		if err != nil {
 			return err
+		}
+
+		if handlerErr == nil {
+			sliceRefs, err = e.writeSlices(ctx, comp, output)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -82,7 +91,7 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 		return err
 	}
 
-	return resultErr
+	return handlerErr
 }
 
 func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, syn *apiv1.Synthesizer) (*krmv1.ResourceList, []apiv1.InputRevisions, error) {
