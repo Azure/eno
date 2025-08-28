@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/go-logr/logr"
 	"github.com/google/cel-go/cel"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -69,10 +71,15 @@ func (o *Op) UnmarshalJSON(data []byte) error {
 
 // Apply applies the operation to the "mutated" object if the condition is met by the "current" object.
 func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutated *unstructured.Unstructured) (Status, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+
 	if o.Condition != nil {
 		val, err := enocel.Eval(ctx, o.Condition, comp, current, o.Path)
 		if err != nil && current == nil {
-			return StatusInvalidCondition, nil // fail closed (too noisy to log)
+			if !strings.HasPrefix(err.Error(), "no such ") { // e.g. "no such property" or "no such key"
+				logger.V(1).Info("override condition is invalid", "error", err)
+			}
+			return StatusInvalidCondition, nil
 		}
 		if b, ok := val.Value().(bool); !ok || !b {
 			return StatusInactive, nil // condition not met
