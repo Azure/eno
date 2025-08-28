@@ -43,7 +43,7 @@ var newResourceTests = []struct {
 					"eno.azure.io/disable-reconciliation": "true",
 					"eno.azure.io/disable-updates": "true",
 					"eno.azure.io/deletion-strategy": "orphan",
-					"eno.azure.io/overrides": "[{\"path\":\".self.foo\"}, {\"path\":\".self.bar\"}]"
+					"eno.azure.io/overrides": "[{\"path\":\".self.foo\"}, {\"path\":\".self.bar\", \"condition\": \"false\"}]"
 				}
 			}
 		}`,
@@ -63,6 +63,7 @@ var newResourceTests = []struct {
 			assert.True(t, r.Orphan)
 			assert.Equal(t, int(250), r.readinessGroup)
 			assert.Len(t, r.overrides, 2)
+			assert.Equal(t, ".self.foo=Active, .self.bar=Inactive", r.OverrideStatus())
 		},
 	},
 	{

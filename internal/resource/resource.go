@@ -220,16 +220,19 @@ func (r *Resource) Snapshot(ctx context.Context, comp *apiv1.Composition, actual
 func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Composition, actual *unstructured.Unstructured, overrideRes *Resource) (*Snapshot, error) {
 	copy := r.parsed.DeepCopy()
 
+	overrideStatus := make([]string, len(overrideRes.overrides))
 	for i, op := range overrideRes.overrides {
-		err := op.Apply(ctx, comp, actual, copy)
+		status, err := op.Apply(ctx, comp, actual, copy)
 		if err != nil {
 			return nil, fmt.Errorf("applying override %d: %w", i+1, err)
 		}
+		overrideStatus[i] = fmt.Sprintf("%s=%s", op.Path, status)
 	}
 
 	snap := &Snapshot{
-		Resource: r,
-		parsed:   copy,
+		Resource:       r,
+		parsed:         copy,
+		overrideStatus: strings.Join(overrideStatus, ", "),
 	}
 
 	const disableKey = "eno.azure.io/disable-reconciliation"
@@ -271,8 +274,11 @@ type Snapshot struct {
 	Replace           bool
 	Orphan            bool
 
-	parsed *unstructured.Unstructured
+	parsed         *unstructured.Unstructured
+	overrideStatus string
 }
+
+func (r *Snapshot) OverrideStatus() string { return r.overrideStatus }
 
 func (r *Snapshot) Unstructured() *unstructured.Unstructured {
 	// NOTE(jordan): This probably doesn't need to be deep copied. Leaving it during some refactoring, maybe carefully remove it for perf later.
