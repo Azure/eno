@@ -791,7 +791,7 @@ func TestExecErrors(t *testing.T) {
 		{
 			Name:          "missing command",
 			Command:       []string{"not-a-real-command"},
-			ExpectedError: `Synthesizer error: exec: "not-a-real-command": executable file not found in $PATH`,
+			ExpectedError: `Synthesizer error: exec: "not-a-real-command": executable file not found in $PATH (likely a mismatch between the Synthesizer object and container image)`,
 		},
 		{
 			Name:          "exit 2",

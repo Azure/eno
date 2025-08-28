@@ -54,7 +54,7 @@ func NewExecHandler() SynthesizerHandle {
 		cmd.Stdout = stdout
 		err = cmd.Run()
 		if errors.Is(err, exec.ErrNotFound) {
-			return nil, err
+			return nil, fmt.Errorf("%w (likely a mismatch between the Synthesizer object and container image)", err)
 		}
 		if err != nil {
 			logger.V(0).Info("stdout buffer contents", "stdout", stdout)
