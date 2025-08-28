@@ -22,7 +22,7 @@ func ExampleMain() {
 	}
 
 	Main(fn)
-	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"creationTimestamp":null,"name":"test-pod"},"spec":{"containers":null},"status":{}}]}
+	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"name":"test-pod"},"spec":{"containers":null},"status":{}}]}
 }
 
 func ExampleInputs() {
@@ -38,7 +38,7 @@ func ExampleInputs() {
 
 	ir := newTestInputReader()
 	main(fn, &mainConfig{}, ir, NewDefaultOutputWriter())
-	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"creationTimestamp":null,"name":"foobar\n"},"spec":{"containers":null},"status":{}}]}
+	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"name":"foobar\n"},"spec":{"containers":null},"status":{}}]}
 }
 
 func ExampleAddCustomInputType() {
@@ -64,7 +64,7 @@ func ExampleAddCustomInputType() {
 
 	ir := newTestInputReader()
 	main(fn, &mainConfig{}, ir, NewDefaultOutputWriter())
-	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"creationTimestamp":null,"name":"foobar\n"},"spec":{"containers":null},"status":{}}]}
+	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"name":"foobar\n"},"spec":{"containers":null},"status":{}}]}
 }
 
 func ExampleAddCustomInputType_slice() {
@@ -90,7 +90,7 @@ func ExampleAddCustomInputType_slice() {
 
 	ir := newTestInputReader()
 	main(fn, &mainConfig{}, ir, NewDefaultOutputWriter())
-	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"creationTimestamp":null,"name":"foobar\n"},"spec":{"containers":null},"status":{}}]}
+	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"name":"foobar\n"},"spec":{"containers":null},"status":{}}]}
 }
 
 func TestMain(t *testing.T) {
@@ -109,7 +109,7 @@ func TestMain(t *testing.T) {
 	}
 
 	require.NoError(t, main(fn, &mainConfig{}, ir, ow))
-	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[{\"apiVersion\":\"v1\",\"kind\":\"Pod\",\"metadata\":{\"annotations\":{\"cm-value\":\"foo\",\"secret-value\":\"foobar\\n\"},\"creationTimestamp\":null,\"name\":\"test-pod\"},\"spec\":{\"containers\":null},\"status\":{}}]}\n", outBuf.String())
+	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[{\"apiVersion\":\"v1\",\"kind\":\"Pod\",\"metadata\":{\"annotations\":{\"cm-value\":\"foo\",\"secret-value\":\"foobar\\n\"},\"name\":\"test-pod\"},\"spec\":{\"containers\":null},\"status\":{}}]}\n", outBuf.String())
 }
 
 func TestMainInputMissing(t *testing.T) {
@@ -155,7 +155,7 @@ func ExampleMain_withMungers() {
 
 	//stdout of main will be compared with output comment below becausse this is an example
 	Main(fn, WithManagedByEno(), WithReconcilationInterval(time.Minute))
-	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"annotations":{"eno.azure.io/reconcile-interval":"1m0s"},"creationTimestamp":null,"labels":{"app.kubernetes.io/managed-by":"Eno"},"name":"test-pod"},"spec":{"containers":null},"status":{}}]}
+	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"annotations":{"eno.azure.io/reconcile-interval":"1m0s"},"labels":{"app.kubernetes.io/managed-by":"Eno"},"name":"test-pod"},"spec":{"containers":null},"status":{}}]}
 }
 
 type testSimpleInputs struct {

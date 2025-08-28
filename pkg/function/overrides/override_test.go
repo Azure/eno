@@ -20,7 +20,7 @@ func TestOverrideValidate(t *testing.T) {
 		{
 			name: "ValidOverride",
 			o: overrides.Override{
-				Path:      "metadata.name",
+				Path:      "self.metadata.name",
 				Condition: "true",
 			},
 			wantErr: false,
@@ -36,7 +36,7 @@ func TestOverrideValidate(t *testing.T) {
 		{
 			name: "EmptyCondition",
 			o: overrides.Override{
-				Path:      "metadata.name",
+				Path:      "self.metadata.name",
 				Condition: "",
 			},
 			wantErr: true,
@@ -44,7 +44,7 @@ func TestOverrideValidate(t *testing.T) {
 		{
 			name: "InvalidConditionSyntax",
 			o: overrides.Override{
-				Path:      "metadata.name",
+				Path:      "self.metadata.name",
 				Condition: "1 +",
 			},
 			wantErr: true,
