@@ -416,7 +416,8 @@ func TestDeletedResourceSlice(t *testing.T) {
 					continue
 				}
 				item.Finalizers = []string{}
-				if err := upstream.Update(ctx, &item); err != nil {
+				err := upstream.Update(ctx, &item)
+				if err != nil && !errors.IsNotFound(err) { // it's possible that some have been deleted before getting a finalizer
 					return err
 				}
 			}
