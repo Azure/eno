@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 
@@ -36,7 +37,7 @@ func NewExecHandler() SynthesizerHandle {
 
 		err := json.NewEncoder(stdin).Encode(rl)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("encoding stdin buffer: %w", err)
 		}
 
 		command := s.Spec.Command
@@ -50,13 +51,13 @@ func NewExecHandler() SynthesizerHandle {
 		cmd.Stdout = stdout
 		err = cmd.Run()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("executing command: %w", err)
 		}
 
 		output := &krmv1.ResourceList{}
-		err = json.NewDecoder(stdout).Decode(output)
+		err = json.Unmarshal(stdout.Bytes(), output)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error while parsing synthesizer's stdout as json %q - raw output: %s", err, stdout)
 		}
 
 		return output, nil
