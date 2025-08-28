@@ -107,11 +107,8 @@ func AnnotateOverrides(obj client.Object, overrides []Override) error {
 		merged = append(merged, overrides...)
 	}
 
-	for _, override := range merged {
-		if _, err := override.validate(); err != nil {
-			return fmt.Errorf("validating override: %w", err)
-		}
-	}
+	// intentionally not validating so custom overrides can work eno-reconciler rather than be bound to cel
+	// pinned in this helper. Shared overrrdies defined here already validate anyways
 
 	jsonBytes, err := json.Marshal(merged)
 	if err != nil {
@@ -170,12 +167,9 @@ func allowVPA(container, resourceType, reqOrLimits, value string) (Override, err
 
 	path := fmt.Sprintf("self.spec.template.spec.containers[name='%s'].resources.%s.%s", container, reqOrLimits, resourceType)
 
-	//"self.spec.template.spec.containers.exists(c, c.name == '%s' &&  has(c.resources.requests) &&  '%s' in c.resources.requests &&  compareResourceQuantities(c.resources.requests['%s'], '%s') > 0)"
-	// self.spec.template.spec.containers.exists(c, c.name == 'retina' && has(c.resources.requests) && 'cpu' in c.resources.requests &&  compareResourceQuantities(c.resources.requests['cpu'], '100') > 0)}
-	//to get && !pathManagedByEno to work need to pass in a  field manager to Test
-	// also changed >= 0 to > 0
 	// this is pretty unreadable use go text templating instead?
-	cel := `!pathManagedByEno && self.spec.template.spec.containers.exists(c, c.name == '%s' && has(c.resources.%s) && '%s' in c.resources.%s && compareResourceQuantities(c.resources.%s['%s'], '%s') > 0)`
+	// it basically says if its not managed by us and >= some minumum then use nuil to not mess with it.
+	cel := `!pathManagedByEno && self.spec.template.spec.containers.exists(c, c.name == '%s' && has(c.resources.%s) && '%s' in c.resources.%s && compareResourceQuantities(c.resources.%s['%s'], '%s') >= 0)`
 	condition := fmt.Sprintf(cel, container, reqOrLimits, resourceType, reqOrLimits, reqOrLimits, resourceType, value)
 	o := Override{
 		Path:      path,

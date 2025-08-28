@@ -146,7 +146,7 @@ func TestAnnotateOverrides_ExistingAnnotation(t *testing.T) {
 	}
 }
 
-func TestAnnotateOverrides_InvalidOverride(t *testing.T) {
+func TestAnnotateOverrides_InvalidOverrideAllowed(t *testing.T) {
 	obj := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "v1",
@@ -159,8 +159,8 @@ func TestAnnotateOverrides_InvalidOverride(t *testing.T) {
 		Condition: "true",
 	}
 	err := overrides.AnnotateOverrides(obj, []overrides.Override{ov})
-	if err == nil {
-		t.Fatal("AnnotateOverrides() triggered validation error for invalid override, got nil")
+	if err != nil {
+		t.Fatal("AnnotateOverrides() should not validate just serialize")
 	}
 }
 
@@ -327,7 +327,7 @@ func TestAllowVPA(t *testing.T) {
 		expectError bool
 	}{
 		{
-			name: "don't trigger cpu requests when the same",
+			name: "don't trigger cpu requests when less",
 			data: map[string]any{
 				"pathManagedByEno": false,
 				"self": map[string]any{
@@ -339,7 +339,7 @@ func TestAllowVPA(t *testing.T) {
 										"name": "retina",
 										"resources": map[string]any{
 											"requests": map[string]any{
-												"cpu": "100m",
+												"cpu": "90m",
 											},
 										},
 									},
@@ -405,7 +405,7 @@ func TestAllowVPA(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "don't replace memory requests when the same",
+			name: "don't trigger memory requests when less",
 			data: map[string]any{
 				"pathManagedByEno": false,
 				"self": map[string]any{
@@ -417,7 +417,7 @@ func TestAllowVPA(t *testing.T) {
 										"name": "retina",
 										"resources": map[string]any{
 											"requests": map[string]any{
-												"memory": "128Mi",
+												"memory": "64Mi",
 											},
 										},
 									},
@@ -457,7 +457,7 @@ func TestAllowVPA(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "don't trigger for cpu limits when the same",
+			name: "don't trigger for cpu limits when less",
 			data: map[string]any{
 				"pathManagedByEno": false,
 				"self": map[string]any{
@@ -469,7 +469,7 @@ func TestAllowVPA(t *testing.T) {
 										"name": "retina",
 										"resources": map[string]any{
 											"limits": map[string]any{
-												"cpu": "500m",
+												"cpu": "100m",
 											},
 										},
 									},
@@ -509,7 +509,7 @@ func TestAllowVPA(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "don't trigger for memory limits when the same",
+			name: "don't trigger for memory limits when less",
 			data: map[string]any{
 				"pathManagedByEno": false,
 				"self": map[string]any{
@@ -521,7 +521,7 @@ func TestAllowVPA(t *testing.T) {
 										"name": "retina",
 										"resources": map[string]any{
 											"limits": map[string]any{
-												"memory": "512Mi",
+												"memory": "256Mi",
 											},
 										},
 									},
