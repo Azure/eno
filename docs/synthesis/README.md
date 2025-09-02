@@ -1,7 +1,8 @@
 # Synthesis
 
-Eno uses short-lived pods to synthesize compositions using [a simple stdio protocol](./synthesizer-api.md).
+Eno uses short-lived pods to synthesize compositions using a simple stdio protocol.
 This process and its results are referred to as `synthesis`.
+
 
 ## Dispatch
 
@@ -50,3 +51,72 @@ annotations:
   # Will block synthesis if < the composition's metadata.generation
   eno.azure.io/composition-generation: "321"
 ```
+
+
+## Protocol
+
+> ⚠️ Most use-cases do not need to work directly with the synthesis protocol. Use one of these libraries instead: [Helm](./examples/03-helm-shim), [Go](./examples/02-go-synthesizer/main.go), [KCL](./pkg/kclshim/).
+
+### Inputs
+
+Input resources are provided to the synthesizer through a json object streamed over stdin.
+
+Example:
+
+```json
+{
+  "apiVersion":"config.kubernetes.io/v1",
+  "kind":"ResourceList",
+  "items": [{
+    "apiVersion": "v1",
+    "kind": "ConfigMap",
+    "metadata": {
+      "name": "my-app-config",
+      "annotations": {
+        "eno.azure.io/input-key": "value-from-synthesizer-ref"
+      }
+    }
+  }]
+}
+```
+
+### Outputs
+
+The results of a synthesizer run should be returned through stdout using the same schema as the inputs:
+
+```json
+{
+  "apiVersion":"config.kubernetes.io/v1",
+  "kind":"ResourceList",
+  "items": [{
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    // ...
+  }]
+}
+```
+
+The first error result is visible when listing compositions.
+
+```json
+{
+  "apiVersion":"config.kubernetes.io/v1",
+  "kind":"ResourceList",
+  "results": [{
+    "severity": "error",
+    "message": "The system is down, the system is down"
+  }]
+}
+```
+
+For example:
+
+```bash
+$ kubectl get compositions
+NAME      SYNTHESIZER     AGE   STATUS     ERROR
+example   error-example   10s   NotReady   The system is down, the system is down
+```
+
+### Logging
+
+The synthesizer process's `stderr` is piped to the synthesizer container it's running in so any typical log forwarding infra can be used.
