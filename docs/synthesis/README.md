@@ -46,7 +46,7 @@ metadata:
   annotations:
     eno.azure.io/ignore-side-effects: "true"
 ```
-With this annotation, only direct composition changes will trigger synthesis.
+With this annotation, only changes to the composition spec will trigger synthesis.
 
 #### Input Synchronization 
 
