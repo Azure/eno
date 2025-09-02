@@ -49,19 +49,20 @@ func main() {
 func runController() error {
 	ctx := ctrl.SetupSignalHandler()
 	var (
-		debugLogging             bool
-		watchdogThres            time.Duration
-		rolloutCooldown          time.Duration
-		selfHealingGracePeriod   time.Duration
-		taintToleration          string
-		nodeAffinity             string
-		synthesizerPodLabels       string
-		synthesizerPodAnnotations  string
-		concurrencyLimit         int
-		inputRateLimit           int
-		podTimeout               time.Duration
-		containerCreationTimeout time.Duration
-		synconf                  = &synthesis.Config{}
+		debugLogging              bool
+		watchdogThres             time.Duration
+		rolloutCooldown           time.Duration
+		selfHealingGracePeriod    time.Duration
+		taintToleration           string
+		nodeAffinity              string
+		synthesizerPodLabels      string
+		synthesizerPodAnnotations string
+		concurrencyLimit          int
+		inputRateLimit            int
+		podTimeout                time.Duration
+		containerCreationTimeout  time.Duration
+		statusLogFreq             time.Duration
+		synconf                   = &synthesis.Config{}
 
 		mgrOpts = &manager.Options{
 			Rest: ctrl.GetConfigOrDie(),
@@ -74,6 +75,7 @@ func runController() error {
 	flag.StringVar(&synthesizerPodAnnotations, "synthesizer-pod-annotations", "", "Default annotations to apply to synthesizer pods (comma-separated key=value pairs)")
 	flag.DurationVar(&podTimeout, "pod-timeout", time.Second*30, "Max TTL for synthesizer pods")
 	flag.DurationVar(&containerCreationTimeout, "container-creation-ttl", time.Second*3, "Timeout when waiting for kubelet to ack scheduled pods. Protects tail latency from kubelet network partitions")
+	flag.DurationVar(&statusLogFreq, "status-log-frequency", 0, "How often to log the status of various resources. Disabled when set to 0.")
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.DurationVar(&watchdogThres, "watchdog-threshold", time.Minute*3, "How long before the watchdog considers a mid-transition resource to be stuck")
 	flag.DurationVar(&rolloutCooldown, "rollout-cooldown", time.Minute, "How long before an update to a related resource (synthesizer, bindings, etc.) will trigger a second composition's re-synthesis")
@@ -150,6 +152,11 @@ func runController() error {
 		return fmt.Errorf("constructing composition controller: %w", err)
 	}
 
+	err = composition.NewStatusLogger(mgr, statusLogFreq)
+	if err != nil {
+		return fmt.Errorf("constructing composition status logger: %w", err)
+	}
+
 	err = symphony.NewController(mgr)
 	if err != nil {
 		return fmt.Errorf("constructing symphony controller: %w", err)
@@ -157,7 +164,6 @@ func runController() error {
 
 	return mgr.Start(ctx)
 }
-
 
 func installExecutor() {
 	self := os.Args[0]

@@ -177,14 +177,10 @@ func (c *compositionController) reconcileDeletedComposition(ctx context.Context,
 }
 
 func (c *compositionController) reconcileSimplifiedStatus(ctx context.Context, synth *apiv1.Synthesizer, comp *apiv1.Composition) (bool, error) {
-	logger := logr.FromContextOrDiscard(ctx)
-
 	next := buildSimplifiedStatus(synth, comp)
 	if equality.Semantic.DeepEqual(next, comp.Status.Simplified) {
 		return false, nil
 	}
-
-	logger.V(0).Info("composition status changed", "status", next, "previousStatus", comp.Status.Simplified)
 
 	copy := comp.DeepCopy()
 	copy.Status.Simplified = next
