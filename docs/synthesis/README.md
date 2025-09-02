@@ -1,122 +1,172 @@
-# Synthesis
+# Writing Synthesizers
 
-Eno uses short-lived pods to synthesize compositions using a simple stdio protocol.
-This process and its results are referred to as `synthesis`.
+Synthesizers are containerized programs that transform input Kubernetes resources into output resources using a simple JSON protocol over stdin/stdout. They enable declarative resource generation within Eno compositions.
+
+## What is Synthesis?
+
+Synthesis is the process where Eno runs your containerized synthesizer in a short-lived pod to generate Kubernetes resources. Your synthesizer receives input resources via stdin as JSON and returns generated resources via stdout, also as JSON.
+
+## Quick Start
+
+The fastest way to get started is with one of our language-specific libraries:
+
+- **Go**: Use the [Go synthesizer library](./examples/02-go-synthesizer/main.go)
+- **Helm**: Use the [Helm shim](./examples/03-helm-shim) 
+- **KCL**: Use the [KCL library](./pkg/kclshim/)
+- **Any language**: Implement the [JSON protocol](#protocol) directly
+
+Your synthesizer needs to:
+1. Read a JSON ResourceList from stdin
+2. Process the input resources 
+3. Write a JSON ResourceList with generated resources to stdout
 
 
-## Dispatch
+## When Synthesis Runs
 
-Synthesis will occur in these scenarios unless blocked by one of the conditions described later:
+Eno automatically triggers synthesis when any of these conditions occur:
 
-- The composition changed
-- The composition's synthesizer changed
-- An input of the composition changed
+- **Composition changes**: The composition resource itself is modified
+- **Synthesizer changes**: The synthesizer container image or configuration changes  
+- **Input changes**: Any input resource bound to the composition changes
 
-### Deferral
+### Controlling Synthesis Timing
 
-Changes that may impact many compositions are designated as `deferred`.
-This includes synthesizer changes and changes to any inputs bound to refs that set `defer: true`.
+#### Deferral for Large-Scale Changes
 
-Deferred changes are subject to a global cooldown period to avoid suddenly changing hundreds/thousands/etc. of compositions.
-The cooldown period can be configured with `--rollout-cooldown`.
+Some changes can affect many compositions simultaneously. These are marked as "deferred" to prevent overwhelming your cluster:
 
-Compositions can opt-out of any deferred syntheses.
-Only composition updates will cause synthesis when this annotation is set on the composition.
+- **Synthesizer updates**: Changes to synthesizer images/config
+- **Deferred inputs**: Input resources with `defer: true` in their binding
 
+Deferred changes use a global cooldown period (configurable with `--rollout-cooldown`) to stagger synthesis across compositions.
+
+**Opting out of deferred synthesis:**
 ```yaml
-annotations:
-  eno.azure.io/ignore-side-effects: "true"
+metadata:
+  annotations:
+    eno.azure.io/ignore-side-effects: "true"
 ```
+With this annotation, only direct composition changes will trigger synthesis.
 
-### Input Lockstep
+#### Input Synchronization 
 
-Synthesis can be blocked until relevant inputs have the same revision.
-This pattern is useful when inputs are coupled in such a way that the synthesizer may behave unexpectedly during state transitions.
+Sometimes you need multiple input resources to be synchronized before synthesis runs.
 
-> Note: Inputs that do not set a revision "fail open" i.e. will not block synthesis.
-
+**Revision-based synchronization:**
 ```yaml
-annotations:
-  eno.azure.io/revision: "123"
+# On input resources
+metadata:
+  annotations:
+    eno.azure.io/revision: "123"
 ```
+Synthesis waits until all inputs have the same revision number.
 
-It's also possible to block synthesis until an input has "seen" the current synthesizer/composition resource.
-This is useful in cases where another controller generates input resources based on some properties or annotations of the synthesizer/composition.
-
+**Generation-based synchronization:**
 ```yaml
-annotations:
-  # Will block synthesis if < the synthesizer's metadata.generation
-  eno.azure.io/synthesizer-generation: "123"
-
-  # Will block synthesis if < the composition's metadata.generation
-  eno.azure.io/composition-generation: "321"
+# On input resources  
+metadata:
+  annotations:
+    # Wait for synthesizer to reach generation 123
+    eno.azure.io/synthesizer-generation: "123"
+    
+    # Wait for composition to reach generation 321
+    eno.azure.io/composition-generation: "321"
 ```
+This blocks synthesis until input controllers have "seen" the current synthesizer/composition state.
 
 
-## Protocol
+## Synthesis Protocol
 
-> ⚠️ Most use-cases do not need to work directly with the synthesis protocol. Use one of these libraries instead: [Helm](./examples/03-helm-shim), [Go](./examples/02-go-synthesizer/main.go), [KCL](./pkg/kclshim/).
+Your synthesizer communicates with Eno using JSON over stdin/stdout, following the [KRM Functions Specification](https://kustomize.io/).
 
-### Inputs
+> 💡 **Recommendation**: Use our language-specific libraries ([Go](./examples/02-go-synthesizer/main.go), [Helm](./examples/03-helm-shim), [KCL](./pkg/kclshim/)) instead of implementing the protocol directly.
 
-Input resources are provided to the synthesizer through a json object streamed over stdin.
+### Input Format
 
-Example:
+Eno sends input resources as a JSON ResourceList via stdin:
 
 ```json
 {
-  "apiVersion":"config.kubernetes.io/v1",
-  "kind":"ResourceList",
-  "items": [{
-    "apiVersion": "v1",
-    "kind": "ConfigMap",
-    "metadata": {
-      "name": "my-app-config",
-      "annotations": {
-        "eno.azure.io/input-key": "value-from-synthesizer-ref"
+  "apiVersion": "config.kubernetes.io/v1",
+  "kind": "ResourceList",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "ConfigMap",
+      "metadata": {
+        "name": "my-app-config",
+        "annotations": {
+          "eno.azure.io/input-key": "app-config"
+        }
+      },
+      "data": {
+        "replicas": "3",
+        "image": "nginx:1.21"
       }
     }
-  }]
+  ]
 }
 ```
 
-### Outputs
+The `eno.azure.io/input-key` annotation identifies which input binding this resource came from.
 
-The results of a synthesizer run should be returned through stdout using the same schema as the inputs:
+### Output Format
+
+Return generated resources using the same ResourceList format via stdout:
 
 ```json
 {
-  "apiVersion":"config.kubernetes.io/v1",
-  "kind":"ResourceList",
-  "items": [{
-    "apiVersion": "apps/v1",
-    "kind": "Deployment",
-    // ...
-  }]
+  "apiVersion": "config.kubernetes.io/v1", 
+  "kind": "ResourceList",
+  "items": [
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "name": "my-app"
+      },
+      "spec": {
+        "replicas": 3,
+        "selector": {
+          "matchLabels": {"app": "my-app"}
+        },
+        "template": {
+          "metadata": {
+            "labels": {"app": "my-app"}
+          },
+          "spec": {
+            "containers": [{
+              "name": "app",
+              "image": "nginx:1.21"
+            }]
+          }
+        }
+      }
+    }
+  ]
 }
 ```
 
-The first error result is visible when listing compositions.
+### Error Handling
+
+Report errors using the `results` field. The first error will appear in the composition status:
 
 ```json
 {
-  "apiVersion":"config.kubernetes.io/v1",
-  "kind":"ResourceList",
-  "results": [{
-    "severity": "error",
-    "message": "The system is down, the system is down"
-  }]
+  "apiVersion": "config.kubernetes.io/v1",
+  "kind": "ResourceList", 
+  "results": [
+    {
+      "severity": "error",
+      "message": "Invalid configuration: replicas must be a positive integer"
+    }
+  ]
 }
 ```
 
-For example:
-
+This error will be visible when checking composition status:
 ```bash
 $ kubectl get compositions
 NAME      SYNTHESIZER     AGE   STATUS     ERROR
-example   error-example   10s   NotReady   The system is down, the system is down
+my-app    my-synthesizer  10s   NotReady   Invalid configuration: replicas must be a positive integer
 ```
-
-### Logging
-
-The synthesizer process's `stderr` is piped to the synthesizer container it's running in so any typical log forwarding infra can be used.
