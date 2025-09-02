@@ -72,7 +72,7 @@ metadata:
     # Wait for composition to reach generation 321
     eno.azure.io/composition-generation: "321"
 ```
-This blocks synthesis until input controllers have "seen" the current synthesizer/composition state.
+This blocks synthesis until input controllers have "seen" the requested synthesizer/composition state.
 
 
 ## Synthesis Protocol
