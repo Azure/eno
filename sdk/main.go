@@ -9,6 +9,7 @@ import (
 	"reflect"
 
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/kubectl/pkg/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -17,7 +18,7 @@ import (
 // Inputs is satisfied by any struct that defines the inputs required by a SynthFunc.
 // Use the `eno_key` struct tag to specify the corresponding ref key for each input.
 // Each field must either be a client.Object or a custom type registered with AddCustomInputType.
-type Inputs interface{}
+type Inputs any
 
 // MungableInputs is an optional interface that can be implemented by Inputs structs
 // if it is, it gets called after inputs are read. It can fail the whole
@@ -86,8 +87,7 @@ func main[T Inputs](fn SynthFunc[T], options *mainConfig, in io.Reader, ow *Outp
 
 	// Use reflection to check if inputs implements MungableInputs.
 	if v.CanAddr() {
-		inputsPtr := v.Addr().Interface()
-		if im, ok := inputsPtr.(MungableInputs); ok {
+		if im, ok := v.Addr().Interface().(MungableInputs); ok {
 			err := im.Munge()
 			if err != nil {
 				return err
@@ -107,13 +107,29 @@ func main[T Inputs](fn SynthFunc[T], options *mainConfig, in io.Reader, ow *Outp
 
 	// Write the outputs
 	for _, out := range outputs {
+		if out == nil {
+			continue // shouldn't be possible
+		}
+
+		// Set GVK from the scheme if it wasn't set explicitly
 		if options.scheme != nil && out.GetObjectKind().GroupVersionKind().Empty() {
 			gvks, _, err := options.scheme.ObjectKinds(out)
 			if err == nil && len(gvks) > 0 {
 				out.GetObjectKind().SetGroupVersionKind(gvks[0])
 			}
 		}
-		ow.Add(out)
+
+		// Convert to unstructured and apply and munge funcs
+		obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(out)
+		if err != nil {
+			return fmt.Errorf("converting %s %s to unstructured: %w", out.GetName(), out.GetObjectKind().GroupVersionKind().Kind, err)
+		}
+		u := &unstructured.Unstructured{Object: obj}
+		for _, fn := range options.mungers {
+			fn(u)
+		}
+
+		ow.Add(u)
 	}
 	return ow.Write()
 }

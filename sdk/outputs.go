@@ -8,8 +8,6 @@ import (
 
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type OutputWriter struct {
@@ -39,32 +37,14 @@ func (w *OutputWriter) AddResult(result *krmv1.Result) {
 	w.results = append(w.results, result)
 }
 
-func (w *OutputWriter) Add(outs ...client.Object) error {
+func (w *OutputWriter) Add(outs ...*unstructured.Unstructured) error {
 	if w.committed {
 		return fmt.Errorf("cannot add to a committed output")
 	}
 
 	// Doing a "filter" to avoid committing nil values.
 	for _, o := range outs {
-		if o == nil {
-			continue
-		}
-
-		// Encode
-		obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
-		if err != nil {
-			return fmt.Errorf(
-				"converting %s %s to unstructured: %w",
-				o.GetName(),
-				o.GetObjectKind().GroupVersionKind().Kind,
-				err,
-			)
-		}
-		u := &unstructured.Unstructured{Object: obj}
-		if w.munge != nil {
-			w.munge(u)
-		}
-		w.outputs = append(w.outputs, u)
+		w.outputs = append(w.outputs, o)
 	}
 	return nil
 }
