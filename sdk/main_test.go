@@ -3,6 +3,7 @@ package function
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"testing"
 	"time"
 
@@ -117,15 +118,13 @@ func TestMainInputMissing(t *testing.T) {
 	inBuf := bytes.NewBufferString(`{}`)
 
 	ow := NewOutputWriter(outBuf, nil)
-	ir, err := NewInputReader(inBuf)
-	require.NoError(t, err)
 
 	fn := func(inputs testSimpleInputs) ([]client.Object, error) {
 		output := &corev1.Pod{}
 		return []client.Object{output}, nil
 	}
 
-	require.NoError(t, main(fn, &mainConfig{}, ir, ow))
+	require.NoError(t, main(fn, &mainConfig{}, inBuf, ow))
 	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[],\"results\":[{\"message\":\"error while reading input with key \\\"test-cm\\\": input \\\"test-cm\\\" was not found\",\"severity\":\"error\"}]}\n", outBuf.String())
 }
 
@@ -134,14 +133,12 @@ func TestMainError(t *testing.T) {
 	inBuf := bytes.NewBufferString(`{"items": [{"kind": "ConfigMap", "apiVersion": "v1", "metadata": {"name": "test-configmap", "annotations": {"eno.azure.io/input-key": "test-cm"}}, "data": {"key": "foo"}}, {"kind": "Secret", "apiVersion": "v1", "metadata": {"name": "test-secret", "annotations": {"eno.azure.io/input-key": "test-secret"}}, "data": {"key": "Zm9vYmFyCg=="}}]}`)
 
 	ow := NewOutputWriter(outBuf, nil)
-	ir, err := NewInputReader(inBuf)
-	require.NoError(t, err)
 
 	fn := func(inputs testSimpleInputs) ([]client.Object, error) {
 		return []client.Object{}, fmt.Errorf("foobar")
 	}
 
-	require.NoError(t, main(fn, &mainConfig{}, ir, ow))
+	require.NoError(t, main(fn, &mainConfig{}, inBuf, ow))
 	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[],\"results\":[{\"message\":\"foobar\",\"severity\":\"error\"}]}\n", outBuf.String())
 }
 
@@ -163,13 +160,8 @@ type testSimpleInputs struct {
 	MySecret    *corev1.Secret    `eno_key:"test-secret"`
 }
 
-func newTestInputReader() *InputReader {
-	inBuf := bytes.NewBufferString(`{"items": [{"kind": "ConfigMap", "apiVersion": "v1", "metadata": {"name": "test-configmap", "annotations": {"eno.azure.io/input-key": "test-cm"}}, "data": {"key": "foo"}}, {"kind": "Secret", "apiVersion": "v1", "metadata": {"name": "test-secret", "annotations": {"eno.azure.io/input-key": "test-secret"}}, "data": {"key": "Zm9vYmFyCg=="}}]}`)
-	ir, err := NewInputReader(inBuf)
-	if err != nil {
-		panic(err)
-	}
-	return ir
+func newTestInputReader() io.Reader {
+	return bytes.NewBufferString(`{"items": [{"kind": "ConfigMap", "apiVersion": "v1", "metadata": {"name": "test-configmap", "annotations": {"eno.azure.io/input-key": "test-cm"}}, "data": {"key": "foo"}}, {"kind": "Secret", "apiVersion": "v1", "metadata": {"name": "test-secret", "annotations": {"eno.azure.io/input-key": "test-secret"}}, "data": {"key": "Zm9vYmFyCg=="}}]}`)
 }
 
 // Test inputs that implement MungerError

@@ -36,8 +36,6 @@ func TestCompositeMunger(t *testing.T) {
 	inBuf := bytes.NewBufferString(`{"items": []}`)
 
 	ow := NewOutputWriter(outBuf, nil)
-	ir, err := NewInputReader(inBuf)
-	require.NoError(t, err)
 
 	// Test function that returns a simple pod
 	fn := func(inputs struct{}) ([]client.Object, error) {
@@ -56,7 +54,7 @@ func TestCompositeMunger(t *testing.T) {
 	compositeMunge := opts.CompositeMungeFunc()
 
 	ow = NewOutputWriter(outBuf, compositeMunge)
-	require.NoError(t, main(fn, opts, ir, ow))
+	require.NoError(t, main(fn, opts, inBuf, ow))
 
 	// Verify that both mungers were applied
 	output := outBuf.String()

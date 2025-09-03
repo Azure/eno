@@ -1,11 +1,15 @@
 package function
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"reflect"
 
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -33,18 +37,20 @@ func Main[T Inputs](fn SynthFunc[T], opts ...Option) {
 	}
 
 	ow := NewOutputWriter(os.Stdout, options.CompositeMungeFunc())
-	ir, err := NewDefaultInputReader()
-	if err != nil {
-		panic(fmt.Sprintf("failed to create default input reader: %s", err))
-	}
 
-	err = main(fn, options, ir, ow)
+	err := main(fn, options, os.Stdin, ow)
 	if err != nil {
 		panic(fmt.Sprintf("error while calling synthesizer function: %s", err))
 	}
 }
 
-func main[T Inputs](fn SynthFunc[T], options *mainConfig, ir *InputReader, ow *OutputWriter) error {
+func main[T Inputs](fn SynthFunc[T], options *mainConfig, in io.Reader, ow *OutputWriter) error {
+	inputRL := krmv1.ResourceList{}
+	err := json.NewDecoder(in).Decode(&inputRL)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return fmt.Errorf("decoding stdin as krm resource list: %w", err)
+	}
+
 	var inputs T
 	v := reflect.ValueOf(&inputs).Elem()
 	t := v.Type()
@@ -56,12 +62,12 @@ func main[T Inputs](fn SynthFunc[T], options *mainConfig, ir *InputReader, ow *O
 			continue
 		}
 
-		input, err := newInput(ir, v.Field(i))
+		input, err := newInput(v.Field(i))
 		if err != nil {
 			return err
 		}
 
-		err = ReadInput(ir, tagValue, input.Object)
+		err = findInput(&inputRL, tagValue, input.Object)
 		if err != nil {
 			ow.AddResult(&krmv1.Result{
 				Message:  fmt.Sprintf("error while reading input with key %q: %s", tagValue, err),
@@ -130,7 +136,7 @@ type input struct {
 	field  reflect.Value
 }
 
-func newInput(ir *InputReader, field reflect.Value) (*input, error) {
+func newInput(field reflect.Value) (*input, error) {
 	i := &input{field: field}
 
 	// Allocate values for nil pointers
@@ -174,4 +180,30 @@ func (i *input) Finalize() error {
 
 	i.field.Set(reflect.ValueOf(bound))
 	return nil
+}
+
+func findInput[T client.Object](inputRL *krmv1.ResourceList, key string, out T) error {
+	var found bool
+	for _, i := range inputRL.Items {
+		i := i
+		if getKey(i) == key {
+			err := runtime.DefaultUnstructuredConverter.FromUnstructured(i.Object, out)
+			if err != nil {
+				return fmt.Errorf("converting item to Input: %w", err)
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("input %q was not found", key)
+	}
+	return nil
+}
+
+func getKey(obj client.Object) string {
+	if obj.GetAnnotations() == nil {
+		return ""
+	}
+	return obj.GetAnnotations()["eno.azure.io/input-key"]
 }
