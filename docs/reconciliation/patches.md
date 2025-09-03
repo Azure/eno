@@ -1,4 +1,4 @@
-# Patch
+# Patches
 
 > ⚠️ This is an advanced Eno concept
 
