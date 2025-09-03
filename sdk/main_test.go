@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"testing"
 	"time"
 
@@ -38,7 +39,7 @@ func ExampleInputs() {
 	}
 
 	ir := newTestInputReader()
-	main(fn, &mainConfig{}, ir, NewDefaultOutputWriter())
+	main(fn, &mainConfig{}, ir, os.Stdout)
 	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"name":"foobar\n"},"spec":{"containers":null},"status":{}}]}
 }
 
@@ -64,7 +65,7 @@ func ExampleAddCustomInputType() {
 	}
 
 	ir := newTestInputReader()
-	main(fn, &mainConfig{}, ir, NewDefaultOutputWriter())
+	main(fn, &mainConfig{}, ir, os.Stdout)
 	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"name":"foobar\n"},"spec":{"containers":null},"status":{}}]}
 }
 
@@ -90,14 +91,13 @@ func ExampleAddCustomInputType_slice() {
 	}
 
 	ir := newTestInputReader()
-	main(fn, &mainConfig{}, ir, NewDefaultOutputWriter())
+	main(fn, &mainConfig{}, ir, os.Stdout)
 	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"name":"foobar\n"},"spec":{"containers":null},"status":{}}]}
 }
 
 func TestMain(t *testing.T) {
 	outBuf := &bytes.Buffer{}
-	ow := NewOutputWriter(outBuf, nil)
-	ir := newTestInputReader()
+	inBuf := newTestInputReader()
 
 	fn := func(inputs testSimpleInputs) ([]client.Object, error) {
 		output := &corev1.Pod{}
@@ -109,7 +109,7 @@ func TestMain(t *testing.T) {
 		return []client.Object{output}, nil
 	}
 
-	require.NoError(t, main(fn, &mainConfig{}, ir, ow))
+	require.NoError(t, main(fn, &mainConfig{}, inBuf, outBuf))
 	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[{\"apiVersion\":\"v1\",\"kind\":\"Pod\",\"metadata\":{\"annotations\":{\"cm-value\":\"foo\",\"secret-value\":\"foobar\\n\"},\"name\":\"test-pod\"},\"spec\":{\"containers\":null},\"status\":{}}]}\n", outBuf.String())
 }
 
@@ -117,14 +117,12 @@ func TestMainInputMissing(t *testing.T) {
 	outBuf := &bytes.Buffer{}
 	inBuf := bytes.NewBufferString(`{}`)
 
-	ow := NewOutputWriter(outBuf, nil)
-
 	fn := func(inputs testSimpleInputs) ([]client.Object, error) {
 		output := &corev1.Pod{}
 		return []client.Object{output}, nil
 	}
 
-	require.NoError(t, main(fn, &mainConfig{}, inBuf, ow))
+	require.NoError(t, main(fn, &mainConfig{}, inBuf, outBuf))
 	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[],\"results\":[{\"message\":\"error while reading input with key \\\"test-cm\\\": input \\\"test-cm\\\" was not found\",\"severity\":\"error\"}]}\n", outBuf.String())
 }
 
@@ -132,13 +130,11 @@ func TestMainError(t *testing.T) {
 	outBuf := &bytes.Buffer{}
 	inBuf := bytes.NewBufferString(`{"items": [{"kind": "ConfigMap", "apiVersion": "v1", "metadata": {"name": "test-configmap", "annotations": {"eno.azure.io/input-key": "test-cm"}}, "data": {"key": "foo"}}, {"kind": "Secret", "apiVersion": "v1", "metadata": {"name": "test-secret", "annotations": {"eno.azure.io/input-key": "test-secret"}}, "data": {"key": "Zm9vYmFyCg=="}}]}`)
 
-	ow := NewOutputWriter(outBuf, nil)
-
 	fn := func(inputs testSimpleInputs) ([]client.Object, error) {
 		return []client.Object{}, fmt.Errorf("foobar")
 	}
 
-	require.NoError(t, main(fn, &mainConfig{}, inBuf, ow))
+	require.NoError(t, main(fn, &mainConfig{}, inBuf, outBuf))
 	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[],\"results\":[{\"message\":\"foobar\",\"severity\":\"error\"}]}\n", outBuf.String())
 }
 
@@ -182,8 +178,7 @@ func (m *mungerInputs) Munge() error {
 
 func TestMungerError(t *testing.T) {
 	outBuf := &bytes.Buffer{}
-	ow := NewOutputWriter(outBuf, nil)
-	ir := newTestInputReader()
+	inBuf := newTestInputReader()
 
 	fn := func(inputs mungerInputs) ([]client.Object, error) {
 		output := &corev1.Pod{}
@@ -195,7 +190,7 @@ func TestMungerError(t *testing.T) {
 		return []client.Object{output}, nil
 	}
 
-	require.NoError(t, main(fn, &mainConfig{}, ir, ow))
+	require.NoError(t, main(fn, &mainConfig{}, inBuf, outBuf))
 
 	// Verify that munging occurred
 	output := outBuf.String()
@@ -215,8 +210,7 @@ func (m *failingMungerInputs) Munge() error {
 
 func TestMungerErrorFailure(t *testing.T) {
 	outBuf := &bytes.Buffer{}
-	ow := NewOutputWriter(outBuf, nil)
-	ir := newTestInputReader()
+	inBuf := newTestInputReader()
 
 	fn := func(inputs failingMungerInputs) ([]client.Object, error) {
 		// This should not be called because munging will fail
@@ -225,7 +219,7 @@ func TestMungerErrorFailure(t *testing.T) {
 		return []client.Object{output}, nil
 	}
 
-	err := main(fn, &mainConfig{}, ir, ow)
+	err := main(fn, &mainConfig{}, inBuf, outBuf)
 
 	// Verify that the error from Munge() is returned
 	require.Error(t, err)
@@ -239,8 +233,7 @@ func TestMainWithScheme(t *testing.T) {
 	require.NoError(t, err)
 
 	options := &mainConfig{scheme: scheme}
-	ow := NewOutputWriter(outBuf, nil)
-	ir := newTestInputReader()
+	inBuf := newTestInputReader()
 
 	fn := func(inputs testSimpleInputs) ([]client.Object, error) {
 		output := &corev1.Pod{}
@@ -249,7 +242,7 @@ func TestMainWithScheme(t *testing.T) {
 		return []client.Object{output}, nil
 	}
 
-	require.NoError(t, main(fn, options, ir, ow))
+	require.NoError(t, main(fn, options, inBuf, outBuf))
 
 	// Verify the output contains proper apiVersion and kind
 	output := outBuf.String()
@@ -264,7 +257,6 @@ func TestMainWithSchemePresetGVK(t *testing.T) {
 	require.NoError(t, err)
 
 	options := &mainConfig{scheme: scheme}
-	ow := NewOutputWriter(outBuf, nil)
 	ir := newTestInputReader()
 
 	fn := func(inputs testSimpleInputs) ([]client.Object, error) {
@@ -275,7 +267,7 @@ func TestMainWithSchemePresetGVK(t *testing.T) {
 		return []client.Object{output}, nil
 	}
 
-	require.NoError(t, main(fn, options, ir, ow))
+	require.NoError(t, main(fn, options, ir, outBuf))
 
 	// Verify the output contains the GVK we set
 	output := outBuf.String()
@@ -286,7 +278,6 @@ func TestMainWithSchemePresetGVK(t *testing.T) {
 func TestMainWithSchemeMissing(t *testing.T) {
 	outBuf := &bytes.Buffer{}
 	options := &mainConfig{scheme: runtime.NewScheme()} // nothing registered to scheme
-	ow := NewOutputWriter(outBuf, nil)
 	ir := newTestInputReader()
 
 	fn := func(inputs testSimpleInputs) ([]client.Object, error) {
@@ -296,13 +287,12 @@ func TestMainWithSchemeMissing(t *testing.T) {
 		return []client.Object{output}, nil
 	}
 
-	require.NoError(t, main(fn, options, ir, ow))
+	require.NoError(t, main(fn, options, ir, outBuf))
 }
 
 func TestMainWithSchemeUnstructured(t *testing.T) {
 	outBuf := &bytes.Buffer{}
 	options := &mainConfig{scheme: runtime.NewScheme()}
-	ow := NewOutputWriter(outBuf, nil)
 	ir := newTestInputReader()
 
 	fn := func(inputs testSimpleInputs) ([]client.Object, error) {
@@ -312,5 +302,5 @@ func TestMainWithSchemeUnstructured(t *testing.T) {
 		return []client.Object{output}, nil
 	}
 
-	require.NoError(t, main(fn, options, ir, ow))
+	require.NoError(t, main(fn, options, ir, outBuf))
 }

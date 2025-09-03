@@ -10,6 +10,8 @@ import (
 // option defines an option for configuring/augmenting the Main function.
 type Option func(*mainConfig)
 
+type MungeFunc func(*unstructured.Unstructured)
+
 // mainConfig holds configuration options for the Main function.
 type mainConfig struct {
 	mungers []MungeFunc
@@ -93,18 +95,4 @@ func WithReconcilationInterval(interval time.Duration) Option {
 		annotations["eno.azure.io/reconcile-interval"] = interval.String()
 		obj.SetAnnotations(annotations)
 	})
-}
-
-// CompositeMungeFunc creates a composite munge function that applies all
-// mungers in sequence. Returns nil if no mungers are configured.
-func (opts *mainConfig) CompositeMungeFunc() MungeFunc {
-	if len(opts.mungers) == 0 {
-		return nil
-	}
-
-	return func(obj *unstructured.Unstructured) {
-		for _, munger := range opts.mungers {
-			munger(obj)
-		}
-	}
 }

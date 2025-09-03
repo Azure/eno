@@ -35,8 +35,6 @@ func TestCompositeMunger(t *testing.T) {
 	outBuf := &bytes.Buffer{}
 	inBuf := bytes.NewBufferString(`{"items": []}`)
 
-	ow := NewOutputWriter(outBuf, nil)
-
 	// Test function that returns a simple pod
 	fn := func(inputs struct{}) ([]client.Object, error) {
 		pod := &corev1.Pod{}
@@ -50,11 +48,7 @@ func TestCompositeMunger(t *testing.T) {
 	WithMunger(addLabelMunger)(opts)
 	WithMunger(addAnnotationMunger)(opts)
 
-	// Create composite munge function using the receiver method
-	compositeMunge := opts.CompositeMungeFunc()
-
-	ow = NewOutputWriter(outBuf, compositeMunge)
-	require.NoError(t, main(fn, opts, inBuf, ow))
+	require.NoError(t, main(fn, opts, inBuf, outBuf))
 
 	// Verify that both mungers were applied
 	output := outBuf.String()

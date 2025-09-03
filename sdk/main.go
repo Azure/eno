@@ -38,23 +38,30 @@ func Main[T Inputs](fn SynthFunc[T], opts ...Option) {
 		opt(options)
 	}
 
-	ow := NewOutputWriter(os.Stdout, options.CompositeMungeFunc())
-
-	err := main(fn, options, os.Stdin, ow)
+	err := main(fn, options, os.Stdin, os.Stdout)
 	if err != nil {
 		panic(fmt.Sprintf("error while calling synthesizer function: %s", err))
 	}
 }
 
-func main[T Inputs](fn SynthFunc[T], options *mainConfig, in io.Reader, ow *OutputWriter) error {
+func main[T Inputs](fn SynthFunc[T], options *mainConfig, r io.Reader, w io.Writer) error {
 	if options.scheme == nil {
 		options.scheme = scheme.Scheme
 	}
 
+	outputRL := krmv1.ResourceList{
+		Kind:       krmv1.ResourceListKind,
+		APIVersion: krmv1.SchemeGroupVersion.String(),
+		Items:      []*unstructured.Unstructured{},
+	}
 	inputRL := krmv1.ResourceList{}
-	err := json.NewDecoder(in).Decode(&inputRL)
+	err := json.NewDecoder(r).Decode(&inputRL)
 	if err != nil && !errors.Is(err, io.EOF) {
-		return fmt.Errorf("decoding stdin as krm resource list: %w", err)
+		outputRL.Results = []*krmv1.Result{{
+			Message:  fmt.Sprintf("decoding stdin as krm resource list: %s", err),
+			Severity: krmv1.ResultSeverityError,
+		}}
+		return json.NewEncoder(w).Encode(&outputRL)
 	}
 
 	var inputs T
@@ -75,11 +82,11 @@ func main[T Inputs](fn SynthFunc[T], options *mainConfig, in io.Reader, ow *Outp
 
 		err = findInput(&inputRL, tagValue, input.Object)
 		if err != nil {
-			ow.AddResult(&krmv1.Result{
+			outputRL.Results = []*krmv1.Result{{
 				Message:  fmt.Sprintf("error while reading input with key %q: %s", tagValue, err),
 				Severity: krmv1.ResultSeverityError,
-			})
-			return ow.Write()
+			}}
+			return json.NewEncoder(w).Encode(&outputRL)
 		}
 
 		input.Finalize()
@@ -98,11 +105,11 @@ func main[T Inputs](fn SynthFunc[T], options *mainConfig, in io.Reader, ow *Outp
 	// Call the fn and handle errors through the KRM interface
 	outputs, err := fn(inputs)
 	if err != nil {
-		ow.AddResult(&krmv1.Result{
+		outputRL.Results = []*krmv1.Result{{
 			Message:  err.Error(),
 			Severity: krmv1.ResultSeverityError,
-		})
-		return ow.Write()
+		}}
+		return json.NewEncoder(w).Encode(&outputRL)
 	}
 
 	// Write the outputs
@@ -122,16 +129,20 @@ func main[T Inputs](fn SynthFunc[T], options *mainConfig, in io.Reader, ow *Outp
 		// Convert to unstructured and apply and munge funcs
 		obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(out)
 		if err != nil {
-			return fmt.Errorf("converting %s %s to unstructured: %w", out.GetName(), out.GetObjectKind().GroupVersionKind().Kind, err)
+			outputRL.Results = []*krmv1.Result{{
+				Message:  fmt.Sprintf("converting %s %s to unstructured: %s", out.GetName(), out.GetObjectKind().GroupVersionKind().Kind, err),
+				Severity: krmv1.ResultSeverityError,
+			}}
+			return json.NewEncoder(w).Encode(&outputRL)
 		}
 		u := &unstructured.Unstructured{Object: obj}
 		for _, fn := range options.mungers {
 			fn(u)
 		}
-
-		ow.Add(u)
+		outputRL.Items = append(outputRL.Items, u)
 	}
-	return ow.Write()
+
+	return json.NewEncoder(w).Encode(&outputRL)
 }
 
 var customInputSourceTypes = map[string]reflect.Type{}
