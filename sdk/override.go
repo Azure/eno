@@ -65,8 +65,7 @@ func (o *Override) String() string {
 	return fmt.Sprintf("{Path: %s,\n Value: %v,\n Condition: %s}", o.Path, o.Value, o.Condition)
 }
 
-// AnnotateOverrides will take care of appropriatly serializng your overrides to annotations
-// merging them with others that exist
+// AnnotateOverrides appends the overrides to any existing overrides on `obj`.
 func AnnotateOverrides(obj client.Object, overrides []Override) error {
 	annotations := obj.GetAnnotations()
 	if annotations == nil {
