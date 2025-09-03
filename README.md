@@ -15,9 +15,9 @@ Just print JSON objects to stdout and Eno will handle the rest.
 
 ## Docs
 
-- [Synthesis](./docs/synthesis)
-- [Reconciliation](./docs/reconciliation)
-- [Symphony](./docs/symphony)
+- [Synthesis](./docs/synthesis.md)
+- [Reconciliation](./docs/reconciliation.md)
+- [Symphony](./docs/symphony.md)
 
 ## Getting Started
 
