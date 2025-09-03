@@ -18,8 +18,6 @@ Just print JSON objects to stdout and Eno will handle the rest.
 - [Synthesis](./docs/synthesis)
 - [Reconciliation](./docs/reconciliation)
 - [Symphony](./docs/symphony)
-- [Synthesizer API](./docs/synthesizer-api.md)
-- [Generated API Docs](./docs/api.md)
 
 ## Getting Started
 

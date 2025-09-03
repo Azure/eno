@@ -9,10 +9,6 @@ import (
 
 //go:generate go run sigs.k8s.io/controller-tools/cmd/controller-gen object crd rbac:roleName=resourceprovider paths=./...
 
-// Requires https://github.com/elastic/crd-ref-docs
-//
-//go:generate crd-ref-docs --source-path=./ --config=docsconfig.yaml --renderer=markdown --output-path=../../docs/api.md
-
 var (
 	SchemeGroupVersion = schema.GroupVersion{Group: "eno.azure.io", Version: "v1"}
 	SchemeBuilder      = &scheme.Builder{GroupVersion: SchemeGroupVersion}
