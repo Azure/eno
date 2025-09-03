@@ -12,9 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// mirror of type Op struct  and type jsonOp struct  in internal/resource/mutation/mutation.go
-// trying to do type Override = intmut.Op will get you an erro about extending methods.
-// could make it a composition but not going down that path yet
+// Override represents an object in the eno.azure.io/overrides array.
 type Override struct {
 	Path      string `json:"path"`
 	Value     any    `json:"value"`
@@ -43,13 +41,9 @@ func (o *Override) parseCondition() (cel.Program, error) {
 	return intcel.Env.Program(ast)
 }
 
-// Test lets you unittest your overrides Condition agains some data kid of like unstructerd.unstructered.
-// variables like pathManagedByEno can also be mocked at top level of data along with self.
-// it does NOT actually test api server logic as it doesn't have fieldmanger two sets of data.
-// Still it can be helpful in finding bugs in Conditions. See examples in unittest.
-func (o *Override) Test(data map[string]interface{}) (bool, error) {
-	// Evaluate with the input data
-
+// Test evaluates the override's condition against the provided CEL scope.
+// Useful for unit testing condition logic.
+func (o *Override) Test(data map[string]any) (bool, error) {
 	prg, err := o.parseCondition()
 	if err != nil {
 		return false, fmt.Errorf("failed to validate override: %w", err)
@@ -60,7 +54,6 @@ func (o *Override) Test(data map[string]interface{}) (bool, error) {
 		return false, fmt.Errorf("failed to evaluate condition: %w", err)
 	}
 
-	// Convert result to boolean
 	if boolVal, ok := result.(types.Bool); ok {
 		return bool(boolVal), nil
 	}
@@ -68,21 +61,19 @@ func (o *Override) Test(data map[string]interface{}) (bool, error) {
 	return false, fmt.Errorf("condition did not evaluate to boolean, got: %T", result)
 }
 
-// String is for debugging only because escaped json cel is hard to read.
+// String returns a human readable representation of the override with minimal escaping for readability.
 func (o *Override) String() string {
-	//not actual json becuse escaping is hard to read.
 	return fmt.Sprintf("{Path: %s,\n Value: %v,\n Condition: %s}", o.Path, o.Value, o.Condition)
 }
 
 // AnnotateOverrides will take care of appropriatly serializng your overrides to annotations
 // merging them with others that exist
 func AnnotateOverrides(obj client.Object, overrides []Override) error {
-
-	// Add Helm annotations that are required for Helm to recognize the resources
 	annotations := obj.GetAnnotations()
 	if annotations == nil {
 		annotations = make(map[string]string)
 	}
+
 	merged := overrides
 	if existingStr, exists := annotations["eno.azure.io/overrides"]; exists {
 		var existing []Override
@@ -90,17 +81,12 @@ func AnnotateOverrides(obj client.Object, overrides []Override) error {
 		merged = append(merged, overrides...)
 	}
 
-	// intentionally not validating so custom overrides can work eno-reconciler rather than be bound to cel
-	// pinned in this helper. Shared overrrdies defined here already validate anyways
-
 	jsonBytes, err := json.Marshal(merged)
 	if err != nil {
 		return fmt.Errorf("failed to marshal overrides: %w", err)
 	}
 
-	//should we append to existing annoations or panic if they exist?
 	annotations["eno.azure.io/overrides"] = string(jsonBytes)
-
 	obj.SetAnnotations(annotations)
 	return nil
 }
