@@ -23,8 +23,7 @@ type mainConfig struct {
 // its GroupVersionKind is empty, the scheme will be consulted to determine the
 // appropriate apiVersion and kind values.
 //
-// If no scheme is provided, or if an object's type is not registered in the scheme,
-// the object will be processed without modification.
+// If no scheme is provided, the default kubectl scheme will be used.
 //
 // Example usage:
 //

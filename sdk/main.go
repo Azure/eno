@@ -10,6 +10,7 @@ import (
 
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/kubectl/pkg/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -45,6 +46,10 @@ func Main[T Inputs](fn SynthFunc[T], opts ...Option) {
 }
 
 func main[T Inputs](fn SynthFunc[T], options *mainConfig, in io.Reader, ow *OutputWriter) error {
+	if options.scheme == nil {
+		options.scheme = scheme.Scheme
+	}
+
 	inputRL := krmv1.ResourceList{}
 	err := json.NewDecoder(in).Decode(&inputRL)
 	if err != nil && !errors.Is(err, io.EOF) {

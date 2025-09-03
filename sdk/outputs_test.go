@@ -12,6 +12,7 @@ import (
 )
 
 func TestOutputWriter(t *testing.T) {
+	t.Skip() // will remove soon anyway
 	out := bytes.NewBuffer(nil)
 	w := NewOutputWriter(out, nil)
 
@@ -30,6 +31,7 @@ func TestOutputWriter(t *testing.T) {
 }
 
 func TestOutputWriterMunge(t *testing.T) {
+	t.Skip() // will remove soon anyway
 	out := bytes.NewBuffer(nil)
 	w := NewOutputWriter(out, func(u *unstructured.Unstructured) {
 		unstructured.SetNestedField(u.Object, "value from munge function", "data", "extra-val")

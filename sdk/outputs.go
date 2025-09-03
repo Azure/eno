@@ -9,11 +9,8 @@ import (
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/kubectl/pkg/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
-
-var Scheme = scheme.Scheme
 
 type OutputWriter struct {
 	outputs   []*unstructured.Unstructured
@@ -51,15 +48,6 @@ func (w *OutputWriter) Add(outs ...client.Object) error {
 	for _, o := range outs {
 		if o == nil {
 			continue
-		}
-
-		// Resolve GVK if needed
-		if o.GetObjectKind().GroupVersionKind().Empty() {
-			gvks, _, err := Scheme.ObjectKinds(o)
-			if err != nil || len(gvks) == 0 {
-				return fmt.Errorf("unable to determine GVK for object %s: %w", o.GetName(), err)
-			}
-			o.GetObjectKind().SetGroupVersionKind(gvks[0])
 		}
 
 		// Encode
