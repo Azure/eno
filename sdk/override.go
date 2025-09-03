@@ -21,13 +21,11 @@ type Override struct {
 	Condition string `json:"condition"`
 }
 
-func (o *Override) validate() (cel.Program, error) {
-
+func (o *Override) parseCondition() (cel.Program, error) {
 	if o.Path == "" {
 		return nil, fmt.Errorf("path is required")
 	}
 
-	//Not taking a dependency
 	_, err := intmut.ParsePathExpr(o.Path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse path: %w", err)
@@ -36,28 +34,13 @@ func (o *Override) validate() (cel.Program, error) {
 	if o.Condition == "" {
 		return nil, fmt.Errorf("condition is required")
 	}
-	// Parse the expression
-	celEnv := intcel.Env
-	ast, issues := celEnv.Parse(o.Condition)
+
+	ast, issues := intcel.Env.Parse(o.Condition)
 	if issues != nil && issues.Err() != nil {
 		return nil, fmt.Errorf("failed to parse condition: %w", issues.Err())
 	}
 
-	// Type-check the expression
-	checked, issues := celEnv.Check(ast)
-	if issues != nil && issues.Err() != nil {
-		return nil, fmt.Errorf("failed to type-check condition: %w", issues.Err())
-	}
-
-	// Create the program
-	p, err := celEnv.Program(checked)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create program: %w", err)
-	}
-
-	//Value can be null which is abit wierd.
-	return p, nil
-
+	return intcel.Env.Program(ast)
 }
 
 // Test lets you unittest your overrides Condition agains some data kid of like unstructerd.unstructered.
@@ -67,7 +50,7 @@ func (o *Override) validate() (cel.Program, error) {
 func (o *Override) Test(data map[string]interface{}) (bool, error) {
 	// Evaluate with the input data
 
-	prg, err := o.validate()
+	prg, err := o.parseCondition()
 	if err != nil {
 		return false, fmt.Errorf("failed to validate override: %w", err)
 	}
@@ -132,7 +115,7 @@ func ReplaceIf(condition string) (Override, error) {
 		Condition: condition,
 	}
 	//even if they didn't test ensure it valdiates
-	if _, err := o.validate(); err != nil {
+	if _, err := o.parseCondition(); err != nil {
 		return Override{}, fmt.Errorf("validating override: %w", err)
 	}
 	return o, nil
@@ -176,7 +159,7 @@ func allowVPA(container, resourceType, reqOrLimits, value string) (Override, err
 		Value:     nil,
 		Condition: condition,
 	}
-	if _, err := o.validate(); err != nil {
+	if _, err := o.parseCondition(); err != nil {
 		return Override{}, fmt.Errorf("validating override: %w", err)
 	}
 	return o, nil
