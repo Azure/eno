@@ -1,0 +1,241 @@
+package sdk
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"reflect"
+
+	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/kubectl/pkg/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+// Inputs is satisfied by any struct that defines the inputs required by a SynthFunc.
+// Use the `eno_key` struct tag to specify the corresponding ref key for each input.
+// Each field must either be a client.Object or a custom type registered with AddCustomInputType.
+type Inputs any
+
+// MungableInputs is an optional interface that can be implemented by Inputs structs
+// if it is, it gets called after inputs are read. It can fail the whole
+// Synthesis.
+type MungableInputs interface {
+	Munge() error
+}
+
+// SynthFunc defines a synthesizer function that takes a set of inputs and returns a list of objects.
+type SynthFunc[T Inputs] func(inputs T) ([]client.Object, error)
+
+// Main is the entrypoint for Eno synthesizer processes written using the framework defined by this package.
+func Main[T Inputs](fn SynthFunc[T], opts ...Option) {
+	// Process options
+	options := &mainConfig{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	err := main(fn, options, os.Stdin, os.Stdout)
+	if err != nil {
+		panic(fmt.Sprintf("error while calling synthesizer function: %s", err))
+	}
+}
+
+func main[T Inputs](fn SynthFunc[T], options *mainConfig, r io.Reader, w io.Writer) error {
+	if options.scheme == nil {
+		options.scheme = scheme.Scheme
+	}
+
+	outputRL := krmv1.ResourceList{
+		Kind:       krmv1.ResourceListKind,
+		APIVersion: krmv1.SchemeGroupVersion.String(),
+		Items:      []*unstructured.Unstructured{},
+	}
+	inputRL := krmv1.ResourceList{}
+	err := json.NewDecoder(r).Decode(&inputRL)
+	if err != nil && !errors.Is(err, io.EOF) {
+		outputRL.Results = []*krmv1.Result{{
+			Message:  fmt.Sprintf("decoding stdin as krm resource list: %s", err),
+			Severity: krmv1.ResultSeverityError,
+		}}
+		return json.NewEncoder(w).Encode(&outputRL)
+	}
+
+	var inputs T
+	v := reflect.ValueOf(&inputs).Elem()
+	t := v.Type()
+
+	// Read the inputs
+	for i := 0; i < t.NumField(); i++ {
+		tagValue := t.Field(i).Tag.Get("eno_key")
+		if tagValue == "" {
+			continue
+		}
+
+		input, err := newInput(v.Field(i))
+		if err != nil {
+			return err
+		}
+
+		err = findInput(&inputRL, tagValue, input.Object)
+		if err != nil {
+			outputRL.Results = []*krmv1.Result{{
+				Message:  fmt.Sprintf("error while reading input with key %q: %s", tagValue, err),
+				Severity: krmv1.ResultSeverityError,
+			}}
+			return json.NewEncoder(w).Encode(&outputRL)
+		}
+
+		input.Finalize()
+	}
+
+	// Use reflection to check if inputs implements MungableInputs.
+	if v.CanAddr() {
+		if im, ok := v.Addr().Interface().(MungableInputs); ok {
+			err := im.Munge()
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	// Call the fn and handle errors through the KRM interface
+	outputs, err := fn(inputs)
+	if err != nil {
+		outputRL.Results = []*krmv1.Result{{
+			Message:  err.Error(),
+			Severity: krmv1.ResultSeverityError,
+		}}
+		return json.NewEncoder(w).Encode(&outputRL)
+	}
+
+	// Write the outputs
+	for _, out := range outputs {
+		if out == nil {
+			continue // shouldn't be possible
+		}
+
+		// Set GVK from the scheme if it wasn't set explicitly
+		if options.scheme != nil && out.GetObjectKind().GroupVersionKind().Empty() {
+			gvks, _, err := options.scheme.ObjectKinds(out)
+			if err == nil && len(gvks) > 0 {
+				out.GetObjectKind().SetGroupVersionKind(gvks[0])
+			}
+		}
+
+		// Convert to unstructured and apply and munge funcs
+		obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(out)
+		if err != nil {
+			outputRL.Results = []*krmv1.Result{{
+				Message:  fmt.Sprintf("converting %s %s to unstructured: %s", out.GetName(), out.GetObjectKind().GroupVersionKind().Kind, err),
+				Severity: krmv1.ResultSeverityError,
+			}}
+			return json.NewEncoder(w).Encode(&outputRL)
+		}
+		u := &unstructured.Unstructured{Object: obj}
+		for _, fn := range options.mungers {
+			fn(u)
+		}
+		outputRL.Items = append(outputRL.Items, u)
+	}
+
+	return json.NewEncoder(w).Encode(&outputRL)
+}
+
+var customInputSourceTypes = map[string]reflect.Type{}
+var customInputBindings = map[string]func(any) (any, error){}
+
+// AddCustomInputType allows types that do not implement client.Object to be used as fields of Inputs structs.
+func AddCustomInputType[Resource client.Object, Custom any](bind func(Resource) (Custom, error)) {
+	str := reflect.TypeOf(bind).Out(0).String()
+
+	// Map from custom type name to the underlying k8s input type
+	var res Resource
+	customInputSourceTypes[str] = reflect.TypeOf(res)
+
+	// Map from the custom type name to the binding function
+	customInputBindings[str] = func(in any) (any, error) {
+		return bind(in.(Resource))
+	}
+}
+
+type input struct {
+	Object client.Object
+	bindFn func(any) (any, error)
+	field  reflect.Value
+}
+
+func newInput(field reflect.Value) (*input, error) {
+	i := &input{field: field}
+
+	// Allocate values for nil pointers
+	if field.IsNil() {
+		if field.Kind() == reflect.Slice {
+			field.Set(reflect.MakeSlice(field.Type(), 0, 0))
+		} else {
+			field.Set(reflect.New(field.Type().Elem()))
+		}
+	}
+
+	// Pass through client.Object types
+	fieldVal := field.Interface()
+	if o, ok := fieldVal.(client.Object); ok {
+		i.Object = o
+		return i, nil
+	}
+
+	// Resolve custom input types back to their binding functions
+	name := field.Type().String()
+	inputSourceType, ok := customInputSourceTypes[name]
+	if !ok {
+		return nil, fmt.Errorf("custom input type %q has not been registered", name)
+	}
+
+	fieldVal = reflect.New(inputSourceType.Elem()).Interface()
+	i.Object = fieldVal.(client.Object)
+	i.bindFn = customInputBindings[name]
+	return i, nil
+}
+
+func (i *input) Finalize() error {
+	if i.bindFn == nil {
+		return nil
+	}
+
+	bound, err := i.bindFn(i.Object)
+	if err != nil {
+		return fmt.Errorf("error while binding custom input of type %T: %s", i.Object, err)
+	}
+
+	i.field.Set(reflect.ValueOf(bound))
+	return nil
+}
+
+func findInput[T client.Object](inputRL *krmv1.ResourceList, key string, out T) error {
+	var found bool
+	for _, i := range inputRL.Items {
+		i := i
+		if getKey(i) == key {
+			err := runtime.DefaultUnstructuredConverter.FromUnstructured(i.Object, out)
+			if err != nil {
+				return fmt.Errorf("converting item to Input: %w", err)
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("input %q was not found", key)
+	}
+	return nil
+}
+
+func getKey(obj client.Object) string {
+	if obj.GetAnnotations() == nil {
+		return ""
+	}
+	return obj.GetAnnotations()["eno.azure.io/input-key"]
+}
