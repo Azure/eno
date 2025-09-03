@@ -1,4 +1,4 @@
-package overrides_test
+package sdk_test
 
 import (
 	"encoding/json"
