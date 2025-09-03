@@ -1,78 +1,126 @@
-# Reconciliation
+# Resource Reconciliation
 
-Synthesized compositions are reconciled into real k8s resources by the `eno-reconciler` process.
+Reconciliation is the process where Eno continuously synchronizes your synthesized resources with the actual state in your Kubernetes cluster. The `eno-reconciler` process monitors for changes and automatically applies updates, handles deletions, and manages resource dependencies to keep your cluster in the desired state.
 
-## Opacity
+## What is Reconciliation?
 
-Eno is designed to treat the resources it manages as completely opaque - it doesn't "understand" their schema, infer dependencies, etc..
+When your synthesizer generates Kubernetes resources, reconciliation ensures those resources actually exist and match their intended configuration in your cluster. This includes:
 
-There is one exception to this rule: CRDs are always reconciled before CRs of the kind they define.
+- **Applying changes** when the actual state has diverged from the synthesized resources
+- **Deleting resources** when they've been removed from the composition
+- **Ordering operations** to respect dependencies between resources
+- **Reporting status** as feedback for the composition status
 
-## Updates
+Eno treats managed resources as **opaque** - it doesn't interpret their schemas or infer relationships between them.
+There is only one exception: CRDs are always reconciled before CRs that use them, since CRs can't exist without their definitions.
 
-By default, Eno uses [server-side apply](https://kubernetes.io/docs/reference/using-api/server-side-apply/) with `--force-conflicts=true` to write resources it manages.
+### Update Strategy
 
-Exceptions:
+By default, Eno uses [server-side apply](https://kubernetes.io/docs/reference/using-api/server-side-apply/) with conflict resolution to update resources:
 
-- The eno-reconciler process can fall back to client-side three-way merge patch by setting `--disable-ssa`
-- Merge can be disabled for a resource by setting the `eno.azure.io/replace: "true"` annotation (a full `update` request will be used instead of a `patch`)
-- All updates can be disabled for a resource by setting the `eno.azure.io/disable-updates: "true"` annotation
+> 💡 **Fallback option**: The reconciler can use client-side three-way merge by setting `--disable-ssa`
 
-## Deletion
-
-Resources are automatically deleted if they are no longer synthesized (returned by the synthesizer) for a given composition, or the composition was deleted.
-
-> Cascading resource cleanup caused by composition deletion can be disabled by setting the `eno.azure.io/deletion-strategy: orphan` annotation on the composition.
-
-## Drift Detection
-
-By default, resources are reconciled when their expected state changes or when `eno-reconciler` restarts.
-
-In some cases it's useful for the Eno reconciler to regularly sync a resource. 
-Syncing the resource will correct any drift, re-evaluate any conditional overrides, etc.
+**Alternative update strategies:**
 
 ```yaml
-annotations:
-  eno.azure.io/reconcile-interval: "15m" # supports any value parsable by Go's `time.ParseDuration`
+metadata:
+  annotations:
+    # Use full replacement instead of patches
+    eno.azure.io/replace: "true"
+    
+    # Prevent all updates to this resource
+    eno.azure.io/disable-updates: "true"
+
+    # Prevent any mutation of this resource
+    eno.azure.io/disable-reconciliation: "true"
 ```
 
-## Readiness
+### Automatic Deletion
 
-Readiness checks determine when resources are ready and control reconciliation order using CEL expressions.
-
-### Readiness Expressions
-
-Resources can include [CEL](https://github.com/google/cel-go) expressions used to determine their readiness.
+Resources are automatically cleaned up when:
+- They're no longer returned by your synthesizer
+- Their parent composition is deleted
 
 ```yaml
-annotations:
-  # Basic readiness check
-  eno.azure.io/readiness: self.status.foo == 'bar'
-
-  # Multiple checks are AND'd together (all must be true)
-  # The latest transition time determines the resource's ready timestamp.
-  eno.azure.io/readiness-custom: self.status.anotherField == 'ok'
-
-  # Return condition objects to use the precise timestamp from `lastTransitionTime`.
-  # Boolean `true` results use the controller's current system time when readiness is first detected.
-  eno.azure.io/readiness-condition: self.status.conditions.filter(item, item.type == 'Ready' && item.status == 'True')
+# Prevent cascading deletion
+metadata:
+  annotations:
+    eno.azure.io/deletion-strategy: orphan
 ```
+
+### Drift Detection and Correction
+
+By default, resources reconcile when their expected state changes or when the reconciler restarts. For resources that may drift or need regular evaluation:
+
+```yaml
+metadata:
+  annotations:
+    # Re-sync every 15 minutes to correct drift
+    eno.azure.io/reconcile-interval: "15m"
+```
+
+## Controlling Reconciliation Order
+
+### Readiness Checks
+
+Readiness checks determine when resources are considered "ready" and control the order of reconciliation operations. Eno uses [CEL (Common Expression Language)](https://github.com/google/cel-go) expressions to evaluate resource readiness.
+
+#### Basic Readiness
+
+```yaml
+metadata:
+  annotations:
+    # Wait for a specific status field
+    eno.azure.io/readiness: self.status.foo == 'bar'
+```
+
+#### Multiple Readiness Conditions
+
+You can define multiple readiness checks - all must be true for the resource to be considered ready:
+
+```yaml
+metadata:
+  annotations:
+    # Primary readiness check
+    eno.azure.io/readiness: self.status.foo == 'bar'
+    
+    # Additional check (both must pass)
+    eno.azure.io/readiness-foo: self.status.anotherField == 'ok'
+```
+
+> 💡 **Note**: When multiple checks are used, the latest transition time determines when the resource became ready.
+
+#### Condition-Based Readiness
+
+For precise timing, return condition objects that include `lastTransitionTime`:
+
+```yaml
+metadata:
+  annotations:
+    # Use the condition's exact timestamp
+    eno.azure.io/readiness-condition: |
+      self.status.conditions.filter(item, 
+        item.type == 'Ready' && item.status == 'True'
+      )
+```
+
+> 💡 **Note**: Boolean `true` results use the current system time when readiness is first detected, while condition objects use their `lastTransitionTime` field.
 
 ### Readiness Groups
 
-Assign resources to numbered groups to control reconciliation order:
+Control reconciliation order by assigning resources to numbered groups:
 
 ```yaml
-annotations:
-  eno.azure.io/readiness-group: "1"
+metadata:
+  annotations:
+    eno.azure.io/readiness-group: "1"
 ```
 
-#### Behavior
+#### How Groups Work
 
-- Resources without `eno.azure.io/readiness-group` default to group `0`
-- Lower-numbered groups reconcile first: `-2` → `-1` → `0` → `1` → `2`
-- Group `N+1` resources wait until all group `N` resources are ready
-
+- **Default group**: Resources without `readiness-group` are in group `0`
+- **Ordering**: Lower numbers reconcile first: `-2` → `-1` → `0` → `1` → `2`
+- **Dependencies**: Group `N+1` waits for all group `N` resources to be ready
 
 ## Advanced Concepts
 
