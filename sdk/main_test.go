@@ -1,4 +1,4 @@
-package function
+package sdk
 
 import (
 	"bytes"
@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -136,19 +135,6 @@ func TestMainError(t *testing.T) {
 
 	require.NoError(t, main(fn, &mainConfig{}, inBuf, outBuf))
 	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[],\"results\":[{\"message\":\"foobar\",\"severity\":\"error\"}]}\n", outBuf.String())
-}
-
-func ExampleMain_withMungers() {
-	// Example using precreted mungers
-	fn := func(inputs struct{}) ([]client.Object, error) {
-		output := &corev1.Pod{}
-		output.Name = "test-pod"
-		return []client.Object{output}, nil
-	}
-
-	//stdout of main will be compared with output comment below becausse this is an example
-	Main(fn, WithManagedByEno(), WithReconcilationInterval(time.Minute))
-	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"annotations":{"eno.azure.io/reconcile-interval":"1m0s"},"labels":{"app.kubernetes.io/managed-by":"Eno"},"name":"test-pod"},"spec":{"containers":null},"status":{}}]}
 }
 
 type testSimpleInputs struct {
