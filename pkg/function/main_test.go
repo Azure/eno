@@ -67,6 +67,37 @@ func ExampleAddCustomInputType() {
 	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"name":"foobar\n"},"spec":{"containers":null},"status":{}}]}
 }
 
+func ExampleAddCustomInputType_map() {
+	type myType struct {
+		SecretKey string
+	}
+
+	AddCustomInputType(func(in *corev1.Secret) (map[string]*myType, error) {
+		m := make(map[string]*myType, len(in.Data))
+		for k, v := range in.Data {
+			m[k] = &myType{
+				SecretKey: string(v),
+			}
+		}
+
+		return m, nil
+	})
+
+	type exampleInputs struct {
+		CustomInputs map[string]*myType `eno_key:"test-secret"`
+	}
+
+	fn := func(inputs exampleInputs) ([]client.Object, error) {
+		output := &corev1.Pod{}
+		output.Name = string(inputs.CustomInputs["key"].SecretKey)
+		return []client.Object{output}, nil
+	}
+
+	ir := newTestInputReader()
+	main(fn, &mainConfig{}, ir, NewDefaultOutputWriter())
+	// Output: {"apiVersion":"config.kubernetes.io/v1","kind":"ResourceList","items":[{"apiVersion":"v1","kind":"Pod","metadata":{"name":"foobar\n"},"spec":{"containers":null},"status":{}}]}
+}
+
 func ExampleAddCustomInputType_slice() {
 	type myType struct {
 		SecretKey string
