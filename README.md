@@ -15,11 +15,9 @@ Just print JSON objects to stdout and Eno will handle the rest.
 
 ## Docs
 
-- [Synthesis](./docs/synthesis)
-- [Reconciliation](./docs/reconciliation)
-- [Symphony](./docs/symphony)
-- [Synthesizer API](./docs/synthesizer-api.md)
-- [Generated API Docs](./docs/api.md)
+- [Synthesis](./docs/synthesis.md)
+- [Reconciliation](./docs/reconciliation.md)
+- [Symphony](./docs/symphony.md)
 
 ## Getting Started
 
