@@ -32,6 +32,7 @@ func registerControllers(t *testing.T, mgr *testutil.Manager) {
 	require.NoError(t, resourceslice.NewController(mgr.Manager))
 	require.NoError(t, resourceslice.NewCleanupController(mgr.Manager))
 	require.NoError(t, composition.NewController(mgr.Manager, time.Second))
+	require.NoError(t, composition.NewStatusLogger(mgr.Manager, time.Second*10))
 	require.NoError(t, symphony.NewController(mgr.Manager))
 }
 
