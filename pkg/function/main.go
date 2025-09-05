@@ -135,9 +135,12 @@ func newInput(ir *InputReader, field reflect.Value) (*input, error) {
 
 	// Allocate values for nil pointers
 	if field.IsNil() {
-		if field.Kind() == reflect.Slice {
+		switch field.Kind() {
+		case reflect.Map:
+			field.Set(reflect.MakeMap(field.Type()))
+		case reflect.Slice:
 			field.Set(reflect.MakeSlice(field.Type(), 0, 0))
-		} else {
+		default:
 			field.Set(reflect.New(field.Type().Elem()))
 		}
 	}
