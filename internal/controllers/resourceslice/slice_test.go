@@ -426,6 +426,26 @@ func TestFuzzProcessCompositionTransition(t *testing.T) {
 			c.Snapshot.ReadyTime = &metav1.Time{}
 			return c
 		}).
+		WithMutation("simplified status exists", func(c *compositionTransitionTest) *compositionTransitionTest {
+			c.Composition.Status.Simplified = &apiv1.SimplifiedStatus{}
+			return c
+		}).
+		WithMutation("simplified status is in reconciling state", func(c *compositionTransitionTest) *compositionTransitionTest {
+			if s := c.Composition.Status.Simplified; s != nil {
+				s.Status = "Reconciling"
+			}
+			return c
+		}).
+		WithMutation("simplified status has error", func(c *compositionTransitionTest) *compositionTransitionTest {
+			if s := c.Composition.Status.Simplified; s != nil {
+				s.Error = "existing error"
+			}
+			return c
+		}).
+		WithMutation("snapshot has error", func(c *compositionTransitionTest) *compositionTransitionTest {
+			c.Snapshot.Error = "snapshot error"
+			return c
+		}).
 		WithInvariant("modified when state has transitioned", func(state *compositionTransitionTest, result bool) bool {
 			syn := state.Composition.Status.CurrentSynthesis
 			if syn == nil {
@@ -433,7 +453,13 @@ func TestFuzzProcessCompositionTransition(t *testing.T) {
 			}
 			readinessTransition := state.Snapshot.Ready != (syn.Ready != nil)
 			reconciledTransition := state.Snapshot.Reconciled != (syn.Reconciled != nil)
-			return result == (readinessTransition || reconciledTransition)
+
+			errorTransition := false
+			if s := state.Composition.Status.Simplified; s != nil && s.Status == "Reconciling" {
+				errorTransition = s.Error != state.Snapshot.Error
+			}
+
+			return result == (readinessTransition || reconciledTransition || errorTransition)
 		}).
 		Evaluate(t)
 }

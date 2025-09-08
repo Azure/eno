@@ -2,6 +2,7 @@ package reconciliation
 
 import (
 	"context"
+	goerrors "errors"
 	"fmt"
 	"strings"
 	"time"
@@ -166,6 +167,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	modified, err := c.reconcileResource(ctx, comp, prev, snap, current)
 	if err != nil {
 		logger.Error(err, "failed to reconcile resource")
+		c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceError(err))
 		return ctrl.Result{}, err
 	}
 	if modified {
@@ -199,7 +201,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		reconciliationActions.WithLabelValues("delete").Inc()
 		err := c.upstreamClient.Delete(ctx, current)
 		if err != nil {
-			return true, client.IgnoreNotFound(fmt.Errorf("deleting resource: %w", err))
+			return true, client.IgnoreNotFound(err)
 		}
 		logger.V(0).Info("deleted resource")
 		return true, nil
@@ -219,7 +221,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		reconciliationActions.WithLabelValues("create").Inc()
 		err := c.upstreamClient.Create(ctx, res.Unstructured())
 		if err != nil {
-			return false, fmt.Errorf("creating resource: %w", err)
+			return false, err
 		}
 		logger.V(0).Info("created resource")
 		return true, nil
@@ -239,7 +241,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		updated := current.DeepCopy()
 		err := c.upstreamClient.Patch(ctx, updated, client.RawPatch(types.JSONPatchType, patchJson))
 		if err != nil {
-			return false, fmt.Errorf("applying patch: %w", err)
+			return false, err
 		}
 		if updated.GetResourceVersion() == current.GetResourceVersion() {
 			logger.V(0).Info("resource didn't change after patch")
@@ -253,7 +255,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	if !c.disableSSA {
 		dryRun, err := c.update(ctx, comp, prev, res, current, true)
 		if err != nil {
-			return false, fmt.Errorf("dry-run applying update: %w", err)
+			return false, fmt.Errorf("(dry-run): %w", err)
 		}
 		if resource.Compare(dryRun, current) {
 			return false, nil // in sync
@@ -290,7 +292,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	reconciliationActions.WithLabelValues("apply").Inc()
 	updated, err := c.update(ctx, comp, prev, res, current, false)
 	if err != nil {
-		return false, fmt.Errorf("applying update: %w", err)
+		return false, err
 	}
 	if current != nil && updated.GetResourceVersion() == current.GetResourceVersion() {
 		logger.V(0).Info("resource didn't change after update")
@@ -393,6 +395,48 @@ func patchResourceState(deleted bool, ready *metav1.Time) flowcontrol.StatusPatc
 			Ready:      ready,
 			Reconciled: true,
 		}
+	}
+}
+
+func patchResourceError(err error) flowcontrol.StatusPatchFn {
+	return func(rs *apiv1.ResourceState) *apiv1.ResourceState {
+		str := summarizeError(err)
+		if rs != nil && (rs.Reconciled || (rs.ReconciliationError != nil && *rs.ReconciliationError == str)) {
+			return nil
+		}
+		return &apiv1.ResourceState{
+			Reconciled:          rs.Reconciled,
+			Ready:               rs.Ready,
+			Deleted:             rs.Deleted,
+			ReconciliationError: &str,
+		}
+	}
+}
+
+func summarizeError(err error) string {
+	statusErr := &errors.StatusError{}
+	if err == nil || !goerrors.As(err, &statusErr) {
+		return ""
+	}
+	status := statusErr.Status()
+
+	// SSA is sloppy with the status codes
+	if msg, cut := strings.CutPrefix(status.Message, "failed to create typed patch object "); cut && status.Code == 500 {
+		return msg
+	}
+
+	switch status.Reason {
+	case metav1.StatusReasonBadRequest,
+		metav1.StatusReasonNotAcceptable,
+		metav1.StatusReasonRequestEntityTooLarge,
+		metav1.StatusReasonMethodNotAllowed,
+		metav1.StatusReasonGone,
+		metav1.StatusReasonForbidden,
+		metav1.StatusReasonUnauthorized:
+		return status.Message
+
+	default:
+		return ""
 	}
 }
 

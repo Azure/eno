@@ -65,6 +65,8 @@ spec:
                       type: string
                     reconciled:
                       type: boolean
+                    reconciliationError:
+                      type: string
                   type: object
                 type: array
             type: object

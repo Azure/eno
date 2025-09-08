@@ -89,6 +89,10 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			if state.Ready != nil && (snapshot.ReadyTime == nil || state.Ready.After(snapshot.ReadyTime.Time)) {
 				snapshot.ReadyTime = state.Ready
 			}
+			if e := state.ReconciliationError; e != nil {
+				// TODO: Agg?
+				snapshot.Error = max(*e, snapshot.Error)
+			}
 		}
 	}
 
@@ -153,8 +157,19 @@ func (s *sliceController) handleMissingSlice(ctx context.Context, comp *apiv1.Co
 func processCompositionTransition(ctx context.Context, comp *apiv1.Composition, snapshot statusSnapshot) (modified bool) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	if comp.Status.CurrentSynthesis == nil || ((comp.Status.CurrentSynthesis.Reconciled != nil) == snapshot.Reconciled && (comp.Status.CurrentSynthesis.Ready != nil) == snapshot.Ready) {
+	synthesisMatches := comp.Status.CurrentSynthesis == nil || ((comp.Status.CurrentSynthesis.Reconciled != nil) == snapshot.Reconciled && (comp.Status.CurrentSynthesis.Ready != nil) == snapshot.Ready)
+	errorsMatch := comp.Status.Simplified == nil || comp.Status.Simplified.Status != "Reconciling" || comp.Status.Simplified.Error == snapshot.Error
+	if synthesisMatches && errorsMatch {
 		return false // either no change or no synthesis yet
+	}
+
+	// The composition's simplified error message is owned by this controller while the synthesis is being reconciled
+	if comp.Status.Simplified != nil && comp.Status.Simplified.Status == "Reconciling" {
+		comp.Status.Simplified.Error = snapshot.Error
+	}
+
+	if comp.Status.CurrentSynthesis == nil {
+		return true // nothing else to do
 	}
 
 	// Empty compositions should logically become ready immediately after reconciliation
@@ -181,6 +196,7 @@ type statusSnapshot struct {
 	Reconciled bool
 	Ready      bool
 	ReadyTime  *metav1.Time
+	Error      string
 }
 
 func (s *statusSnapshot) GetReconciled(comp *apiv1.Composition, now *metav1.Time, logger logr.Logger) *metav1.Time {
