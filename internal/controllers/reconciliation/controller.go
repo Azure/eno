@@ -35,7 +35,8 @@ type Options struct {
 	Downstream       *rest.Config
 	ResourceSelector labels.Selector
 
-	DisableServerSideApply bool
+	DisableServerSideApply     bool
+	DisableReconciliationCheck bool
 
 	Timeout               time.Duration
 	ReadinessPollInterval time.Duration
@@ -52,6 +53,7 @@ type Controller struct {
 	upstreamClient        client.Client
 	minReconcileInterval  time.Duration
 	disableSSA            bool
+	optimistic            bool
 }
 
 func New(mgr ctrl.Manager, opts Options) error {
@@ -77,6 +79,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 		upstreamClient:        upstreamClient,
 		minReconcileInterval:  opts.MinReconcileInterval,
 		disableSSA:            opts.DisableServerSideApply,
+		optimistic:            opts.DisableReconciliationCheck,
 	}
 
 	return builder.TypedControllerManagedBy[resource.Request](mgr).
@@ -167,8 +170,12 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	modified, err := c.reconcileResource(ctx, comp, prev, snap, current)
 	if err != nil {
 		logger.Error(err, "failed to reconcile resource")
-		c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceError(err))
-		return ctrl.Result{}, err
+
+		// Continue to mark the resource as Reconciled if we're in optimistic mode
+		if !c.optimistic {
+			c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceError(err))
+			return ctrl.Result{}, err
+		}
 	}
 	if modified {
 		return ctrl.Result{Requeue: true}, nil
