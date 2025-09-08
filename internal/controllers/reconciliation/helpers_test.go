@@ -74,8 +74,10 @@ func setupTestSubjectForOptions(t *testing.T, mgr *testutil.Manager, opts Option
 	queue := workqueue.NewTypedRateLimitingQueue(rateLimiter)
 	cache.SetQueue(queue)
 
-	opts.Downstream = rest.CopyConfig(mgr.DownstreamRestConfig)
-	opts.Downstream.QPS = 200 // minimal throttling for the tests
+	if opts.Downstream == nil {
+		opts.Downstream = rest.CopyConfig(mgr.DownstreamRestConfig)
+		opts.Downstream.QPS = 200 // minimal throttling for the tests
+	}
 
 	err := New(mgr.Manager, opts)
 	require.NoError(t, err)
