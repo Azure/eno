@@ -2,6 +2,7 @@ package reconciliation
 
 import (
 	"context"
+	goerrors "errors"
 	"fmt"
 	"strings"
 	"time"
@@ -166,6 +167,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	modified, err := c.reconcileResource(ctx, comp, prev, snap, current)
 	if err != nil {
 		logger.Error(err, "failed to reconcile resource")
+		c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceError(err))
 		return ctrl.Result{}, err
 	}
 	if modified {
@@ -393,6 +395,48 @@ func patchResourceState(deleted bool, ready *metav1.Time) flowcontrol.StatusPatc
 			Ready:      ready,
 			Reconciled: true,
 		}
+	}
+}
+
+func patchResourceError(err error) flowcontrol.StatusPatchFn {
+	return func(rs *apiv1.ResourceState) *apiv1.ResourceState {
+		str := summarizeError(err)
+		if rs != nil && (rs.Reconciled || (rs.ReconciliationError != nil && *rs.ReconciliationError == str)) {
+			return nil
+		}
+		return &apiv1.ResourceState{
+			Reconciled:          rs.Reconciled,
+			Ready:               rs.Ready,
+			Deleted:             rs.Deleted,
+			ReconciliationError: &str,
+		}
+	}
+}
+
+func summarizeError(err error) string {
+	statusErr := &errors.StatusError{}
+	if err == nil || !goerrors.As(err, &statusErr) {
+		return ""
+	}
+	status := statusErr.Status()
+
+	// SSA is sloppy with the status codes
+	if spl := strings.SplitAfter(status.Message, "failed to create typed patch object"); len(spl) > 1 {
+		return strings.TrimSpace(spl[1])
+	}
+
+	switch status.Reason {
+	case metav1.StatusReasonBadRequest,
+		metav1.StatusReasonNotAcceptable,
+		metav1.StatusReasonRequestEntityTooLarge,
+		metav1.StatusReasonMethodNotAllowed,
+		metav1.StatusReasonGone,
+		metav1.StatusReasonForbidden,
+		metav1.StatusReasonUnauthorized:
+		return status.Message
+
+	default:
+		return ""
 	}
 }
 
