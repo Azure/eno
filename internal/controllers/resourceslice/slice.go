@@ -89,8 +89,8 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			if state.Ready != nil && (snapshot.ReadyTime == nil || state.Ready.After(snapshot.ReadyTime.Time)) {
 				snapshot.ReadyTime = state.Ready
 			}
-			if e := state.ReconciliationError; e != nil {
-				snapshot.Error = max(*e, snapshot.Error)
+			if e := state.ReconciliationError; e != nil && (snapshot.Error == "" || *e > snapshot.Error) {
+				snapshot.Error = *e
 			}
 		}
 	}
