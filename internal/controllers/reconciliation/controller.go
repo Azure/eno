@@ -132,40 +132,13 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		prev, _, _ = c.resourceClient.Get(ctx, syn.UUID, req.Resource)
 	}
 
-	// Fetch the current resource
-	current, err := c.getCurrent(ctx, resource)
-	if client.IgnoreNotFound(err) != nil && !isErrMissingNS(err) && !isErrNoKindMatch(err) {
-		logger.Error(err, "failed to get current state")
-		return ctrl.Result{}, err
+	snap, current, ready, modified, err := c.reconcileResource(ctx, comp, prev, resource)
+	if c.optimistic {
+		err = nil
+		modified = false
 	}
-
-	// Evaluate resource readiness
-	// - Readiness checks are skipped when this version of the resource's desired state has already become ready
-	// - Readiness checks are skipped when the resource hasn't changed since the last check
-	// - Readiness defaults to true if no checks are given
-	var ready *metav1.Time
-	status := resource.State()
-	if status == nil || status.Ready == nil {
-		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, &apiv1.Composition{}, current)
-		if ok {
-			ready = &readiness.ReadyTime
-		}
-	} else {
-		ready = status.Ready
-	}
-
-	snap, err := resource.Snapshot(ctx, comp, current)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to create resource snapshot: %w", err)
-	}
-	if status := snap.OverrideStatus(); len(status) > 0 {
-		logger = logger.WithValues("overrideStatus", status)
-		ctx = logr.NewContext(ctx, logger)
-	}
-
-	modified, err := c.reconcileResource(ctx, comp, prev, snap, current)
-	if err != nil {
-		logger.Error(err, "failed to reconcile resource")
+		c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceError(err))
 		return ctrl.Result{}, err
 	}
 	if modified {
@@ -180,7 +153,47 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	return c.requeue(logger, comp, snap, ready)
 }
 
-func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composition, prev *resource.Resource, res *resource.Snapshot, current *unstructured.Unstructured) (bool, error) {
+func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composition, prev *resource.Resource, resource *resource.Resource) (snap *resource.Snapshot, current *unstructured.Unstructured, ready *metav1.Time, modified bool, err error) {
+	logger := logr.FromContextOrDiscard(ctx)
+
+	// Fetch the current resource
+	current, err = c.getCurrent(ctx, resource)
+	if client.IgnoreNotFound(err) != nil && !isErrMissingNS(err) && !isErrNoKindMatch(err) {
+		logger.Error(err, "failed to get current state")
+		return nil, nil, nil, false, err
+	}
+
+	// Evaluate resource readiness
+	// - Readiness checks are skipped when this version of the resource's desired state has already become ready
+	// - Readiness checks are skipped when the resource hasn't changed since the last check
+	// - Readiness defaults to true if no checks are given
+	status := resource.State()
+	if status == nil || status.Ready == nil {
+		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, &apiv1.Composition{}, current)
+		if ok {
+			ready = &readiness.ReadyTime
+		}
+	} else {
+		ready = status.Ready
+	}
+
+	snap, err = resource.Snapshot(ctx, comp, current)
+	if err != nil {
+		return nil, nil, nil, false, fmt.Errorf("failed to create resource snapshot: %w", err)
+	}
+	if status := snap.OverrideStatus(); len(status) > 0 {
+		logger = logger.WithValues("overrideStatus", status)
+		ctx = logr.NewContext(ctx, logger)
+	}
+
+	modified, err = c.reconcileSnapshot(ctx, comp, prev, snap, current)
+	if err != nil {
+		logger.Error(err, "failed to reconcile resource")
+	}
+	return snap, current, ready, modified, err
+}
+
+func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composition, prev *resource.Resource, res *resource.Snapshot, current *unstructured.Unstructured) (bool, error) {
 	if res.Disable {
 		return false, nil
 	}
