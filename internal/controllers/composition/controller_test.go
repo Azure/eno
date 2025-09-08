@@ -210,6 +210,10 @@ func TestSimplifiedStatus(t *testing.T) {
 			}
 			return state
 		}).
+		WithMutation("with simplified status error", func(state *simplifiedStatusState) *simplifiedStatusState {
+			state.Comp.Status.Simplified = &apiv1.SimplifiedStatus{Error: "Previous reconciliation error"}
+			return state
+		}).
 		WithInvariant("missing synth", func(state *simplifiedStatusState, result *apiv1.SimplifiedStatus) bool {
 			return state.Comp.DeletionTimestamp != nil || state.Synth != nil || result.Status == "MissingSynthesizer"
 		}).
@@ -250,6 +254,12 @@ func TestSimplifiedStatus(t *testing.T) {
 				state.Comp.Status.CurrentSynthesis == nil ||
 				state.Comp.Status.CurrentSynthesis.Ready == nil ||
 				result.Status == "Ready"
+		}).
+		WithInvariant("reconciling preserves error", func(state *simplifiedStatusState, result *apiv1.SimplifiedStatus) bool {
+			return result.Status != "Reconciling" ||
+				state.Comp.Status.Simplified == nil ||
+				state.Comp.Status.Simplified.Error == "" ||
+				result.Error == state.Comp.Status.Simplified.Error
 		}).
 		Evaluate(t)
 }

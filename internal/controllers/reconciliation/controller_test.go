@@ -1,6 +1,7 @@
 package reconciliation
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -11,7 +12,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -108,4 +111,34 @@ func TestBuildNonStrategicPatch_NilPrevious(t *testing.T) {
 		"added":    "value",
 		"original": "value",
 	}, actual.Data)
+}
+
+func TestSummarizeError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"nil", nil, ""},
+		{"non-api", errors.New("test"), "test"},
+		{"non-api-64", errors.New("this error message has exactly sixty four chars for edge testing"), "this error message has exactly sixty four chars for edge testing"},
+		{"non-api-long", errors.New("very long error message that exceeds the sixty four character limit for messages"), "very long error message that exceeds the sixty four character li"},
+		{"conflict", k8serrors.NewConflict(schema.GroupResource{Group: "", Resource: "test"}, "", nil), ""},
+		{"bad-request", &k8serrors.StatusError{ErrStatus: metav1.Status{Reason: metav1.StatusReasonBadRequest, Message: "bad"}}, "bad"},
+		{"not-acceptable", &k8serrors.StatusError{ErrStatus: metav1.Status{Reason: metav1.StatusReasonNotAcceptable, Message: "not ok"}}, "not ok"},
+		{"too-large", &k8serrors.StatusError{ErrStatus: metav1.Status{Reason: metav1.StatusReasonRequestEntityTooLarge, Message: "big"}}, "big"},
+		{"method-not-allowed", &k8serrors.StatusError{ErrStatus: metav1.Status{Reason: metav1.StatusReasonMethodNotAllowed, Message: "no"}}, "no"},
+		{"too-many-requests", &k8serrors.StatusError{ErrStatus: metav1.Status{Reason: metav1.StatusReasonTooManyRequests, Message: "slow"}}, "slow"},
+		{"gone", &k8serrors.StatusError{ErrStatus: metav1.Status{Reason: metav1.StatusReasonGone, Message: "bye"}}, "bye"},
+		{"not-found", &k8serrors.StatusError{ErrStatus: metav1.Status{Reason: metav1.StatusReasonNotFound, Message: "missing"}}, "missing"},
+		{"forbidden", &k8serrors.StatusError{ErrStatus: metav1.Status{Reason: metav1.StatusReasonForbidden, Message: "nope"}}, "nope"},
+		{"unauthorized", &k8serrors.StatusError{ErrStatus: metav1.Status{Reason: metav1.StatusReasonUnauthorized, Message: "denied"}}, "denied"},
+		{"server-error", &k8serrors.StatusError{ErrStatus: metav1.Status{Reason: metav1.StatusReasonInternalError, Message: "internal"}}, "apiserver error, see eno-reconciler logs for details"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, summarizeError(tt.err))
+		})
+	}
 }
