@@ -421,8 +421,8 @@ func summarizeError(err error) string {
 	status := statusErr.Status()
 
 	// SSA is sloppy with the status codes
-	if msg, cut := strings.CutPrefix(status.Message, "failed to create typed patch object "); cut {
-		return msg
+	if strings.Contains(status.Message, "failed to create typed patch object") {
+		return strings.SplitAfter(status.Message, "failed to create typed patch object ")[1]
 	}
 
 	switch status.Reason {
