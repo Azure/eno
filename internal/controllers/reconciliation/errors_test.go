@@ -61,7 +61,9 @@ func TestErrorReporting(t *testing.T) {
 
 	testutil.Eventually(t, func() bool {
 		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.Simplified != nil && comp.Status.Simplified.Error == "" && comp.Status.CurrentSynthesis.Ready != nil
+		return err == nil &&
+			comp.Status.Simplified != nil && comp.Status.Simplified.Error == "" &&
+			comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
 	})
 }
 
