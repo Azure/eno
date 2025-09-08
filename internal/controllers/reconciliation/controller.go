@@ -201,7 +201,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		reconciliationActions.WithLabelValues("delete").Inc()
 		err := c.upstreamClient.Delete(ctx, current)
 		if err != nil {
-			return true, client.IgnoreNotFound(err)
+			return true, client.IgnoreNotFound(fmt.Errorf("deleting resource: %w", err))
 		}
 		logger.V(0).Info("deleted resource")
 		return true, nil
@@ -221,7 +221,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		reconciliationActions.WithLabelValues("create").Inc()
 		err := c.upstreamClient.Create(ctx, res.Unstructured())
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("creating resource: %w", err)
 		}
 		logger.V(0).Info("created resource")
 		return true, nil
@@ -241,7 +241,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		updated := current.DeepCopy()
 		err := c.upstreamClient.Patch(ctx, updated, client.RawPatch(types.JSONPatchType, patchJson))
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("applying patch: %w", err)
 		}
 		if updated.GetResourceVersion() == current.GetResourceVersion() {
 			logger.V(0).Info("resource didn't change after patch")
@@ -255,7 +255,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	if !c.disableSSA {
 		dryRun, err := c.update(ctx, comp, prev, res, current, true)
 		if err != nil {
-			return false, fmt.Errorf("(dry-run): %w", err)
+			return false, fmt.Errorf("dry-run applying update: %w", err)
 		}
 		if resource.Compare(dryRun, current) {
 			return false, nil // in sync
@@ -292,7 +292,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	reconciliationActions.WithLabelValues("apply").Inc()
 	updated, err := c.update(ctx, comp, prev, res, current, false)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("applying update: %w", err)
 	}
 	if current != nil && updated.GetResourceVersion() == current.GetResourceVersion() {
 		logger.V(0).Info("resource didn't change after update")
