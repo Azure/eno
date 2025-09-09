@@ -393,5 +393,5 @@ func TestSymphonyOptionalVariation(t *testing.T) {
 	obj := &corev1.ConfigMap{}
 	obj.SetName("test-obj")
 	obj.SetNamespace("default")
-	assert.NoError(t, upstream.Get(ctx, client.ObjectKeyFromObject(obj), obj))
+	assert.NoError(t, mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(obj), obj))
 }
