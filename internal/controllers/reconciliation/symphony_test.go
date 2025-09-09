@@ -343,3 +343,55 @@ func TestSymphonyDeletionOrphaning(t *testing.T) {
 		return mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(obj), obj) == nil
 	})
 }
+
+func TestSymphonyOptionalVariation(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]string{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+				"data": map[string]string{"foo": "bar"},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "anything"
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	symph := &apiv1.Symphony{}
+	symph.Name = "test-comp"
+	symph.Namespace = "default"
+	symph.Spec.Variations = []apiv1.Variation{
+		{Synthesizer: apiv1.SynthesizerRef{Name: syn.Name}},
+		{Optional: true, Synthesizer: apiv1.SynthesizerRef{Name: "does-not-exist"}},
+	}
+	require.NoError(t, upstream.Create(ctx, symph))
+
+	// Symphony should still become ready
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(symph), symph)
+		return err == nil && symph.Status.Ready != nil && symph.Status.ObservedGeneration == symph.Generation
+	})
+
+	// The resource should exist
+	obj := &corev1.ConfigMap{}
+	obj.SetName("test-obj")
+	obj.SetNamespace("default")
+	assert.NoError(t, upstream.Get(ctx, client.ObjectKeyFromObject(obj), obj))
+}

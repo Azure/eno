@@ -285,8 +285,20 @@ func (c *symphonyController) buildStatus(symph *apiv1.Symphony, comps *apiv1.Com
 		ObservedGeneration: symph.Generation,
 	}
 	synthMap := map[string]struct{}{}
+
+	optionalSynths := make(map[string]struct{})
+	for _, variation := range symph.Spec.Variations {
+		if variation.Optional {
+			optionalSynths[variation.Synthesizer.Name] = struct{}{}
+		}
+	}
+
 	for _, comp := range comps.Items {
 		synthMap[comp.Spec.Synthesizer.Name] = struct{}{}
+
+		if _, ok := optionalSynths[comp.Spec.Synthesizer.Name]; ok {
+			continue
+		}
 
 		syn := comp.Status.CurrentSynthesis
 		if syn == nil {
@@ -306,6 +318,10 @@ func (c *symphonyController) buildStatus(symph *apiv1.Symphony, comps *apiv1.Com
 
 	// Status should be nil for any states that haven't been reached by all compositions
 	for _, comp := range comps.Items {
+		if _, ok := optionalSynths[comp.Spec.Synthesizer.Name]; ok {
+			continue
+		}
+
 		syn := comp.Status.CurrentSynthesis
 		synInvalid := syn == nil || syn.ObservedCompositionGeneration != comp.Generation || comp.DeletionTimestamp != nil
 
