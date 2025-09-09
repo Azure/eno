@@ -67,4 +67,8 @@ type Variation struct {
 	// It gets merged with the Symhony environment and takes precedence over it.
 	// +kubebuilder:validation:MaxItems:=25
 	SynthesisEnv []EnvVar `json:"synthesisEnv,omitempty"`
+
+	// Optional indicates that this variation should not block the symphony status
+	// when it fails to synthesize, reconcile, or become ready.
+	Optional bool `json:"optional,omitempty"`
 }
