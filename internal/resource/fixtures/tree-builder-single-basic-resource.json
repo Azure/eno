@@ -2,6 +2,8 @@
   "(test.group.TestKind)/default/test-resource": {
     "dependencies": [],
     "dependents": [],
+    "deletionDependencies": [],
+    "deletionDependents": [],
     "ready": false,
     "reconciled": false
   }

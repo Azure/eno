@@ -7,7 +7,9 @@
       "(test.group.TestKind)/default/test-crd"
     ],
     "ready": false,
-    "reconciled": false
+    "reconciled": false,
+    "deletionDependencies": [],
+    "deletionDependents": []
   },
   "(test.group.TestKind)/default/test-crd": {
     "dependencies": [
@@ -17,6 +19,8 @@
       "(test.group.TestKind)/default/test-cr"
     ],
     "ready": false,
-    "reconciled": false
+    "reconciled": false,
+    "deletionDependencies": [],
+    "deletionDependents": []
   }
 }

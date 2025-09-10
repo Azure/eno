@@ -4,6 +4,8 @@
       "(test.group.TestKind)/default/test-crd"
     ],
     "dependents": [],
+    "deletionDependencies": [],
+    "deletionDependents": [],
     "ready": false,
     "reconciled": false
   },
@@ -12,6 +14,8 @@
     "dependents": [
       "(test.group.TestKind)/default/test-cr"
     ],
+    "deletionDependencies": [],
+    "deletionDependents": [],
     "ready": false,
     "reconciled": false
   }

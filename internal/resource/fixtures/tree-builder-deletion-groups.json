@@ -1,0 +1,52 @@
+{
+  "(test.group.TestKind)/default/test-deletion-default": {
+    "deletionDependencies": [
+      "(test.group.TestKind)/default/test-deletion-high",
+      "(test.group.TestKind)/default/test-deletion-medium"
+    ],
+    "deletionDependents": [
+      "(test.group.TestKind)/default/test-deletion-low"
+    ],
+    "dependencies": [],
+    "dependents": [],
+    "ready": false,
+    "reconciled": false
+  },
+  "(test.group.TestKind)/default/test-deletion-high": {
+    "deletionDependencies": [],
+    "deletionDependents": [
+      "(test.group.TestKind)/default/test-deletion-default",
+      "(test.group.TestKind)/default/test-deletion-low",
+      "(test.group.TestKind)/default/test-deletion-medium"
+    ],
+    "dependencies": [],
+    "dependents": [],
+    "ready": false,
+    "reconciled": false
+  },
+  "(test.group.TestKind)/default/test-deletion-low": {
+    "deletionDependencies": [
+      "(test.group.TestKind)/default/test-deletion-default",
+      "(test.group.TestKind)/default/test-deletion-high",
+      "(test.group.TestKind)/default/test-deletion-medium"
+    ],
+    "deletionDependents": [],
+    "dependencies": [],
+    "dependents": [],
+    "ready": false,
+    "reconciled": false
+  },
+  "(test.group.TestKind)/default/test-deletion-medium": {
+    "deletionDependencies": [
+      "(test.group.TestKind)/default/test-deletion-high"
+    ],
+    "deletionDependents": [
+      "(test.group.TestKind)/default/test-deletion-default",
+      "(test.group.TestKind)/default/test-deletion-low"
+    ],
+    "dependencies": [],
+    "dependents": [],
+    "ready": false,
+    "reconciled": false
+  }
+}

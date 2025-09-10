@@ -10,11 +10,13 @@ import (
 )
 
 type indexedResource struct {
-	Resource            *Resource
-	Seen                bool
-	PendingDependencies map[Ref]struct{}
-	Dependents          map[Ref]*indexedResource
-	CompositionDeleting bool
+	Resource                    *Resource
+	Seen                        bool
+	PendingDependencies         map[Ref]struct{}
+	Dependents                  map[Ref]*indexedResource
+	CompositionDeleting         bool
+	PendingDeletionDependencies map[Ref]struct{}
+	DeletionDependents          map[Ref]*indexedResource
 }
 
 // Backtracks returns true if visibility would cause the resource to backtrack to a previous state.
@@ -34,10 +36,11 @@ func (i *indexedResource) Backtracks() bool {
 
 // treeBuilder is used to index a set of resources into a stateTree.
 type treeBuilder struct {
-	byRef        map[Ref]*indexedResource                    // fast key/value lookup by group/kind/ns/name
-	byGroup      *redblacktree.Tree[int, []*indexedResource] // fast search for sparse readiness groups
-	byDefiningGK map[schema.GroupKind]*indexedResource       // index CRDs by the GK they define
-	byGK         map[schema.GroupKind]*indexedResource       // index all resources by their GK
+	byRef           map[Ref]*indexedResource                    // fast key/value lookup by group/kind/ns/name
+	byGroup         *redblacktree.Tree[int, []*indexedResource] // fast search for sparse readiness groups
+	byDeletionGroup *redblacktree.Tree[int, []*indexedResource] // fast search for sparse deletion groups
+	byDefiningGK    map[schema.GroupKind]*indexedResource       // index CRDs by the GK they define
+	byGK            map[schema.GroupKind]*indexedResource       // index all resources by their GK
 }
 
 func (b *treeBuilder) init() {
@@ -46,6 +49,9 @@ func (b *treeBuilder) init() {
 	}
 	if b.byGroup == nil {
 		b.byGroup = redblacktree.New[int, []*indexedResource]()
+	}
+	if b.byDeletionGroup == nil {
+		b.byDeletionGroup = redblacktree.New[int, []*indexedResource]()
 	}
 	if b.byDefiningGK == nil {
 		b.byDefiningGK = map[schema.GroupKind]*indexedResource{}
@@ -65,13 +71,17 @@ func (b *treeBuilder) Add(resource *Resource) {
 
 	// Index the resource into the builder
 	idx := &indexedResource{
-		Resource:            resource,
-		PendingDependencies: map[Ref]struct{}{},
-		Dependents:          map[Ref]*indexedResource{},
+		Resource:                    resource,
+		PendingDependencies:         map[Ref]struct{}{},
+		Dependents:                  map[Ref]*indexedResource{},
+		PendingDeletionDependencies: map[Ref]struct{}{},
+		DeletionDependents:          map[Ref]*indexedResource{},
 	}
 	b.byRef[resource.Ref] = idx
 	current, _ := b.byGroup.Get(resource.readinessGroup)
 	b.byGroup.Put(resource.readinessGroup, append(current, idx))
+	deletionCurrent, _ := b.byDeletionGroup.Get(resource.deletionGroup)
+	b.byDeletionGroup.Put(resource.deletionGroup, append(deletionCurrent, idx))
 	b.byGK[resource.GVK.GroupKind()] = idx
 	if resource.DefinedGroupKind != nil {
 		b.byDefiningGK[*resource.DefinedGroupKind] = idx
@@ -109,6 +119,22 @@ func (b *treeBuilder) Build() *tree {
 				idx.Dependents[cur.Resource.Ref] = cur
 			}
 		}
+
+		// Depend on any resources in higher deletion groups to be deleted first
+		di := b.byDeletionGroup.IteratorAt(b.byDeletionGroup.GetNode(idx.Resource.deletionGroup))
+		for di.Next() && di.Key() > idx.Resource.deletionGroup {
+			for _, dep := range di.Value() {
+				idx.PendingDeletionDependencies[dep.Resource.Ref] = struct{}{}
+			}
+		}
+		di.Begin() // Reset iterator to beginning
+
+		// Any resources in lower deletion groups depend on us being deleted first
+		for di.Next() && di.Key() < idx.Resource.deletionGroup {
+			for _, cur := range di.Value() {
+				idx.DeletionDependents[cur.Resource.Ref] = cur
+			}
+		}
 	}
 
 	return t
@@ -122,12 +148,19 @@ type tree struct {
 }
 
 // Get returns the resource and determines if it's visible based on the state of its dependencies.
-func (t *tree) Get(key Ref) (res *Resource, visible bool, found bool) {
+func (t *tree) Get(key Ref) (res *Resource, visible, found bool) {
 	idx, ok := t.byRef[key]
 	if !ok {
 		return nil, false, false
 	}
-	return idx.Resource, (!idx.Backtracks() && len(idx.PendingDependencies) == 0) || idx.CompositionDeleting, true
+
+	if idx.CompositionDeleting {
+		visible = !idx.Backtracks() && len(idx.PendingDeletionDependencies) == 0
+	} else {
+		visible = (!idx.Backtracks() && len(idx.PendingDependencies) == 0)
+	}
+
+	return idx.Resource, visible, true
 }
 
 // UpdateState updates the state of a resource and requeues dependents if necessary.
@@ -152,6 +185,14 @@ func (t *tree) UpdateState(comp *apiv1.Composition, ref ManifestRef, state *apiv
 			enqueue(dep.Resource.Ref)
 		}
 	}
+
+	// Deletion dependents should no longer be blocked when this resource is deleted
+	if state.Deleted && (lastKnown == nil || !lastKnown.Deleted) {
+		for _, dep := range idx.DeletionDependents {
+			delete(dep.PendingDeletionDependencies, idx.Resource.Ref)
+			enqueue(dep.Resource.Ref)
+		}
+	}
 }
 
 // MarshalJSON allows the current tree to be serialized to JSON for testing/debugging purposes.
@@ -171,12 +212,26 @@ func (t *tree) MarshalJSON() ([]byte, error) {
 		}
 		slices.Sort(dependents)
 
+		deletionDependencies := []string{}
+		for ref := range value.PendingDeletionDependencies {
+			deletionDependencies = append(deletionDependencies, ref.String())
+		}
+		slices.Sort(deletionDependencies)
+
+		deletionDependents := []string{}
+		for ref := range value.DeletionDependents {
+			deletionDependents = append(deletionDependents, ref.String())
+		}
+		slices.Sort(deletionDependents)
+
 		state := value.Resource.latestKnownState.Load()
 		valMap := map[string]any{
-			"ready":        state != nil && state.Ready != nil,
-			"reconciled":   state != nil && state.Reconciled,
-			"dependencies": dependencies,
-			"dependents":   dependents,
+			"ready":                state != nil && state.Ready != nil,
+			"reconciled":           state != nil && state.Reconciled,
+			"dependencies":         dependencies,
+			"dependents":           dependents,
+			"deletionDependencies": deletionDependencies,
+			"deletionDependents":   deletionDependents,
 		}
 		tree[key.String()] = valMap
 	}

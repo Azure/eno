@@ -6,6 +6,8 @@
     "dependents": [
       "(test.group.TestKind)/default/test-1"
     ],
+    "deletionDependencies": [],
+    "deletionDependents": [],
     "ready": false,
     "reconciled": false
   },
@@ -16,6 +18,8 @@
     "dependents": [
       "(test.group.TestKind)/default/test-4"
     ],
+    "deletionDependencies": [],
+    "deletionDependents": [],
     "ready": false,
     "reconciled": false
   },
@@ -24,6 +28,8 @@
       "(test.group.TestKind)/default/test-1"
     ],
     "dependents": [],
+    "deletionDependencies": [],
+    "deletionDependents": [],
     "ready": false,
     "reconciled": false
   },
@@ -32,6 +38,8 @@
     "dependents": [
       "(test.group.TestKind)/default/test-0"
     ],
+    "deletionDependencies": [],
+    "deletionDependents": [],
     "ready": false,
     "reconciled": false
   }

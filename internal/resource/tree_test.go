@@ -115,6 +115,27 @@ func TestTreeBuilderSanity(t *testing.T) {
 				},
 			},
 		},
+		{
+			Name: "deletion-groups",
+			Resources: []*Resource{
+				{
+					Ref:           newTestRef("test-deletion-high"),
+					deletionGroup: 4, // deleted first
+				},
+				{
+					Ref:           newTestRef("test-deletion-medium"),
+					deletionGroup: 2,
+				},
+				{
+					Ref: newTestRef("test-deletion-default"),
+					// deletionGroup defaults to 0
+				},
+				{
+					Ref:           newTestRef("test-deletion-low"),
+					deletionGroup: -2, // deleted last
+				},
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -250,6 +271,12 @@ func TestTreeDeletion(t *testing.T) {
 		readinessGroup: 2,
 		ManifestRef:    ManifestRef{Index: 2},
 	})
+	b.Add(&Resource{
+		Ref:            newTestRef("test-resource-4"),
+		readinessGroup: 2,
+		deletionGroup:  -4,
+		ManifestRef:    ManifestRef{Index: 4},
+	})
 
 	tree := b.Build()
 
@@ -264,14 +291,14 @@ func TestTreeDeletion(t *testing.T) {
 			enqueued = append(enqueued, r.Name)
 		})
 	}
-	assert.ElementsMatch(t, []string{"test-resource-1", "test-resource-2", "test-resource-2", "test-resource-3"}, enqueued)
+	assert.ElementsMatch(t, []string{"test-resource-1", "test-resource-2", "test-resource-2", "test-resource-3", "test-resource-4"}, enqueued)
 
 	// The third resource should not be visible yet because it's readiness group is still blocked
 	_, visible, found := tree.Get(newTestRef("test-resource-3"))
 	assert.False(t, visible)
 	assert.True(t, found)
 
-	// Deleting the composition should enqueue every item
+	// Deleting the composition should enqueue every item except those blocked by earlier deletion groups
 	enqueued = nil
 	for i := 1; i < 4; i++ {
 		comp := &apiv1.Composition{}
@@ -281,6 +308,10 @@ func TestTreeDeletion(t *testing.T) {
 		})
 	}
 	assert.ElementsMatch(t, []string{"test-resource-1", "test-resource-2", "test-resource-3"}, enqueued)
+
+	for _, r := range tree.byRef {
+		r.CompositionDeleting = true
+	}
 
 	// ...but only once
 	enqueued = nil
@@ -295,6 +326,29 @@ func TestTreeDeletion(t *testing.T) {
 
 	// The third resource should be visible now
 	_, visible, found = tree.Get(newTestRef("test-resource-3"))
+	assert.True(t, visible)
+	assert.True(t, found)
+
+	// The fourth resource should not be visible now
+	_, visible, found = tree.Get(newTestRef("test-resource-4"))
+	assert.False(t, visible)
+	assert.True(t, found)
+
+	// Observe the first three resources in a deleted state
+	enqueued = nil
+	for i := 1; i < 4; i++ {
+		state := &apiv1.ResourceState{Deleted: true}
+		tree.UpdateState(&apiv1.Composition{}, ManifestRef{Index: i}, state, func(r Ref) {
+			enqueued = append(enqueued, r.Name)
+		})
+	}
+	// When resources 1-3 are deleted, they get enqueued themselves plus resource 4 becomes unblocked
+	// (resource 4 gets enqueued 3 times since each deleted resource triggers it independently)
+	expected := []string{"test-resource-1", "test-resource-2", "test-resource-3", "test-resource-4", "test-resource-4", "test-resource-4"}
+	assert.ElementsMatch(t, expected, enqueued)
+
+	// The fourth resource should be visible now
+	_, visible, found = tree.Get(newTestRef("test-resource-4"))
 	assert.True(t, visible)
 	assert.True(t, found)
 }
@@ -383,5 +437,120 @@ func TestIndexedResourceBacktracks(t *testing.T) {
 		ir.Dependents[dep1.Resource.Ref] = dep1
 		ir.Dependents[dep2.Resource.Ref] = dep2
 		assert.False(t, ir.Backtracks())
+	})
+}
+
+func TestTreeDeletionGroups(t *testing.T) {
+	resources := []*Resource{
+		{
+			Ref:           newTestRef("high-priority-1"),
+			deletionGroup: 10, // deleted first
+			ManifestRef:   ManifestRef{Index: 1},
+		},
+		{
+			Ref:           newTestRef("high-priority-2"),
+			deletionGroup: 10, // deleted first (same group)
+			ManifestRef:   ManifestRef{Index: 2},
+		},
+		{
+			Ref:           newTestRef("medium-priority"),
+			deletionGroup: 5, // deleted after high-priority
+			ManifestRef:   ManifestRef{Index: 3},
+		},
+		{
+			Ref:           newTestRef("default-priority"),
+			deletionGroup: 0, // deleted after medium-priority (default)
+			ManifestRef:   ManifestRef{Index: 4},
+		},
+		{
+			Ref:           newTestRef("low-priority"),
+			deletionGroup: -5, // deleted last
+			ManifestRef:   ManifestRef{Index: 5},
+		},
+	}
+
+	var b treeBuilder
+	for _, r := range resources {
+		b.Add(r)
+	}
+
+	tree := b.Build()
+
+	// Mark composition as deleting
+	comp := &apiv1.Composition{}
+	comp.DeletionTimestamp = &metav1.Time{}
+
+	// Initially, only high-priority resources (group 10) should be visible
+	for i := range resources {
+		tree.UpdateState(comp, ManifestRef{Index: i + 1}, &apiv1.ResourceState{}, func(ref Ref) {})
+	}
+
+	assertVisibility := func(expected map[string]bool) {
+		t.Helper()
+		for _, r := range resources {
+			_, visible, found := tree.Get(r.Ref)
+			assert.True(t, found, "resource %s should be found", r.Ref.Name)
+			expectedVis := expected[r.Ref.Name]
+			assert.Equal(t, expectedVis, visible, "resource %s visibility", r.Ref.Name)
+		}
+	}
+
+	// Only high-priority resources (deletion group 10) should be visible initially
+	assertVisibility(map[string]bool{
+		"high-priority-1":  true,
+		"high-priority-2":  true,
+		"medium-priority":  false,
+		"default-priority": false,
+		"low-priority":     false,
+	})
+
+	// Delete high-priority resources
+	var enqueued []string
+	for i := 1; i <= 2; i++ {
+		tree.UpdateState(comp, ManifestRef{Index: i}, &apiv1.ResourceState{Deleted: true}, func(r Ref) {
+			enqueued = append(enqueued, r.Name)
+		})
+	}
+
+	// Medium-priority should become visible and get enqueued
+	assert.Contains(t, enqueued, "medium-priority")
+	assertVisibility(map[string]bool{
+		"high-priority-1":  true,
+		"high-priority-2":  true,
+		"medium-priority":  true,
+		"default-priority": false,
+		"low-priority":     false,
+	})
+
+	// Delete medium-priority resource
+	enqueued = nil
+	tree.UpdateState(comp, ManifestRef{Index: 3}, &apiv1.ResourceState{Deleted: true}, func(r Ref) {
+		enqueued = append(enqueued, r.Name)
+	})
+
+	// Default-priority should become visible and get enqueued
+	assert.Contains(t, enqueued, "default-priority")
+	assertVisibility(map[string]bool{
+		"high-priority-1":  true,
+		"high-priority-2":  true,
+		"medium-priority":  true,
+		"default-priority": true,
+		"low-priority":     false,
+	})
+
+	// Delete default-priority resource
+	enqueued = nil
+	tree.UpdateState(comp, ManifestRef{Index: 4}, &apiv1.ResourceState{Deleted: true}, func(r Ref) {
+		enqueued = append(enqueued, r.Name)
+	})
+
+	// Low-priority should become visible and get enqueued
+	assert.Contains(t, enqueued, "low-priority")
+	assertVisibility(map[string]bool{
+		"high-priority-1":  true,
+		"high-priority-2":  true,
+		"medium-priority":  true,
+		"default-priority": true,
+		"low-priority":     true,
 	})
 }
