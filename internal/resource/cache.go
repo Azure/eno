@@ -2,9 +2,12 @@ package resource
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
+	"github.com/google/cel-go/cel"
 	apiv1 "github.com/Azure/eno/api/v1"
+	enocel "github.com/Azure/eno/internal/cel"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
@@ -18,10 +21,11 @@ type Request struct {
 // Cache caches resources indexed and logically grouped by the UUID of the synthesis that produced them.
 // Kind of like an informer but optimized for Eno.
 type Cache struct {
-	mut       sync.Mutex
-	queue     workqueue.TypedRateLimitingInterface[Request]
-	syntheses map[string]*tree
-	synByComp map[types.NamespacedName][]string
+	mut            sync.Mutex
+	queue          workqueue.TypedRateLimitingInterface[Request]
+	syntheses      map[string]*tree
+	synByComp      map[types.NamespacedName][]string
+	ResourceFilter cel.Program
 }
 
 func (c *Cache) initUnlocked() {
@@ -91,7 +95,7 @@ func (c *Cache) Visit(ctx context.Context, comp *apiv1.Composition, synUUID stri
 
 // Fill populates the cache with resources from a synthesis. Call Visit first to see if filling the cache is necessary.
 // Get the resource slices from the API - not the informers, which prune out the manifests to save memory.
-func (c *Cache) Fill(ctx context.Context, comp types.NamespacedName, synUUID string, items []apiv1.ResourceSlice) {
+func (c *Cache) Fill(ctx context.Context, comp *apiv1.Composition, synUUID string, items []apiv1.ResourceSlice) {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	var builder treeBuilder
@@ -104,15 +108,28 @@ func (c *Cache) Fill(ctx context.Context, comp types.NamespacedName, synUUID str
 				logger.Error(err, "invalid resource - cannot load into cache", "resourceSliceName", slice.Name, "resourceIndex", i)
 				return
 			}
+
+			if c.ResourceFilter != nil {
+				matches, err := c.evaluateResourceFilter(ctx, comp, res)
+				if err != nil {
+					logger.Error(err, "failed to evaluate resource filter", "resourceKind", res.Ref.Kind, "resourceName", res.Ref.Name)
+					continue
+				}
+				if !matches {
+					continue
+				}
+			}
+
 			builder.Add(res)
 		}
 	}
 	tree := builder.Build()
 
+	compNSN := types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
 	c.mut.Lock()
 	c.initUnlocked()
 	c.syntheses[synUUID] = tree
-	c.synByComp[comp] = append(c.synByComp[comp], synUUID)
+	c.synByComp[compNSN] = append(c.synByComp[compNSN], synUUID)
 	c.mut.Unlock()
 	logger.V(1).Info("resource cache filled", "synthesisUUID", synUUID)
 }
@@ -137,4 +154,18 @@ func (c *Cache) Purge(ctx context.Context, compNSN types.NamespacedName, comp *a
 	}
 
 	c.synByComp[compNSN] = remainingSyns
+}
+
+func (c *Cache) evaluateResourceFilter(ctx context.Context, comp *apiv1.Composition, res *Resource) (bool, error) {
+	result, err := enocel.Eval(ctx, c.ResourceFilter, comp, res.parsed, nil)
+	if err != nil {
+		return false, err
+	}
+
+	boolResult, ok := result.Value().(bool)
+	if !ok {
+		return false, fmt.Errorf("resource filter expression must return a boolean, got %T", result.Value())
+	}
+
+	return boolResult, nil
 }

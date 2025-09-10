@@ -14,7 +14,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -24,6 +23,7 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	v1 "github.com/Azure/eno/api/v1"
+	enocel "github.com/Azure/eno/internal/cel"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/execution"
@@ -1069,13 +1069,16 @@ func TestResourceSelector(t *testing.T) {
 		return output, nil
 	})
 
+	resourceFilter, err := enocel.Parse("self.metadata.labels.foo == 'bar'")
+	require.NoError(t, err)
+
 	registerControllers(t, mgr)
 	setupTestSubjectForOptions(t, mgr, Options{
 		Manager:                mgr.Manager,
 		Timeout:                time.Minute,
 		ReadinessPollInterval:  time.Hour,
 		DisableServerSideApply: mgr.NoSsaSupport,
-		ResourceSelector:       labels.SelectorFromSet(labels.Set(map[string]string{"foo": "bar"})),
+		ResourceFilter:         resourceFilter,
 	})
 	mgr.Start(t)
 	writeGenericComposition(t, upstream)
