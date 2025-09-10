@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -108,4 +109,16 @@ func TestBuildNonStrategicPatch_NilPrevious(t *testing.T) {
 		"added":    "value",
 		"original": "value",
 	}, actual.Data)
+}
+
+func TestShouldFailOpen(t *testing.T) {
+	c := &Controller{failOpen: true}
+	assert.True(t, c.shouldFailOpen(&resource.Resource{FailOpen: nil}))
+	assert.False(t, c.shouldFailOpen(&resource.Resource{FailOpen: ptr.To(false)}))
+	assert.True(t, c.shouldFailOpen(&resource.Resource{FailOpen: ptr.To(true)}))
+
+	c.failOpen = false
+	assert.False(t, c.shouldFailOpen(&resource.Resource{FailOpen: nil}))
+	assert.False(t, c.shouldFailOpen(&resource.Resource{FailOpen: ptr.To(false)}))
+	assert.True(t, c.shouldFailOpen(&resource.Resource{FailOpen: ptr.To(true)}))
 }

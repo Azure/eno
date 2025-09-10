@@ -136,7 +136,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	}
 
 	snap, current, ready, modified, err := c.reconcileResource(ctx, comp, prev, resource)
-	if c.failOpen {
+	if c.shouldFailOpen(resource) {
 		err = nil
 		modified = false
 	}
@@ -154,6 +154,10 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 
 	return c.requeue(logger, comp, snap, ready)
+}
+
+func (c *Controller) shouldFailOpen(resource *resource.Resource) bool {
+	return (resource.FailOpen == nil && c.failOpen) || (resource.FailOpen != nil && *resource.FailOpen)
 }
 
 func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composition, prev *resource.Resource, resource *resource.Resource) (snap *resource.Snapshot, current *unstructured.Unstructured, ready *metav1.Time, modified bool, err error) {
