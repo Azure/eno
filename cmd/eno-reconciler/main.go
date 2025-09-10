@@ -14,6 +14,7 @@ import (
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 
+	"github.com/Azure/eno/internal/cel"
 	"github.com/Azure/eno/internal/controllers/liveness"
 	"github.com/Azure/eno/internal/controllers/reconciliation"
 	"github.com/Azure/eno/internal/flowcontrol"
@@ -36,7 +37,7 @@ func run() error {
 		remoteQPS                    float64
 		compositionSelector          string
 		compositionNamespace         string
-		resourceSelector             string
+		resourceFilter               string
 		namespaceCreationGracePeriod time.Duration
 		namespaceCleanup             bool
 
@@ -55,7 +56,7 @@ func run() error {
 	flag.BoolVar(&recOpts.DisableServerSideApply, "disable-ssa", false, "Use non-strategic three-way merge patches instead of server-side apply")
 	flag.StringVar(&compositionSelector, "composition-label-selector", labels.Everything().String(), "Optional label selector for compositions to be reconciled")
 	flag.StringVar(&compositionNamespace, "composition-namespace", metav1.NamespaceAll, "Optional namespace to limit compositions that will be reconciled")
-	flag.StringVar(&resourceSelector, "resource-label-selector", labels.Everything().String(), "Optional label selector for resources within compositions to be reconciled")
+	flag.StringVar(&resourceFilter, "resource-filter", "", "Optional CEL filter expression for resources within compositions to be reconciled")
 	flag.DurationVar(&namespaceCreationGracePeriod, "ns-creation-grace-period", time.Second, "A namespace is assumed to be missing if it doesn't exist once one of its resources has existed for this long")
 	flag.BoolVar(&namespaceCleanup, "namespace-cleanup", true, "Clean up orphaned resources caused by namespace force-deletions")
 	mgrOpts.Bind(flag.CommandLine)
@@ -82,11 +83,11 @@ func run() error {
 		mgrOpts.CompositionSelector = labels.Everything()
 	}
 
-	if resourceSelector != "" {
+	if resourceFilter != "" {
 		var err error
-		recOpts.ResourceSelector, err = labels.Parse(resourceSelector)
+		recOpts.ResourceFilter, err = cel.Parse(resourceFilter)
 		if err != nil {
-			return fmt.Errorf("invalid resource label selector: %w", err)
+			return fmt.Errorf("invalid resource filter expression: %w", err)
 		}
 	}
 

@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/cel-go/cel"
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/Azure/eno/internal/resource"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -29,8 +29,8 @@ type reconstitutionSource struct {
 	cache           *resource.Cache
 }
 
-func newReconstitutionSource(mgr ctrl.Manager) (source.TypedSource[resource.Request], *resource.Cache, error) {
-	var cache resource.Cache
+func newReconstitutionSource(mgr ctrl.Manager, resourceFilter cel.Program) (source.TypedSource[resource.Request], *resource.Cache, error) {
+	cache := resource.Cache{ResourceFilter: resourceFilter}
 	return source.TypedFunc[resource.Request](func(ctx context.Context, queue workqueue.TypedRateLimitingInterface[resource.Request]) error {
 		cache.SetQueue(queue)
 
@@ -131,7 +131,6 @@ func (r *reconstitutionSource) populateCache(ctx context.Context, comp *apiv1.Co
 		slices[i] = slice
 	}
 
-	compNSN := types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}
 	if r.cache.Visit(ctx, comp, synthesis.UUID, slices) {
 		return false, nil
 	}
@@ -149,6 +148,6 @@ func (r *reconstitutionSource) populateCache(ctx context.Context, comp *apiv1.Co
 		slices[i] = slice
 	}
 
-	r.cache.Fill(ctx, compNSN, synthesis.UUID, slices)
+	r.cache.Fill(ctx, comp, synthesis.UUID, slices)
 	return true, nil
 }
