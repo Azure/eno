@@ -35,8 +35,8 @@ type Options struct {
 	Downstream       *rest.Config
 	ResourceSelector labels.Selector
 
-	DisableServerSideApply     bool
-	DisableReconciliationCheck bool
+	DisableServerSideApply bool
+	FailOpen               bool
 
 	Timeout               time.Duration
 	ReadinessPollInterval time.Duration
@@ -53,7 +53,7 @@ type Controller struct {
 	upstreamClient        client.Client
 	minReconcileInterval  time.Duration
 	disableSSA            bool
-	optimistic            bool
+	failOpen              bool
 }
 
 func New(mgr ctrl.Manager, opts Options) error {
@@ -79,7 +79,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 		upstreamClient:        upstreamClient,
 		minReconcileInterval:  opts.MinReconcileInterval,
 		disableSSA:            opts.DisableServerSideApply,
-		optimistic:            opts.DisableReconciliationCheck,
+		failOpen:              opts.FailOpen,
 	}
 
 	return builder.TypedControllerManagedBy[resource.Request](mgr).
@@ -137,7 +137,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	}
 
 	snap, current, ready, modified, err := c.reconcileResource(ctx, comp, prev, resource)
-	if c.optimistic {
+	if c.failOpen {
 		err = nil
 		modified = false
 	}
