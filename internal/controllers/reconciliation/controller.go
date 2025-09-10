@@ -120,7 +120,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 
 	// Find the current and (optionally) previous desired states in the cache
 	var prev *resource.Resource
-	resource, visible, exists := c.resourceClient.Get(ctx, synthesisUUID, req.Resource)
+	resource, visible, strictDeletion, exists := c.resourceClient.Get(ctx, synthesisUUID, req.Resource)
 	if !exists || !visible {
 		return ctrl.Result{}, nil
 	}
@@ -133,7 +133,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	}
 
 	if syn := comp.Status.PreviousSynthesis; syn != nil {
-		prev, _, _ = c.resourceClient.Get(ctx, syn.UUID, req.Resource)
+		prev, _, _, _ = c.resourceClient.Get(ctx, syn.UUID, req.Resource)
 	}
 
 	snap, current, ready, modified, err := c.reconcileResource(ctx, comp, prev, resource)
@@ -150,7 +150,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	}
 
 	deleted := current == nil ||
-		current.GetDeletionTimestamp() != nil ||
+		(!strictDeletion && current.GetDeletionTimestamp() != nil) ||
 		(snap.Deleted(comp) && (snap.Orphan || snap.Disable)) // orphaning should be reflected on the status.
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 

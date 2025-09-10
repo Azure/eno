@@ -196,7 +196,7 @@ func TestTreeVisibility(t *testing.T) {
 
 	tree := b.Build()
 
-	res, visible, found := tree.Get(newTestRef("foobar"))
+	res, visible, _, found := tree.Get(newTestRef("foobar"))
 	assert.False(t, found, "404 case")
 	assert.False(t, visible)
 	assert.Nil(t, res)
@@ -207,7 +207,7 @@ func TestTreeVisibility(t *testing.T) {
 	expectedVisibility := map[string]bool{"test-resource-1": true}
 	assertReadiness := func() {
 		for _, name := range names {
-			res, visible, found := tree.Get(newTestRef(name))
+			res, visible, _, found := tree.Get(newTestRef(name))
 			assert.True(t, found, name)
 			assert.Equal(t, expectedVisibility[name], visible, name)
 			assert.NotNil(t, res, name)
@@ -294,8 +294,9 @@ func TestTreeDeletion(t *testing.T) {
 	assert.ElementsMatch(t, []string{"test-resource-1", "test-resource-2", "test-resource-2", "test-resource-3", "test-resource-4"}, enqueued)
 
 	// The third resource should not be visible yet because it's readiness group is still blocked
-	_, visible, found := tree.Get(newTestRef("test-resource-3"))
+	_, visible, strictDelete, found := tree.Get(newTestRef("test-resource-3"))
 	assert.False(t, visible)
+	assert.True(t, strictDelete)
 	assert.True(t, found)
 
 	// Deleting the composition should enqueue every item except those blocked by earlier deletion groups
@@ -325,13 +326,15 @@ func TestTreeDeletion(t *testing.T) {
 	assert.Nil(t, enqueued)
 
 	// The third resource should be visible now
-	_, visible, found = tree.Get(newTestRef("test-resource-3"))
+	_, visible, strictDelete, found = tree.Get(newTestRef("test-resource-3"))
 	assert.True(t, visible)
+	assert.True(t, strictDelete)
 	assert.True(t, found)
 
 	// The fourth resource should not be visible now
-	_, visible, found = tree.Get(newTestRef("test-resource-4"))
+	_, visible, strictDelete, found = tree.Get(newTestRef("test-resource-4"))
 	assert.False(t, visible)
+	assert.False(t, strictDelete)
 	assert.True(t, found)
 
 	// Observe the first three resources in a deleted state
@@ -348,8 +351,9 @@ func TestTreeDeletion(t *testing.T) {
 	assert.ElementsMatch(t, expected, enqueued)
 
 	// The fourth resource should be visible now
-	_, visible, found = tree.Get(newTestRef("test-resource-4"))
+	_, visible, strictDelete, found = tree.Get(newTestRef("test-resource-4"))
 	assert.True(t, visible)
+	assert.False(t, strictDelete)
 	assert.True(t, found)
 }
 
@@ -366,7 +370,7 @@ func TestTreeRefConflicts(t *testing.T) {
 
 	tree := b.Build()
 
-	res, visible, found := tree.Get(newTestRef("test-resource"))
+	res, visible, _, found := tree.Get(newTestRef("test-resource"))
 	assert.True(t, found)
 	assert.True(t, visible)
 	assert.Equal(t, "b", string(res.manifestHash))
@@ -488,7 +492,7 @@ func TestTreeDeletionGroups(t *testing.T) {
 	assertVisibility := func(expected map[string]bool) {
 		t.Helper()
 		for _, r := range resources {
-			_, visible, found := tree.Get(r.Ref)
+			_, visible, _, found := tree.Get(r.Ref)
 			assert.True(t, found, "resource %s should be found", r.Ref.Name)
 			expectedVis := expected[r.Ref.Name]
 			assert.Equal(t, expectedVis, visible, "resource %s visibility", r.Ref.Name)

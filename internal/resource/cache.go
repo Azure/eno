@@ -46,13 +46,13 @@ func (c *Cache) SetQueue(queue workqueue.TypedRateLimitingInterface[Request]) {
 	c.queue = queue
 }
 
-func (c *Cache) Get(ctx context.Context, synthesisUUID string, ref Ref) (res *Resource, visible, found bool) {
+func (c *Cache) Get(ctx context.Context, synthesisUUID string, ref Ref) (res *Resource, visible, strictDelete, found bool) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
 	syn, ok := c.syntheses[synthesisUUID]
 	if !ok {
-		return nil, false, false
+		return nil, false, false, false
 	}
 	return syn.Get(ref)
 }

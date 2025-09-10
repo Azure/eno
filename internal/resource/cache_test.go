@@ -27,8 +27,9 @@ func TestCacheBasics(t *testing.T) {
 	c.Purge(ctx, types.NamespacedName{}, nil)
 
 	// Get returns false when the synthesis doesn't exist
-	_, visible, found := c.Get(ctx, "foo", Ref{})
+	_, visible, strictDelete, found := c.Get(ctx, "foo", Ref{})
 	assert.False(t, visible)
+	assert.False(t, strictDelete)
 	assert.False(t, found)
 
 	// Load a synthesis into the cache
@@ -72,15 +73,17 @@ func TestCacheBasics(t *testing.T) {
 	assert.ElementsMatch(t, []string{}, dumpQueue(queue))
 
 	// Get works
-	res, visible, found := c.Get(ctx, synUUID, Ref{Name: "foo", Namespace: "default", Kind: "Pod"})
+	res, visible, strictDelete, found := c.Get(ctx, synUUID, Ref{Name: "foo", Namespace: "default", Kind: "Pod"})
 	assert.NotNil(t, res)
 	assert.True(t, visible)
+	assert.False(t, strictDelete)
 	assert.True(t, found)
 
 	// Get doesn't panic when getting a resource that doesn't exist from the otherwise valid synthesis
-	res, visible, found = c.Get(ctx, synUUID, Ref{Name: "not-a-pod", Namespace: "default", Kind: "Pod"})
+	res, visible, strictDelete, found = c.Get(ctx, synUUID, Ref{Name: "not-a-pod", Namespace: "default", Kind: "Pod"})
 	assert.Nil(t, res)
 	assert.False(t, visible)
+	assert.False(t, strictDelete)
 	assert.False(t, found)
 
 	// Purge basics
@@ -174,7 +177,7 @@ func TestCacheReadinessGroups(t *testing.T) {
 	dumpQueue(queue)
 
 	podIsVisible := func(name string, exp bool) {
-		_, visible, found := c.Get(ctx, synUUID, Ref{Name: name, Namespace: "default", Kind: "Pod"})
+		_, visible, _, found := c.Get(ctx, synUUID, Ref{Name: name, Namespace: "default", Kind: "Pod"})
 		assert.Equal(t, exp, visible, name)
 		assert.True(t, found, name)
 	}

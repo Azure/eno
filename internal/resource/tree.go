@@ -148,10 +148,10 @@ type tree struct {
 }
 
 // Get returns the resource and determines if it's visible based on the state of its dependencies.
-func (t *tree) Get(key Ref) (res *Resource, visible, found bool) {
+func (t *tree) Get(key Ref) (res *Resource, visible, strictDelete, found bool) {
 	idx, ok := t.byRef[key]
 	if !ok {
-		return nil, false, false
+		return nil, false, false, false
 	}
 
 	if idx.CompositionDeleting {
@@ -160,7 +160,7 @@ func (t *tree) Get(key Ref) (res *Resource, visible, found bool) {
 		visible = (!idx.Backtracks() && len(idx.PendingDependencies) == 0)
 	}
 
-	return idx.Resource, visible, true
+	return idx.Resource, visible, len(idx.DeletionDependents) > 0, true
 }
 
 // UpdateState updates the state of a resource and requeues dependents if necessary.

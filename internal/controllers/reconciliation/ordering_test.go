@@ -566,9 +566,8 @@ func TestDeletionGroups(t *testing.T) {
 		return errors.IsNotFound(mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(res), res))
 	})
 
-	time.Sleep(time.Second) // TODO
-
 	// The later deletion group is blocked by the default group's finalizer
+	time.Sleep(time.Millisecond * 200)
 	res := &corev1.ConfigMap{}
 	res.Name = "deleted-after-default"
 	res.Namespace = "default"
