@@ -133,7 +133,7 @@ You may reconcile a subset of Compositions and/or resources by optionally passin
   ```
   --composition-label-selector=some.domain.com/type=some-type
   ```
-- **--resource-filter**: Only reconcile resources that pass the given cel filter expression. Both the Composition and resource are availalbe in the evaluation context.
+- **--resource-filter**: Only reconcile resources that pass the given cel filter expression. Both the Composition and resource are available in the evaluation context.
   ```
   --resource-filter=composition.metadata.annotations.someAnnotation == 'some-value' && self.kind == 'ConfigMap'
   ```
