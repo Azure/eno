@@ -122,6 +122,24 @@ metadata:
 - **Ordering**: Lower numbers reconcile first: `-2` → `-1` → `0` → `1` → `2`
 - **Dependencies**: Group `N+1` waits for all group `N` resources to be ready
 
+## Sharding
+
+You may reconcile a subset of Compositions and/or resources by optionally passing the following flags to the Eno reconciler:
+- **--composition-namespace**: Only watch compositions in the given namespace.
+  ```
+  --composition-namespace=default
+  ```
+- **--composition-label-selector**: Only watch composition that match the selector.
+  ```
+  --composition-label-selector=some.domain.com/type=some-type
+  ```
+- **--resource-filter**: Only reconcile resources that pass the given cel filter expression. Both the Composition and resource are availalbe in the evaluation context.
+  ```
+  --resource-filter=composition.metadata.annotations.someAnnotation == 'some-value' && self.kind == 'ConfigMap'
+  ```
+  > ⚠️ Changes to composition metadata (without changing the spec) will not trigger a reevaluation of the filter.
+
+The flags stack up and are not mutually excluive i.e. A resource filter will only be evaluated against resources whose Composition match the label selector, which in turn is only evaluated against Compositions in the selected namespace.
 ## Advanced Concepts
 
 - [Overrides](./overrides.md)
