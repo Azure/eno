@@ -139,7 +139,7 @@ You may reconcile a subset of Compositions and/or resources by optionally passin
   ```
   > ⚠️ Changes to composition metadata (without changing the spec) will not trigger a re-evaluation of the filter.
 
-The flags stack up and are not mutually excluive i.e. A resource filter will only be evaluated against resources whose Composition match the label selector, which in turn is only evaluated against Compositions in the selected namespace.
+The flags stack up and are not mutually exclusive i.e. A resource filter will only be evaluated against resources whose Composition match the label selector, which in turn is only evaluated against Compositions in the selected namespace.
 ## Advanced Concepts
 
 - [Overrides](./overrides.md)
