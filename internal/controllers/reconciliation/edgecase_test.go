@@ -573,7 +573,7 @@ func TestSynthesisErrorResult(t *testing.T) {
 	})
 }
 
-func TestOptimisticMode_NoReadinessChecks(t *testing.T) {
+func TestFailOpen_NoReadinessChecks(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
@@ -596,11 +596,11 @@ func TestOptimisticMode_NoReadinessChecks(t *testing.T) {
 	})
 
 	setupTestSubjectForOptions(t, mgr, Options{
-		Manager:                    mgr.Manager,
-		Timeout:                    time.Minute,
-		ReadinessPollInterval:      time.Hour,
-		DisableServerSideApply:     mgr.NoSsaSupport,
-		DisableReconciliationCheck: true,
+		Manager:                mgr.Manager,
+		Timeout:                time.Minute,
+		ReadinessPollInterval:  time.Hour,
+		DisableServerSideApply: mgr.NoSsaSupport,
+		FailOpen:               true,
 	})
 	mgr.Start(t)
 	_, comp := writeGenericComposition(t, upstream)
@@ -611,7 +611,7 @@ func TestOptimisticMode_NoReadinessChecks(t *testing.T) {
 	})
 }
 
-func TestOptimisticMode_WithReadinessChecks(t *testing.T) {
+func TestFailOpen_WithReadinessChecks(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
@@ -635,11 +635,11 @@ func TestOptimisticMode_WithReadinessChecks(t *testing.T) {
 	})
 
 	setupTestSubjectForOptions(t, mgr, Options{
-		Manager:                    mgr.Manager,
-		Timeout:                    time.Minute,
-		ReadinessPollInterval:      time.Hour,
-		DisableServerSideApply:     mgr.NoSsaSupport,
-		DisableReconciliationCheck: true,
+		Manager:                mgr.Manager,
+		Timeout:                time.Minute,
+		ReadinessPollInterval:  time.Hour,
+		DisableServerSideApply: mgr.NoSsaSupport,
+		FailOpen:               true,
 	})
 	mgr.Start(t)
 	_, comp := writeGenericComposition(t, upstream)
@@ -650,7 +650,7 @@ func TestOptimisticMode_WithReadinessChecks(t *testing.T) {
 	})
 }
 
-func TestOptimisticMode_WithBrokenDownstream(t *testing.T) {
+func TestFailOpen_WithBrokenDownstream(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
@@ -673,12 +673,12 @@ func TestOptimisticMode_WithBrokenDownstream(t *testing.T) {
 	})
 
 	setupTestSubjectForOptions(t, mgr, Options{
-		Manager:                    mgr.Manager,
-		Timeout:                    time.Minute,
-		ReadinessPollInterval:      time.Hour,
-		DisableServerSideApply:     mgr.NoSsaSupport,
-		DisableReconciliationCheck: true,
-		Downstream:                 &rest.Config{Host: mgr.RestConfig.Host, APIPath: "/nowhere"}, // broken downstream config
+		Manager:                mgr.Manager,
+		Timeout:                time.Minute,
+		ReadinessPollInterval:  time.Hour,
+		DisableServerSideApply: mgr.NoSsaSupport,
+		FailOpen:               true,
+		Downstream:             &rest.Config{Host: mgr.RestConfig.Host, APIPath: "/nowhere"}, // broken downstream config
 	})
 	mgr.Start(t)
 	_, comp := writeGenericComposition(t, upstream)

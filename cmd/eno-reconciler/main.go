@@ -58,6 +58,7 @@ func run() error {
 	flag.StringVar(&resourceSelector, "resource-label-selector", labels.Everything().String(), "Optional label selector for resources within compositions to be reconciled")
 	flag.DurationVar(&namespaceCreationGracePeriod, "ns-creation-grace-period", time.Second, "A namespace is assumed to be missing if it doesn't exist once one of its resources has existed for this long")
 	flag.BoolVar(&namespaceCleanup, "namespace-cleanup", true, "Clean up orphaned resources caused by namespace force-deletions")
+	flag.BoolVar(&recOpts.FailOpen, "fail-open", false, "Report that resources are reconciled once they've been seen, even if reconciliation failed. Useful in some cases where Eno deploys its own reconcilers.")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 
