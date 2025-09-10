@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/google/cel-go/cel"
 	apiv1 "github.com/Azure/eno/api/v1"
 	enocel "github.com/Azure/eno/internal/cel"
 	"github.com/go-logr/logr"
+	"github.com/google/cel-go/cel"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 )
@@ -113,6 +113,7 @@ func (c *Cache) Fill(ctx context.Context, comp *apiv1.Composition, synUUID strin
 				matches, err := c.evaluateResourceFilter(ctx, comp, res)
 				if err != nil {
 					logger.Error(err, "failed to evaluate resource filter", "resourceKind", res.Ref.Kind, "resourceName", res.Ref.Name)
+					resourceFilterErrors.Inc()
 					continue
 				}
 				if !matches {
