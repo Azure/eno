@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/cel-go/cel"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -30,10 +30,10 @@ import (
 )
 
 type Options struct {
-	Manager          ctrl.Manager
-	WriteBuffer      *flowcontrol.ResourceSliceWriteBuffer
-	Downstream       *rest.Config
-	ResourceSelector labels.Selector
+	Manager       ctrl.Manager
+	WriteBuffer   *flowcontrol.ResourceSliceWriteBuffer
+	Downstream    *rest.Config
+	ResourceFilter cel.Program
 
 	DisableServerSideApply bool
 
@@ -46,7 +46,7 @@ type Controller struct {
 	client                client.Client
 	writeBuffer           *flowcontrol.ResourceSliceWriteBuffer
 	resourceClient        *resource.Cache
-	resourceSelector      labels.Selector
+	resourceFilter        cel.Program
 	timeout               time.Duration
 	readinessPollInterval time.Duration
 	upstreamClient        client.Client
@@ -62,7 +62,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 		return err
 	}
 
-	src, cache, err := newReconstitutionSource(mgr)
+	src, cache, err := newReconstitutionSource(mgr, opts.ResourceFilter)
 	if err != nil {
 		return err
 	}
@@ -71,7 +71,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 		client:                opts.Manager.GetClient(),
 		writeBuffer:           opts.WriteBuffer,
 		resourceClient:        cache,
-		resourceSelector:      opts.ResourceSelector,
+		resourceFilter:        opts.ResourceFilter,
 		timeout:               opts.Timeout,
 		readinessPollInterval: opts.ReadinessPollInterval,
 		upstreamClient:        upstreamClient,
@@ -123,11 +123,6 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	}
 	logger = logger.WithValues("resourceKind", resource.Ref.Kind, "resourceName", resource.Ref.Name, "resourceNamespace", resource.Ref.Namespace)
 	ctx = logr.NewContext(ctx, logger)
-
-	if c.resourceSelector != nil && !c.resourceSelector.Matches(labels.Set(resource.Labels)) {
-		// Skip resources that don't match this process's resource label selector
-		return ctrl.Result{}, nil
-	}
 
 	if syn := comp.Status.PreviousSynthesis; syn != nil {
 		prev, _, _ = c.resourceClient.Get(ctx, syn.UUID, req.Resource)

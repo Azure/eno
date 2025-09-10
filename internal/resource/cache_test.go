@@ -5,7 +5,9 @@ import (
 	"testing"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	enocel "github.com/Azure/eno/internal/cel"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
@@ -18,7 +20,7 @@ func TestCacheBasics(t *testing.T) {
 	c.SetQueue(queue)
 
 	// Fill doesn't panic when given nil slices
-	c.Fill(ctx, types.NamespacedName{}, "", nil)
+	c.Fill(ctx, &apiv1.Composition{}, "", nil)
 
 	// Visit doesn't panic when given nil slices
 	assert.False(t, c.Visit(ctx, &apiv1.Composition{}, "foo", nil))
@@ -60,7 +62,7 @@ func TestCacheBasics(t *testing.T) {
 	assert.ElementsMatch(t, []string{}, dumpQueue(queue))
 
 	// Filling the cache does not enqueue anything
-	c.Fill(ctx, compNSN, synUUID, slices)
+	c.Fill(ctx, comp, synUUID, slices)
 	assert.ElementsMatch(t, []string{}, dumpQueue(queue))
 
 	// Each visible resource is enqueued when visiting the state for the first time
@@ -109,9 +111,9 @@ func TestCachePurge(t *testing.T) {
 		}}
 
 		// Fill two syntheses
-		c.Fill(ctx, compNSN, "syn-a", slices)
+		c.Fill(ctx, comp, "syn-a", slices)
 		c.Visit(ctx, comp, "syn-a", slices)
-		c.Fill(ctx, compNSN, "syn-b", slices)
+		c.Fill(ctx, comp, "syn-b", slices)
 		c.Visit(ctx, comp, "syn-b", slices)
 		dumpQueue(queue)
 
@@ -156,7 +158,6 @@ func TestCacheReadinessGroups(t *testing.T) {
 	comp := &apiv1.Composition{}
 	comp.Name = "foo"
 	comp.Namespace = "bar"
-	compNSN := types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
 
 	slices := []apiv1.ResourceSlice{{
 		Spec: apiv1.ResourceSliceSpec{
@@ -169,7 +170,7 @@ func TestCacheReadinessGroups(t *testing.T) {
 	}}
 
 	const synUUID = "foobar"
-	c.Fill(ctx, compNSN, synUUID, slices)
+	c.Fill(ctx, comp, synUUID, slices)
 	c.Visit(ctx, comp, synUUID, slices)
 	dumpQueue(queue)
 
@@ -195,6 +196,221 @@ func TestCacheReadinessGroups(t *testing.T) {
 	podIsVisible("foo", true)
 	podIsVisible("bar", true)
 	podIsVisible("baz", true)
+}
+
+func TestCacheResourceFilter(t *testing.T) {
+	ctx := context.Background()
+	var c Cache
+	queue := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[Request]())
+	c.SetQueue(queue)
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "test-ns"
+
+	slices := []apiv1.ResourceSlice{{
+		ObjectMeta: metav1.ObjectMeta{Name: "slice-1"},
+		Spec: apiv1.ResourceSliceSpec{
+			Resources: []apiv1.Manifest{
+				{Manifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "allowed", "namespace": "default", "labels": {"env": "prod"}}}`},
+				{Manifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "filtered", "namespace": "default", "labels": {"env": "dev"}}}`},
+				{Manifest: `{"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "pod-prod", "namespace": "default", "labels": {"env": "prod"}}}`},
+			},
+		},
+	}}
+
+	filter, err := enocel.Parse("self.metadata.labels.env == 'prod'")
+	require.NoError(t, err)
+	c.ResourceFilter = filter
+
+	const synUUID = "test-syn"
+	c.Fill(ctx, comp, synUUID, slices)
+	c.Visit(ctx, comp, synUUID, slices)
+
+	requests := dumpQueue(queue)
+	assert.ElementsMatch(t, []string{"(.ConfigMap)/default/allowed", "(.Pod)/default/pod-prod"}, requests)
+
+	configMapRes, visible, found := c.Get(ctx, synUUID, Ref{Name: "allowed", Namespace: "default", Kind: "ConfigMap"})
+	assert.NotNil(t, configMapRes)
+	assert.True(t, visible)
+	assert.True(t, found)
+
+	filteredRes, visible, found := c.Get(ctx, synUUID, Ref{Name: "filtered", Namespace: "default", Kind: "ConfigMap"})
+	assert.Nil(t, filteredRes)
+	assert.False(t, visible)
+	assert.False(t, found)
+
+	podRes, visible, found := c.Get(ctx, synUUID, Ref{Name: "pod-prod", Namespace: "default", Kind: "Pod"})
+	assert.NotNil(t, podRes)
+	assert.True(t, visible)
+	assert.True(t, found)
+}
+
+func TestCacheResourceFilterWithCompositionContext(t *testing.T) {
+	ctx := context.Background()
+	var c Cache
+	queue := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[Request]())
+	c.SetQueue(queue)
+
+	comp := &apiv1.Composition{}
+	comp.Name = "my-special-comp"
+	comp.Namespace = "prod-ns"
+	comp.Labels = map[string]string{"team": "platform"}
+
+	slices := []apiv1.ResourceSlice{{
+		ObjectMeta: metav1.ObjectMeta{Name: "slice-1"},
+		Spec: apiv1.ResourceSliceSpec{
+			Resources: []apiv1.Manifest{
+				{Manifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "resource-1", "namespace": "default"}}`},
+				{Manifest: `{"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "resource-2", "namespace": "default"}}`},
+			},
+		},
+	}}
+
+	filter, err := enocel.Parse("composition.metadata.name == 'my-special-comp' && composition.metadata.labels.team == 'platform' && self.kind == 'ConfigMap'")
+	require.NoError(t, err)
+	c.ResourceFilter = filter
+
+	const synUUID = "test-syn"
+	c.Fill(ctx, comp, synUUID, slices)
+	c.Visit(ctx, comp, synUUID, slices)
+
+	requests := dumpQueue(queue)
+	assert.ElementsMatch(t, []string{"(.ConfigMap)/default/resource-1"}, requests)
+
+	configMapRes, visible, found := c.Get(ctx, synUUID, Ref{Name: "resource-1", Namespace: "default", Kind: "ConfigMap"})
+	assert.NotNil(t, configMapRes)
+	assert.True(t, visible)
+	assert.True(t, found)
+
+	secretRes, visible, found := c.Get(ctx, synUUID, Ref{Name: "resource-2", Namespace: "default", Kind: "Secret"})
+	assert.Nil(t, secretRes)
+	assert.False(t, visible)
+	assert.False(t, found)
+}
+
+func TestCacheResourceFilterNilFilter(t *testing.T) {
+	ctx := context.Background()
+	var c Cache
+	queue := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[Request]())
+	c.SetQueue(queue)
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "test-ns"
+
+	slices := []apiv1.ResourceSlice{{
+		ObjectMeta: metav1.ObjectMeta{Name: "slice-1"},
+		Spec: apiv1.ResourceSliceSpec{
+			Resources: []apiv1.Manifest{
+				{Manifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "resource-1", "namespace": "default", "labels": {"env": "prod"}}}`},
+				{Manifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "resource-2", "namespace": "default", "labels": {"env": "dev"}}}`},
+			},
+		},
+	}}
+
+	c.ResourceFilter = nil
+
+	const synUUID = "test-syn"
+	c.Fill(ctx, comp, synUUID, slices)
+	c.Visit(ctx, comp, synUUID, slices)
+
+	requests := dumpQueue(queue)
+	assert.ElementsMatch(t, []string{"(.ConfigMap)/default/resource-1", "(.ConfigMap)/default/resource-2"}, requests)
+
+	res1, visible, found := c.Get(ctx, synUUID, Ref{Name: "resource-1", Namespace: "default", Kind: "ConfigMap"})
+	assert.NotNil(t, res1)
+	assert.True(t, visible)
+	assert.True(t, found)
+
+	res2, visible, found := c.Get(ctx, synUUID, Ref{Name: "resource-2", Namespace: "default", Kind: "ConfigMap"})
+	assert.NotNil(t, res2)
+	assert.True(t, visible)
+	assert.True(t, found)
+}
+
+func TestCacheResourceFilterAlwaysFalse(t *testing.T) {
+	ctx := context.Background()
+	var c Cache
+	queue := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[Request]())
+	c.SetQueue(queue)
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "test-ns"
+
+	slices := []apiv1.ResourceSlice{{
+		ObjectMeta: metav1.ObjectMeta{Name: "slice-1"},
+		Spec: apiv1.ResourceSliceSpec{
+			Resources: []apiv1.Manifest{
+				{Manifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "resource-1", "namespace": "default"}}`},
+				{Manifest: `{"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "resource-2", "namespace": "default"}}`},
+			},
+		},
+	}}
+
+	filter, err := enocel.Parse("false")
+	require.NoError(t, err)
+	c.ResourceFilter = filter
+
+	const synUUID = "test-syn"
+	c.Fill(ctx, comp, synUUID, slices)
+	c.Visit(ctx, comp, synUUID, slices)
+
+	requests := dumpQueue(queue)
+	assert.ElementsMatch(t, []string{}, requests)
+
+	res1, visible, found := c.Get(ctx, synUUID, Ref{Name: "resource-1", Namespace: "default", Kind: "ConfigMap"})
+	assert.Nil(t, res1)
+	assert.False(t, visible)
+	assert.False(t, found)
+
+	res2, visible, found := c.Get(ctx, synUUID, Ref{Name: "resource-2", Namespace: "default", Kind: "Pod"})
+	assert.Nil(t, res2)
+	assert.False(t, visible)
+	assert.False(t, found)
+}
+
+func TestCacheResourceFilterAlwaysTrue(t *testing.T) {
+	ctx := context.Background()
+	var c Cache
+	queue := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[Request]())
+	c.SetQueue(queue)
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "test-ns"
+
+	slices := []apiv1.ResourceSlice{{
+		ObjectMeta: metav1.ObjectMeta{Name: "slice-1"},
+		Spec: apiv1.ResourceSliceSpec{
+			Resources: []apiv1.Manifest{
+				{Manifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "resource-1", "namespace": "default"}}`},
+				{Manifest: `{"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "resource-2", "namespace": "default"}}`},
+			},
+		},
+	}}
+
+	filter, err := enocel.Parse("true")
+	require.NoError(t, err)
+	c.ResourceFilter = filter
+
+	const synUUID = "test-syn"
+	c.Fill(ctx, comp, synUUID, slices)
+	c.Visit(ctx, comp, synUUID, slices)
+
+	requests := dumpQueue(queue)
+	assert.ElementsMatch(t, []string{"(.ConfigMap)/default/resource-1", "(.Pod)/default/resource-2"}, requests)
+
+	res1, visible, found := c.Get(ctx, synUUID, Ref{Name: "resource-1", Namespace: "default", Kind: "ConfigMap"})
+	assert.NotNil(t, res1)
+	assert.True(t, visible)
+	assert.True(t, found)
+
+	res2, visible, found := c.Get(ctx, synUUID, Ref{Name: "resource-2", Namespace: "default", Kind: "Pod"})
+	assert.NotNil(t, res2)
+	assert.True(t, visible)
+	assert.True(t, found)
 }
 
 func dumpQueue(q workqueue.TypedRateLimitingInterface[Request]) (slice []string) {
