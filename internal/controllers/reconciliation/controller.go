@@ -30,9 +30,9 @@ import (
 )
 
 type Options struct {
-	Manager       ctrl.Manager
-	WriteBuffer   *flowcontrol.ResourceSliceWriteBuffer
-	Downstream    *rest.Config
+	Manager        ctrl.Manager
+	WriteBuffer    *flowcontrol.ResourceSliceWriteBuffer
+	Downstream     *rest.Config
 	ResourceFilter cel.Program
 
 	DisableServerSideApply bool
@@ -170,7 +170,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	}
 
 	deleted := current == nil ||
-		current.GetDeletionTimestamp() != nil ||
+		(current.GetDeletionTimestamp() != nil && !snap.StrictDeletion) ||
 		(snap.Deleted(comp) && (snap.Orphan || snap.Disable)) // orphaning should be reflected on the status.
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 

@@ -43,6 +43,7 @@ var newResourceTests = []struct {
 					"eno.azure.io/disable-reconciliation": "true",
 					"eno.azure.io/disable-updates": "true",
 					"eno.azure.io/deletion-strategy": "orphan",
+					"eno.azure.io/ordered-deletion": "true",
 					"eno.azure.io/overrides": "[{\"path\":\".self.foo\"}, {\"path\":\".self.bar\", \"condition\": \"false\"}]"
 				}
 			}
@@ -61,6 +62,7 @@ var newResourceTests = []struct {
 			assert.True(t, r.DisableUpdates)
 			assert.True(t, r.Replace)
 			assert.True(t, r.Orphan)
+			assert.True(t, r.OrderedDeletion)
 			assert.Equal(t, int(250), r.readinessGroup)
 			assert.Len(t, r.overrides, 2)
 			assert.Equal(t, ".self.foo=Active, .self.bar=Inactive", r.OverrideStatus())
@@ -161,6 +163,23 @@ var newResourceTests = []struct {
 		},
 		Assert: func(t *testing.T, r *Snapshot) {
 			assert.True(t, r.Orphan)
+		},
+	},
+	{
+		Name: "strict-deletion",
+		Manifest: `{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "foo",
+				"annotations": {
+				  "eno.azure.io/deletion-strategy": "strict"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Snapshot) {
+			assert.False(t, r.Orphan)
+			assert.True(t, r.StrictDeletion)
 		},
 	},
 	{

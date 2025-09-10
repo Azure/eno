@@ -476,3 +476,126 @@ func TestInputCompositionGenerationOrdering(t *testing.T) {
 	})
 	assert.Equal(t, input.ResourceVersion, comp.Status.InputRevisions[0].ResourceVersion)
 }
+
+func TestDeletionGroups(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{
+			{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":       "default-group",
+						"namespace":  "default",
+						"finalizers": []any{"eno.azure.io/test"}, // this resource will never delete successfully
+						"annotations": map[string]string{
+							"eno.azure.io/deletion-strategy": "strict",
+						},
+					},
+				},
+			},
+			{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "deleted-after-default",
+						"namespace": "default",
+						"annotations": map[string]string{
+							"eno.azure.io/readiness-group":  "-1",
+							"eno.azure.io/ordered-deletion": "true",
+						},
+					},
+				},
+			},
+			{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "deleted-before-default",
+						"namespace": "default",
+						"annotations": map[string]string{
+							"eno.azure.io/readiness-group":  "1",
+							"eno.azure.io/ordered-deletion": "true",
+						},
+					},
+				},
+			},
+			{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "non-ordered",
+						"namespace": "default",
+						"annotations": map[string]string{
+							"eno.azure.io/readiness-group": "-1",
+						},
+					},
+				},
+			},
+		}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "deletion-test-syn"
+	syn.Spec.Image = "create"
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "deletion-test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	// Wait for initial reconciliation
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
+	})
+
+	// Delete the composition
+	require.NoError(t, upstream.Delete(ctx, comp))
+
+	// Wait for the default deletion group (0) to be reached
+	testutil.Eventually(t, func() bool {
+		res := &corev1.ConfigMap{}
+		res.Name = "default-group"
+		res.Namespace = "default"
+		return mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(res), res) == nil && res.DeletionTimestamp != nil
+	})
+
+	// The earlier deletion group should be deleted
+	testutil.Eventually(t, func() bool {
+		res := &corev1.ConfigMap{}
+		res.Name = "deleted-before-default"
+		res.Namespace = "default"
+		return errors.IsNotFound(mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(res), res))
+	})
+
+	// The non-ordered resource should be deleted
+	testutil.Eventually(t, func() bool {
+		res := &corev1.ConfigMap{}
+		res.Name = "non-ordered"
+		res.Namespace = "default"
+		return errors.IsNotFound(mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(res), res))
+	})
+
+	// The later deletion group is blocked by the default group's finalizer
+	time.Sleep(time.Millisecond * 200)
+	res := &corev1.ConfigMap{}
+	res.Name = "deleted-after-default"
+	res.Namespace = "default"
+	assert.Nil(t, mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(res), res))
+}

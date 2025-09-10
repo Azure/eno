@@ -127,6 +127,19 @@ func (t *tree) Get(key Ref) (res *Resource, visible bool, found bool) {
 	if !ok {
 		return nil, false, false
 	}
+
+	// Special handling for ordered deletion
+	if idx.CompositionDeleting && idx.Resource.OrderedDeletion {
+		for _, otherIdx := range t.byRef {
+			if otherIdx.Resource.OrderedDeletion && otherIdx.Resource.readinessGroup > idx.Resource.readinessGroup {
+				state := otherIdx.Resource.latestKnownState.Load()
+				if state == nil || !state.Deleted {
+					return idx.Resource, false, true // A resource with a lower readiness group hasn't been deleted yet
+				}
+			}
+		}
+	}
+
 	return idx.Resource, (!idx.Backtracks() && len(idx.PendingDependencies) == 0) || idx.CompositionDeleting, true
 }
 

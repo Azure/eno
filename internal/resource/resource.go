@@ -55,6 +55,7 @@ type Resource struct {
 
 	// DefinedGroupKind is set on CRDs to represent the resource type they define.
 	DefinedGroupKind *schema.GroupKind
+	OrderedDeletion  bool
 
 	parsed           *unstructured.Unstructured
 	isPatch          bool
@@ -160,6 +161,11 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		}
 	}
 
+	const orderedDeletionKey = "eno.azure.io/ordered-deletion"
+	if str, ok := anno[orderedDeletionKey]; ok {
+		res.OrderedDeletion = str == "true"
+	}
+
 	const readinessGroupKey = "eno.azure.io/readiness-group"
 	if str, ok := anno[readinessGroupKey]; ok {
 		rg, err := strconv.Atoi(str)
@@ -245,7 +251,9 @@ func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Compos
 	snap.Replace = cascadeAnnotation(comp, copy, replaceKey) == "true"
 
 	const deletionStratKey = "eno.azure.io/deletion-strategy"
-	snap.Orphan = cascadeAnnotation(comp, copy, deletionStratKey) == "orphan"
+	deletionStrat := cascadeAnnotation(comp, copy, deletionStratKey)
+	snap.Orphan = deletionStrat == "orphan"
+	snap.StrictDeletion = deletionStrat == "strict"
 
 	const reconcileIntervalKey = "eno.azure.io/reconcile-interval"
 	if str := cascadeAnnotation(comp, copy, reconcileIntervalKey); str != "" {
@@ -273,6 +281,7 @@ type Snapshot struct {
 	DisableUpdates    bool
 	Replace           bool
 	Orphan            bool
+	StrictDeletion    bool
 
 	parsed         *unstructured.Unstructured
 	overrideStatus string
