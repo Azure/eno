@@ -35,17 +35,28 @@ metadata:
     eno.azure.io/disable-reconciliation: "true"
 ```
 
-### Automatic Deletion
+### Deletion
 
 Resources are automatically cleaned up when:
 - They're no longer returned by your synthesizer
 - Their parent composition is deleted
 
+**Preserve resource after composition deletion:**
+
 ```yaml
-# Prevent cascading deletion
 metadata:
   annotations:
     eno.azure.io/deletion-strategy: orphan
+```
+
+**Strict deletion:**
+
+By default, a resource is considered deleted when it no longer exists or has a non-nil `metadata.deletionTimestamp`. The `strict` strategy disables the deletion timestamp check, causing Eno to wait for all finalizers to complete before proceeding.
+
+```yaml
+metadata:
+  annotations:
+    eno.azure.io/deletion-strategy: strict
 ```
 
 ### Drift Detection and Correction
@@ -121,6 +132,18 @@ metadata:
 - **Default group**: Resources without `readiness-group` are in group `0`
 - **Ordering**: Lower numbers reconcile first: `-2` → `-1` → `0` → `1` → `2`
 - **Dependencies**: Group `N+1` waits for all group `N` resources to be ready
+
+#### Deletion Order
+
+By default, resources are deleted without regard to their readiness groups. To enable ordered deletion, use this annotation:
+
+```yaml
+metadata:
+  annotations:
+    eno.azure.io/ordered-deletion: "true"
+```
+
+With ordered deletion enabled, a resource's deletion is blocked until all resources in **higher** numbered groups have been deleted (the inverse order of reconciliation).
 
 ## Sharding
 
