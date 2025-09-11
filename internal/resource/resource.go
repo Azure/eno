@@ -24,6 +24,17 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+const (
+	overridesKey         = "eno.azure.io/overrides"
+	orderedDeletionKey   = "eno.azure.io/ordered-deletion"
+	readinessGroupKey    = "eno.azure.io/readiness-group"
+	disableKey           = "eno.azure.io/disable-reconciliation"
+	disableUpdatesKey    = "eno.azure.io/disable-updates"
+	replaceKey           = "eno.azure.io/replace"
+	deletionStratKey     = "eno.azure.io/deletion-strategy"
+	reconcileIntervalKey = "eno.azure.io/reconcile-interval"
+)
+
 var patchGVK = schema.GroupVersionKind{
 	Group:   "eno.azure.io",
 	Version: "v1",
@@ -55,7 +66,7 @@ type Resource struct {
 
 	// DefinedGroupKind is set on CRDs to represent the resource type they define.
 	DefinedGroupKind *schema.GroupKind
-	OrderedDeletion  bool
+	OrderedDeletion  *bool
 
 	parsed           *unstructured.Unstructured
 	isPatch          bool
@@ -150,7 +161,6 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		anno = map[string]string{}
 	}
 
-	const overridesKey = "eno.azure.io/overrides"
 	if js, ok := anno[overridesKey]; ok {
 		err := json.Unmarshal([]byte(js), &res.overrides)
 		if strict && err != nil {
@@ -161,12 +171,15 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		}
 	}
 
-	const orderedDeletionKey = "eno.azure.io/ordered-deletion"
 	if str, ok := anno[orderedDeletionKey]; ok {
-		res.OrderedDeletion = str == "true"
+		b, err := strconv.ParseBool(str)
+		if err == nil {
+			res.OrderedDeletion = &b
+		} else {
+			return nil, fmt.Errorf("invalid ordered-deletion boolean: %w", err)
+		}
 	}
 
-	const readinessGroupKey = "eno.azure.io/readiness-group"
 	if str, ok := anno[readinessGroupKey]; ok {
 		rg, err := strconv.Atoi(str)
 		if strict && err != nil {
@@ -241,21 +254,13 @@ func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Compos
 		overrideStatus: strings.Join(overrideStatus, ", "),
 	}
 
-	const disableKey = "eno.azure.io/disable-reconciliation"
 	snap.Disable = cascadeAnnotation(comp, copy, disableKey) == "true"
-
-	const disableUpdatesKey = "eno.azure.io/disable-updates"
 	snap.DisableUpdates = cascadeAnnotation(comp, copy, disableUpdatesKey) == "true"
-
-	const replaceKey = "eno.azure.io/replace"
 	snap.Replace = cascadeAnnotation(comp, copy, replaceKey) == "true"
-
-	const deletionStratKey = "eno.azure.io/deletion-strategy"
 	deletionStrat := cascadeAnnotation(comp, copy, deletionStratKey)
 	snap.Orphan = strings.EqualFold(deletionStrat, "orphan")
 	snap.ForegroundDeletion = strings.EqualFold(deletionStrat, "foreground")
 
-	const reconcileIntervalKey = "eno.azure.io/reconcile-interval"
 	if str := cascadeAnnotation(comp, copy, reconcileIntervalKey); str != "" {
 		reconcileInterval, err := time.ParseDuration(str)
 		if err != nil {

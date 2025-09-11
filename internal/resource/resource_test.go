@@ -62,7 +62,7 @@ var newResourceTests = []struct {
 			assert.True(t, r.DisableUpdates)
 			assert.True(t, r.Replace)
 			assert.True(t, r.Orphan)
-			assert.True(t, r.OrderedDeletion)
+			assert.True(t, *r.OrderedDeletion)
 			assert.Equal(t, int(250), r.readinessGroup)
 			assert.Len(t, r.overrides, 2)
 			assert.Equal(t, ".self.foo=Active, .self.bar=Inactive", r.OverrideStatus())

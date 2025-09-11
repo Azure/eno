@@ -10,11 +10,12 @@ import (
 )
 
 type indexedResource struct {
-	Resource            *Resource
-	Seen                bool
-	PendingDependencies map[Ref]struct{}
-	Dependents          map[Ref]*indexedResource
-	CompositionDeleting bool
+	Resource                   *Resource
+	Seen                       bool
+	PendingDependencies        map[Ref]struct{}
+	Dependents                 map[Ref]*indexedResource
+	CompositionDeleting        bool
+	CompositionOrderedDeletion bool
 }
 
 // Backtracks returns true if visibility would cause the resource to backtrack to a previous state.
@@ -128,14 +129,19 @@ func (t *tree) Get(key Ref) (res *Resource, visible bool, found bool) {
 		return nil, false, false
 	}
 
+	orderedDeletion := idx.CompositionOrderedDeletion
+	if b := idx.Resource.OrderedDeletion; b != nil {
+		orderedDeletion = *b
+	}
+
 	// Special handling for ordered deletion
-	if idx.CompositionDeleting && idx.Resource.OrderedDeletion {
-		for _, otherIdx := range t.byRef {
-			if otherIdx.Resource.OrderedDeletion && otherIdx.Resource.readinessGroup > idx.Resource.readinessGroup {
-				state := otherIdx.Resource.latestKnownState.Load()
-				if state == nil || !state.Deleted {
-					return idx.Resource, false, true // A resource with a lower readiness group hasn't been deleted yet
-				}
+	if idx.CompositionDeleting && orderedDeletion {
+		for _, dep := range t.byRef {
+			if dep.Resource.readinessGroup < idx.Resource.readinessGroup || dep.Resource.Ref == key {
+				continue
+			}
+			if state := dep.Resource.latestKnownState.Load(); state == nil || !state.Deleted {
+				return idx.Resource, false, true // A resource with a lower readiness group hasn't been deleted yet
 			}
 		}
 	}
@@ -157,6 +163,7 @@ func (t *tree) UpdateState(comp *apiv1.Composition, ref ManifestRef, state *apiv
 	}
 	idx.Seen = true
 	idx.CompositionDeleting = comp.DeletionTimestamp != nil
+	idx.CompositionOrderedDeletion = comp.Annotations != nil && comp.Annotations[orderedDeletionKey] == "true"
 
 	// Dependents should no longer be blocked by this resource
 	if state.Ready != nil && (lastKnown == nil || lastKnown.Ready == nil) {

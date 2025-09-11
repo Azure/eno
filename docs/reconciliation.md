@@ -135,7 +135,7 @@ metadata:
 
 #### Deletion Order
 
-By default, resources are deleted without regard to their readiness groups. To enable ordered deletion, use this annotation:
+By default, resources are deleted without regard to their readiness groups. To enable ordered deletion, use this annotation on Compositions or individual resources:
 
 ```yaml
 metadata:

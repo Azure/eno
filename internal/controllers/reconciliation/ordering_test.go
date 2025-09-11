@@ -477,7 +477,7 @@ func TestInputCompositionGenerationOrdering(t *testing.T) {
 	assert.Equal(t, input.ResourceVersion, comp.Status.InputRevisions[0].ResourceVersion)
 }
 
-func TestDeletionGroups(t *testing.T) {
+func TestOrderedDeletion(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()

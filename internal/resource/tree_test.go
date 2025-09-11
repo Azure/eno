@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/utils/ptr"
 )
 
 func TestTreeBuilderSanity(t *testing.T) {
@@ -299,6 +300,92 @@ func TestTreeDeletion(t *testing.T) {
 	assert.True(t, found)
 }
 
+func TestTreeOrderedDeletion(t *testing.T) {
+	var b treeBuilder
+	b.Add(&Resource{
+		Ref:            newTestRef("test-resource-1"),
+		readinessGroup: 1,
+		ManifestRef:    ManifestRef{Index: 1},
+	})
+	b.Add(&Resource{
+		Ref:            newTestRef("test-resource-3"),
+		readinessGroup: 3,
+		ManifestRef:    ManifestRef{Index: 3},
+	})
+	b.Add(&Resource{
+		Ref:             newTestRef("test-resource-2"),
+		readinessGroup:  2,
+		OrderedDeletion: ptr.To(true),
+		ManifestRef:     ManifestRef{Index: 2},
+	})
+	tree := b.Build()
+
+	comp := &apiv1.Composition{}
+	comp.DeletionTimestamp = &metav1.Time{}
+	for i := 1; i < 4; i++ {
+		tree.UpdateState(comp, ManifestRef{Index: i}, &apiv1.ResourceState{}, func(r Ref) {})
+	}
+
+	_, visible, found := tree.Get(newTestRef("test-resource-1"))
+	assert.True(t, visible)
+	assert.True(t, found)
+
+	_, visible, found = tree.Get(newTestRef("test-resource-2"))
+	assert.False(t, visible)
+	assert.True(t, found)
+
+	_, visible, found = tree.Get(newTestRef("test-resource-3"))
+	assert.True(t, visible)
+	assert.True(t, found)
+
+	// Unblock deletion of the blocked resource
+	tree.UpdateState(comp, ManifestRef{Index: 3}, &apiv1.ResourceState{Deleted: true}, func(r Ref) {})
+
+	_, visible, found = tree.Get(newTestRef("test-resource-2"))
+	assert.True(t, visible)
+	assert.True(t, found)
+}
+
+func TestTreeOrderedDeletion_CompositionAnnotation(t *testing.T) {
+	var b treeBuilder
+	b.Add(&Resource{
+		Ref:             newTestRef("test-resource-1"),
+		readinessGroup:  1,
+		OrderedDeletion: ptr.To(false),
+		ManifestRef:     ManifestRef{Index: 1},
+	})
+	b.Add(&Resource{
+		Ref:            newTestRef("test-resource-3"),
+		readinessGroup: 3,
+		ManifestRef:    ManifestRef{Index: 3},
+	})
+	b.Add(&Resource{
+		Ref:            newTestRef("test-resource-2"),
+		readinessGroup: 2,
+		ManifestRef:    ManifestRef{Index: 2},
+	})
+	tree := b.Build()
+
+	comp := &apiv1.Composition{}
+	comp.Annotations = map[string]string{"eno.azure.io/ordered-deletion": "true"}
+	comp.DeletionTimestamp = &metav1.Time{}
+	for i := 1; i < 4; i++ {
+		tree.UpdateState(comp, ManifestRef{Index: i}, &apiv1.ResourceState{}, func(r Ref) {})
+	}
+
+	_, visible, found := tree.Get(newTestRef("test-resource-1"))
+	assert.True(t, visible)
+	assert.True(t, found)
+
+	_, visible, found = tree.Get(newTestRef("test-resource-2"))
+	assert.False(t, visible)
+	assert.True(t, found)
+
+	_, visible, found = tree.Get(newTestRef("test-resource-3"))
+	assert.True(t, visible)
+	assert.True(t, found)
+}
+
 func TestTreeRefConflicts(t *testing.T) {
 	var b treeBuilder
 	b.Add(&Resource{
@@ -383,91 +470,5 @@ func TestIndexedResourceBacktracks(t *testing.T) {
 		ir.Dependents[dep1.Resource.Ref] = dep1
 		ir.Dependents[dep2.Resource.Ref] = dep2
 		assert.False(t, ir.Backtracks())
-	})
-}
-
-func TestTreeOrderedDeletion(t *testing.T) {
-	var b treeBuilder
-
-	// Add resources with ordered deletion at different readiness groups
-	b.Add(&Resource{
-		Ref:             newTestRef("resource-group-1"),
-		readinessGroup:  1,
-		ManifestRef:     ManifestRef{Index: 1},
-		OrderedDeletion: true,
-	})
-	b.Add(&Resource{
-		Ref:             newTestRef("resource-group-2"),
-		readinessGroup:  2,
-		ManifestRef:     ManifestRef{Index: 2},
-		OrderedDeletion: true,
-	})
-	b.Add(&Resource{
-		Ref:             newTestRef("resource-group-3"),
-		readinessGroup:  3,
-		ManifestRef:     ManifestRef{Index: 3},
-		OrderedDeletion: true,
-	})
-	b.Add(&Resource{
-		Ref:             newTestRef("resource-no-ordered-deletion"),
-		readinessGroup:  2,
-		ManifestRef:     ManifestRef{Index: 4},
-		OrderedDeletion: false,
-	})
-
-	tree := b.Build()
-
-	// Mark all resources as seen and composition as deleting
-	comp := &apiv1.Composition{}
-	comp.DeletionTimestamp = &metav1.Time{}
-
-	for i := 1; i <= 4; i++ {
-		tree.UpdateState(comp, ManifestRef{Index: i}, &apiv1.ResourceState{}, func(r Ref) {})
-	}
-
-	t.Run("ordered deletion resource blocked by higher readiness group", func(t *testing.T) {
-		// Resource in group 1 should not be visible because group 2 and 3 are not deleted yet
-		_, visible, found := tree.Get(newTestRef("resource-group-1"))
-		assert.True(t, found)
-		assert.False(t, visible, "resource-group-1 should not be visible while higher readiness groups exist")
-	})
-
-	t.Run("resource without ordered deletion not affected", func(t *testing.T) {
-		// Resource without ordered deletion should be visible during composition deletion
-		_, visible, found := tree.Get(newTestRef("resource-no-ordered-deletion"))
-		assert.True(t, found)
-		assert.True(t, visible, "resource without ordered deletion should be visible")
-	})
-
-	t.Run("highest readiness group visible first", func(t *testing.T) {
-		// Resource in group 3 (highest) should be visible since no higher groups exist
-		_, visible, found := tree.Get(newTestRef("resource-group-3"))
-		assert.True(t, found)
-		assert.True(t, visible, "resource-group-3 should be visible as highest readiness group")
-	})
-
-	t.Run("ordered deletion proceeds after higher group deleted", func(t *testing.T) {
-		// Mark resource in group 3 as deleted
-		tree.UpdateState(comp, ManifestRef{Index: 3}, &apiv1.ResourceState{Deleted: true}, func(r Ref) {})
-
-		// Now resource in group 2 should be visible
-		_, visible, found := tree.Get(newTestRef("resource-group-2"))
-		assert.True(t, found)
-		assert.True(t, visible, "resource-group-2 should be visible after group-3 deleted")
-
-		// But resource in group 1 should still not be visible
-		_, visible, found = tree.Get(newTestRef("resource-group-1"))
-		assert.True(t, found)
-		assert.False(t, visible, "resource-group-1 should still not be visible while group-2 exists")
-	})
-
-	t.Run("all ordered deletion resources visible after sequential deletion", func(t *testing.T) {
-		// Mark resource in group 2 as deleted
-		tree.UpdateState(comp, ManifestRef{Index: 2}, &apiv1.ResourceState{Deleted: true}, func(r Ref) {})
-
-		// Now resource in group 1 should be visible
-		_, visible, found := tree.Get(newTestRef("resource-group-1"))
-		assert.True(t, found)
-		assert.True(t, visible, "resource-group-1 should be visible after all higher groups deleted")
 	})
 }
