@@ -140,7 +140,7 @@ func (t *tree) Get(key Ref) (res *Resource, visible bool, found bool) {
 			if dep.Resource.readinessGroup < idx.Resource.readinessGroup || dep.Resource.Ref == key {
 				continue
 			}
-			if state := dep.Resource.latestKnownState.Load(); state == nil || !state.Deleted {
+			if state := dep.Resource.latestKnownState.Load(); state == nil || !state.Deleted || state.Ready == nil {
 				return idx.Resource, false, true // A resource with a lower readiness group hasn't been deleted yet
 			}
 		}

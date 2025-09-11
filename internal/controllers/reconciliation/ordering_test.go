@@ -494,9 +494,6 @@ func TestOrderedDeletion(t *testing.T) {
 						"name":       "default-group",
 						"namespace":  "default",
 						"finalizers": []any{"eno.azure.io/test"}, // this resource will never delete successfully
-						"annotations": map[string]string{
-							"eno.azure.io/deletion-strategy": "Foreground",
-						},
 					},
 				},
 			},

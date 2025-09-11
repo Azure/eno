@@ -339,7 +339,7 @@ func TestTreeOrderedDeletion(t *testing.T) {
 	assert.True(t, found)
 
 	// Unblock deletion of the blocked resource
-	tree.UpdateState(comp, ManifestRef{Index: 3}, &apiv1.ResourceState{Deleted: true}, func(r Ref) {})
+	tree.UpdateState(comp, ManifestRef{Index: 3}, &apiv1.ResourceState{Deleted: true, Ready: &metav1.Time{}}, func(r Ref) {})
 
 	_, visible, found = tree.Get(newTestRef("test-resource-2"))
 	assert.True(t, visible)

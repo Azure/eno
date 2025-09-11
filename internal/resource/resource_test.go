@@ -166,23 +166,6 @@ var newResourceTests = []struct {
 		},
 	},
 	{
-		Name: "foreground-deletion",
-		Manifest: `{
-			"apiVersion": "v1",
-			"kind": "ConfigMap",
-			"metadata": {
-				"name": "foo",
-				"annotations": {
-				  "eno.azure.io/deletion-strategy": "foreground"
-				}
-			}
-		}`,
-		Assert: func(t *testing.T, r *Snapshot) {
-			assert.False(t, r.Orphan)
-			assert.True(t, r.ForegroundDeletion)
-		},
-	},
-	{
 		Name: "negative-readiness-group",
 		Manifest: `{
 			"apiVersion": "v1",

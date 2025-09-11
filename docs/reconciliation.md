@@ -35,28 +35,17 @@ metadata:
     eno.azure.io/disable-reconciliation: "true"
 ```
 
-### Deletion
+### Automatic Deletion
 
 Resources are automatically cleaned up when:
 - They're no longer returned by your synthesizer
 - Their parent composition is deleted
 
-**Preserve resource after composition deletion:**
-
 ```yaml
+# Prevent cascading deletion
 metadata:
   annotations:
     eno.azure.io/deletion-strategy: orphan
-```
-
-**Foreground deletion:**
-
-By default, a resource is considered deleted when it no longer exists or has a non-nil `metadata.deletionTimestamp`. The `foreground` strategy disables the deletion timestamp check, causing Eno to wait for all finalizers to complete before proceeding.
-
-```yaml
-metadata:
-  annotations:
-    eno.azure.io/deletion-strategy: foreground
 ```
 
 ### Drift Detection and Correction

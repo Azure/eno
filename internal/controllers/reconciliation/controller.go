@@ -135,21 +135,6 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		return ctrl.Result{}, err
 	}
 
-	// Evaluate resource readiness
-	// - Readiness checks are skipped when this version of the resource's desired state has already become ready
-	// - Readiness checks are skipped when the resource hasn't changed since the last check
-	// - Readiness defaults to true if no checks are given
-	var ready *metav1.Time
-	status := resource.State()
-	if status == nil || status.Ready == nil {
-		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, &apiv1.Composition{}, current)
-		if ok {
-			ready = &readiness.ReadyTime
-		}
-	} else {
-		ready = status.Ready
-	}
-
 	snap, err := resource.Snapshot(ctx, comp, current)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to create resource snapshot: %w", err)
@@ -159,6 +144,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		ctx = logr.NewContext(ctx, logger)
 	}
 
+	ready := c.checkReadiness(ctx, comp, snap, current)
 	modified, err := c.reconcileResource(ctx, comp, prev, snap, current)
 	if err != nil {
 		logger.Error(err, "failed to reconcile resource")
@@ -170,11 +156,26 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	}
 
 	deleted := current == nil ||
-		(current.GetDeletionTimestamp() != nil && !snap.ForegroundDeletion) ||
+		(current.GetDeletionTimestamp() != nil) ||
 		(snap.Deleted(comp) && (snap.Orphan || snap.Disable)) // orphaning should be reflected on the status.
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 
 	return c.requeue(logger, comp, snap, ready)
+}
+
+func (c *Controller) checkReadiness(ctx context.Context, comp *apiv1.Composition, snap *resource.Snapshot, current *unstructured.Unstructured) *metav1.Time {
+	status := snap.Resource.State()
+	if status != nil && status.Ready != nil {
+		return status.Ready // "latch" on the current value
+	}
+	if snap.Deleted(comp) && current != nil {
+		return nil // deleting resources aren't ready until they're fully deleted
+	}
+	readiness, ok := snap.Resource.ReadinessChecks.EvalOptionally(ctx, &apiv1.Composition{}, current)
+	if ok {
+		return &readiness.ReadyTime
+	}
+	return status.Ready
 }
 
 func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composition, prev *resource.Resource, res *resource.Snapshot, current *unstructured.Unstructured) (bool, error) {

@@ -259,7 +259,6 @@ func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Compos
 	snap.Replace = cascadeAnnotation(comp, copy, replaceKey) == "true"
 	deletionStrat := cascadeAnnotation(comp, copy, deletionStratKey)
 	snap.Orphan = strings.EqualFold(deletionStrat, "orphan")
-	snap.ForegroundDeletion = strings.EqualFold(deletionStrat, "foreground")
 
 	if str := cascadeAnnotation(comp, copy, reconcileIntervalKey); str != "" {
 		reconcileInterval, err := time.ParseDuration(str)
@@ -281,12 +280,11 @@ func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Compos
 type Snapshot struct {
 	*Resource
 
-	ReconcileInterval  *metav1.Duration
-	Disable            bool
-	DisableUpdates     bool
-	Replace            bool
-	Orphan             bool
-	ForegroundDeletion bool
+	ReconcileInterval *metav1.Duration
+	Disable           bool
+	DisableUpdates    bool
+	Replace           bool
+	Orphan            bool
 
 	parsed         *unstructured.Unstructured
 	overrideStatus string
