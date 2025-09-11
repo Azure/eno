@@ -59,6 +59,7 @@ func run() error {
 	flag.StringVar(&resourceFilter, "resource-filter", "", "Optional CEL filter expression for resources within compositions to be reconciled")
 	flag.DurationVar(&namespaceCreationGracePeriod, "ns-creation-grace-period", time.Second, "A namespace is assumed to be missing if it doesn't exist once one of its resources has existed for this long")
 	flag.BoolVar(&namespaceCleanup, "namespace-cleanup", true, "Clean up orphaned resources caused by namespace force-deletions")
+	flag.BoolVar(&recOpts.FailOpen, "fail-open", false, "Report that resources are reconciled once they've been seen, even if reconciliation failed. Overridden by individual resources with 'eno.azure.io/fail-open: true|false'")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 
