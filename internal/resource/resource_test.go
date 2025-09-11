@@ -166,20 +166,20 @@ var newResourceTests = []struct {
 		},
 	},
 	{
-		Name: "strict-deletion",
+		Name: "foreground-deletion",
 		Manifest: `{
 			"apiVersion": "v1",
 			"kind": "ConfigMap",
 			"metadata": {
 				"name": "foo",
 				"annotations": {
-				  "eno.azure.io/deletion-strategy": "strict"
+				  "eno.azure.io/deletion-strategy": "foreground"
 				}
 			}
 		}`,
 		Assert: func(t *testing.T, r *Snapshot) {
 			assert.False(t, r.Orphan)
-			assert.True(t, r.StrictDeletion)
+			assert.True(t, r.ForegroundDeletion)
 		},
 	},
 	{

@@ -252,8 +252,8 @@ func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Compos
 
 	const deletionStratKey = "eno.azure.io/deletion-strategy"
 	deletionStrat := cascadeAnnotation(comp, copy, deletionStratKey)
-	snap.Orphan = deletionStrat == "orphan"
-	snap.StrictDeletion = deletionStrat == "strict"
+	snap.Orphan = strings.EqualFold(deletionStrat, "orphan")
+	snap.ForegroundDeletion = strings.EqualFold(deletionStrat, "foreground")
 
 	const reconcileIntervalKey = "eno.azure.io/reconcile-interval"
 	if str := cascadeAnnotation(comp, copy, reconcileIntervalKey); str != "" {
@@ -276,12 +276,12 @@ func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Compos
 type Snapshot struct {
 	*Resource
 
-	ReconcileInterval *metav1.Duration
-	Disable           bool
-	DisableUpdates    bool
-	Replace           bool
-	Orphan            bool
-	StrictDeletion    bool
+	ReconcileInterval  *metav1.Duration
+	Disable            bool
+	DisableUpdates     bool
+	Replace            bool
+	Orphan             bool
+	ForegroundDeletion bool
 
 	parsed         *unstructured.Unstructured
 	overrideStatus string

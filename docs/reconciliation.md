@@ -49,14 +49,14 @@ metadata:
     eno.azure.io/deletion-strategy: orphan
 ```
 
-**Strict deletion:**
+**Foreground deletion:**
 
-By default, a resource is considered deleted when it no longer exists or has a non-nil `metadata.deletionTimestamp`. The `strict` strategy disables the deletion timestamp check, causing Eno to wait for all finalizers to complete before proceeding.
+By default, a resource is considered deleted when it no longer exists or has a non-nil `metadata.deletionTimestamp`. The `foreground` strategy disables the deletion timestamp check, causing Eno to wait for all finalizers to complete before proceeding.
 
 ```yaml
 metadata:
   annotations:
-    eno.azure.io/deletion-strategy: strict
+    eno.azure.io/deletion-strategy: foreground
 ```
 
 ### Drift Detection and Correction
