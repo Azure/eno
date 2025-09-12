@@ -247,6 +247,7 @@ func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Compos
 		Resource:       r,
 		parsed:         copy,
 		overrideStatus: strings.Join(overrideStatus, ", "),
+		composition:    comp,
 	}
 
 	const disableKey = "eno.azure.io/disable-reconciliation"
@@ -290,6 +291,7 @@ type Snapshot struct {
 
 	parsed         *unstructured.Unstructured
 	overrideStatus string
+	composition    *apiv1.Composition
 }
 
 func (r *Snapshot) OverrideStatus() string { return r.overrideStatus }
@@ -299,8 +301,8 @@ func (r *Snapshot) Unstructured() *unstructured.Unstructured {
 	return r.parsed.DeepCopy()
 }
 
-func (r *Snapshot) Deleted(comp *apiv1.Composition) bool {
-	return (comp.DeletionTimestamp != nil && !r.Orphan) || r.manifestDeleted || r.Disable || (r.isPatch && r.patchSetsDeletionTimestamp())
+func (r *Snapshot) Deleted() bool {
+	return (r.composition.DeletionTimestamp != nil && !r.Orphan) || r.manifestDeleted || r.Disable || (r.isPatch && r.patchSetsDeletionTimestamp())
 }
 
 func (r *Snapshot) Patch() ([]byte, bool, error) {
