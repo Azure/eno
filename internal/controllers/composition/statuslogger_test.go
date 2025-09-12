@@ -305,7 +305,7 @@ func TestStatusLoggerReconcile(t *testing.T) {
 		}
 
 		result, err := logger.Reconcile(ctx, req)
-		require.Error(t, err)
+		require.NoError(t, err)
 		assert.False(t, logCalled)
 		assert.Equal(t, reconcile.Result{}, result)
 	})
