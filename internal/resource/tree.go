@@ -14,7 +14,6 @@ type indexedResource struct {
 	Seen                bool
 	PendingDependencies map[Ref]struct{}
 	Dependents          map[Ref]*indexedResource
-	CompositionDeleting bool
 }
 
 // Backtracks returns true if visibility would cause the resource to backtrack to a previous state.
@@ -78,10 +77,11 @@ func (b *treeBuilder) Add(resource *Resource) {
 	}
 }
 
-func (b *treeBuilder) Build() *tree {
+func (b *treeBuilder) Build(comp *apiv1.Composition) *tree {
 	t := &tree{
 		byRef:     b.byRef,
 		byManiRef: map[ManifestRef]*indexedResource{},
+		deleting:  comp.DeletionTimestamp != nil,
 	}
 
 	for _, idx := range b.byRef {
@@ -119,6 +119,7 @@ func (b *treeBuilder) Build() *tree {
 type tree struct {
 	byRef     map[Ref]*indexedResource
 	byManiRef map[ManifestRef]*indexedResource
+	deleting  bool
 }
 
 // Get returns the resource and determines if it's visible based on the state of its dependencies.
@@ -127,11 +128,13 @@ func (t *tree) Get(key Ref) (res *Resource, visible bool, found bool) {
 	if !ok {
 		return nil, false, false
 	}
-	return idx.Resource, (!idx.Backtracks() && len(idx.PendingDependencies) == 0) || idx.CompositionDeleting, true
+	return idx.Resource, (!idx.Backtracks() && len(idx.PendingDependencies) == 0) || t.deleting, true
 }
 
 // UpdateState updates the state of a resource and requeues dependents if necessary.
-func (t *tree) UpdateState(comp *apiv1.Composition, ref ManifestRef, state *apiv1.ResourceState, enqueue func(Ref)) {
+// TODO: It's possible that we start deleting things without reloading the entire cache.
+// If we change this, what happens to the resource slice refs?
+func (t *tree) UpdateState(ref ManifestRef, state *apiv1.ResourceState, enqueue func(Ref)) {
 	idx, ok := t.byManiRef[ref]
 	if !ok {
 		return
@@ -139,11 +142,10 @@ func (t *tree) UpdateState(comp *apiv1.Composition, ref ManifestRef, state *apiv
 
 	// Requeue self when the state has changed
 	lastKnown := idx.Resource.latestKnownState.Swap(state)
-	if (!idx.Seen && lastKnown == nil) || !lastKnown.Equal(state) || (!idx.CompositionDeleting && comp.DeletionTimestamp != nil) {
+	if (!idx.Seen && lastKnown == nil) || !lastKnown.Equal(state) {
 		enqueue(idx.Resource.Ref)
 	}
 	idx.Seen = true
-	idx.CompositionDeleting = comp.DeletionTimestamp != nil
 
 	// Dependents should no longer be blocked by this resource
 	if state.Ready != nil && (lastKnown == nil || lastKnown.Ready == nil) {
