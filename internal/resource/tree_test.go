@@ -279,7 +279,7 @@ func TestTreeDeletion(t *testing.T) {
 
 		snap, err := res.Snapshot(t.Context(), comp, nil)
 		require.NoError(t, err)
-		assert.True(t, snap.Deleted(comp))
+		assert.True(t, snap.Deleted())
 	}
 }
 
