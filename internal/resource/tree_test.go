@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -238,18 +239,24 @@ func TestTreeDeletion(t *testing.T) {
 		Ref:            newTestRef("test-resource-1"),
 		readinessGroup: 1,
 		ManifestRef:    ManifestRef{Index: 1},
+		parsed:         &unstructured.Unstructured{},
 	})
 	b.Add(&Resource{
 		Ref:            newTestRef("test-resource-3"),
 		readinessGroup: 3,
 		ManifestRef:    ManifestRef{Index: 3},
+		parsed:         &unstructured.Unstructured{},
 	})
 	b.Add(&Resource{
 		Ref:            newTestRef("test-resource-2"),
 		readinessGroup: 2,
 		ManifestRef:    ManifestRef{Index: 2},
+		parsed:         &unstructured.Unstructured{},
 	})
-	tree := b.Build(&apiv1.Composition{})
+
+	comp := &apiv1.Composition{}
+	comp.DeletionTimestamp = &metav1.Time{}
+	tree := b.Build(comp)
 
 	// All resources are seen, but only one is ready
 	var enqueued []string
@@ -264,7 +271,16 @@ func TestTreeDeletion(t *testing.T) {
 	}
 	assert.ElementsMatch(t, []string{"test-resource-1", "test-resource-2", "test-resource-2", "test-resource-3"}, enqueued)
 
-	// TODO
+	for i := 1; i < 4; i++ {
+		res, visible, found := tree.Get(newTestRef(fmt.Sprintf("test-resource-%d", i)))
+		assert.True(t, found)
+		assert.True(t, visible)
+		require.NotNil(t, res)
+
+		snap, err := res.Snapshot(t.Context(), comp, nil)
+		require.NoError(t, err)
+		assert.True(t, snap.Deleted(comp))
+	}
 }
 
 func TestTreeRefConflicts(t *testing.T) {
