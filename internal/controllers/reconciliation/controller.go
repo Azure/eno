@@ -149,7 +149,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		(snap.Deleted() && (snap.Orphan || snap.Disable)) // orphaning should be reflected on the status.
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 
-	return c.requeue(logger, comp, snap, ready)
+	return c.requeue(logger, snap, ready)
 }
 
 func (c *Controller) shouldFailOpen(resource *resource.Resource) bool {
@@ -382,7 +382,7 @@ func (c *Controller) getCurrent(ctx context.Context, resource *resource.Resource
 	return current, nil
 }
 
-func (c *Controller) requeue(logger logr.Logger, comp *apiv1.Composition, resource *resource.Snapshot, ready *metav1.Time) (ctrl.Result, error) {
+func (c *Controller) requeue(logger logr.Logger, resource *resource.Snapshot, ready *metav1.Time) (ctrl.Result, error) {
 	if ready == nil {
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}

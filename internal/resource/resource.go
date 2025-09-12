@@ -302,7 +302,7 @@ func (r *Snapshot) Unstructured() *unstructured.Unstructured {
 }
 
 func (r *Snapshot) Deleted() bool {
-	return (r.composition.DeletionTimestamp != nil && !r.Orphan) || r.manifestDeleted || r.Disable || (r.isPatch && r.patchSetsDeletionTimestamp())
+	return (r.composition != nil && r.composition.DeletionTimestamp != nil && !r.Orphan) || r.manifestDeleted || r.Disable || (r.isPatch && r.patchSetsDeletionTimestamp())
 }
 
 func (r *Snapshot) Patch() ([]byte, bool, error) {
