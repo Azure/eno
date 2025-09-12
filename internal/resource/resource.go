@@ -57,18 +57,19 @@ type Resource struct {
 	// DefinedGroupKind is set on CRDs to represent the resource type they define.
 	DefinedGroupKind *schema.GroupKind
 
-	parsed           *unstructured.Unstructured
-	isPatch          bool
-	manifestHash     []byte
-	manifestDeleted  bool
-	readinessGroup   int
-	overrides        []*mutation.Op
-	latestKnownState atomic.Pointer[apiv1.ResourceState]
+	parsed             *unstructured.Unstructured
+	isPatch            bool
+	manifestHash       []byte
+	manifestDeleted    bool
+	compositionDeleted bool
+	readinessGroup     int
+	overrides          []*mutation.Op
+	latestKnownState   atomic.Pointer[apiv1.ResourceState]
 }
 
 // FromSlice constructs a resource out of the given resource slice.
 // Some invalid metadata is tolerated. See FromUnstructured for strict validation.
-func FromSlice(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*Resource, error) {
+func FromSlice(ctx context.Context, comp *apiv1.Composition, slice *apiv1.ResourceSlice, index int) (*Resource, error) {
 	resource := slice.Spec.Resources[index]
 
 	hash := fnv.New64()
@@ -95,6 +96,7 @@ func FromSlice(ctx context.Context, slice *apiv1.ResourceSlice, index int) (*Res
 
 	res.manifestHash = hash.Sum(nil)
 	res.manifestDeleted = resource.Deleted
+	res.compositionDeleted = comp.DeletionTimestamp != nil
 	res.ManifestRef.Slice.Name = slice.Name
 	res.ManifestRef.Slice.Namespace = slice.Namespace
 	res.ManifestRef.Index = index
@@ -299,8 +301,8 @@ func (r *Snapshot) Unstructured() *unstructured.Unstructured {
 	return r.parsed.DeepCopy()
 }
 
-func (r *Snapshot) Deleted(comp *apiv1.Composition) bool {
-	return (comp.DeletionTimestamp != nil && !r.Orphan) || r.manifestDeleted || r.Disable || (r.isPatch && r.patchSetsDeletionTimestamp())
+func (r *Snapshot) Deleted() bool {
+	return (r.compositionDeleted && !r.Orphan) || r.manifestDeleted || r.Disable || (r.isPatch && r.patchSetsDeletionTimestamp())
 }
 
 func (r *Snapshot) Patch() ([]byte, bool, error) {

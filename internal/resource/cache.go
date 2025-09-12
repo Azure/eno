@@ -84,7 +84,7 @@ func (c *Cache) Visit(ctx context.Context, comp *apiv1.Composition, synUUID stri
 				Slice: types.NamespacedName{Name: slice.Name, Namespace: slice.Namespace},
 				Index: i,
 			}
-			syn.UpdateState(comp, ref, &state, func(r Ref) {
+			syn.UpdateState(ref, &state, func(r Ref) {
 				c.queue.Add(Request{Resource: r, Composition: compNSN})
 			})
 		}
@@ -102,7 +102,7 @@ func (c *Cache) Fill(ctx context.Context, comp *apiv1.Composition, synUUID strin
 	for _, slice := range items {
 		slice := slice
 		for i := range slice.Spec.Resources {
-			res, err := FromSlice(ctx, &slice, i)
+			res, err := FromSlice(ctx, comp, &slice, i)
 			if err != nil {
 				// This should be impossible since the synthesis executor process will not produce invalid resources
 				logger.Error(err, "invalid resource - cannot load into cache", "resourceSliceName", slice.Name, "resourceIndex", i)

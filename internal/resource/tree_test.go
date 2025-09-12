@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -172,7 +173,6 @@ func TestTreeVisibility(t *testing.T) {
 		ManifestRef:    ManifestRef{Index: 2},
 	})
 	names := []string{"test-resource-1", "test-resource-2", "test-resource-3", "test-resource-4"}
-
 	tree := b.Build()
 
 	res, visible, found := tree.Get(newTestRef("foobar"))
@@ -180,7 +180,7 @@ func TestTreeVisibility(t *testing.T) {
 	assert.False(t, visible)
 	assert.Nil(t, res)
 
-	tree.UpdateState(&apiv1.Composition{}, ManifestRef{Index: 100}, &apiv1.ResourceState{Ready: &metav1.Time{}}, func(r Ref) {}) // it doesn't panic
+	tree.UpdateState(ManifestRef{Index: 100}, &apiv1.ResourceState{Ready: &metav1.Time{}}, func(r Ref) {}) // it doesn't panic
 
 	// Default readiness
 	expectedVisibility := map[string]bool{"test-resource-1": true}
@@ -196,7 +196,7 @@ func TestTreeVisibility(t *testing.T) {
 
 	// First resource becomes ready
 	var enqueued []string
-	tree.UpdateState(&apiv1.Composition{}, ManifestRef{Index: 1}, &apiv1.ResourceState{Ready: &metav1.Time{}}, func(r Ref) {
+	tree.UpdateState(ManifestRef{Index: 1}, &apiv1.ResourceState{Ready: &metav1.Time{}}, func(r Ref) {
 		enqueued = append(enqueued, r.Name)
 	})
 	assert.ElementsMatch(t, []string{"test-resource-1", "test-resource-2"}, enqueued)
@@ -210,7 +210,7 @@ func TestTreeVisibility(t *testing.T) {
 	// This shouldn't actually be possible in real life.
 	// The test exists only to avoid undefined behavior.
 	enqueued = nil
-	tree.UpdateState(&apiv1.Composition{}, ManifestRef{Index: 3}, &apiv1.ResourceState{Ready: &metav1.Time{}}, func(r Ref) {
+	tree.UpdateState(ManifestRef{Index: 3}, &apiv1.ResourceState{Ready: &metav1.Time{}}, func(r Ref) {
 		enqueued = append(enqueued, r.Name)
 	})
 	assert.ElementsMatch(t, []string{"test-resource-3", "test-resource-4"}, enqueued)
@@ -220,14 +220,14 @@ func TestTreeVisibility(t *testing.T) {
 
 	// Nothing is enqueued because the resource is already ready
 	enqueued = nil
-	tree.UpdateState(&apiv1.Composition{}, ManifestRef{Index: 3}, &apiv1.ResourceState{Ready: &metav1.Time{}}, func(r Ref) {
+	tree.UpdateState(ManifestRef{Index: 3}, &apiv1.ResourceState{Ready: &metav1.Time{}}, func(r Ref) {
 		enqueued = append(enqueued, r.Name)
 	})
 	assert.Nil(t, enqueued)
 
 	// It is enqueued again when the status changes
 	enqueued = nil
-	tree.UpdateState(&apiv1.Composition{}, ManifestRef{Index: 3}, &apiv1.ResourceState{Ready: &metav1.Time{}, Reconciled: true}, func(r Ref) {
+	tree.UpdateState(ManifestRef{Index: 3}, &apiv1.ResourceState{Ready: &metav1.Time{}, Reconciled: true}, func(r Ref) {
 		enqueued = append(enqueued, r.Name)
 	})
 	assert.ElementsMatch(t, []string{"test-resource-3"}, enqueued)
@@ -236,21 +236,26 @@ func TestTreeVisibility(t *testing.T) {
 func TestTreeDeletion(t *testing.T) {
 	var b treeBuilder
 	b.Add(&Resource{
-		Ref:            newTestRef("test-resource-1"),
-		readinessGroup: 1,
-		ManifestRef:    ManifestRef{Index: 1},
+		Ref:                newTestRef("test-resource-1"),
+		readinessGroup:     1,
+		ManifestRef:        ManifestRef{Index: 1},
+		parsed:             &unstructured.Unstructured{},
+		compositionDeleted: true,
 	})
 	b.Add(&Resource{
-		Ref:            newTestRef("test-resource-3"),
-		readinessGroup: 3,
-		ManifestRef:    ManifestRef{Index: 3},
+		Ref:                newTestRef("test-resource-3"),
+		readinessGroup:     3,
+		ManifestRef:        ManifestRef{Index: 3},
+		parsed:             &unstructured.Unstructured{},
+		compositionDeleted: true,
 	})
 	b.Add(&Resource{
-		Ref:            newTestRef("test-resource-2"),
-		readinessGroup: 2,
-		ManifestRef:    ManifestRef{Index: 2},
+		Ref:                newTestRef("test-resource-2"),
+		readinessGroup:     2,
+		ManifestRef:        ManifestRef{Index: 2},
+		parsed:             &unstructured.Unstructured{},
+		compositionDeleted: true,
 	})
-
 	tree := b.Build()
 
 	// All resources are seen, but only one is ready
@@ -260,43 +265,22 @@ func TestTreeDeletion(t *testing.T) {
 		if i == 1 {
 			state.Ready = &metav1.Time{}
 		}
-		tree.UpdateState(&apiv1.Composition{}, ManifestRef{Index: i}, state, func(r Ref) {
+		tree.UpdateState(ManifestRef{Index: i}, state, func(r Ref) {
 			enqueued = append(enqueued, r.Name)
 		})
 	}
 	assert.ElementsMatch(t, []string{"test-resource-1", "test-resource-2", "test-resource-2", "test-resource-3"}, enqueued)
 
-	// The third resource should not be visible yet because it's readiness group is still blocked
-	_, visible, found := tree.Get(newTestRef("test-resource-3"))
-	assert.False(t, visible)
-	assert.True(t, found)
-
-	// Deleting the composition should enqueue every item
-	enqueued = nil
 	for i := 1; i < 4; i++ {
-		comp := &apiv1.Composition{}
-		comp.DeletionTimestamp = &metav1.Time{}
-		tree.UpdateState(comp, ManifestRef{Index: i}, &apiv1.ResourceState{}, func(r Ref) {
-			enqueued = append(enqueued, r.Name)
-		})
-	}
-	assert.ElementsMatch(t, []string{"test-resource-1", "test-resource-2", "test-resource-3"}, enqueued)
+		res, visible, found := tree.Get(newTestRef(fmt.Sprintf("test-resource-%d", i)))
+		assert.True(t, found)
+		assert.True(t, visible)
+		require.NotNil(t, res)
 
-	// ...but only once
-	enqueued = nil
-	for i := 1; i < 3; i++ {
-		comp := &apiv1.Composition{}
-		comp.DeletionTimestamp = &metav1.Time{}
-		tree.UpdateState(comp, ManifestRef{Index: i}, &apiv1.ResourceState{}, func(r Ref) {
-			enqueued = append(enqueued, r.Name)
-		})
+		snap, err := res.Snapshot(t.Context(), &apiv1.Composition{}, nil)
+		require.NoError(t, err)
+		assert.True(t, snap.Deleted())
 	}
-	assert.Nil(t, enqueued)
-
-	// The third resource should be visible now
-	_, visible, found = tree.Get(newTestRef("test-resource-3"))
-	assert.True(t, visible)
-	assert.True(t, found)
 }
 
 func TestTreeRefConflicts(t *testing.T) {
@@ -309,7 +293,6 @@ func TestTreeRefConflicts(t *testing.T) {
 		Ref:          newTestRef("test-resource"),
 		manifestHash: []byte("a"),
 	})
-
 	tree := b.Build()
 
 	res, visible, found := tree.Get(newTestRef("test-resource"))

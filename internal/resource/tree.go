@@ -14,7 +14,6 @@ type indexedResource struct {
 	Seen                bool
 	PendingDependencies map[Ref]struct{}
 	Dependents          map[Ref]*indexedResource
-	CompositionDeleting bool
 }
 
 // Backtracks returns true if visibility would cause the resource to backtrack to a previous state.
@@ -127,11 +126,11 @@ func (t *tree) Get(key Ref) (res *Resource, visible bool, found bool) {
 	if !ok {
 		return nil, false, false
 	}
-	return idx.Resource, (!idx.Backtracks() && len(idx.PendingDependencies) == 0) || idx.CompositionDeleting, true
+	return idx.Resource, (!idx.Backtracks() && len(idx.PendingDependencies) == 0) || idx.Resource.compositionDeleted, true
 }
 
 // UpdateState updates the state of a resource and requeues dependents if necessary.
-func (t *tree) UpdateState(comp *apiv1.Composition, ref ManifestRef, state *apiv1.ResourceState, enqueue func(Ref)) {
+func (t *tree) UpdateState(ref ManifestRef, state *apiv1.ResourceState, enqueue func(Ref)) {
 	idx, ok := t.byManiRef[ref]
 	if !ok {
 		return
@@ -139,11 +138,10 @@ func (t *tree) UpdateState(comp *apiv1.Composition, ref ManifestRef, state *apiv
 
 	// Requeue self when the state has changed
 	lastKnown := idx.Resource.latestKnownState.Swap(state)
-	if (!idx.Seen && lastKnown == nil) || !lastKnown.Equal(state) || (!idx.CompositionDeleting && comp.DeletionTimestamp != nil) {
+	if (!idx.Seen && lastKnown == nil) || !lastKnown.Equal(state) {
 		enqueue(idx.Resource.Ref)
 	}
 	idx.Seen = true
-	idx.CompositionDeleting = comp.DeletionTimestamp != nil
 
 	// Dependents should no longer be blocked by this resource
 	if state.Ready != nil && (lastKnown == nil || lastKnown.Ready == nil) {
