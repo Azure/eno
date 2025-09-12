@@ -61,8 +61,8 @@ func (c *statusLogger) newPredicate() predicate.Predicate {
 func (c *statusLogger) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, req.NamespacedName, comp)
-	if client.IgnoreNotFound(err) != nil || comp.Status.Simplified == nil {
-		return ctrl.Result{}, err
+	if err != nil || comp.Status.Simplified == nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
 	fields := []any{
