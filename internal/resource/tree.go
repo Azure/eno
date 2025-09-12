@@ -77,11 +77,10 @@ func (b *treeBuilder) Add(resource *Resource) {
 	}
 }
 
-func (b *treeBuilder) Build(comp *apiv1.Composition) *tree {
+func (b *treeBuilder) Build() *tree {
 	t := &tree{
 		byRef:     b.byRef,
 		byManiRef: map[ManifestRef]*indexedResource{},
-		deleting:  comp.DeletionTimestamp != nil,
 	}
 
 	for _, idx := range b.byRef {
@@ -119,7 +118,6 @@ func (b *treeBuilder) Build(comp *apiv1.Composition) *tree {
 type tree struct {
 	byRef     map[Ref]*indexedResource
 	byManiRef map[ManifestRef]*indexedResource
-	deleting  bool
 }
 
 // Get returns the resource and determines if it's visible based on the state of its dependencies.
@@ -128,7 +126,7 @@ func (t *tree) Get(key Ref) (res *Resource, visible bool, found bool) {
 	if !ok {
 		return nil, false, false
 	}
-	return idx.Resource, (!idx.Backtracks() && len(idx.PendingDependencies) == 0) || t.deleting, true
+	return idx.Resource, (!idx.Backtracks() && len(idx.PendingDependencies) == 0) || idx.Resource.compositionDeleted, true
 }
 
 // UpdateState updates the state of a resource and requeues dependents if necessary.

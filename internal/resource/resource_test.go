@@ -434,7 +434,7 @@ func TestNewResource(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range newResourceTests {
 		t.Run(tc.Name, func(t *testing.T) {
-			r, err := FromSlice(ctx, &apiv1.ResourceSlice{
+			r, err := FromSlice(ctx, &apiv1.Composition{}, &apiv1.ResourceSlice{
 				Spec: apiv1.ResourceSliceSpec{
 					Resources: []apiv1.Manifest{{Manifest: tc.Manifest}},
 				},
@@ -593,7 +593,7 @@ func TestSnapshotPatch(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.Name, func(t *testing.T) {
-			r, err := FromSlice(ctx, &apiv1.ResourceSlice{
+			r, err := FromSlice(ctx, &apiv1.Composition{}, &apiv1.ResourceSlice{
 				Spec: apiv1.ResourceSliceSpec{
 					Resources: []apiv1.Manifest{{Manifest: tc.Manifest}},
 				},

@@ -125,7 +125,7 @@ func TestTreeBuilderSanity(t *testing.T) {
 				b.Add(r)
 			}
 
-			tree := b.Build(&apiv1.Composition{})
+			tree := b.Build()
 			js, err := json.MarshalIndent(tree, "", "  ")
 			require.NoError(t, err)
 
@@ -173,7 +173,7 @@ func TestTreeVisibility(t *testing.T) {
 		ManifestRef:    ManifestRef{Index: 2},
 	})
 	names := []string{"test-resource-1", "test-resource-2", "test-resource-3", "test-resource-4"}
-	tree := b.Build(&apiv1.Composition{})
+	tree := b.Build()
 
 	res, visible, found := tree.Get(newTestRef("foobar"))
 	assert.False(t, found, "404 case")
@@ -236,27 +236,27 @@ func TestTreeVisibility(t *testing.T) {
 func TestTreeDeletion(t *testing.T) {
 	var b treeBuilder
 	b.Add(&Resource{
-		Ref:            newTestRef("test-resource-1"),
-		readinessGroup: 1,
-		ManifestRef:    ManifestRef{Index: 1},
-		parsed:         &unstructured.Unstructured{},
+		Ref:                newTestRef("test-resource-1"),
+		readinessGroup:     1,
+		ManifestRef:        ManifestRef{Index: 1},
+		parsed:             &unstructured.Unstructured{},
+		compositionDeleted: true,
 	})
 	b.Add(&Resource{
-		Ref:            newTestRef("test-resource-3"),
-		readinessGroup: 3,
-		ManifestRef:    ManifestRef{Index: 3},
-		parsed:         &unstructured.Unstructured{},
+		Ref:                newTestRef("test-resource-3"),
+		readinessGroup:     3,
+		ManifestRef:        ManifestRef{Index: 3},
+		parsed:             &unstructured.Unstructured{},
+		compositionDeleted: true,
 	})
 	b.Add(&Resource{
-		Ref:            newTestRef("test-resource-2"),
-		readinessGroup: 2,
-		ManifestRef:    ManifestRef{Index: 2},
-		parsed:         &unstructured.Unstructured{},
+		Ref:                newTestRef("test-resource-2"),
+		readinessGroup:     2,
+		ManifestRef:        ManifestRef{Index: 2},
+		parsed:             &unstructured.Unstructured{},
+		compositionDeleted: true,
 	})
-
-	comp := &apiv1.Composition{}
-	comp.DeletionTimestamp = &metav1.Time{}
-	tree := b.Build(comp)
+	tree := b.Build()
 
 	// All resources are seen, but only one is ready
 	var enqueued []string
@@ -277,7 +277,7 @@ func TestTreeDeletion(t *testing.T) {
 		assert.True(t, visible)
 		require.NotNil(t, res)
 
-		snap, err := res.Snapshot(t.Context(), comp, nil)
+		snap, err := res.Snapshot(t.Context(), &apiv1.Composition{}, nil)
 		require.NoError(t, err)
 		assert.True(t, snap.Deleted())
 	}
@@ -293,7 +293,7 @@ func TestTreeRefConflicts(t *testing.T) {
 		Ref:          newTestRef("test-resource"),
 		manifestHash: []byte("a"),
 	})
-	tree := b.Build(&apiv1.Composition{})
+	tree := b.Build()
 
 	res, visible, found := tree.Get(newTestRef("test-resource"))
 	assert.True(t, found)

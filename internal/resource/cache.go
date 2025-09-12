@@ -102,7 +102,7 @@ func (c *Cache) Fill(ctx context.Context, comp *apiv1.Composition, synUUID strin
 	for _, slice := range items {
 		slice := slice
 		for i := range slice.Spec.Resources {
-			res, err := FromSlice(ctx, &slice, i)
+			res, err := FromSlice(ctx, comp, &slice, i)
 			if err != nil {
 				// This should be impossible since the synthesis executor process will not produce invalid resources
 				logger.Error(err, "invalid resource - cannot load into cache", "resourceSliceName", slice.Name, "resourceIndex", i)
@@ -124,7 +124,7 @@ func (c *Cache) Fill(ctx context.Context, comp *apiv1.Composition, synUUID strin
 			builder.Add(res)
 		}
 	}
-	tree := builder.Build(comp)
+	tree := builder.Build()
 
 	compNSN := types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
 	c.mut.Lock()
