@@ -84,7 +84,7 @@ func (c *Cache) Visit(ctx context.Context, comp *apiv1.Composition, synUUID stri
 				Slice: types.NamespacedName{Name: slice.Name, Namespace: slice.Namespace},
 				Index: i,
 			}
-			syn.UpdateState(comp, ref, &state, func(r Ref) {
+			syn.UpdateState(ref, &state, func(r Ref) {
 				c.queue.Add(Request{Resource: r, Composition: compNSN})
 			})
 		}
@@ -124,7 +124,7 @@ func (c *Cache) Fill(ctx context.Context, comp *apiv1.Composition, synUUID strin
 			builder.Add(res)
 		}
 	}
-	tree := builder.Build()
+	tree := builder.Build(comp)
 
 	compNSN := types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
 	c.mut.Lock()
