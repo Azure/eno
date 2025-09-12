@@ -132,8 +132,6 @@ func (t *tree) Get(key Ref) (res *Resource, visible bool, found bool) {
 }
 
 // UpdateState updates the state of a resource and requeues dependents if necessary.
-// TODO: It's possible that we start deleting things without reloading the entire cache.
-// If we change this, what happens to the resource slice refs?
 func (t *tree) UpdateState(ref ManifestRef, state *apiv1.ResourceState, enqueue func(Ref)) {
 	idx, ok := t.byManiRef[ref]
 	if !ok {
