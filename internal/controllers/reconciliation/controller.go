@@ -190,9 +190,13 @@ func (c *Controller) checkReadiness(ctx context.Context, resource *resource.Reso
 		return state.Ready
 	}
 
-	// Deleting resources aren't ready until deletion is complete
-	if current != nil && snap != nil && snap.Deleted() && !snap.Orphan && !snap.Disable {
-		return nil
+	if snap != nil && snap.Deleted() && !snap.Orphan && !snap.Disable {
+		if current != nil {
+			// Deleting resources aren't ready until deletion is complete
+			return nil
+		}
+		// Readiness checks shouldn't apply to deleting resources
+		return ptr.To(metav1.Now())
 	}
 
 	// Process the readiness checks
