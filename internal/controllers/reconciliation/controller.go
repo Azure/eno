@@ -190,12 +190,16 @@ func (c *Controller) checkReadiness(ctx context.Context, resource *resource.Reso
 		return state.Ready
 	}
 
-	if snap != nil && snap.Deleted() && !snap.Orphan && !snap.Disable {
+	// No snapshot means we're failing open on purpose
+	if snap == nil {
+		return ptr.To(metav1.Now())
+	}
+
+	// Deletion is special: readiness is blocked only until the resource is fully deleted regardless of any configured checks
+	if snap.Deleted() && !snap.Orphan && !snap.Disable {
 		if current != nil {
-			// Deleting resources aren't ready until deletion is complete
 			return nil
 		}
-		// Readiness checks shouldn't apply to deleting resources
 		return ptr.To(metav1.Now())
 	}
 
