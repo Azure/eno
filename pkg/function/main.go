@@ -47,9 +47,9 @@ func Main[T Inputs](fn SynthFunc[T], opts ...Option) {
 	}
 }
 
-// processStructFields recursively processes struct fields with eno_key tags,
+// readInputStruct recursively processes struct fields with eno_key tags,
 // only recurses embedded struct/pointer fields.
-func processStructFields(ir *InputReader, ow *OutputWriter, v reflect.Value) error {
+func readInputStruct(ir *InputReader, ow *OutputWriter, v reflect.Value) error {
 	t := v.Type()
 
 	for i := 0; i < t.NumField(); i++ {
@@ -86,7 +86,7 @@ func processStructFields(ir *InputReader, ow *OutputWriter, v reflect.Value) err
 
 		// Handle embedded struct fields.
 		if field.Anonymous && fieldValue.Kind() == reflect.Struct {
-			err := processStructFields(ir, ow, fieldValue)
+			err := readInputStruct(ir, ow, fieldValue)
 			if err != nil {
 				return err
 			}
@@ -98,7 +98,7 @@ func processStructFields(ir *InputReader, ow *OutputWriter, v reflect.Value) err
 			if fieldValue.IsNil() {
 				fieldValue.Set(reflect.New(fieldValue.Type().Elem()))
 			}
-			err := processStructFields(ir, ow, fieldValue.Elem())
+			err := readInputStruct(ir, ow, fieldValue.Elem())
 			if err != nil {
 				return err
 			}
@@ -112,7 +112,7 @@ func main[T Inputs](fn SynthFunc[T], options *mainConfig, ir *InputReader, ow *O
 	var inputs T
 	v := reflect.ValueOf(&inputs).Elem()
 
-	err := processStructFields(ir, ow, v)
+	err := readInputStruct(ir, ow, v)
 	if err != nil {
 		if errors.Is(err, ErrInputReadingFailed) {
 			return ow.Write()
