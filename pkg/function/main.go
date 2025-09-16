@@ -1,6 +1,7 @@
 package function
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -20,6 +21,8 @@ type Inputs interface{}
 type MungableInputs interface {
 	Munge() error
 }
+
+var ErrInputReadingFailed = errors.New("input reading failed")
 
 // SynthFunc defines a synthesizer function that takes a set of inputs and returns a list of objects.
 type SynthFunc[T Inputs] func(inputs T) ([]client.Object, error)
@@ -44,33 +47,77 @@ func Main[T Inputs](fn SynthFunc[T], opts ...Option) {
 	}
 }
 
-func main[T Inputs](fn SynthFunc[T], options *mainConfig, ir *InputReader, ow *OutputWriter) error {
-	var inputs T
-	v := reflect.ValueOf(&inputs).Elem()
+// processStructFields recursively processes struct fields with eno_key tags,
+// only recurses embedded struct/pointer fields.
+func processStructFields(ir *InputReader, ow *OutputWriter, v reflect.Value) error {
 	t := v.Type()
 
-	// Read the inputs
 	for i := 0; i < t.NumField(); i++ {
-		tagValue := t.Field(i).Tag.Get("eno_key")
-		if tagValue == "" {
+		field := t.Field(i)
+		fieldValue := v.Field(i)
+
+		// Skip unexported fields.
+		if !fieldValue.CanSet() {
 			continue
 		}
 
-		input, err := newInput(ir, v.Field(i))
-		if err != nil {
-			return err
+		// Handle fields tagged with `eno_key`.
+		tagValue := field.Tag.Get("eno_key")
+		if tagValue != "" {
+			input, err := newInput(ir, fieldValue)
+			if err != nil {
+				return err
+			}
+
+			err = ReadInput(ir, tagValue, input.Object)
+			if err != nil {
+				ow.AddResult(&krmv1.Result{
+					Message:  fmt.Sprintf("error while reading input with key %q: %s", tagValue, err),
+					Severity: krmv1.ResultSeverityError,
+				})
+				return ErrInputReadingFailed
+			}
+
+			err = input.Finalize()
+			if err != nil {
+				return err
+			}
 		}
 
-		err = ReadInput(ir, tagValue, input.Object)
-		if err != nil {
-			ow.AddResult(&krmv1.Result{
-				Message:  fmt.Sprintf("error while reading input with key %q: %s", tagValue, err),
-				Severity: krmv1.ResultSeverityError,
-			})
+		// Handle embedded struct fields.
+		if field.Anonymous && fieldValue.Kind() == reflect.Struct {
+			err := processStructFields(ir, ow, fieldValue)
+			if err != nil {
+				return err
+			}
+		}
+
+		// Handle embedded struct pointer fields.
+		if field.Anonymous && fieldValue.Kind() == reflect.Ptr && fieldValue.Type().Elem().Kind() == reflect.Struct {
+			// Initialize the pointer if it's nil.
+			if fieldValue.IsNil() {
+				fieldValue.Set(reflect.New(fieldValue.Type().Elem()))
+			}
+			err := processStructFields(ir, ow, fieldValue.Elem())
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func main[T Inputs](fn SynthFunc[T], options *mainConfig, ir *InputReader, ow *OutputWriter) error {
+	var inputs T
+	v := reflect.ValueOf(&inputs).Elem()
+
+	err := processStructFields(ir, ow, v)
+	if err != nil {
+		if errors.Is(err, ErrInputReadingFailed) {
 			return ow.Write()
 		}
-
-		input.Finalize()
+		return err
 	}
 
 	// Use reflection to check if inputs implements MungableInputs.
