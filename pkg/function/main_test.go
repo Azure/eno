@@ -194,6 +194,21 @@ type testSimpleInputs struct {
 	MySecret    *corev1.Secret    `eno_key:"test-secret"`
 }
 
+// Test struct with embedded structs that have eno_key tags
+type EmbeddedConfigMap struct {
+	ConfigMap *corev1.ConfigMap `eno_key:"embedded-cm"`
+}
+
+type EmbeddedSecret struct {
+	Secret *corev1.Secret `eno_key:"embedded-secret"`
+}
+
+type testEmbeddedInputs struct {
+	EmbeddedConfigMap
+	*EmbeddedSecret
+	DirectField *corev1.ConfigMap `eno_key:"direct-cm"`
+}
+
 func newTestInputReader() *InputReader {
 	inBuf := bytes.NewBufferString(`{"items": [{"kind": "ConfigMap", "apiVersion": "v1", "metadata": {"name": "test-configmap", "annotations": {"eno.azure.io/input-key": "test-cm"}}, "data": {"key": "foo"}}, {"kind": "Secret", "apiVersion": "v1", "metadata": {"name": "test-secret", "annotations": {"eno.azure.io/input-key": "test-secret"}}, "data": {"key": "Zm9vYmFyCg=="}}]}`)
 	ir, err := NewInputReader(inBuf)
@@ -201,6 +216,51 @@ func newTestInputReader() *InputReader {
 		panic(err)
 	}
 	return ir
+}
+
+func newTestInputReaderForEmbedded() *InputReader {
+	inBuf := bytes.NewBufferString(`{"items": [
+		{"kind": "ConfigMap", "apiVersion": "v1", "metadata": {"name": "embedded-configmap", "annotations": {"eno.azure.io/input-key": "embedded-cm"}}, "data": {"key": "embedded-foo"}},
+		{"kind": "Secret", "apiVersion": "v1", "metadata": {"name": "embedded-secret", "annotations": {"eno.azure.io/input-key": "embedded-secret"}}, "data": {"key": "ZW1iZWRkZWQtc2VjcmV0"}},
+		{"kind": "ConfigMap", "apiVersion": "v1", "metadata": {"name": "direct-configmap", "annotations": {"eno.azure.io/input-key": "direct-cm"}}, "data": {"key": "direct-foo"}}
+	]}`)
+	ir, err := NewInputReader(inBuf)
+	if err != nil {
+		panic(err)
+	}
+	return ir
+}
+
+func TestMainWithEmbeddedStructs(t *testing.T) {
+	outBuf := &bytes.Buffer{}
+	ow := NewOutputWriter(outBuf, nil)
+	ir := newTestInputReaderForEmbedded()
+
+	fn := func(inputs testEmbeddedInputs) ([]client.Object, error) {
+		output := &corev1.Pod{}
+		output.Name = "test-pod"
+		annotations := map[string]string{}
+
+		if inputs.ConfigMap != nil {
+			annotations["embedded-cm-value"] = inputs.ConfigMap.Data["key"]
+		}
+		if inputs.EmbeddedSecret != nil && inputs.Secret != nil {
+			annotations["embedded-secret-value"] = string(inputs.Secret.Data["key"])
+		}
+		if inputs.DirectField != nil {
+			annotations["direct-cm-value"] = inputs.DirectField.Data["key"]
+		}
+
+		output.Annotations = annotations
+		return []client.Object{output}, nil
+	}
+
+	require.NoError(t, main(fn, &mainConfig{}, ir, ow))
+
+	output := outBuf.String()
+	assert.Contains(t, output, `"embedded-cm-value":"embedded-foo"`)
+	assert.Contains(t, output, `"embedded-secret-value":"embedded-secret"`)
+	assert.Contains(t, output, `"direct-cm-value":"direct-foo"`)
 }
 
 // Test inputs that implement MungerError
