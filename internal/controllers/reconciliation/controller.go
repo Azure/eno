@@ -145,7 +145,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	}
 
 	deleted := current == nil ||
-		current.GetDeletionTimestamp() != nil ||
+		(current.GetDeletionTimestamp() != nil && !snap.ForegroundDeletion) ||
 		(snap.Deleted() && (snap.Orphan || snap.Disable)) // orphaning should be reflected on the status.
 	ready := c.checkReadiness(ctx, resource, snap, current)
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
@@ -402,7 +402,7 @@ func (c *Controller) requeue(logger logr.Logger, resource *resource.Snapshot, re
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}
 
-	if resource == nil || (resource.Deleted() && !resource.Disable) || resource.ReconcileInterval == nil {
+	if resource == nil || (resource.Deleted() && resource.Disable) || resource.ReconcileInterval == nil {
 		return ctrl.Result{}, nil
 	}
 
