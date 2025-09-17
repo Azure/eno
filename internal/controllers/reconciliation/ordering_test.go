@@ -523,7 +523,7 @@ func TestForegroundDeletion(t *testing.T) {
 	err := retry.RetryOnConflict(testutil.Backoff, func() error {
 		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
 		cm.Finalizers = []string{}
-		return upstream.Update(ctx, cm)
+		return mgr.DownstreamClient.Update(ctx, cm)
 	})
 	require.NoError(t, err)
 	testutil.Eventually(t, func() bool {
