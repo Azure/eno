@@ -521,7 +521,7 @@ func TestForegroundDeletion(t *testing.T) {
 
 	// Unblocking the configmap deletion should also unblock composition deletion
 	err := retry.RetryOnConflict(testutil.Backoff, func() error {
-		upstream.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
 		cm.Finalizers = []string{}
 		return upstream.Update(ctx, cm)
 	})
