@@ -131,7 +131,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		prev, _, _ = c.resourceClient.Get(ctx, syn.UUID, req.Resource)
 	}
 
-	snap, current, modified, err := c.reconcileResource(ctx, comp, prev, resource)
+	snap, current, ready, modified, err := c.reconcileResource(ctx, comp, prev, resource)
 	if c.shouldFailOpen(resource) {
 		err = nil
 		modified = false
@@ -147,7 +147,6 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	deleted := current == nil ||
 		current.GetDeletionTimestamp() != nil ||
 		(snap.Deleted() && (snap.Orphan || snap.Disable)) // orphaning should be reflected on the status.
-	ready := c.checkReadiness(ctx, resource, snap, current)
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 
 	return c.requeue(logger, snap, ready)
@@ -157,19 +156,33 @@ func (c *Controller) shouldFailOpen(resource *resource.Resource) bool {
 	return (resource.FailOpen == nil && c.failOpen) || (resource.FailOpen != nil && *resource.FailOpen)
 }
 
-func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composition, prev *resource.Resource, resource *resource.Resource) (snap *resource.Snapshot, current *unstructured.Unstructured, modified bool, err error) {
+func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composition, prev *resource.Resource, resource *resource.Resource) (snap *resource.Snapshot, current *unstructured.Unstructured, ready *metav1.Time, modified bool, err error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	// Fetch the current resource
 	current, err = c.getCurrent(ctx, resource)
 	if client.IgnoreNotFound(err) != nil && !isErrMissingNS(err) && !isErrNoKindMatch(err) {
 		logger.Error(err, "failed to get current state")
-		return nil, nil, false, err
+		return nil, nil, nil, false, err
+	}
+
+	// Evaluate resource readiness
+	// - Readiness checks are skipped when this version of the resource's desired state has already become ready
+	// - Readiness checks are skipped when the resource hasn't changed since the last check
+	// - Readiness defaults to true if no checks are given
+	status := resource.State()
+	if status == nil || status.Ready == nil {
+		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, &apiv1.Composition{}, current)
+		if ok {
+			ready = &readiness.ReadyTime
+		}
+	} else {
+		ready = status.Ready
 	}
 
 	snap, err = resource.Snapshot(ctx, comp, current)
 	if err != nil {
-		return nil, nil, false, fmt.Errorf("failed to create resource snapshot: %w", err)
+		return nil, nil, nil, false, fmt.Errorf("failed to create resource snapshot: %w", err)
 	}
 	if status := snap.OverrideStatus(); len(status) > 0 {
 		logger = logger.WithValues("overrideStatus", status)
@@ -180,35 +193,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	if err != nil {
 		logger.Error(err, "failed to reconcile resource")
 	}
-	return snap, current, modified, err
-}
-
-func (c *Controller) checkReadiness(ctx context.Context, resource *resource.Resource, snap *resource.Snapshot, current *unstructured.Unstructured) *metav1.Time {
-	// Readiness state "latches" once set
-	state := resource.State()
-	if state != nil && state.Ready != nil {
-		return state.Ready
-	}
-
-	// No snapshot means we're failing open on purpose
-	if snap == nil {
-		return ptr.To(metav1.Now())
-	}
-
-	// Deletion is special: readiness is blocked only until the resource is fully deleted regardless of any configured checks
-	if snap.Deleted() && !snap.Orphan && !snap.Disable {
-		if current != nil {
-			return nil
-		}
-		return ptr.To(metav1.Now())
-	}
-
-	// Process the readiness checks
-	readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, &apiv1.Composition{}, current)
-	if ok {
-		return &readiness.ReadyTime
-	}
-	return nil
+	return snap, current, ready, modified, err
 }
 
 func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composition, prev *resource.Resource, res *resource.Snapshot, current *unstructured.Unstructured) (bool, error) {
