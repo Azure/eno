@@ -733,10 +733,7 @@ func TestDisableReconciliation(t *testing.T) {
 	_, comp := writeGenericComposition(t, upstream)
 
 	// Wait for readiness
-	testutil.Eventually(t, func() bool {
-		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
-	})
+	waitForReadiness(t, mgr, comp, nil, nil)
 
 	// The resource should not have been created
 	obj := &corev1.ConfigMap{}
@@ -789,10 +786,7 @@ func TestUpdateReplace(t *testing.T) {
 	_, comp := writeGenericComposition(t, upstream)
 
 	// Wait for resource to be created
-	testutil.Eventually(t, func() bool {
-		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
-	})
+	waitForReadiness(t, mgr, comp, nil, nil)
 
 	initial := &corev1.ConfigMap{}
 	initial.SetName("test-obj")
@@ -816,10 +810,7 @@ func TestUpdateReplace(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	testutil.Eventually(t, func() bool {
-		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == comp.Generation
-	})
+	waitForReadiness(t, mgr, comp, nil, nil)
 
 	// The external change should be removed AND the UID should not change
 	testutil.Eventually(t, func() bool {
@@ -844,10 +835,7 @@ func TestUpdateReplace(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	testutil.Eventually(t, func() bool {
-		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == comp.Generation
-	})
+	waitForReadiness(t, mgr, comp, nil, nil)
 
 	// The external change should be removed AND the UID should not change
 	testutil.Eventually(t, func() bool {
@@ -928,7 +916,6 @@ func TestResourceDefaulting(t *testing.T) {
 	corev1.SchemeBuilder.AddToScheme(scheme)
 	testv1.SchemeBuilder.AddToScheme(scheme)
 
-	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
 
@@ -982,10 +969,7 @@ func TestResourceDefaulting(t *testing.T) {
 	_, comp := writeGenericComposition(t, upstream)
 
 	// It should be able to become ready
-	testutil.Eventually(t, func() bool {
-		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == comp.Generation
-	})
+	waitForReadiness(t, mgr, comp, nil, nil)
 }
 
 func TestImplicitBindings(t *testing.T) {

@@ -17,7 +17,6 @@ import (
 	"github.com/Azure/eno/internal/resource"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/require"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -84,21 +83,30 @@ func setupTestSubjectForOptions(t *testing.T, mgr *testutil.Manager, opts Option
 	require.NoError(t, err)
 }
 
-func mapToResource(t *testing.T, res map[string]any) (*unstructured.Unstructured, *resource.Resource) {
-	obj := &unstructured.Unstructured{Object: res}
-	js, err := obj.MarshalJSON()
-	require.NoError(t, err)
-
-	slice := &apiv1.ResourceSlice{}
-	slice.Spec.Resources = []apiv1.Manifest{{Manifest: string(js)}}
-	rr, err := resource.FromSlice(context.Background(), &apiv1.Composition{}, slice, 0)
-	require.NoError(t, err)
-
-	return obj, rr
-}
-
 func requireSSA(t *testing.T, mgr *testutil.Manager) {
 	if mgr.DownstreamVersion > 0 && mgr.DownstreamVersion < 16 {
 		t.Skipf("skipping test because it requires server-side apply which isn't supported on k8s 1.%d", mgr.DownstreamVersion)
 	}
+}
+
+func waitForReadiness(t *testing.T, mgr *testutil.Manager, comp *apiv1.Composition, synth *apiv1.Synthesizer, notUUID *string) {
+	t.Helper()
+	testutil.Eventually(t, func() bool {
+		err := mgr.GetClient().Get(t.Context(), client.ObjectKeyFromObject(comp), comp)
+		if err != nil {
+			t.Logf("client error while polling for readiness: %s", err)
+			return false
+		}
+		syn := comp.Status.CurrentSynthesis
+		if syn == nil {
+			return false
+		}
+		if notUUID != nil && syn.UUID == *notUUID {
+			return false
+		}
+		if synth != nil && syn.ObservedSynthesizerGeneration != synth.Generation {
+			return false
+		}
+		return syn.Reconciled != nil && syn.Ready != nil && syn.ObservedCompositionGeneration == comp.Generation
+	})
 }
