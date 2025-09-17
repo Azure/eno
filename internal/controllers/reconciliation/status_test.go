@@ -90,7 +90,10 @@ func TestResourceReadiness(t *testing.T) {
 	require.NoError(t, err)
 
 	// The composition should also be updated
-	waitForReadiness(t, mgr, comp, syn, nil)
+	testutil.Eventually(t, func() bool {
+		err = upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
 
 	// Update resource to not meet readiness criteria
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {

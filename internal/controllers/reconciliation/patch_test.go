@@ -67,7 +67,10 @@ func TestPatchCreation(t *testing.T) {
 	comp.Spec.Synthesizer.Name = syn.Name
 	require.NoError(t, upstream.Create(ctx, comp))
 
-	waitForReadiness(t, mgr, comp, syn, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
+	})
 
 	cm := &corev1.ConfigMap{}
 	cm.Name = "test-obj"
@@ -119,7 +122,10 @@ func TestPatchDeletion(t *testing.T) {
 	cm.Namespace = "default"
 	require.NoError(t, downstream.Create(ctx, cm))
 
-	waitForReadiness(t, mgr, comp, nil, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
+	})
 
 	err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm)
 	require.True(t, errors.IsNotFound(err))
@@ -166,7 +172,10 @@ func TestPatchDeleteOnCompositionDeletion(t *testing.T) {
 	_, comp := writeGenericComposition(t, upstream)
 
 	// Initial reconciliation
-	waitForReadiness(t, mgr, comp, nil, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
+	})
 
 	// Configmap should still exist
 	testutil.Eventually(t, func() bool { return downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm) == nil })
@@ -224,7 +233,10 @@ func TestPatchOverrides(t *testing.T) {
 	cm.Data = map[string]string{"foo": "initial"}
 	require.NoError(t, downstream.Create(ctx, cm))
 
-	waitForReadiness(t, mgr, comp, nil, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
+	})
 
 	testutil.Eventually(t, func() bool {
 		downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm)
@@ -299,7 +311,10 @@ func TestPatchDeletionBeforeCreation(t *testing.T) {
 	setupTestSubject(t, mgr)
 	mgr.Start(t)
 	_, comp := writeGenericComposition(t, upstream)
-	waitForReadiness(t, mgr, comp, nil, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
+	})
 
 	// Verify the configmap should be created after the deletion patch is applied.
 	err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm)
@@ -387,7 +402,10 @@ func TestPatchDeletionBeforeUpgrade(t *testing.T) {
 	// Create deletion patch and configmap with new change.
 	_, comp := writeGenericComposition(t, upstream)
 
-	waitForReadiness(t, mgr, comp, nil, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
+	})
 
 	err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm)
 	require.NoError(t, err)
@@ -463,7 +481,10 @@ func TestPatchDeletionForResourceWithReconciliationFromInput(t *testing.T) {
 	// Create deletion patch and configmap.
 	_, comp := writeGenericComposition(t, upstream)
 
-	waitForReadiness(t, mgr, comp, nil, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
+	})
 
 	cm := &corev1.ConfigMap{}
 	cm.Name = cmName
@@ -540,7 +561,10 @@ func TestPatchDeleteOrphanedResources(t *testing.T) {
 	syn, comp := writeComposition(t, upstream, true) // Set orphan to true
 
 	// Ensure the composition is created and reconciled.
-	waitForReadiness(t, mgr, comp, nil, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
+	})
 
 	// The resource should be deleted even the composition have orphan for deletion-strategy annotation.
 	cm := &corev1.ConfigMap{}
@@ -558,5 +582,8 @@ func TestPatchDeleteOrphanedResources(t *testing.T) {
 		return upstream.Update(ctx, syn)
 	})
 	require.NoError(t, err)
-	waitForReadiness(t, mgr, comp, nil, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
+	})
 }

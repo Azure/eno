@@ -75,7 +75,12 @@ func TestDisableSSA(t *testing.T) {
 	})
 	mgr.Start(t)
 	_, comp := writeGenericComposition(t, upstream)
-	waitForReadiness(t, mgr, comp, nil, nil)
+
+	// It should be able to become ready
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == comp.Generation
+	})
 
 	// Add a field to the deployment
 	dep := &appsv1.Deployment{}
@@ -95,7 +100,12 @@ func TestDisableSSA(t *testing.T) {
 		return upstream.Update(ctx, comp)
 	})
 	require.NoError(t, err)
-	waitForReadiness(t, mgr, comp, nil, nil)
+
+	latestGen := comp.Generation
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration >= latestGen
+	})
 
 	// Prove the field wasn't removed
 	testutil.Eventually(t, func() bool {
@@ -138,7 +148,10 @@ func TestRemoveProperty(t *testing.T) {
 	syn, comp := writeGenericComposition(t, upstream)
 
 	// Creation
-	waitForReadiness(t, mgr, comp, syn, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
 
 	// Sanity check the current state of the CM
 	cm := &corev1.ConfigMap{}
@@ -157,7 +170,10 @@ func TestRemoveProperty(t *testing.T) {
 	require.NoError(t, err)
 
 	// Update
-	waitForReadiness(t, mgr, comp, syn, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
 
 	// Prove the resource was reconciled correctly
 	err = mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
@@ -201,7 +217,10 @@ func TestRemovePropertyAndOwnership(t *testing.T) {
 	syn, comp := writeGenericComposition(t, upstream)
 
 	// Creation
-	waitForReadiness(t, mgr, comp, syn, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
 
 	// Remove the field ownership metadata
 	cm := &corev1.ConfigMap{}
@@ -224,7 +243,10 @@ func TestRemovePropertyAndOwnership(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	waitForReadiness(t, mgr, comp, syn, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
 
 	// Prove the resource was reconciled correctly
 	testutil.Eventually(t, func() bool {
@@ -270,7 +292,10 @@ func TestRemovePropertyAndPartialOwnership(t *testing.T) {
 	syn, comp := writeGenericComposition(t, upstream)
 
 	// Creation
-	waitForReadiness(t, mgr, comp, syn, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
 
 	// Mutate one of the fields using another field manager
 	cm := &corev1.ConfigMap{}
@@ -291,7 +316,10 @@ func TestRemovePropertyAndPartialOwnership(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	waitForReadiness(t, mgr, comp, syn, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
 
 	// Prove the resource was reconciled correctly
 	testutil.Eventually(t, func() bool {
@@ -334,7 +362,10 @@ func TestRemoveMissingProperty(t *testing.T) {
 	syn, comp := writeGenericComposition(t, upstream)
 
 	// Creation
-	waitForReadiness(t, mgr, comp, syn, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
 
 	// Remove the data field from outside of Eno
 	cm := &corev1.ConfigMap{}
@@ -355,7 +386,10 @@ func TestRemoveMissingProperty(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	waitForReadiness(t, mgr, comp, syn, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
 
 	// Prove the resource was reconciled correctly
 	testutil.Eventually(t, func() bool {
@@ -396,7 +430,10 @@ func TestReplaceProperty(t *testing.T) {
 	syn, comp := writeGenericComposition(t, upstream)
 
 	// Creation
-	waitForReadiness(t, mgr, comp, syn, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
 
 	// Force update some of the properties with another field manager
 	cm := &corev1.ConfigMap{}
@@ -421,7 +458,10 @@ func TestReplaceProperty(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	waitForReadiness(t, mgr, comp, syn, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
 
 	// Prove the resource was reconciled correctly
 	err = mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
@@ -461,7 +501,10 @@ func TestReplacePropertyAndRemoveOwnership(t *testing.T) {
 	syn, comp := writeGenericComposition(t, upstream)
 
 	// Creation
-	waitForReadiness(t, mgr, comp, syn, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
 
 	// Force update some of the properties with another field manager
 	cm := &corev1.ConfigMap{}
@@ -498,7 +541,10 @@ func TestReplacePropertyAndRemoveOwnership(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	waitForReadiness(t, mgr, comp, syn, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
 
 	// Prove the resource was reconciled correctly
 	err = mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
@@ -541,7 +587,10 @@ func TestExternallyManagedPropertyPreserved(t *testing.T) {
 	syn, comp := writeGenericComposition(t, upstream)
 
 	// Creation
-	waitForReadiness(t, mgr, comp, syn, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
 
 	// Hand off ownership of 'foo'
 	cm := &corev1.ConfigMap{}
@@ -566,7 +615,10 @@ func TestExternallyManagedPropertyPreserved(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	waitForReadiness(t, mgr, comp, syn, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
 
 	// Prove the resource was reconciled correctly
 	err = mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
@@ -611,7 +663,10 @@ func TestExternallyManagedPropertyRemoved(t *testing.T) {
 	syn, comp := writeGenericComposition(t, upstream)
 
 	// Creation
-	waitForReadiness(t, mgr, comp, syn, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
 
 	// Hand off ownership of 'foo'
 	cm := &corev1.ConfigMap{}
@@ -635,7 +690,10 @@ func TestExternallyManagedPropertyRemoved(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	waitForReadiness(t, mgr, comp, syn, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
 
 	// Prove the resource was reconciled correctly
 	err = mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
@@ -693,7 +751,10 @@ func TestExternallyManagedPropertyAndOverrideRemoved(t *testing.T) {
 	syn, comp := writeGenericComposition(t, upstream)
 
 	// Creation
-	waitForReadiness(t, mgr, comp, syn, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
 
 	// Hand off ownership of 'foo'
 	cm := &corev1.ConfigMap{}
@@ -717,7 +778,10 @@ func TestExternallyManagedPropertyAndOverrideRemoved(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	waitForReadiness(t, mgr, comp, syn, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration == syn.Generation
+	})
 
 	// Prove the resource was reconciled correctly
 	err = mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)

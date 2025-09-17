@@ -59,7 +59,12 @@ func TestErrorReporting(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	waitForReadiness(t, mgr, comp, syn, nil)
+	testutil.Eventually(t, func() bool {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil &&
+			comp.Status.Simplified != nil && comp.Status.Simplified.Error == "" &&
+			comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
 }
 
 func TestSummarizeErrorIntegration(t *testing.T) {
