@@ -402,7 +402,7 @@ func (c *Controller) requeue(logger logr.Logger, resource *resource.Snapshot, re
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}
 
-	if resource == nil || (resource.Deleted() && resource.Disable) || resource.ReconcileInterval == nil {
+	if resource == nil || resource.ReconcileInterval == nil {
 		return ctrl.Result{}, nil
 	}
 
