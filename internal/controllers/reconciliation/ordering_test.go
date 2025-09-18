@@ -534,3 +534,271 @@ func TestForegroundDeletion(t *testing.T) {
 		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 	})
 }
+
+func TestDeletionOrder(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{
+			{
+				// Will never finish deleting due to finalizer
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":       "stuck-no-deletion-group",
+						"namespace":  "default",
+						"finalizers": []any{"eno.azure.io/stuck"},
+					},
+				},
+			},
+			{
+				// Should never be deleted since a resource with lower deletion group is stuck
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":       "stuck",
+						"namespace":  "default",
+						"finalizers": []any{"eno.azure.io/stuck"},
+						"annotations": map[string]any{
+							"eno.azure.io/deletion-group":    "123",
+							"eno.azure.io/deletion-strategy": "Foreground",
+						},
+					},
+				},
+			},
+			{
+				// Should never be deleted since a resource with lower deletion group is stuck
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "stuck-behind",
+						"namespace": "default",
+						"annotations": map[string]any{
+							"eno.azure.io/deletion-group": "1",
+						},
+					},
+				},
+			},
+			{
+				// Should be deleted like normal - no ordering
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "no-deletion-group",
+						"namespace": "default",
+					},
+				},
+			},
+			{
+				// Disabled resources shouldn't block reconciliation
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "disabled",
+						"namespace": "default",
+						"annotations": map[string]any{
+							"eno.azure.io/deletion-group":         "456",
+							"eno.azure.io/disable-reconciliation": "true",
+							"eno.azure.io/deletion-strategy":      "Foreground",
+						},
+					},
+				},
+			},
+			{
+				// Orphaned resources shouldn't block reconciliation
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "orphaned",
+						"namespace": "default",
+						"annotations": map[string]any{
+							"eno.azure.io/deletion-group":    "567",
+							"eno.azure.io/deletion-strategy": "orphan",
+						},
+					},
+				},
+			},
+			{
+				// Should be deleted like normal - not blocked by the disabled resource
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "first",
+						"namespace": "default",
+						"annotations": map[string]any{
+							"eno.azure.io/deletion-group": "345",
+						},
+					},
+				},
+			},
+			{
+				// This one should be deleted before "first"
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "second",
+						"namespace": "default",
+						"annotations": map[string]any{
+							"eno.azure.io/deletion-group": "234",
+						},
+					},
+				},
+			},
+		}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+	waitForReadiness(t, mgr, comp, nil, nil)
+	require.NoError(t, upstream.Delete(ctx, comp))
+
+	names := []string{"stuck-no-deletion-group", "stuck", "stuck-behind", "no-deletion-group", "orphaned", "disabled", "first", "second"}
+	expected := []string{"Deleting", "Deleting", "Gone", "Gone", "NotDeleting", "Gone", "NotDeleting", "NotDeleting"}
+	require.Equal(t, len(names), len(expected))
+	testutil.Eventually(t, func() bool {
+		states := make([]string, len(names))
+
+		for i, name := range names {
+			cm := &corev1.ConfigMap{}
+			cm.Namespace = "default"
+			cm.Name = name
+			err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+			if errors.IsNotFound(err) {
+				states[i] = "Gone"
+				continue
+			}
+			require.NoError(t, err)
+			if cm.DeletionTimestamp != nil {
+				states[i] = "Deleting"
+				continue
+			}
+			states[i] = "NotDeleting"
+		}
+
+		if slices.Equal(states, expected) {
+			return true
+		}
+
+		t.Logf("unexpected states: %+s", states)
+		return false
+	})
+}
+
+func TestDeletionOrderLiveness(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{
+			{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "no-deletion-group",
+						"namespace": "default",
+					},
+				},
+			},
+			{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "disabled",
+						"namespace": "default",
+						"annotations": map[string]any{
+							"eno.azure.io/deletion-group":         "456",
+							"eno.azure.io/disable-reconciliation": "true",
+							"eno.azure.io/deletion-strategy":      "Foreground",
+						},
+					},
+				},
+			},
+			{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "orphaned",
+						"namespace": "default",
+						"annotations": map[string]any{
+							"eno.azure.io/deletion-group":    "567",
+							"eno.azure.io/deletion-strategy": "orphan",
+						},
+					},
+				},
+			},
+			{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "fail-open",
+						"namespace": "default",
+						"annotations": map[string]any{
+							"eno.azure.io/deletion-group":    "678",
+							"eno.azure.io/fail-open":         "true",
+							"eno.azure.io/deletion-strategy": "Foreground",
+						},
+					},
+				},
+			},
+			{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "second",
+						"namespace": "default",
+						"annotations": map[string]any{
+							"eno.azure.io/deletion-group": "345",
+						},
+					},
+				},
+			},
+			{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "first",
+						"namespace": "default",
+						"annotations": map[string]any{
+							"eno.azure.io/deletion-group": "234",
+						},
+					},
+				},
+			},
+		}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+	waitForReadiness(t, mgr, comp, nil, nil)
+	require.NoError(t, upstream.Delete(ctx, comp))
+
+	// Deletion isn't blocked
+	testutil.Eventually(t, func() bool {
+		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	})
+}

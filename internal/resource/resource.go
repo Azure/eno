@@ -63,6 +63,7 @@ type Resource struct {
 	manifestDeleted    bool
 	compositionDeleted bool
 	readinessGroup     int
+	deletionGroup      *int
 	overrides          []*mutation.Op
 	latestKnownState   atomic.Pointer[apiv1.ResourceState]
 }
@@ -186,6 +187,19 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 			logger.V(0).Info("invalid readiness group - ignoring")
 		} else {
 			res.readinessGroup = rg
+		}
+	}
+
+	const deletionGroupKey = "eno.azure.io/deletion-group"
+	if str, ok := anno[deletionGroupKey]; ok {
+		rg, err := strconv.Atoi(str)
+		if strict && err != nil {
+			return nil, fmt.Errorf("invalid deletion group value: %q", str)
+		}
+		if err != nil {
+			logger.V(0).Info("invalid deletion group - ignoring")
+		} else {
+			res.deletionGroup = &rg
 		}
 	}
 

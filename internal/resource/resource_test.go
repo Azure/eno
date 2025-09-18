@@ -43,6 +43,7 @@ var newResourceTests = []struct {
 					"eno.azure.io/disable-reconciliation": "true",
 					"eno.azure.io/disable-updates": "true",
 					"eno.azure.io/deletion-strategy": "orphan",
+					"eno.azure.io/deletion-group": "0",
 					"eno.azure.io/fail-open": "true",
 					"eno.azure.io/overrides": "[{\"path\":\".self.foo\"}, {\"path\":\".self.bar\", \"condition\": \"false\"}]"
 				}
@@ -64,6 +65,7 @@ var newResourceTests = []struct {
 			assert.True(t, r.Orphan)
 			assert.False(t, r.ForegroundDeletion)
 			assert.True(t, *r.FailOpen)
+			assert.Equal(t, 0, *r.deletionGroup)
 			assert.Equal(t, int(250), r.readinessGroup)
 			assert.Len(t, r.overrides, 2)
 			assert.Equal(t, ".self.foo=Active, .self.bar=Inactive", r.OverrideStatus())
@@ -120,6 +122,7 @@ var newResourceTests = []struct {
 			assert.Equal(t, int(0), r.readinessGroup)
 			assert.False(t, r.DisableUpdates)
 			assert.False(t, r.Replace)
+			assert.Nil(t, r.deletionGroup)
 		},
 	},
 	{

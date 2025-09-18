@@ -14,6 +14,7 @@ type indexedResource struct {
 	Seen                bool
 	PendingDependencies map[Ref]struct{}
 	Dependents          map[Ref]*indexedResource
+	Group               *int
 }
 
 // Backtracks returns true if visibility would cause the resource to backtrack to a previous state.
@@ -68,9 +69,20 @@ func (b *treeBuilder) Add(resource *Resource) {
 		PendingDependencies: map[Ref]struct{}{},
 		Dependents:          map[Ref]*indexedResource{},
 	}
+
+	if !resource.compositionDeleted {
+		idx.Group = &resource.readinessGroup
+	} else if resource.deletionGroup != nil {
+		idx.Group = resource.deletionGroup
+	}
+
 	b.byRef[resource.Ref] = idx
-	current, _ := b.byGroup.Get(resource.readinessGroup)
-	b.byGroup.Put(resource.readinessGroup, append(current, idx))
+	if idx.Group == nil {
+		return
+	}
+
+	current, _ := b.byGroup.Get(*idx.Group)
+	b.byGroup.Put(*idx.Group, append(current, idx))
 	b.byGK[resource.GVK.GroupKind()] = idx
 	if resource.DefinedGroupKind != nil {
 		b.byDefiningGK[*resource.DefinedGroupKind] = idx
@@ -87,14 +99,18 @@ func (b *treeBuilder) Build() *tree {
 		t.byManiRef[idx.Resource.ManifestRef] = idx
 
 		// CRs are dependent on their CRDs
-		i := b.byGroup.IteratorAt(b.byGroup.GetNode(idx.Resource.readinessGroup))
 		crd, ok := b.byDefiningGK[idx.Resource.GVK.GroupKind()]
 		if ok {
 			idx.PendingDependencies[crd.Resource.Ref] = struct{}{}
 			crd.Dependents[idx.Resource.Ref] = idx
 		}
 
+		if idx.Group == nil {
+			continue
+		}
+
 		// Depend on any resources in the previous readiness group
+		i := b.byGroup.IteratorAt(b.byGroup.GetNode(*idx.Group))
 		if i.Prev() {
 			for _, dep := range i.Value() {
 				idx.PendingDependencies[dep.Resource.Ref] = struct{}{}
@@ -103,7 +119,7 @@ func (b *treeBuilder) Build() *tree {
 		i.Next() // Prev always moves the cursor, even if it returns false
 
 		// Any resources in the next readiness group depend on us
-		if i.Next() && i.Key() > idx.Resource.readinessGroup {
+		if i.Next() && i.Key() > *idx.Group {
 			for _, cur := range i.Value() {
 				idx.Dependents[cur.Resource.Ref] = cur
 			}
@@ -126,7 +142,7 @@ func (t *tree) Get(key Ref) (res *Resource, visible bool, found bool) {
 	if !ok {
 		return nil, false, false
 	}
-	return idx.Resource, (!idx.Backtracks() && len(idx.PendingDependencies) == 0) || idx.Resource.compositionDeleted, true
+	return idx.Resource, (!idx.Backtracks() && len(idx.PendingDependencies) == 0), true
 }
 
 // UpdateState updates the state of a resource and requeues dependents if necessary.
@@ -144,7 +160,9 @@ func (t *tree) UpdateState(ref ManifestRef, state *apiv1.ResourceState, enqueue 
 	idx.Seen = true
 
 	// Dependents should no longer be blocked by this resource
-	if state.Ready != nil && (lastKnown == nil || lastKnown.Ready == nil) {
+	readinessTransition := !idx.Resource.compositionDeleted && state.Ready != nil && (lastKnown == nil || lastKnown.Ready == nil)
+	deletedTransition := idx.Resource.compositionDeleted && state.Deleted && (lastKnown == nil || !lastKnown.Deleted)
+	if readinessTransition || deletedTransition {
 		for _, dep := range idx.Dependents {
 			delete(dep.PendingDependencies, idx.Resource.Ref)
 			enqueue(dep.Resource.Ref)
