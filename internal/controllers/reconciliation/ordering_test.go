@@ -503,7 +503,12 @@ func TestForegroundDeletion(t *testing.T) {
 	})
 
 	registerControllers(t, mgr)
-	setupTestSubject(t, mgr)
+	setupTestSubjectForOptions(t, mgr, Options{
+		Manager:                mgr.Manager,
+		Timeout:                time.Minute,
+		ReadinessPollInterval:  time.Millisecond * 10,
+		DisableServerSideApply: mgr.NoSsaSupport,
+	})
 	mgr.Start(t)
 	_, comp := writeGenericComposition(t, upstream)
 	waitForReadiness(t, mgr, comp, nil, nil)
