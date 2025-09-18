@@ -62,6 +62,7 @@ var newResourceTests = []struct {
 			assert.True(t, r.DisableUpdates)
 			assert.True(t, r.Replace)
 			assert.True(t, r.Orphan)
+			assert.False(t, r.ForegroundDeletion)
 			assert.True(t, *r.FailOpen)
 			assert.Equal(t, int(250), r.readinessGroup)
 			assert.Len(t, r.overrides, 2)
@@ -119,6 +120,22 @@ var newResourceTests = []struct {
 			assert.Equal(t, int(0), r.readinessGroup)
 			assert.False(t, r.DisableUpdates)
 			assert.False(t, r.Replace)
+		},
+	},
+	{
+		Name: "foreground-deletion",
+		Manifest: `{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "foo",
+				"annotations": {
+					"eno.azure.io/deletion-strategy": "Foreground"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Snapshot) {
+			assert.True(t, r.ForegroundDeletion)
 		},
 	},
 	{

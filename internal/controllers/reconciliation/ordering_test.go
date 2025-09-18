@@ -476,3 +476,61 @@ func TestInputCompositionGenerationOrdering(t *testing.T) {
 	})
 	assert.Equal(t, input.ResourceVersion, comp.Status.InputRevisions[0].ResourceVersion)
 }
+
+func TestForegroundDeletion(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":       "test-obj",
+					"namespace":  "default",
+					"finalizers": []any{"eno.azure.io/test"},
+					"annotations": map[string]any{
+						"eno.azure.io/deletion-strategy": "foreground",
+					},
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	registerControllers(t, mgr)
+	setupTestSubjectForOptions(t, mgr, Options{
+		Manager:                mgr.Manager,
+		Timeout:                time.Minute,
+		ReadinessPollInterval:  time.Millisecond * 10,
+		DisableServerSideApply: mgr.NoSsaSupport,
+	})
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+	waitForReadiness(t, mgr, comp, nil, nil)
+	require.NoError(t, upstream.Delete(ctx, comp))
+
+	// The composition should still exist while the configmap is deleting
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	testutil.Eventually(t, func() bool {
+		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return err == nil && cm.DeletionTimestamp != nil
+	})
+	require.NoError(t, upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+
+	// Unblocking the configmap deletion should also unblock composition deletion
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		cm.Finalizers = []string{}
+		return mgr.DownstreamClient.Update(ctx, cm)
+	})
+	require.NoError(t, err)
+	testutil.Eventually(t, func() bool {
+		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	})
+}
