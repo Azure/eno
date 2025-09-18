@@ -63,6 +63,7 @@ type Resource struct {
 	manifestDeleted    bool
 	compositionDeleted bool
 	readinessGroup     int
+	deletionGroup      *int
 	overrides          []*mutation.Op
 	latestKnownState   atomic.Pointer[apiv1.ResourceState]
 }
@@ -189,6 +190,19 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		}
 	}
 
+	const deletionGroupKey = "eno.azure.io/deletion-group"
+	if str, ok := anno[deletionGroupKey]; ok {
+		rg, err := strconv.Atoi(str)
+		if strict && err != nil {
+			return nil, fmt.Errorf("invalid deletion group value: %q", str)
+		}
+		if err != nil {
+			logger.V(0).Info("invalid deletion group - ignoring")
+		} else {
+			res.deletionGroup = &rg
+		}
+	}
+
 	for key, value := range anno {
 		if !strings.HasPrefix(key, "eno.azure.io/readiness") || key == readinessGroupKey {
 			continue
@@ -221,6 +235,16 @@ func (r *Resource) State() *apiv1.ResourceState { return r.latestKnownState.Load
 // Used to establish determinstic ordering for conflicting resources.
 func (r *Resource) Less(than *Resource) bool {
 	return bytes.Compare(r.manifestHash, than.manifestHash) < 0
+}
+
+// group returns the readiness or deletion group index that is relevant to the resource's current deletion state.
+func (r *Resource) group() (int, bool) {
+	if !r.compositionDeleted {
+		return r.readinessGroup, true
+	} else if r.deletionGroup != nil {
+		return *r.deletionGroup, true
+	}
+	return 0, false
 }
 
 // Snapshot evaluates the resource against its current/actual state and returns the resulting "snapshot".

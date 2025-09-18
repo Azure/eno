@@ -1,0 +1,30 @@
+{
+  "(test.group.TestKind)/default/high-deletion-group": {
+    "dependencies": [
+      "(test.group.TestKind)/default/low-deletion-group"
+    ],
+    "dependents": [],
+    "ready": false,
+    "reconciled": false
+  },
+  "(test.group.TestKind)/default/low-deletion-group": {
+    "dependencies": [],
+    "dependents": [
+      "(test.group.TestKind)/default/high-deletion-group"
+    ],
+    "ready": false,
+    "reconciled": false
+  },
+  "(test.group.TestKind)/default/no-deletion-group": {
+    "dependencies": [],
+    "dependents": [],
+    "ready": false,
+    "reconciled": false
+  },
+  "(test.group.TestKind)/default/no-deletion-or-readiness-group": {
+    "dependencies": [],
+    "dependents": [],
+    "ready": false,
+    "reconciled": false
+  }
+}

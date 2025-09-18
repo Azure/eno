@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/utils/ptr"
 )
 
 func TestTreeBuilderSanity(t *testing.T) {
@@ -113,6 +114,30 @@ func TestTreeBuilderSanity(t *testing.T) {
 					Ref:              newTestRef("test-crd"),
 					DefinedGroupKind: &schema.GroupKind{Group: "test.group", Kind: "TestCRDKind"},
 					readinessGroup:   5,
+				},
+			},
+		},
+		{
+			Name: "deletion-groups",
+			Resources: []*Resource{
+				{
+					Ref:                newTestRef("no-deletion-or-readiness-group"),
+					compositionDeleted: true,
+				},
+				{
+					Ref:                newTestRef("no-deletion-group"),
+					readinessGroup:     3,
+					compositionDeleted: true,
+				},
+				{
+					Ref:                newTestRef("high-deletion-group"),
+					deletionGroup:      ptr.To(9),
+					compositionDeleted: true,
+				},
+				{
+					Ref:                newTestRef("low-deletion-group"),
+					deletionGroup:      ptr.To(3),
+					compositionDeleted: true,
 				},
 			},
 		},
@@ -269,7 +294,7 @@ func TestTreeDeletion(t *testing.T) {
 			enqueued = append(enqueued, r.Name)
 		})
 	}
-	assert.ElementsMatch(t, []string{"test-resource-1", "test-resource-2", "test-resource-2", "test-resource-3"}, enqueued)
+	assert.ElementsMatch(t, []string{"test-resource-1", "test-resource-2", "test-resource-3"}, enqueued)
 
 	for i := 1; i < 4; i++ {
 		res, visible, found := tree.Get(newTestRef(fmt.Sprintf("test-resource-%d", i)))

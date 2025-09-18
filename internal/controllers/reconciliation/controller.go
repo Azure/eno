@@ -132,7 +132,8 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	}
 
 	snap, current, ready, modified, err := c.reconcileResource(ctx, comp, prev, resource)
-	if c.shouldFailOpen(resource) {
+	failingOpen := c.shouldFailOpen(resource)
+	if failingOpen {
 		err = nil
 		modified = false
 	}
@@ -146,7 +147,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 
 	deleted := current == nil ||
 		(current.GetDeletionTimestamp() != nil && !snap.ForegroundDeletion) ||
-		(snap.Deleted() && (snap.Orphan || snap.Disable)) // orphaning should be reflected on the status.
+		(snap.Deleted() && (snap.Orphan || snap.Disable || failingOpen)) // orphaning should be reflected on the status.
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 
 	return c.requeue(logger, snap, ready)
