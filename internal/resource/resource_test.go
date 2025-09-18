@@ -139,6 +139,30 @@ var newResourceTests = []struct {
 		},
 	},
 	{
+		Name: "orphan-patch",
+		Manifest: `{
+			"apiVersion": "eno.azure.io/v1",
+			"kind": "Patch",
+			"metadata": {
+				"name": "foo",
+				"namespace": "bar",
+				"annotations": {
+				  "eno.azure.io/deletion-strategy": "orphan"
+				}
+			},
+			"patch": {
+				"apiVersion": "v1",
+				"kind": "ConfigMap",
+				"ops": [
+					{ "op": "add", "path": "/metadata/deletionTimestamp", "value": "foo" }
+				]
+			}
+		}`,
+		Assert: func(t *testing.T, r *Snapshot) {
+			assert.False(t, r.Orphan) // patches are never orphaned
+		},
+	},
+	{
 		Name: "composition-precedence-positive",
 		Manifest: `{
 			"apiVersion": "v1",
