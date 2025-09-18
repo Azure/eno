@@ -14,7 +14,6 @@ type indexedResource struct {
 	Seen                bool
 	PendingDependencies map[Ref]struct{}
 	Dependents          map[Ref]*indexedResource
-	Group               *int
 }
 
 // Backtracks returns true if visibility would cause the resource to backtrack to a previous state.
@@ -70,19 +69,14 @@ func (b *treeBuilder) Add(resource *Resource) {
 		Dependents:          map[Ref]*indexedResource{},
 	}
 
-	if !resource.compositionDeleted {
-		idx.Group = &resource.readinessGroup
-	} else if resource.deletionGroup != nil {
-		idx.Group = resource.deletionGroup
-	}
-
 	b.byRef[resource.Ref] = idx
-	if idx.Group == nil {
+	grp, hasGrp := resource.group()
+	if !hasGrp {
 		return
 	}
 
-	current, _ := b.byGroup.Get(*idx.Group)
-	b.byGroup.Put(*idx.Group, append(current, idx))
+	current, _ := b.byGroup.Get(grp)
+	b.byGroup.Put(grp, append(current, idx))
 	b.byGK[resource.GVK.GroupKind()] = idx
 	if resource.DefinedGroupKind != nil {
 		b.byDefiningGK[*resource.DefinedGroupKind] = idx
@@ -105,12 +99,13 @@ func (b *treeBuilder) Build() *tree {
 			crd.Dependents[idx.Resource.Ref] = idx
 		}
 
-		if idx.Group == nil {
+		grp, hasGrp := idx.Resource.group()
+		if !hasGrp {
 			continue
 		}
 
 		// Depend on any resources in the previous readiness group
-		i := b.byGroup.IteratorAt(b.byGroup.GetNode(*idx.Group))
+		i := b.byGroup.IteratorAt(b.byGroup.GetNode(grp))
 		if i.Prev() {
 			for _, dep := range i.Value() {
 				idx.PendingDependencies[dep.Resource.Ref] = struct{}{}
@@ -119,7 +114,7 @@ func (b *treeBuilder) Build() *tree {
 		i.Next() // Prev always moves the cursor, even if it returns false
 
 		// Any resources in the next readiness group depend on us
-		if i.Next() && i.Key() > *idx.Group {
+		if i.Next() && i.Key() > grp {
 			for _, cur := range i.Value() {
 				idx.Dependents[cur.Resource.Ref] = cur
 			}

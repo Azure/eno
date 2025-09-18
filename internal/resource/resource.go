@@ -237,6 +237,16 @@ func (r *Resource) Less(than *Resource) bool {
 	return bytes.Compare(r.manifestHash, than.manifestHash) < 0
 }
 
+// group returns the readiness or deletion group index that is relevant to the resource's current deletion state.
+func (r *Resource) group() (int, bool) {
+	if !r.compositionDeleted {
+		return r.readinessGroup, true
+	} else if r.deletionGroup != nil {
+		return *r.deletionGroup, true
+	}
+	return 0, false
+}
+
 // Snapshot evaluates the resource against its current/actual state and returns the resulting "snapshot".
 //
 // The snapshot should only be used to progress the resource's state from the given resourceVersion.
