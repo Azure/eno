@@ -493,8 +493,7 @@ func TestForegroundDeletion(t *testing.T) {
 					"namespace":  "default",
 					"finalizers": []any{"eno.azure.io/test"},
 					"annotations": map[string]any{
-						"eno.azure.io/deletion-strategy":  "foreground",
-						"eno.azure.io/reconcile-interval": "100ms",
+						"eno.azure.io/deletion-strategy": "foreground",
 					},
 				},
 			},
