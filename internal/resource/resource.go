@@ -262,6 +262,7 @@ func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Compos
 
 	const deletionStratKey = "eno.azure.io/deletion-strategy"
 	snap.Orphan = strings.EqualFold(cascadeAnnotation(comp, copy, deletionStratKey), "orphan")
+	snap.Orphan = !r.isPatch && strings.EqualFold(cascadeAnnotation(comp, copy, deletionStratKey), "orphan")
 	snap.ForegroundDeletion = strings.EqualFold(cascadeAnnotation(comp, copy, deletionStratKey), "foreground")
 
 	const reconcileIntervalKey = "eno.azure.io/reconcile-interval"
@@ -304,7 +305,7 @@ func (r *Snapshot) Unstructured() *unstructured.Unstructured {
 }
 
 func (r *Snapshot) Deleted() bool {
-	return (r.compositionDeleted && !r.Orphan) || r.manifestDeleted || r.Disable || (r.isPatch && r.patchSetsDeletionTimestamp())
+	return r.compositionDeleted || r.manifestDeleted || r.Disable || (r.isPatch && r.patchSetsDeletionTimestamp())
 }
 
 func (r *Snapshot) Patch() ([]byte, bool, error) {
