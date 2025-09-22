@@ -104,7 +104,7 @@ func AnnotateOverrides(obj client.Object, overrides []Override) error {
 	if existingStr, exists := annotations["eno.azure.io/overrides"]; exists {
 		var existing []Override
 		json.Unmarshal([]byte(existingStr), &existing)
-		merged = append(merged, overrides...)
+		merged = append(existing, overrides...)
 	}
 
 	// intentionally not validating so custom overrides can work eno-reconciler rather than be bound to cel
