@@ -118,15 +118,21 @@ func TestAnnotateOverrides_ExistingAnnotation(t *testing.T) {
 			"kind":       "ConfigMap",
 		},
 	}
-	// Pre-set the annotation to simulate duplicate
-	obj.SetAnnotations(map[string]string{
-		"eno.azure.io/overrides": "[{\"path\":\"metadata.name2\",\"condition\":\"true\"}]",
-	})
-	ov := overrides.Override{
+	// Pre-set the annotation to simulate existing override
+	existingOverride := overrides.Override{
 		Path:      "metadata.name",
 		Condition: "true",
 	}
-	err := overrides.AnnotateOverrides(obj, []overrides.Override{ov})
+	obj.SetAnnotations(map[string]string{
+		"eno.azure.io/overrides": "[{\"path\":\"metadata.name\",\"condition\":\"true\"}]",
+	})
+
+	// Add a new override
+	newOverride := overrides.Override{
+		Path:      "metadata.namespace",
+		Condition: "true",
+	}
+	err := overrides.AnnotateOverrides(obj, []overrides.Override{newOverride})
 	if err != nil {
 		t.Fatalf("triggered to merge %s", err)
 	}
@@ -143,6 +149,14 @@ func TestAnnotateOverrides_ExistingAnnotation(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Fatalf("triggered 2 overrides, got %d", len(got))
+	}
+
+	// Verify that existing override comes first, new override comes second
+	if got[0].Path != existingOverride.Path || got[0].Condition != existingOverride.Condition {
+		t.Errorf("expected first override to be existing override %+v, got %+v", existingOverride, got[0])
+	}
+	if got[1].Path != newOverride.Path || got[1].Condition != newOverride.Condition {
+		t.Errorf("expected second override to be new override %+v, got %+v", newOverride, got[1])
 	}
 }
 
