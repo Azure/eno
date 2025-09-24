@@ -501,7 +501,7 @@ func TestResourceOrdering(t *testing.T) {
 		{manifestHash: []byte("c")},
 	}
 	sort.Slice(resources, func(i, j int) bool {
-		return resources[i].Less(resources[j])
+		return resources[i].CompareManifest(resources[j]) < 0
 	})
 
 	assert.Equal(t, []*Resource{

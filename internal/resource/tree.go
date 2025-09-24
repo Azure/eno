@@ -58,7 +58,7 @@ func (b *treeBuilder) Add(resource *Resource) {
 	b.init()
 
 	// Handle conflicting refs deterministically
-	if existing, ok := b.byRef[resource.Ref]; ok && resource.Less(existing.Resource) {
+	if existing, ok := b.byRef[resource.Ref]; ok && resource.CompareManifest(existing.Resource) < 0 {
 		return
 	}
 

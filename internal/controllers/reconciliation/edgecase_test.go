@@ -730,3 +730,62 @@ func TestFailOpen_WithAnnotationTrue(t *testing.T) {
 		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Reconciled != nil
 	})
 }
+
+func TestRecreateImmutableConfigmap(t *testing.T) {
+	mgr := testutil.NewManager(t)
+	setupTestSubject(t, mgr)
+	testRecreateImmutableConfigmap(t, mgr)
+}
+
+func TestRecreateImmutableConfigmap_DisableSSA(t *testing.T) {
+	mgr := testutil.NewManager(t)
+	setupTestSubjectForOptions(t, mgr, Options{
+		Manager:                mgr.Manager,
+		Timeout:                time.Minute,
+		ReadinessPollInterval:  time.Hour,
+		DisableServerSideApply: true,
+		FailOpen:               false,
+	})
+	testRecreateImmutableConfigmap(t, mgr)
+}
+
+func testRecreateImmutableConfigmap(t *testing.T, mgr *testutil.Manager) {
+	ctx := testutil.NewContext(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]any{
+						"eno.azure.io/recreate": "true",
+					},
+				},
+				"immutable": true,
+				"data": map[string]any{
+					"synthImage": s.Spec.Image,
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	mgr.Start(t)
+	synth, comp := writeGenericComposition(t, upstream)
+	waitForReadiness(t, mgr, comp, synth, nil)
+
+	// Updating the configmap should be possible even though it's immutable because Eno will recreate it
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(synth), synth)
+		synth.Spec.Image = "updated"
+		return upstream.Update(ctx, synth)
+	})
+	require.NoError(t, err)
+	waitForReadiness(t, mgr, comp, synth, nil)
+}

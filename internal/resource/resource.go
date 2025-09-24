@@ -231,10 +231,8 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 
 func (r *Resource) State() *apiv1.ResourceState { return r.latestKnownState.Load() }
 
-// Less returns true when r < than.
-// Used to establish determinstic ordering for conflicting resources.
-func (r *Resource) Less(than *Resource) bool {
-	return bytes.Compare(r.manifestHash, than.manifestHash) < 0
+func (r *Resource) CompareManifest(than *Resource) int {
+	return bytes.Compare(r.manifestHash, than.manifestHash)
 }
 
 // group returns the readiness or deletion group index that is relevant to the resource's current deletion state.
@@ -284,6 +282,9 @@ func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Compos
 	const replaceKey = "eno.azure.io/replace"
 	snap.Replace = cascadeAnnotation(comp, copy, replaceKey) == "true"
 
+	const recreateKey = "eno.azure.io/recreate"
+	snap.Recreate = cascadeAnnotation(comp, copy, recreateKey) == "true"
+
 	const deletionStratKey = "eno.azure.io/deletion-strategy"
 	snap.Orphan = strings.EqualFold(cascadeAnnotation(comp, copy, deletionStratKey), "orphan")
 	snap.Orphan = !r.isPatch && strings.EqualFold(cascadeAnnotation(comp, copy, deletionStratKey), "orphan")
@@ -314,6 +315,7 @@ type Snapshot struct {
 	Disable            bool
 	DisableUpdates     bool
 	Replace            bool
+	Recreate           bool
 	Orphan             bool
 	ForegroundDeletion bool
 
