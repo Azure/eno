@@ -208,7 +208,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 		reconciliationLatency.Observe(float64(time.Since(start).Milliseconds()))
 	}()
 
-	if res.Deleted() {
+	if res.Deleted() || (res.Recreate && prev != nil && res.CompareManifest(prev) != 0) {
 		if current == nil || current.GetDeletionTimestamp() != nil || res.Orphan || (comp.Labels != nil && comp.Labels["eno.azure.io/symphony-deleting"] == "true") {
 			return false, nil // already deleted - nothing to do
 		}
