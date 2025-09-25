@@ -1,6 +1,7 @@
 package cel
 
 import (
+	"fmt"
 	"testing"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -278,6 +279,246 @@ func TestCompareResourceQuantities(t *testing.T) {
 			result, ok := val.Value().(int64)
 			require.True(t, ok, "expected int64 result, got %T", val.Value())
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestValidHubbleMetrics(t *testing.T) {
+	tests := []struct {
+		name     string
+		metrics  string
+		expected bool
+	}{
+		{
+			name:     "valid simple metrics",
+			metrics:  "flow tcp dns",
+			expected: true,
+		},
+		{
+			name:     "valid metrics with options",
+			metrics:  "flow:sourceContext=pod;destinationContext=pod tcp drop",
+			expected: true,
+		},
+		{
+			name:     "invalid metric type",
+			metrics:  "invalid-metric",
+			expected: false,
+		},
+		{
+			name:     "empty string",
+			metrics:  "",
+			expected: false,
+		},
+		{
+			name:     "valid complex options",
+			metrics:  "flow:sourceContext=pod|namespace;destinationContext=workload httpV2:exemplars=true",
+			expected: true,
+		},
+		{
+			name:     "valid legacy http metric",
+			metrics:  "http:destinationContext=workload-name dns:query",
+			expected: true,
+		},
+		{
+			name:     "invalid context value",
+			metrics:  "flow:sourceContext=invalid-value",
+			expected: false,
+		},
+		{
+			name:     "real world config - basic metrics",
+			metrics:  "flow:sourceEgressContext=pod;destinationIngressContext=pod tcp:sourceEgressContext=pod;destinationIngressContext=pod drop:sourceEgressContext=pod;destinationIngressContext=pod dns:sourceEgressContext=pod;destinationIngressContext=pod",
+			expected: true,
+		},
+		{
+			name:     "real world config - enhanced observability",
+			metrics:  "flow:sourceEgressContext=pod;destinationIngressContext=pod tcp:sourceEgressContext=pod;destinationIngressContext=pod drop:sourceEgressContext=pod;destinationIngressContext=pod dns:query;sourceEgressContext=pod;destinationIngressContext=pod flows-to-world:syn-only;sourceEgressContext=pod;destinationContext=ip",
+			expected: true,
+		},
+		{
+			name:     "real world config - minimal setup",
+			metrics:  "flow:sourceEgressContext=pod;destinationIngressContext=pod tcp drop:sourceEgressContext=pod;destinationIngressContext=pod dns:sourceEgressContext=pod;destinationIngressContext=pod",
+			expected: true,
+		},
+		{
+			name:     "real world config - L7 enabled",
+			metrics:  "flow:sourceEgressContext=pod;destinationIngressContext=pod tcp:sourceEgressContext=pod;destinationIngressContext=pod drop:sourceEgressContext=pod;destinationIngressContext=pod dns:sourceEgressContext=pod;destinationIngressContext=pod httpV2:sourceIngressContext=pod;destinationEgressContext=pod kafka:sourceEgressContext=pod;destinationIngressContext=pod",
+			expected: true,
+		},
+		{
+			name:     "real world config - L7 with enhanced observability",
+			metrics:  "flow:sourceEgressContext=pod;destinationIngressContext=pod tcp:sourceEgressContext=pod;destinationIngressContext=pod drop:sourceEgressContext=pod;destinationIngressContext=pod dns:query;sourceEgressContext=pod;destinationIngressContext=pod flows-to-world:syn-only;sourceEgressContext=pod;destinationContext=ip httpV2:sourceIngressContext=pod;destinationEgressContext=pod kafka:sourceEgressContext=pod;destinationIngressContext=pod",
+			expected: true,
+		},
+
+		// Edge cases and error conditions
+		{
+			name:     "whitespace only string",
+			metrics:  "   \t   ",
+			expected: false,
+		},
+		{
+			name:     "single space",
+			metrics:  " ",
+			expected: false,
+		},
+		{
+			name:     "metric with empty option",
+			metrics:  "flow:",
+			expected: false,
+		},
+		{
+			name:     "metric with semicolon but no options",
+			metrics:  "flow:;",
+			expected: false,
+		},
+		{
+			name:     "metric with empty key-value pair",
+			metrics:  "flow:=value",
+			expected: false,
+		},
+		{
+			name:     "metric with key but no value",
+			metrics:  "flow:sourceContext=",
+			expected: false,
+		},
+		{
+			name:     "metric with invalid key",
+			metrics:  "flow:invalidKey=pod",
+			expected: false,
+		},
+		{
+			name:     "boolean flag with equals sign",
+			metrics:  "dns:query=",
+			expected: false,
+		},
+		{
+			name:     "valid boolean flag without value",
+			metrics:  "dns:query",
+			expected: true,
+		},
+		{
+			name:     "invalid boolean flag",
+			metrics:  "dns:invalidFlag",
+			expected: false,
+		},
+		{
+			name:     "labelsContext with invalid label",
+			metrics:  "flow:labelsContext=source_ip,invalid_label",
+			expected: false,
+		},
+		{
+			name:     "labelsContext with empty label",
+			metrics:  "flow:labelsContext=source_ip,,destination_ip",
+			expected: false,
+		},
+		{
+			name:     "context with pipe separator",
+			metrics:  "flow:sourceContext=pod|namespace|workload",
+			expected: true,
+		},
+		{
+			name:     "context with invalid pipe value",
+			metrics:  "flow:sourceContext=pod|invalid-context",
+			expected: false,
+		},
+		{
+			name:     "context with empty pipe value",
+			metrics:  "flow:sourceContext=pod||namespace",
+			expected: false,
+		},
+		{
+			name:     "multiple metrics with one invalid",
+			metrics:  "flow dns invalid-metric tcp",
+			expected: false,
+		},
+		{
+			name:     "mixed valid and invalid options",
+			metrics:  "flow:sourceContext=pod;invalidOption=value",
+			expected: false,
+		},
+		{
+			name:     "dns with both valid options",
+			metrics:  "dns:query;ignoreAAAA",
+			expected: true,
+		},
+		{
+			name:     "flows-to-world with all options",
+			metrics:  "flows-to-world:any-drop;port;syn-only",
+			expected: true,
+		},
+		{
+			name:     "httpV2 with exemplars boolean",
+			metrics:  "httpV2:exemplars=true",
+			expected: true,
+		},
+		{
+			name:     "httpV2 with exemplars false",
+			metrics:  "httpV2:exemplars=false",
+			expected: true,
+		},
+		{
+			name:     "httpV2 with invalid exemplars value",
+			metrics:  "httpV2:exemplars=maybe",
+			expected: false,
+		},
+		{
+			name:     "labelsContext with all valid labels",
+			metrics:  "flow:labelsContext=source_ip,source_namespace,destination_ip,traffic_direction",
+			expected: true,
+		},
+		{
+			name:     "case sensitivity test - uppercase metric",
+			metrics:  "FLOW",
+			expected: false,
+		},
+		{
+			name:     "case sensitivity test - uppercase option",
+			metrics:  "flow:SOURCECONTEXT=pod",
+			expected: false,
+		},
+		{
+			name:     "special characters in metric name",
+			metrics:  "flow-test",
+			expected: false,
+		},
+		{
+			name:     "metric with colon but no options after",
+			metrics:  "flow: tcp",
+			expected: false,
+		},
+		{
+			name:     "option with multiple equals signs",
+			metrics:  "flow:sourceContext=pod=extra",
+			expected: false,
+		},
+		{
+			name:     "extra whitespace handling",
+			metrics:  "  flow : sourceContext = pod ; destinationContext = namespace   tcp  ",
+			expected: false,
+		},
+		{
+			name:     "metric name with trailing colon in multi-metric",
+			metrics:  "flow: tcp dns",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			expr := fmt.Sprintf("validHubbleMetrics('%s')", tt.metrics)
+			p, err := Parse(expr)
+			if err != nil {
+				t.Fatalf("failed to parse expression: %v", err)
+			}
+
+			result, _, err := p.Eval(map[string]interface{}{})
+			if err != nil {
+				t.Fatalf("failed to evaluate expression: %v", err)
+			}
+
+			if result.Value() != tt.expected {
+				t.Errorf("expected %v, got %v", tt.expected, result.Value())
+			}
 		})
 	}
 }
