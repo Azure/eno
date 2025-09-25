@@ -104,6 +104,10 @@ func compareResources(lhs ref.Val, rhs ref.Val) ref.Val {
 	return types.Int(l.Cmp(r))
 }
 
+// validateHubbleMetrics validates Hubble metrics string according to Cilium documentation.
+// See: https://docs.cilium.io/en/stable/observability/metrics/#hubble
+// Used in CEL expressions to validate user input for Hubble metrics override annotations
+// in the Cilium configmap.
 func validateHubbleMetrics(val ref.Val) ref.Val {
 	str, ok := val.Value().(string)
 	if !ok {
