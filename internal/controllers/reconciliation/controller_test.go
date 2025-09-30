@@ -7,6 +7,7 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/resource"
 	"github.com/Azure/eno/internal/testutil"
+	"github.com/Azure/eno/internal/testutil/statespace"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -116,4 +117,81 @@ func TestShouldFailOpen(t *testing.T) {
 	assert.False(t, c.shouldFailOpen(&resource.Resource{FailOpen: nil}))
 	assert.False(t, c.shouldFailOpen(&resource.Resource{FailOpen: ptr.To(false)}))
 	assert.True(t, c.shouldFailOpen(&resource.Resource{FailOpen: ptr.To(true)}))
+}
+
+func TestRequeueDoesNotPanic(t *testing.T) {
+	type testState struct {
+		snapshot *resource.Snapshot
+		ready    *metav1.Time
+	}
+
+	statespace.Test(func(state *testState) bool {
+		c := &Controller{}
+		_, err := c.requeue(logr.Discard(), state.snapshot, state.ready)
+		require.NoError(t, err)
+		return true
+	}).
+		WithInitialState(func() *testState {
+			return &testState{
+				snapshot: &resource.Snapshot{
+					Resource:          &resource.Resource{},
+					ReconcileInterval: &metav1.Duration{Duration: 15 * time.Second},
+				},
+				ready: &metav1.Time{Time: time.Now()},
+			}
+		}).
+		WithMutation("nil snapshot", func(state *testState) *testState {
+			state.snapshot = nil
+			return state
+		}).
+		WithMutation("nil ready", func(state *testState) *testState {
+			state.ready = nil
+			return state
+		}).
+		WithMutation("nil reconcile interval", func(state *testState) *testState {
+			if state.snapshot != nil {
+				state.snapshot.ReconcileInterval = nil
+			}
+			return state
+		}).
+		WithMutation("short reconcile interval", func(state *testState) *testState {
+			if state.snapshot != nil {
+				state.snapshot.ReconcileInterval = &metav1.Duration{Duration: 1 * time.Second}
+			}
+			return state
+		}).
+		WithMutation("disable", func(state *testState) *testState {
+			if state.snapshot != nil {
+				state.snapshot.Disable = true
+			}
+			return state
+		}).
+		WithMutation("foreground deletion", func(state *testState) *testState {
+			if state.snapshot != nil {
+				state.snapshot.ForegroundDeletion = true
+			}
+			return state
+		}).
+		WithMutation("orphan", func(state *testState) *testState {
+			if state.snapshot != nil {
+				state.snapshot.Orphan = true
+			}
+			return state
+		}).
+		WithMutation("disable updates", func(state *testState) *testState {
+			if state.snapshot != nil {
+				state.snapshot.DisableUpdates = true
+			}
+			return state
+		}).
+		WithMutation("replace", func(state *testState) *testState {
+			if state.snapshot != nil {
+				state.snapshot.Replace = true
+			}
+			return state
+		}).
+		WithInvariant("doesn't panic", func(state *testState, res bool) bool {
+			return res
+		}).
+		Evaluate(t)
 }
