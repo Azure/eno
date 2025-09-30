@@ -384,7 +384,7 @@ func (c *Controller) getCurrent(ctx context.Context, resource *resource.Resource
 }
 
 func (c *Controller) requeue(logger logr.Logger, resource *resource.Snapshot, ready *metav1.Time) (ctrl.Result, error) {
-	pendingForegroundDeletion := (resource.Deleted() && !resource.Disable && resource.ForegroundDeletion)
+	pendingForegroundDeletion := (resource != nil && resource.Deleted() && !resource.Disable && resource.ForegroundDeletion)
 
 	if ready == nil || pendingForegroundDeletion {
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
