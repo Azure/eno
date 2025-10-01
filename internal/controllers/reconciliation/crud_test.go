@@ -1072,3 +1072,70 @@ func TestResourceSelector(t *testing.T) {
 	})
 	assert.True(t, errors.IsNotFound(mgr.DownstreamClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: "test-obj-1"}, &corev1.ConfigMap{})))
 }
+
+func TestSimplePruning(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{
+			{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "test-obj-1",
+						"namespace": "default",
+						"labels":    map[string]any{"foo": "baz"},
+						"annotations": map[string]any{
+							"eno.azure.io/overrides": `[{ "path": "self.metadata.annotations['eno.azure.io/disable-reconciliation']", "value": true, "condition": "composition.metadata.annotations['foobar'] != null" }]`,
+						},
+					},
+				},
+			},
+			{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "test-obj-2",
+						"namespace": "default",
+						"labels":    map[string]any{"foo": "bar"},
+						"annotations": map[string]any{
+							"eno.azure.io/overrides": `[{ "path": "self.metadata.annotations['eno.azure.io/disable-reconciliation']", "value": true, "condition": "composition.metadata.annotations['foobar'] != null" }]`,
+						},
+					},
+				},
+			},
+		}
+		if s.Spec.Image == "pruned" {
+			output.Items = output.Items[0:1]
+		}
+		return output, nil
+	})
+
+	registerControllers(t, mgr)
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	synth, comp := writeGenericComposition(t, upstream)
+	waitForReadiness(t, mgr, comp, synth, nil)
+
+	// Both are created
+	assert.NoError(t, mgr.DownstreamClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: "test-obj-1"}, &corev1.ConfigMap{}))
+	assert.NoError(t, mgr.DownstreamClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: "test-obj-2"}, &corev1.ConfigMap{}))
+
+	// Remove one resource
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(synth), synth)
+		synth.Spec.Image = "pruned"
+		return upstream.Update(ctx, synth)
+	})
+	require.NoError(t, err)
+	waitForReadiness(t, mgr, comp, synth, nil)
+
+	// Prove it was pruned
+	assert.NoError(t, mgr.DownstreamClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: "test-obj-1"}, &corev1.ConfigMap{}))
+	assert.True(t, errors.IsNotFound(mgr.DownstreamClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: "test-obj-2"}, &corev1.ConfigMap{})))
+}
