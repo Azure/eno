@@ -213,6 +213,16 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 			return false, nil // already deleted - nothing to do
 		}
 
+		if res.ForceDeletion && len(current.GetFinalizers()) > 0 {
+			current.SetFinalizers([]string{})
+			err := c.upstreamClient.Update(ctx, current, client.FieldOwner("eno"))
+			if err != nil {
+				return true, fmt.Errorf("removing finalizers: %w", err)
+			}
+			logger.V(0).Info("removed finalizers before deletion")
+			return true, nil
+		}
+
 		reconciliationActions.WithLabelValues("delete").Inc()
 		err := c.upstreamClient.Delete(ctx, current)
 		if err != nil {

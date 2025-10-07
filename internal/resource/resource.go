@@ -284,6 +284,9 @@ func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Compos
 	const replaceKey = "eno.azure.io/replace"
 	snap.Replace = cascadeAnnotation(comp, copy, replaceKey) == "true"
 
+	const forceDeletionKey = "eno.azure.io/force-deletion"
+	snap.ForceDeletion = cascadeAnnotation(comp, copy, forceDeletionKey) == "true"
+
 	const deletionStratKey = "eno.azure.io/deletion-strategy"
 	snap.Orphan = strings.EqualFold(cascadeAnnotation(comp, copy, deletionStratKey), "orphan")
 	snap.Orphan = !r.isPatch && strings.EqualFold(cascadeAnnotation(comp, copy, deletionStratKey), "orphan")
@@ -314,6 +317,7 @@ type Snapshot struct {
 	Disable            bool
 	DisableUpdates     bool
 	Replace            bool
+	ForceDeletion      bool
 	Orphan             bool
 	ForegroundDeletion bool
 
