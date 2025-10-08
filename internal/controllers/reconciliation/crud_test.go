@@ -1072,3 +1072,165 @@ func TestResourceSelector(t *testing.T) {
 	})
 	assert.True(t, errors.IsNotFound(mgr.DownstreamClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: "test-obj-1"}, &corev1.ConfigMap{})))
 }
+
+func TestIgnoreSideEffectsInputAnnotationOverrideFalse(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+				"data": map[string]any{"foo": "bar"},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	input := &corev1.ConfigMap{}
+	input.Name = "test-input"
+	input.Namespace = "default"
+	input.Data = map[string]string{"replicas": "1"}
+	input.Annotations = map[string]string{"eno.azure.io/ignore-side-effects": "false"}
+	require.NoError(t, upstream.Create(ctx, input))
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-syn"
+	synth.Spec.Image = "test-image"
+	synth.Spec.Refs = []apiv1.Ref{{
+		Key: "config",
+		Resource: apiv1.ResourceRef{
+			Version: "v1",
+			Kind:    "ConfigMap",
+		},
+	}}
+	require.NoError(t, upstream.Create(ctx, synth))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Annotations = map[string]string{"eno.azure.io/ignore-side-effects": "true"}
+	comp.Spec.Synthesizer.Name = synth.Name
+	comp.Spec.Bindings = []apiv1.Binding{{
+		Key: "config",
+		Resource: apiv1.ResourceBinding{
+			Name:      input.Name,
+			Namespace: input.Namespace,
+		},
+	}}
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	testutil.Eventually(t, func() bool {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return len(comp.Status.InputRevisions) == 1 &&
+			comp.Status.InputRevisions[0].IgnoreSideEffects != nil &&
+			*comp.Status.InputRevisions[0].IgnoreSideEffects == false
+	})
+
+	waitForReadiness(t, mgr, comp, synth, nil)
+
+	initialUUID := comp.Status.CurrentSynthesis.UUID
+
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(input), input)
+		if err != nil {
+			return err
+		}
+		input.Data["replicas"] = "3"
+		return upstream.Update(ctx, input)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.UUID != initialUUID
+	})
+}
+
+func TestIgnoreSideEffectsInputAnnotationOverrideTrue(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+				"data": map[string]any{"foo": "bar"},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	input := &corev1.ConfigMap{}
+	input.Name = "test-input"
+	input.Namespace = "default"
+	input.Data = map[string]string{"replicas": "1"}
+	input.Annotations = map[string]string{"eno.azure.io/ignore-side-effects": "true"}
+	require.NoError(t, upstream.Create(ctx, input))
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-syn"
+	synth.Spec.Image = "test-image"
+	synth.Spec.Refs = []apiv1.Ref{{
+		Key: "config",
+		Resource: apiv1.ResourceRef{
+			Version: "v1",
+			Kind:    "ConfigMap",
+		},
+	}}
+	require.NoError(t, upstream.Create(ctx, synth))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = synth.Name
+	comp.Spec.Bindings = []apiv1.Binding{{
+		Key: "config",
+		Resource: apiv1.ResourceBinding{
+			Name:      input.Name,
+			Namespace: input.Namespace,
+		},
+	}}
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	waitForReadiness(t, mgr, comp, synth, nil)
+
+	initialUUID := comp.Status.CurrentSynthesis.UUID
+
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(input), input)
+		if err != nil {
+			return err
+		}
+		input.Data["replicas"] = "3"
+		return upstream.Update(ctx, input)
+	})
+	require.NoError(t, err)
+
+	time.Sleep(time.Millisecond * 500)
+
+	require.NoError(t, upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	assert.Equal(t, initialUUID, comp.Status.CurrentSynthesis.UUID)
+}
