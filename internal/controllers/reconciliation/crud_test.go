@@ -910,6 +910,71 @@ func TestOrphanedResources(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestOrphanedResourcesRemovedFromComposition(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		if s.Spec.Image == "include" {
+			output.Items = []*unstructured.Unstructured{{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "test-obj",
+						"namespace": "default",
+						"annotations": map[string]string{
+							"eno.azure.io/reconcile-interval": "5ms",
+						},
+					},
+					"data": map[string]string{"foo": "bar"},
+				},
+			}}
+		}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	syn := &apiv1.Synthesizer{}
+	syn.Name = "test-syn"
+	syn.Spec.Image = "include"
+	require.NoError(t, upstream.Create(ctx, syn))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = syn.Name
+	comp.Annotations = map[string]string{"eno.azure.io/deletion-strategy": "orphan"}
+	require.NoError(t, upstream.Create(ctx, comp))
+
+	obj := &corev1.ConfigMap{}
+	testutil.Eventually(t, func() bool {
+		obj.SetName("test-obj")
+		obj.SetNamespace("default")
+		err := downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+		return err == nil
+	})
+
+	require.NoError(t, retry.RetryOnConflict(testutil.Backoff, func() error {
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+		if err != nil {
+			return err
+		}
+		syn.Spec.Image = "exclude"
+		return upstream.Update(ctx, syn)
+	}))
+
+	testutil.Eventually(t, func() bool {
+		return errors.IsNotFound(downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj))
+	})
+}
+
 // TestResourceDefaulting proves that resources which define properties equal to the field's default will eventually converge.
 func TestResourceDefaulting(t *testing.T) {
 	scheme := runtime.NewScheme()
