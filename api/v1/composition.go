@@ -135,6 +135,7 @@ type InputRevisions struct {
 	Revision              *int   `json:"revision,omitempty"`
 	SynthesizerGeneration *int64 `json:"synthesizerGeneration,omitempty"`
 	CompositionGeneration *int64 `json:"compositionGeneration,omitempty"`
+	IgnoreSideEffects     *bool  `json:"ignoreSideEffects,omitempty"`
 }
 
 func NewInputRevisions(obj client.Object, refKey string) *InputRevisions {
@@ -151,6 +152,9 @@ func NewInputRevisions(obj client.Object, refKey string) *InputRevisions {
 	if rev, _ := strconv.ParseInt(obj.GetAnnotations()["eno.azure.io/composition-generation"], 10, 64); rev != 0 {
 		ir.CompositionGeneration = &rev
 	}
+	if val, err := strconv.ParseBool(obj.GetAnnotations()["eno.azure.io/ignore-side-effects"]); err == nil {
+		ir.IgnoreSideEffects = &val
+	}
 	return &ir
 }
 
@@ -162,6 +166,9 @@ func (i *InputRevisions) Less(b InputRevisions) bool {
 		return *i.Revision < *b.Revision
 	}
 	if i.ResourceVersion == b.ResourceVersion {
+		if i.IgnoreSideEffects != nil && b.IgnoreSideEffects != nil && *i.IgnoreSideEffects != *b.IgnoreSideEffects {
+			return *i.IgnoreSideEffects && !*b.IgnoreSideEffects
+		}
 		return false
 	}
 	iInt, iErr := strconv.Atoi(i.ResourceVersion)
