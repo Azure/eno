@@ -131,9 +131,11 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		prev, _, _ = c.resourceClient.Get(ctx, syn.UUID, req.Resource)
 	}
 
+	fmt.Println("PAUL RECONCILING " + resource.Ref.Name)
 	snap, current, ready, modified, err := c.reconcileResource(ctx, comp, prev, resource)
 	failingOpen := c.shouldFailOpen(resource)
 	if failingOpen {
+		fmt.Println("PAUL FAILING OPEN " + resource.Ref.Name)
 		err = nil
 		modified = false
 	}
@@ -148,6 +150,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	deleted := current == nil ||
 		(current.GetDeletionTimestamp() != nil && !snap.ForegroundDeletion) ||
 		(snap.Deleted() && (snap.Orphan || snap.Disable || failingOpen)) // orphaning should be reflected on the status.
+	fmt.Printf("PAUL %s resource is not ready or pending deletion : deleted=%t\n", resource.Ref.Name, deleted)
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 
 	return c.requeue(logger, snap, ready)
@@ -218,6 +221,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 		if err != nil {
 			return true, client.IgnoreNotFound(fmt.Errorf("deleting resource: %w", err))
 		}
+		fmt.Println("PAUL " + res.Ref.Name + " resource is not ready or pending deletion")
 		logger.V(0).Info("deleted resource")
 		return true, nil
 	}
@@ -387,6 +391,7 @@ func (c *Controller) requeue(logger logr.Logger, resource *resource.Snapshot, re
 	pendingForegroundDeletion := (resource != nil && resource.Deleted() && !resource.Disable && resource.ForegroundDeletion)
 
 	if ready == nil || pendingForegroundDeletion {
+		fmt.Println("PAUL " + resource.Ref.Name + " resource is not ready or pending deletion")
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}
 
