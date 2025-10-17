@@ -139,7 +139,7 @@ func (t *tree) Get(key Ref) (res *Resource, visible bool, found bool) {
 	if !ok {
 		return nil, false, false
 	}
-	//debug logging on what we're blocked on might help future issues.
+	//TODO: debug logging on what we're blocked on might help future issues.
 	return idx.Resource, (!idx.Backtracks() && len(idx.PendingDependencies) == 0), true
 }
 
