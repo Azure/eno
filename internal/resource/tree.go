@@ -92,9 +92,11 @@ func (b *treeBuilder) Build() *tree {
 	for _, idx := range b.byRef {
 		t.byManiRef[idx.Resource.ManifestRef] = idx
 
-		// CRs are dependent on their CRDs
+		// CRs are loosly dependent on their CRDs. For creates they will just be retried
+		// but for updates a change in schmea might effect how the cr is updated so try and be safe for now.
+		// For deletes a CRD delete cascades to all CRS but blocks on them so ordering is not necessary
 		crd, ok := b.byDefiningGK[idx.Resource.GVK.GroupKind()]
-		if ok {
+		if ok && !idx.Resource.compositionDeleted {
 			idx.PendingDependencies[crd.Resource.Ref] = struct{}{}
 			crd.Dependents[idx.Resource.Ref] = idx
 		}
@@ -137,6 +139,7 @@ func (t *tree) Get(key Ref) (res *Resource, visible bool, found bool) {
 	if !ok {
 		return nil, false, false
 	}
+	//TODO: debug logging on what we're blocked on might help future issues.
 	return idx.Resource, (!idx.Backtracks() && len(idx.PendingDependencies) == 0), true
 }
 
