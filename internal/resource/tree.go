@@ -92,11 +92,17 @@ func (b *treeBuilder) Build() *tree {
 	for _, idx := range b.byRef {
 		t.byManiRef[idx.Resource.ManifestRef] = idx
 
-		// CRs are dependent on their CRDs
+		// CRs are dependent on their CRDs, except in delete where its reversed
+		// can this introduce circular dependencies if readines/deltion groups say opposite?
 		crd, ok := b.byDefiningGK[idx.Resource.GVK.GroupKind()]
 		if ok {
-			idx.PendingDependencies[crd.Resource.Ref] = struct{}{}
-			crd.Dependents[idx.Resource.Ref] = idx
+			if idx.Resource.compositionDeleted {
+				crd.PendingDependencies[idx.Resource.Ref] = struct{}{}
+				idx.Dependents[crd.Resource.Ref] = crd
+			} else {
+				idx.PendingDependencies[crd.Resource.Ref] = struct{}{}
+				crd.Dependents[idx.Resource.Ref] = idx
+			}
 		}
 
 		grp, hasGrp := idx.Resource.group()
@@ -137,6 +143,7 @@ func (t *tree) Get(key Ref) (res *Resource, visible bool, found bool) {
 	if !ok {
 		return nil, false, false
 	}
+	//debug logging on what we're blocked on might help future issues.
 	return idx.Resource, (!idx.Backtracks() && len(idx.PendingDependencies) == 0), true
 }
 

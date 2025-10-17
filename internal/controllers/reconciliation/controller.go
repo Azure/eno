@@ -121,7 +121,10 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	// Find the current and (optionally) previous desired states in the cache
 	var prev *resource.Resource
 	resource, visible, exists := c.resourceClient.Get(ctx, synthesisUUID, req.Resource)
-	if !exists || !visible {
+	if !exists {
+		return ctrl.Result{}, nil
+	}
+	if !visible {
 		return ctrl.Result{}, nil
 	}
 	logger = logger.WithValues("resourceKind", resource.Ref.Kind, "resourceName", resource.Ref.Name, "resourceNamespace", resource.Ref.Namespace)
