@@ -168,6 +168,31 @@ func (t *tree) UpdateState(ref ManifestRef, state *apiv1.ResourceState, enqueue 
 	}
 }
 
+func (t *tree) cycles() (bool, []string) {
+	for _, ref := range t.byRef {
+		if found, cycle := t.cycle(ref, []string{}); found {
+			return true, cycle
+		}
+	}
+	return false, []string{}
+}
+
+func (t *tree) cycle(r *indexedResource, visited []string) (bool, []string) {
+
+	key := r.Resource.Ref.Namespace + r.Resource.Ref.Name
+	if slices.Contains(visited, key) {
+		return true, visited
+	}
+	visited = append(visited, key)
+	for r, _ := range r.PendingDependencies {
+		dep := t.byRef[r]
+		if found, cycle := t.cycle(dep, visited); found {
+			return true, cycle
+		}
+	}
+	return false, []string{}
+}
+
 // MarshalJSON allows the current tree to be serialized to JSON for testing/debugging purposes.
 // This should not be expected to provide a stable schema.
 func (t *tree) MarshalJSON() ([]byte, error) {
