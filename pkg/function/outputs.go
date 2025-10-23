@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"reflect"
 
@@ -51,11 +52,13 @@ func (w *OutputWriter) Add(outs ...client.Object) error {
 	// Doing a "filter" to avoid committing nil values.
 	for i, o := range outs {
 		if o == nil {
-			return fmt.Errorf("nil pointer passed to output writer as %d object", i)
+			slog.Info("nil pointer passed to output writer", "object", i)
+			continue
 		}
 		v := reflect.ValueOf(o) //https://blog.theodo.com/2022/08/go-nil-interfaces/?utm_source=chatgpt.com
 		if v.Kind() == reflect.Ptr && v.IsNil() {
-			return fmt.Errorf("nil pointer passed to output writer as %d object", i)
+			slog.Info("nil pointer passed to output writer", "object", i)
+			continue
 		}
 
 		// Resolve GVK if needed
