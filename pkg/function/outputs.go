@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
+	"reflect"
 
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -48,8 +50,14 @@ func (w *OutputWriter) Add(outs ...client.Object) error {
 	}
 
 	// Doing a "filter" to avoid committing nil values.
-	for _, o := range outs {
+	for i, o := range outs {
 		if o == nil {
+			slog.Error("nil pointer passed to output writer", "objectIndex", i)
+			continue
+		}
+		v := reflect.ValueOf(o) //https://blog.theodo.com/2022/08/go-nil-interfaces/?utm_source=chatgpt.com
+		if v.Kind() == reflect.Ptr && v.IsNil() {
+			slog.Error("nil pointer passed to output writer", "objectIndex", i)
 			continue
 		}
 
