@@ -72,9 +72,6 @@ func classifyOp(synth *apiv1.Synthesizer, comp *apiv1.Composition) (opReason, bo
 
 	case compositionHasBeenModified(comp):
 		return compositionModifiedOp, true
-
-	case comp.ShouldIgnoreSideEffects():
-		return 0, false
 	}
 
 	syn := comp.Status.CurrentSynthesis
@@ -82,7 +79,11 @@ func classifyOp(synth *apiv1.Synthesizer, comp *apiv1.Composition) (opReason, bo
 		syn = comp.Status.InFlightSynthesis
 	}
 
-	nonDeferredInputChanges, deferredInputChanges := inputChangeCount(synth, comp.Status.InputRevisions, syn.InputRevisions)
+	nonDeferredInputChanges, deferredInputChanges, forced := inputChangeCount(synth, comp.Status.InputRevisions, syn.InputRevisions)
+	if comp.ShouldIgnoreSideEffects() && forced == 0 {
+		return 0, false
+	}
+
 	if nonDeferredInputChanges > 0 {
 		return inputModifiedOp, true
 	}
@@ -250,7 +251,7 @@ func (r opReason) String() string {
 	}
 }
 
-func inputChangeCount(synth *apiv1.Synthesizer, a, b []apiv1.InputRevisions) (nonDeferred, deferred int) {
+func inputChangeCount(synth *apiv1.Synthesizer, a, b []apiv1.InputRevisions) (nonDeferred, deferred, forced int) {
 	refsByKey := map[string]apiv1.Ref{}
 	for _, ref := range synth.Spec.Refs {
 		ref := ref
@@ -273,6 +274,14 @@ func inputChangeCount(synth *apiv1.Synthesizer, a, b []apiv1.InputRevisions) (no
 		}
 
 		if br.Less(ar) {
+			if ar.IgnoreSideEffects != nil {
+				if *ar.IgnoreSideEffects {
+					continue
+				} else {
+					forced++
+				}
+			}
+
 			if ref.Defer {
 				deferred++
 			} else {
@@ -281,5 +290,5 @@ func inputChangeCount(synth *apiv1.Synthesizer, a, b []apiv1.InputRevisions) (no
 		}
 	}
 
-	return nonDeferred, deferred
+	return nonDeferred, deferred, forced
 }

@@ -89,6 +89,16 @@ func TestFuzzNewOp(t *testing.T) {
 	}).WithMutation("ignoreSideEffects", func(state newOpTestState) newOpTestState {
 		state.comp.EnableIgnoreSideEffects()
 		return state
+	}).WithMutation("ignoreSideEffectsTrue", func(state newOpTestState) newOpTestState {
+		if len(state.comp.Status.InputRevisions) >= 1 {
+			state.comp.Status.InputRevisions[0].IgnoreSideEffects = ptr.To(true)
+		}
+		return state
+	}).WithMutation("ignoreSideEffectsFalse", func(state newOpTestState) newOpTestState {
+		if len(state.comp.Status.InputRevisions) >= 1 {
+			state.comp.Status.InputRevisions[0].IgnoreSideEffects = ptr.To(false)
+		}
+		return state
 	}).WithMutation("missingFinalizer", func(state newOpTestState) newOpTestState {
 		state.comp.Finalizers = nil
 		return state
@@ -153,9 +163,29 @@ func TestFuzzNewOp(t *testing.T) {
 		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || !state.comp.ShouldIgnoreSideEffects() {
 			return true
 		}
+		if state.hasInputWithIgnoreSideEffectsFalse() {
+			return true
+		}
 		return op == nil
+	}).WithInvariant("creates input modified operation when input with IgnoreSideEffects=false forces change", func(state newOpTestState, op *op) bool {
+		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() {
+			return true
+		}
+		if !state.comp.ShouldIgnoreSideEffects() || !state.hasInputWithIgnoreSideEffectsFalse() || !state.hasInputModified() {
+			return true
+		}
+		return op != nil && op.Reason == inputModifiedOp && !op.Reason.Deferred()
 	}).WithInvariant("creates input modified operation when non-deferred input resource version changed", func(state newOpTestState, op *op) bool {
-		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || !state.hasInputModified() {
+		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() {
+			return true
+		}
+		if state.comp.ShouldIgnoreSideEffects() && !state.hasInputWithIgnoreSideEffectsFalse() {
+			return true
+		}
+		if state.hasInputWithIgnoreSideEffectsTrue() && !state.hasInputWithIgnoreSideEffectsFalse() {
+			return true
+		}
+		if !state.hasInputModified() {
 			return true
 		}
 		return op != nil && op.Reason == inputModifiedOp && !op.Reason.Deferred()
@@ -283,6 +313,18 @@ func (s newOpTestState) isSynthesizerModified() bool {
 		syn.ObservedSynthesizerGeneration > 0 && syn.ObservedSynthesizerGeneration < s.synth.Generation
 }
 
+func (s newOpTestState) hasInputWithIgnoreSideEffectsTrue() bool {
+	return len(s.comp.Status.InputRevisions) >= 1 &&
+		s.comp.Status.InputRevisions[0].IgnoreSideEffects != nil &&
+		*s.comp.Status.InputRevisions[0].IgnoreSideEffects
+}
+
+func (s newOpTestState) hasInputWithIgnoreSideEffectsFalse() bool {
+	return len(s.comp.Status.InputRevisions) >= 1 &&
+		s.comp.Status.InputRevisions[0].IgnoreSideEffects != nil &&
+		!*s.comp.Status.InputRevisions[0].IgnoreSideEffects
+}
+
 func TestFuzzInputChangeCount(t *testing.T) {
 	for i := 0; i < 10000; i++ {
 		synth := &apiv1.Synthesizer{}
@@ -298,20 +340,20 @@ func TestFuzzInputChangeCount(t *testing.T) {
 
 		for i := 0; i < rand.Intn(20); i++ {
 			b = append(b, newTestInputRevisions())
-			synth.Spec.Refs = append(synth.Spec.Refs, apiv1.Ref{Key: strconv.Itoa(rand.Intn(10)), Defer: rand.Intn(2) == 0})
+			ref := apiv1.Ref{
+				Key:   strconv.Itoa(rand.Intn(10)),
+				Defer: rand.Intn(2) == 0,
+			}
+			synth.Spec.Refs = append(synth.Spec.Refs, ref)
 		}
 
-		nonDeferred, deferred := inputChangeCount(synth, a, b)
+		nonDeferred, deferred, _ := inputChangeCount(synth, a, b)
 
-		// No refs means no possible input changes
 		if len(synth.Spec.Refs) == 0 {
 			assert.Equal(t, 0, nonDeferred)
 			assert.Equal(t, 0, deferred)
 			continue
 		}
-
-		// There isn't much to test for here without re-implementing all of the logic
-		// Just make sure it doesn't panic
 	}
 }
 
@@ -519,4 +561,287 @@ func TestOpNewerInputInSynthesis(t *testing.T) {
 	}
 
 	assert.Nil(t, newOp(synth, comp, time.Time{}))
+}
+
+func TestInputChangeCount(t *testing.T) {
+	tests := []struct {
+		name            string
+		refs            []apiv1.Ref
+		current         []apiv1.InputRevisions
+		synthesis       []apiv1.InputRevisions
+		wantNonDeferred int
+		wantDeferred    int
+		wantForced      int
+	}{
+		{
+			name: "no changes",
+			refs: []apiv1.Ref{
+				{Key: "foo"},
+				{Key: "bar"},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+				{Key: "bar", ResourceVersion: "2"},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+				{Key: "bar", ResourceVersion: "2"},
+			},
+			wantNonDeferred: 0,
+			wantDeferred:    0,
+			wantForced:      0,
+		},
+		{
+			name: "single non-deferred change",
+			refs: []apiv1.Ref{
+				{Key: "foo"},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "2"},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+			},
+			wantNonDeferred: 1,
+			wantDeferred:    0,
+			wantForced:      0,
+		},
+		{
+			name: "single deferred change",
+			refs: []apiv1.Ref{
+				{Key: "foo", Defer: true},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "2"},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+			},
+			wantNonDeferred: 0,
+			wantDeferred:    1,
+			wantForced:      0,
+		},
+		{
+			name: "mixed deferred and non-deferred changes",
+			refs: []apiv1.Ref{
+				{Key: "foo"},
+				{Key: "bar", Defer: true},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "2"},
+				{Key: "bar", ResourceVersion: "3"},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+				{Key: "bar", ResourceVersion: "2"},
+			},
+			wantNonDeferred: 1,
+			wantDeferred:    1,
+			wantForced:      0,
+		},
+		{
+			name: "ignoreSideEffects=true blocks change",
+			refs: []apiv1.Ref{
+				{Key: "foo"},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "2", IgnoreSideEffects: ptr.To(true)},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+			},
+			wantNonDeferred: 0,
+			wantDeferred:    0,
+			wantForced:      0,
+		},
+		{
+			name: "ignoreSideEffects=false forces change",
+			refs: []apiv1.Ref{
+				{Key: "foo"},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "2", IgnoreSideEffects: ptr.To(false)},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+			},
+			wantNonDeferred: 1,
+			wantDeferred:    0,
+			wantForced:      1,
+		},
+		{
+			name: "ignoreSideEffects=nil allows normal change",
+			refs: []apiv1.Ref{
+				{Key: "foo"},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "2", IgnoreSideEffects: nil},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+			},
+			wantNonDeferred: 1,
+			wantDeferred:    0,
+			wantForced:      0,
+		},
+		{
+			name: "ignoreSideEffects=true on deferred input blocks change",
+			refs: []apiv1.Ref{
+				{Key: "foo", Defer: true},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "2", IgnoreSideEffects: ptr.To(true)},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+			},
+			wantNonDeferred: 0,
+			wantDeferred:    0,
+			wantForced:      0,
+		},
+		{
+			name: "ignoreSideEffects=false on deferred input forces change",
+			refs: []apiv1.Ref{
+				{Key: "foo", Defer: true},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "2", IgnoreSideEffects: ptr.To(false)},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+			},
+			wantNonDeferred: 0,
+			wantDeferred:    1,
+			wantForced:      1,
+		},
+		{
+			name: "multiple inputs with mixed ignoreSideEffects settings",
+			refs: []apiv1.Ref{
+				{Key: "foo"},
+				{Key: "bar"},
+				{Key: "baz", Defer: true},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "2", IgnoreSideEffects: ptr.To(true)},
+				{Key: "bar", ResourceVersion: "3", IgnoreSideEffects: ptr.To(false)},
+				{Key: "baz", ResourceVersion: "4"},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+				{Key: "bar", ResourceVersion: "2"},
+				{Key: "baz", ResourceVersion: "3"},
+			},
+			wantNonDeferred: 1,
+			wantDeferred:    1,
+			wantForced:      1,
+		},
+		{
+			name: "all inputs blocked by ignoreSideEffects=true",
+			refs: []apiv1.Ref{
+				{Key: "foo"},
+				{Key: "bar", Defer: true},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "2", IgnoreSideEffects: ptr.To(true)},
+				{Key: "bar", ResourceVersion: "3", IgnoreSideEffects: ptr.To(true)},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+				{Key: "bar", ResourceVersion: "2"},
+			},
+			wantNonDeferred: 0,
+			wantDeferred:    0,
+			wantForced:      0,
+		},
+		{
+			name: "all inputs forced by ignoreSideEffects=false",
+			refs: []apiv1.Ref{
+				{Key: "foo"},
+				{Key: "bar", Defer: true},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "2", IgnoreSideEffects: ptr.To(false)},
+				{Key: "bar", ResourceVersion: "3", IgnoreSideEffects: ptr.To(false)},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+				{Key: "bar", ResourceVersion: "2"},
+			},
+			wantNonDeferred: 1,
+			wantDeferred:    1,
+			wantForced:      2,
+		},
+		{
+			name: "missing key in synthesis",
+			refs: []apiv1.Ref{
+				{Key: "foo"},
+				{Key: "bar"},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "2"},
+				{Key: "bar", ResourceVersion: "2"},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+			},
+			wantNonDeferred: 1,
+			wantDeferred:    0,
+			wantForced:      0,
+		},
+		{
+			name: "missing key in refs",
+			refs: []apiv1.Ref{
+				{Key: "foo"},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "2"},
+				{Key: "bar", ResourceVersion: "2"},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+				{Key: "bar", ResourceVersion: "1"},
+			},
+			wantNonDeferred: 1,
+			wantDeferred:    0,
+			wantForced:      0,
+		},
+		{
+			name: "no change when synthesis is newer",
+			refs: []apiv1.Ref{
+				{Key: "foo"},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "2"},
+			},
+			wantNonDeferred: 0,
+			wantDeferred:    0,
+			wantForced:      0,
+		},
+		{
+			name:            "empty inputs",
+			refs:            []apiv1.Ref{},
+			current:         []apiv1.InputRevisions{},
+			synthesis:       []apiv1.InputRevisions{},
+			wantNonDeferred: 0,
+			wantDeferred:    0,
+			wantForced:      0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			synth := &apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: tt.refs,
+				},
+			}
+			gotNonDeferred, gotDeferred, gotForced := inputChangeCount(synth, tt.current, tt.synthesis)
+			assert.Equal(t, tt.wantNonDeferred, gotNonDeferred, "nonDeferred mismatch")
+			assert.Equal(t, tt.wantDeferred, gotDeferred, "deferred mismatch")
+			assert.Equal(t, tt.wantForced, gotForced, "forced mismatch")
+		})
+	}
 }

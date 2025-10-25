@@ -9,6 +9,8 @@ import (
 func TestInputRevisionsLess(t *testing.T) {
 	revision1 := 1
 	revision2 := 2
+	trueVal := true
+	falseVal := false
 	tests := []struct {
 		Name        string
 		A           InputRevisions
@@ -168,6 +170,90 @@ func TestInputRevisionsLess(t *testing.T) {
 				Key:             "key6",
 				Revision:        nil,
 				ResourceVersion: "6",
+			},
+			Expectation: false,
+		},
+		{
+			Name: "same ResourceVersion with IgnoreSideEffects true vs false",
+			A: InputRevisions{
+				Key:               "key7",
+				ResourceVersion:   "7",
+				IgnoreSideEffects: &trueVal,
+			},
+			B: InputRevisions{
+				Key:               "key7",
+				ResourceVersion:   "7",
+				IgnoreSideEffects: &falseVal,
+			},
+			Expectation: true,
+		},
+		{
+			Name: "same ResourceVersion with IgnoreSideEffects false vs true",
+			A: InputRevisions{
+				Key:               "key8",
+				ResourceVersion:   "8",
+				IgnoreSideEffects: &falseVal,
+			},
+			B: InputRevisions{
+				Key:               "key8",
+				ResourceVersion:   "8",
+				IgnoreSideEffects: &trueVal,
+			},
+			Expectation: false,
+		},
+		{
+			Name: "same ResourceVersion with both IgnoreSideEffects true",
+			A: InputRevisions{
+				Key:               "key9",
+				ResourceVersion:   "9",
+				IgnoreSideEffects: &trueVal,
+			},
+			B: InputRevisions{
+				Key:               "key9",
+				ResourceVersion:   "9",
+				IgnoreSideEffects: &trueVal,
+			},
+			Expectation: false,
+		},
+		{
+			Name: "same ResourceVersion with both IgnoreSideEffects false",
+			A: InputRevisions{
+				Key:               "key10",
+				ResourceVersion:   "10",
+				IgnoreSideEffects: &falseVal,
+			},
+			B: InputRevisions{
+				Key:               "key10",
+				ResourceVersion:   "10",
+				IgnoreSideEffects: &falseVal,
+			},
+			Expectation: false,
+		},
+		{
+			Name: "same ResourceVersion with one nil IgnoreSideEffects",
+			A: InputRevisions{
+				Key:               "key11",
+				ResourceVersion:   "11",
+				IgnoreSideEffects: &trueVal,
+			},
+			B: InputRevisions{
+				Key:               "key11",
+				ResourceVersion:   "11",
+				IgnoreSideEffects: nil,
+			},
+			Expectation: false,
+		},
+		{
+			Name: "same ResourceVersion with both nil IgnoreSideEffects",
+			A: InputRevisions{
+				Key:               "key12",
+				ResourceVersion:   "12",
+				IgnoreSideEffects: nil,
+			},
+			B: InputRevisions{
+				Key:               "key12",
+				ResourceVersion:   "12",
+				IgnoreSideEffects: nil,
 			},
 			Expectation: false,
 		},
