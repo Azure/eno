@@ -140,6 +140,10 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		err = nil
 		modified = false
 	}
+	if err != nil {
+		logger.Error(err, "failed to reconcileResource and shouldFailOpen is set to False")
+		return ctrl.Result{}, err
+	}
 	if modified {
 		return ctrl.Result{Requeue: true}, nil
 	}
