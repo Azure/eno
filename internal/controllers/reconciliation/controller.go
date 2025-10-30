@@ -99,7 +99,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 
 func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx)
-	logger.V(2).Info("starting resource reconciliation",
+	logger.V(1).Info("starting resource reconciliation",
 		"compositionName", req.Composition.Name,
 		"compositionNamespace", req.Composition.Namespace,
 		"resourceGroup", req.Resource.Group,
@@ -110,7 +110,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, types.NamespacedName{Name: req.Composition.Name, Namespace: req.Composition.Namespace}, comp)
 	if errors.IsNotFound(err) {
-		logger.V(2).Info("composition not found - skipping reconciliation")
+		logger.V(1).Info("composition not found - skipping reconciliation")
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
@@ -120,30 +120,30 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 
 	synthesisUUID := comp.Status.GetCurrentSynthesisUUID()
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisUUID", synthesisUUID)
-	logger.V(2).Info("fetched composition", "generation", comp.Generation, "currentSynthesisUUID", synthesisUUID)
+	logger.V(1).Info("fetched composition", "generation", comp.Generation, "currentSynthesisUUID", synthesisUUID)
 
 	if comp.Status.CurrentSynthesis == nil {
-		logger.V(2).Info("no current synthesis - nothing to reconcile")
+		logger.V(1).Info("no current synthesis - nothing to reconcile")
 		return ctrl.Result{}, nil // nothing to do
 	}
 	logger = logger.WithValues("synthesizerName", comp.Spec.Synthesizer.Name, "synthesizerGeneration", comp.Status.CurrentSynthesis.ObservedSynthesizerGeneration, "synthesisUUID", comp.Status.GetCurrentSynthesisUUID())
 	ctx = logr.NewContext(ctx, logger)
 
 	// Find the current and (optionally) previous desired states in the cache
-	logger.V(2).Info("looking up resource in cache", "synthesisUUID", synthesisUUID, "resourceKey", req.Resource)
+	logger.V(1).Info("looking up resource in cache", "synthesisUUID", synthesisUUID, "resourceKey", req.Resource)
 	var prev *resource.Resource
 	resource, visible, exists := c.resourceClient.Get(ctx, synthesisUUID, req.Resource)
 	if !exists {
-		logger.V(2).Info("resource not found in cache - skipping reconciliation")
+		logger.V(1).Info("resource not found in cache - skipping reconciliation")
 		return ctrl.Result{}, nil
 	}
 	if !visible {
-		logger.V(2).Info("resource not visible in cache - skipping reconciliation")
+		logger.V(1).Info("resource not visible in cache - skipping reconciliation")
 		return ctrl.Result{}, nil
 	}
 	logger = logger.WithValues("resourceKind", resource.Ref.Kind, "resourceName", resource.Ref.Name, "resourceNamespace", resource.Ref.Namespace)
 	ctx = logr.NewContext(ctx, logger)
-	logger.V(2).Info("found resource in cache",
+	logger.V(1).Info("found resource in cache",
 		"resourceGroup", resource.Ref.Group,
 		"resourceKind", resource.Ref.Kind,
 		"resourceName", resource.Ref.Name,
@@ -167,7 +167,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	snap, current, ready, modified, err := c.reconcileResource(ctx, comp, prev, resource)
 	failingOpen := c.shouldFailOpen(resource)
 	if failingOpen {
-		logger.V(2).Info("resource configured to fail open - ignoring errors", "hasError", err != nil)
+		logger.V(1).Info("resource configured to fail open - ignoring errors", "hasError", err != nil)
 		err = nil
 		modified = false
 	}
@@ -184,7 +184,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	deleted := current == nil ||
 		(current.GetDeletionTimestamp() != nil && !snap.ForegroundDeletion) ||
 		(snap.Deleted() && (snap.Orphan || snap.Disable || failingOpen)) // orphaning should be reflected on the status.
-	logger.V(2).Info("updating resource status",
+	logger.V(1).Info("updating resource status",
 		"deleted", deleted,
 		"ready", ready != nil,
 		"currentExists", current != nil,
@@ -192,7 +192,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 
 	result, err := c.requeue(logger, snap, ready)
-	logger.V(2).Info("resource reconciliation completed", "requeue", result.Requeue, "requeueAfter", result.RequeueAfter)
+	logger.V(1).Info("resource reconciliation completed", "requeue", result.Requeue, "requeueAfter", result.RequeueAfter)
 	return result, err
 }
 

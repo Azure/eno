@@ -39,24 +39,24 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 	comp.Name = env.CompositionName
 	comp.Namespace = env.CompositionNamespace
 
-	logger.V(2).Info("fetching composition from API server", "compositionKey", client.ObjectKeyFromObject(comp))
+	logger.V(1).Info("fetching composition from API server", "compositionKey", client.ObjectKeyFromObject(comp))
 	err := e.Reader.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 	if err != nil {
 		logger.Error(err, "failed to fetch composition from API server", "compositionKey", client.ObjectKeyFromObject(comp))
 		return fmt.Errorf("fetching composition: %w", err)
 	}
-	logger.V(2).Info("successfully fetched composition", "generation", comp.Generation, "resourceVersion", comp.ResourceVersion)
+	logger.V(1).Info("successfully fetched composition", "generation", comp.Generation, "resourceVersion", comp.ResourceVersion)
 
 	syn := &apiv1.Synthesizer{}
 	syn.Name = comp.Spec.Synthesizer.Name
 
-	logger.V(2).Info("fetching synthesizer from API server", "synthesizerName", syn.Name)
+	logger.V(1).Info("fetching synthesizer from API server", "synthesizerName", syn.Name)
 	err = e.Reader.Get(ctx, client.ObjectKeyFromObject(syn), syn)
 	if err != nil {
 		logger.Error(err, "failed to fetch synthesizer from API server", "synthesizerName", syn.Name)
 		return fmt.Errorf("fetching synthesizer: %w", err)
 	}
-	logger.V(2).Info("successfully fetched synthesizer", "synthesizerName", syn.Name, "generation", syn.Generation, "image", syn.Spec.Image)
+	logger.V(1).Info("successfully fetched synthesizer", "synthesizerName", syn.Name, "generation", syn.Generation, "image", syn.Spec.Image)
 
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", syn.Name)
 	ctx = logr.NewContext(ctx, logger)
@@ -96,14 +96,14 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 	logger.V(1).Info("synthesizer execution completed successfully", "outputItemCount", len(output.Items), "outputResultCount", len(output.Results))
 
 	err = findResultError(output)
-	logger.V(2).Info("checking for result errors in output", "hasError", err != nil)
+	logger.V(1).Info("checking for result errors in output", "hasError", err != nil)
 
-	logger.V(2).Info("performing preflight validation on output resources")
+	logger.V(1).Info("performing preflight validation on output resources")
 	if err := e.preflightValidateResources(output); err != nil {
 		logger.Error(err, "preflight validation failed", "outputItemCount", len(output.Items))
 		return err
 	}
-	logger.V(2).Info("preflight validation passed")
+	logger.V(1).Info("preflight validation passed")
 
 	if err == nil {
 		logger.V(1).Info("writing resource slices", "outputItemCount", len(output.Items))
@@ -128,7 +128,7 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 
 func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, syn *apiv1.Synthesizer) (*krmv1.ResourceList, []apiv1.InputRevisions, error) {
 	logger := logr.FromContextOrDiscard(ctx)
-	logger.V(2).Info("building pod input for synthesis", "synthesizerRefCount", len(syn.Spec.Refs), "compositionBindingCount", len(comp.Spec.Bindings))
+	logger.V(1).Info("building pod input for synthesis", "synthesizerRefCount", len(syn.Spec.Refs), "compositionBindingCount", len(comp.Spec.Bindings))
 
 	bindings := map[string]*apiv1.Binding{}
 	for _, b := range comp.Spec.Bindings {
@@ -136,14 +136,14 @@ func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, s
 		bindings[b.Key] = &b
 		logger.V(3).Info("indexed binding", "key", b.Key, "resourceName", b.Resource.Name, "resourceNamespace", b.Resource.Namespace)
 	}
-	logger.V(2).Info("indexed all bindings", "bindingCount", len(bindings))
+	logger.V(1).Info("indexed all bindings", "bindingCount", len(bindings))
 
 	rl := &krmv1.ResourceList{
 		Kind:       krmv1.ResourceListKind,
 		APIVersion: krmv1.SchemeGroupVersion.String(),
 	}
 	revs := []apiv1.InputRevisions{}
-	logger.V(2).Info("processing synthesizer refs", "refCount", len(syn.Spec.Refs))
+	logger.V(1).Info("processing synthesizer refs", "refCount", len(syn.Spec.Refs))
 
 	for i, r := range syn.Spec.Refs {
 		key := r.Key
@@ -189,13 +189,13 @@ func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, s
 		logger.V(3).Info("stored input revision", "key", key, "uid", obj.GetUID(), "resourceVersion", obj.GetResourceVersion())
 	}
 
-	logger.V(2).Info("completed building pod input", "totalItems", len(rl.Items), "totalRevisions", len(revs))
+	logger.V(1).Info("completed building pod input", "totalItems", len(rl.Items), "totalRevisions", len(revs))
 	return rl, revs, nil
 }
 
 func (e *Executor) preflightValidateResources(rl *krmv1.ResourceList) error {
 	logger := logr.FromContextOrDiscard(context.Background())
-	logger.V(2).Info("starting preflight validation of resources", "resourceCount", len(rl.Items))
+	logger.V(1).Info("starting preflight validation of resources", "resourceCount", len(rl.Items))
 
 	for i, obj := range rl.Items {
 		logger.V(3).Info("validating resource", "index", i, "kind", obj.GetKind(), "name", obj.GetName(), "namespace", obj.GetNamespace())
@@ -207,29 +207,29 @@ func (e *Executor) preflightValidateResources(rl *krmv1.ResourceList) error {
 		logger.V(3).Info("resource validation passed", "index", i, "kind", obj.GetKind(), "name", obj.GetName())
 	}
 
-	logger.V(2).Info("preflight validation completed successfully", "validatedResourceCount", len(rl.Items))
+	logger.V(1).Info("preflight validation completed successfully", "validatedResourceCount", len(rl.Items))
 	return nil
 }
 
 func (e *Executor) writeSlices(ctx context.Context, comp *apiv1.Composition, rl *krmv1.ResourceList) ([]*apiv1.ResourceSliceRef, error) {
 	logger := logr.FromContextOrDiscard(ctx)
-	logger.V(2).Info("starting to write resource slices", "inputResourceCount", len(rl.Items), "maxSliceBytes", maxSliceJsonBytes)
+	logger.V(1).Info("starting to write resource slices", "inputResourceCount", len(rl.Items), "maxSliceBytes", maxSliceJsonBytes)
 
-	logger.V(2).Info("fetching previous resource slices")
+	logger.V(1).Info("fetching previous resource slices")
 	previous, err := e.fetchPreviousSlices(ctx, comp)
 	if err != nil {
 		logger.Error(err, "failed to fetch previous resource slices")
 		return nil, err
 	}
-	logger.V(2).Info("fetched previous resource slices", "previousSliceCount", len(previous))
+	logger.V(1).Info("fetched previous resource slices", "previousSliceCount", len(previous))
 
-	logger.V(2).Info("slicing resources", "inputResourceCount", len(rl.Items), "previousSliceCount", len(previous))
+	logger.V(1).Info("slicing resources", "inputResourceCount", len(rl.Items), "previousSliceCount", len(previous))
 	slices, err := resource.Slice(comp, previous, rl.Items, maxSliceJsonBytes)
 	if err != nil {
 		logger.Error(err, "failed to slice resources", "inputResourceCount", len(rl.Items))
 		return nil, err
 	}
-	logger.V(2).Info("resources sliced successfully", "resultingSliceCount", len(slices))
+	logger.V(1).Info("resources sliced successfully", "resultingSliceCount", len(slices))
 
 	sliceRefs := make([]*apiv1.ResourceSliceRef, len(slices))
 	for i, slice := range slices {
@@ -248,7 +248,7 @@ func (e *Executor) writeSlices(ctx context.Context, comp *apiv1.Composition, rl 
 		sliceRefs[i] = &apiv1.ResourceSliceRef{Name: slice.Name}
 	}
 
-	logger.V(2).Info("completed writing all resource slices", "totalSlicesWritten", len(sliceRefs))
+	logger.V(1).Info("completed writing all resource slices", "totalSlicesWritten", len(sliceRefs))
 	return sliceRefs, nil
 }
 
@@ -260,12 +260,12 @@ func (e *Executor) fetchPreviousSlices(ctx context.Context, comp *apiv1.Composit
 	logger := logr.FromContextOrDiscard(ctx)
 
 	if comp.Status.CurrentSynthesis == nil {
-		logger.V(2).Info("no current synthesis found - no previous slices to fetch")
+		logger.V(1).Info("no current synthesis found - no previous slices to fetch")
 		return nil, nil // nothing to fetch
 	}
 
 	currentSynthesis := comp.Status.CurrentSynthesis
-	logger.V(2).Info("fetching previous slices from current synthesis",
+	logger.V(1).Info("fetching previous slices from current synthesis",
 		"currentSynthesisUUID", currentSynthesis.UUID,
 		"currentSliceRefCount", len(currentSynthesis.ResourceSlices))
 
@@ -299,7 +299,7 @@ func (e *Executor) fetchPreviousSlices(ctx context.Context, comp *apiv1.Composit
 		slices = append(slices, slice)
 	}
 
-	logger.V(2).Info("completed fetching previous slices",
+	logger.V(1).Info("completed fetching previous slices",
 		"requestedSliceCount", len(currentSynthesis.ResourceSlices),
 		"fetchedSliceCount", len(slices))
 	return slices, nil
@@ -338,7 +338,7 @@ func (e *Executor) writeResourceSlice(ctx context.Context, slice *apiv1.Resource
 
 func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *apiv1.Composition, syn *apiv1.Synthesizer, refs []*apiv1.ResourceSliceRef, revs []apiv1.InputRevisions, rl *krmv1.ResourceList) error {
 	logger := logr.FromContextOrDiscard(ctx)
-	logger.V(2).Info("starting composition status update",
+	logger.V(1).Info("starting composition status update",
 		"sliceRefCount", len(refs),
 		"inputRevisionCount", len(revs),
 		"resultCount", len(rl.Results))
@@ -381,7 +381,7 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 		// Swap pending->current->previous syntheses
 		resultErr := findResultError(rl)
 		if resultErr == nil {
-			logger.V(2).Info("no result errors found - swapping synthesis states")
+			logger.V(1).Info("no result errors found - swapping synthesis states")
 			comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
 			comp.Status.CurrentSynthesis = comp.Status.InFlightSynthesis
 			comp.Status.InFlightSynthesis = nil
@@ -390,7 +390,7 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 				"hasCurrentSynthesis", comp.Status.CurrentSynthesis != nil,
 				"hasInFlightSynthesis", comp.Status.InFlightSynthesis != nil)
 		} else {
-			logger.V(2).Info("result errors found - keeping synthesis in-flight", "resultError", resultErr)
+			logger.V(1).Info("result errors found - keeping synthesis in-flight", "resultError", resultErr)
 		}
 
 		logger.V(3).Info("updating composition status")
@@ -401,7 +401,7 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 		}
 
 		logger.V(0).Info("composition status has been updated following successful synthesis")
-		logger.V(2).Info("composition status update completed successfully",
+		logger.V(1).Info("composition status update completed successfully",
 			"newResourceVersion", comp.ResourceVersion,
 			"synthesisSwapped", resultErr == nil)
 		return nil

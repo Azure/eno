@@ -43,23 +43,23 @@ func NewExecHandler() SynthesizerHandle {
 		stdin := &bytes.Buffer{}
 		stdout := &bytes.Buffer{}
 
-		logger.V(2).Info("encoding input for synthesizer")
+		logger.V(1).Info("encoding input for synthesizer")
 		err := json.NewEncoder(stdin).Encode(rl)
 		if err != nil {
 			logger.Error(err, "failed to encode inputs before execution")
 			return nil, fmt.Errorf("encoding inputs before execution: %s", err)
 		}
-		logger.V(2).Info("input encoded successfully", "stdinSize", stdin.Len())
+		logger.V(1).Info("input encoded successfully", "stdinSize", stdin.Len())
 
 		command := s.Spec.Command
 		if len(command) == 0 {
 			command = []string{"synthesize"}
-			logger.V(2).Info("using default command", "command", command)
+			logger.V(1).Info("using default command", "command", command)
 		} else {
-			logger.V(2).Info("using custom command", "command", command)
+			logger.V(1).Info("using custom command", "command", command)
 		}
 
-		logger.V(2).Info("creating command context", "commandArgs", command)
+		logger.V(1).Info("creating command context", "commandArgs", command)
 		cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 		cmd.Stdin = stdin
 		cmd.Stderr = os.Stdout // logger uses stderr, so use stdout to avoid race condition
@@ -83,7 +83,7 @@ func NewExecHandler() SynthesizerHandle {
 			"stdoutSize", stdout.Len(),
 			"exitCode", cmd.ProcessState.ExitCode())
 
-		logger.V(2).Info("parsing synthesizer output")
+		logger.V(1).Info("parsing synthesizer output")
 		output := &krmv1.ResourceList{}
 		err = json.Unmarshal(stdout.Bytes(), output)
 		if err != nil {
