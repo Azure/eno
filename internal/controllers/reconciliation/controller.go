@@ -140,10 +140,6 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		err = nil
 		modified = false
 	}
-	if err != nil {
-		c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceError(err))
-		return ctrl.Result{}, err
-	}
 	if modified {
 		return ctrl.Result{Requeue: true}, nil
 	}
@@ -386,8 +382,8 @@ func (c *Controller) getCurrent(ctx context.Context, resource *resource.Resource
 	return current, nil
 }
 
-func (c *Controller) requeue(logger logr.Logger, resource *resource.Snapshot, ready *metav1.Time) (ctrl.Result, error) {
-	pendingForegroundDeletion := (resource != nil && resource.Deleted() && !resource.Disable && resource.ForegroundDeletion)
+func (c *Controller) requeue(logger logr.Logger, comp *apiv1.Composition, resource *resource.Snapshot, ready *metav1.Time) (ctrl.Result, error) {
+	pendingForegroundDeletion := (resource != nil && resource.Deleted(comp) && !resource.Disable && resource.ForegroundDeletion)
 
 	if ready == nil || pendingForegroundDeletion {
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil

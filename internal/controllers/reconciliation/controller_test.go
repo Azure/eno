@@ -132,7 +132,8 @@ func TestRequeueDoesNotPanic(t *testing.T) {
 
 	statespace.Test(func(state *testState) bool {
 		c := &Controller{}
-		_, err := c.requeue(logr.Discard(), state.snapshot, state.ready)
+		comp := &apiv1.Composition{}
+		_, err := c.requeue(logr.Discard(), comp, state.snapshot, state.ready)
 		require.NoError(t, err)
 		return true
 	}).
