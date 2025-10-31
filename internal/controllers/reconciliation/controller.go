@@ -2,6 +2,7 @@ package reconciliation
 
 import (
 	"context"
+	goerrors "errors"
 	"fmt"
 	"strings"
 	"time"
@@ -35,6 +36,7 @@ type Options struct {
 	ResourceSelector labels.Selector
 
 	DisableServerSideApply bool
+	FailOpen               bool
 
 	Timeout               time.Duration
 	ReadinessPollInterval time.Duration
@@ -51,6 +53,7 @@ type Controller struct {
 	upstreamClient        client.Client
 	minReconcileInterval  time.Duration
 	disableSSA            bool
+	failOpen              bool
 }
 
 func New(mgr ctrl.Manager, opts Options) error {
@@ -76,6 +79,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 		upstreamClient:        upstreamClient,
 		minReconcileInterval:  opts.MinReconcileInterval,
 		disableSSA:            opts.DisableServerSideApply,
+		failOpen:              opts.FailOpen,
 	}
 
 	return builder.TypedControllerManagedBy[resource.Request](mgr).
@@ -132,40 +136,13 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		prev, _, _ = c.resourceClient.Get(ctx, syn.UUID, req.Resource)
 	}
 
-	// Fetch the current resource
-	current, err := c.getCurrent(ctx, resource)
-	if client.IgnoreNotFound(err) != nil && !isErrMissingNS(err) && !isErrNoKindMatch(err) {
-		logger.Error(err, "failed to get current state")
-		return ctrl.Result{}, err
+	snap, current, ready, modified, err := c.reconcileResource(ctx, comp, prev, resource)
+	if c.shouldFailOpen(resource) {
+		err = nil
+		modified = false
 	}
-
-	// Evaluate resource readiness
-	// - Readiness checks are skipped when this version of the resource's desired state has already become ready
-	// - Readiness checks are skipped when the resource hasn't changed since the last check
-	// - Readiness defaults to true if no checks are given
-	var ready *metav1.Time
-	status := resource.State()
-	if status == nil || status.Ready == nil {
-		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, &apiv1.Composition{}, current)
-		if ok {
-			ready = &readiness.ReadyTime
-		}
-	} else {
-		ready = status.Ready
-	}
-
-	snap, err := resource.Snapshot(ctx, comp, current)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to create resource snapshot: %w", err)
-	}
-	if status := snap.OverrideStatus(); len(status) > 0 {
-		logger = logger.WithValues("overrideStatus", status)
-		ctx = logr.NewContext(ctx, logger)
-	}
-
-	modified, err := c.reconcileResource(ctx, comp, prev, snap, current)
-	if err != nil {
-		logger.Error(err, "failed to reconcile resource")
+		c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceError(err))
 		return ctrl.Result{}, err
 	}
 	if modified {
@@ -180,7 +157,51 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	return c.requeue(logger, comp, snap, ready)
 }
 
-func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composition, prev *resource.Resource, res *resource.Snapshot, current *unstructured.Unstructured) (bool, error) {
+func (c *Controller) shouldFailOpen(resource *resource.Resource) bool {
+	return (resource.FailOpen == nil && c.failOpen) || (resource.FailOpen != nil && *resource.FailOpen)
+}
+
+func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composition, prev *resource.Resource, resource *resource.Resource) (snap *resource.Snapshot, current *unstructured.Unstructured, ready *metav1.Time, modified bool, err error) {
+	logger := logr.FromContextOrDiscard(ctx)
+
+	// Fetch the current resource
+	current, err = c.getCurrent(ctx, resource)
+	if client.IgnoreNotFound(err) != nil && !isErrMissingNS(err) && !isErrNoKindMatch(err) {
+		logger.Error(err, "failed to get current state")
+		return nil, nil, nil, false, err
+	}
+
+	// Evaluate resource readiness
+	// - Readiness checks are skipped when this version of the resource's desired state has already become ready
+	// - Readiness checks are skipped when the resource hasn't changed since the last check
+	// - Readiness defaults to true if no checks are given
+	status := resource.State()
+	if status == nil || status.Ready == nil {
+		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, &apiv1.Composition{}, current)
+		if ok {
+			ready = &readiness.ReadyTime
+		}
+	} else {
+		ready = status.Ready
+	}
+
+	snap, err = resource.Snapshot(ctx, comp, current)
+	if err != nil {
+		return nil, nil, nil, false, fmt.Errorf("failed to create resource snapshot: %w", err)
+	}
+	if status := snap.OverrideStatus(); len(status) > 0 {
+		logger = logger.WithValues("overrideStatus", status)
+		ctx = logr.NewContext(ctx, logger)
+	}
+
+	modified, err = c.reconcileSnapshot(ctx, comp, prev, snap, current)
+	if err != nil {
+		logger.Error(err, "failed to reconcile resource")
+	}
+	return snap, current, ready, modified, err
+}
+
+func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composition, prev *resource.Resource, res *resource.Snapshot, current *unstructured.Unstructured) (bool, error) {
 	if res.Disable {
 		return false, nil
 	}
@@ -393,6 +414,48 @@ func patchResourceState(deleted bool, ready *metav1.Time) flowcontrol.StatusPatc
 			Ready:      ready,
 			Reconciled: true,
 		}
+	}
+}
+
+func patchResourceError(err error) flowcontrol.StatusPatchFn {
+	return func(rs *apiv1.ResourceState) *apiv1.ResourceState {
+		str := summarizeError(err)
+		if rs != nil && (rs.Reconciled || (rs.ReconciliationError != nil && *rs.ReconciliationError == str)) {
+			return nil
+		}
+		return &apiv1.ResourceState{
+			Reconciled:          rs.Reconciled,
+			Ready:               rs.Ready,
+			Deleted:             rs.Deleted,
+			ReconciliationError: &str,
+		}
+	}
+}
+
+func summarizeError(err error) string {
+	statusErr := &errors.StatusError{}
+	if err == nil || !goerrors.As(err, &statusErr) {
+		return ""
+	}
+	status := statusErr.Status()
+
+	// SSA is sloppy with the status codes
+	if spl := strings.SplitAfter(status.Message, "failed to create typed patch object"); len(spl) > 1 {
+		return strings.TrimSpace(spl[1])
+	}
+
+	switch status.Reason {
+	case metav1.StatusReasonBadRequest,
+		metav1.StatusReasonNotAcceptable,
+		metav1.StatusReasonRequestEntityTooLarge,
+		metav1.StatusReasonMethodNotAllowed,
+		metav1.StatusReasonGone,
+		metav1.StatusReasonForbidden,
+		metav1.StatusReasonUnauthorized:
+		return status.Message
+
+	default:
+		return ""
 	}
 }
 

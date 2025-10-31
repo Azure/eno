@@ -197,6 +197,7 @@ func (c *compositionController) reconcileSimplifiedStatus(ctx context.Context, s
 
 func buildSimplifiedStatus(synth *apiv1.Synthesizer, comp *apiv1.Composition) *apiv1.SimplifiedStatus {
 	status := &apiv1.SimplifiedStatus{}
+	current := comp.Status.Simplified
 
 	if comp.DeletionTimestamp != nil {
 		status.Status = "Deleting"
@@ -249,6 +250,10 @@ func buildSimplifiedStatus(synth *apiv1.Synthesizer, comp *apiv1.Composition) *a
 	}
 	if syn := comp.Status.CurrentSynthesis; syn != nil && syn.Reconciled == nil {
 		status.Status = "Reconciling"
+		if current != nil {
+			// Preserve any reconciliation error written by the resource slice controller
+			status.Error = current.Error
+		}
 		return status
 	}
 

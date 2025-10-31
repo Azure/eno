@@ -37,9 +37,10 @@ type ResourceSliceStatus struct {
 }
 
 type ResourceState struct {
-	Reconciled bool         `json:"reconciled,omitempty"`
-	Ready      *metav1.Time `json:"ready,omitempty"`
-	Deleted    bool         `json:"deleted,omitempty"`
+	Reconciled          bool         `json:"reconciled,omitempty"`
+	Ready               *metav1.Time `json:"ready,omitempty"`
+	Deleted             bool         `json:"deleted,omitempty"`
+	ReconciliationError *string      `json:"reconciliationError,omitempty"`
 }
 
 func (r *ResourceState) Equal(rr *ResourceState) bool {

@@ -52,6 +52,7 @@ type Resource struct {
 	GVK             schema.GroupVersionKind
 	ReadinessChecks readiness.Checks
 	Labels          map[string]string
+	FailOpen        *bool
 
 	// DefinedGroupKind is set on CRDs to represent the resource type they define.
 	DefinedGroupKind *schema.GroupKind
@@ -157,6 +158,19 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		}
 		if err != nil {
 			logger.Error(err, "invalid override json")
+		}
+	}
+
+	const failOpenKey = "eno.azure.io/fail-open"
+	if str, ok := anno[failOpenKey]; ok {
+		b, err := strconv.ParseBool(str)
+		if strict && err != nil {
+			return nil, fmt.Errorf("invalid fail-open annotation value: %q", str)
+		}
+		if err != nil {
+			logger.V(0).Info("invalid fail-open annotation - ignoring")
+		} else {
+			res.FailOpen = &b
 		}
 	}
 

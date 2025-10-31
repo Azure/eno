@@ -179,6 +179,113 @@ func TestReadyTimeAggregation(t *testing.T) {
 	assert.Equal(t, latestReadyTime.Round(time.Minute), comp.Status.CurrentSynthesis.Ready.Round(time.Minute))
 }
 
+func TestReconciliationErrorAggregation(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+	now := metav1.Now()
+
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-slice-1"
+	slice.Namespace = "default"
+	slice.Spec.Resources = []apiv1.Manifest{{Manifest: "{}"}, {Manifest: "{}"}, {Manifest: "{}"}}
+	slice.Status.Resources = []apiv1.ResourceState{
+		{ReconciliationError: ptr.To("test 1")},
+		{ReconciliationError: ptr.To("test 3")},
+		{ReconciliationError: ptr.To("test 2")},
+	}
+	require.NoError(t, cli.Create(ctx, slice))
+	require.NoError(t, cli.Status().Update(ctx, slice))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test"
+	comp.Namespace = "default"
+	comp.Status.Simplified = &apiv1.SimplifiedStatus{Status: "Reconciling"}
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		Synthesized:    &now,
+		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
+	}
+	require.NoError(t, cli.Create(ctx, comp))
+	require.NoError(t, cli.Status().Update(ctx, comp))
+
+	a := &sliceController{client: cli}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
+	_, err := a.Reconcile(ctx, req)
+	require.NoError(t, err)
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	assert.Equal(t, "test 3", comp.Status.Simplified.Error)
+}
+
+func TestReconciliationErrorReset(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+	now := metav1.Now()
+
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-slice-1"
+	slice.Namespace = "default"
+	slice.Spec.Resources = []apiv1.Manifest{{Manifest: "{}"}}
+	slice.Status.Resources = []apiv1.ResourceState{
+		{ReconciliationError: ptr.To("test 1")},
+	}
+	require.NoError(t, cli.Create(ctx, slice))
+	require.NoError(t, cli.Status().Update(ctx, slice))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test"
+	comp.Namespace = "default"
+	comp.Status.Simplified = &apiv1.SimplifiedStatus{Status: "NotReconciling", Error: "some other error"}
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		Synthesized:    &now,
+		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
+	}
+	require.NoError(t, cli.Create(ctx, comp))
+	require.NoError(t, cli.Status().Update(ctx, comp))
+
+	a := &sliceController{client: cli}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
+	_, err := a.Reconcile(ctx, req)
+	require.NoError(t, err)
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	assert.Equal(t, "some other error", comp.Status.Simplified.Error)
+}
+
+func TestReconciliationErrorNotReconciling(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+	now := metav1.Now()
+
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-slice-1"
+	slice.Namespace = "default"
+	slice.Spec.Resources = []apiv1.Manifest{{Manifest: "{}"}}
+	slice.Status.Resources = []apiv1.ResourceState{
+		{ReconciliationError: ptr.To("test 1")},
+	}
+	require.NoError(t, cli.Create(ctx, slice))
+	require.NoError(t, cli.Status().Update(ctx, slice))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test"
+	comp.Namespace = "default"
+	comp.Status.Simplified = &apiv1.SimplifiedStatus{Status: "NotReconciling"}
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		Synthesized:    &now,
+		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
+	}
+	require.NoError(t, cli.Create(ctx, comp))
+	require.NoError(t, cli.Status().Update(ctx, comp))
+
+	a := &sliceController{client: cli}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
+	_, err := a.Reconcile(ctx, req)
+	require.NoError(t, err)
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	assert.Empty(t, comp.Status.Simplified.Error)
+}
+
 func TestNoSlices(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
@@ -426,6 +533,26 @@ func TestFuzzProcessCompositionTransition(t *testing.T) {
 			c.Snapshot.ReadyTime = &metav1.Time{}
 			return c
 		}).
+		WithMutation("simplified status exists", func(c *compositionTransitionTest) *compositionTransitionTest {
+			c.Composition.Status.Simplified = &apiv1.SimplifiedStatus{}
+			return c
+		}).
+		WithMutation("simplified status is in reconciling state", func(c *compositionTransitionTest) *compositionTransitionTest {
+			if s := c.Composition.Status.Simplified; s != nil {
+				s.Status = "Reconciling"
+			}
+			return c
+		}).
+		WithMutation("simplified status has error", func(c *compositionTransitionTest) *compositionTransitionTest {
+			if s := c.Composition.Status.Simplified; s != nil {
+				s.Error = "existing error"
+			}
+			return c
+		}).
+		WithMutation("snapshot has error", func(c *compositionTransitionTest) *compositionTransitionTest {
+			c.Snapshot.Error = "snapshot error"
+			return c
+		}).
 		WithInvariant("modified when state has transitioned", func(state *compositionTransitionTest, result bool) bool {
 			syn := state.Composition.Status.CurrentSynthesis
 			if syn == nil {
@@ -433,7 +560,13 @@ func TestFuzzProcessCompositionTransition(t *testing.T) {
 			}
 			readinessTransition := state.Snapshot.Ready != (syn.Ready != nil)
 			reconciledTransition := state.Snapshot.Reconciled != (syn.Reconciled != nil)
-			return result == (readinessTransition || reconciledTransition)
+
+			errorTransition := false
+			if s := state.Composition.Status.Simplified; s != nil && s.Status == "Reconciling" {
+				errorTransition = s.Error != state.Snapshot.Error
+			}
+
+			return result == (readinessTransition || reconciledTransition || errorTransition)
 		}).
 		Evaluate(t)
 }
