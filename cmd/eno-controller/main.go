@@ -24,6 +24,7 @@ import (
 	"github.com/Azure/eno/internal/controllers/symphony"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/controllers/watch"
+	"github.com/Azure/eno/internal/logging"
 
 	"github.com/Azure/eno/internal/config"
 	"github.com/Azure/eno/internal/execution"
@@ -155,6 +156,11 @@ func runController() error {
 	err = composition.NewStatusLogger(mgr, statusLogFreq)
 	if err != nil {
 		return fmt.Errorf("constructing composition status logger: %w", err)
+	}
+
+	err = logging.NewSynthesizerTelemetryLogger(mgr, statusLogFreq)
+	if err != nil {
+		return fmt.Errorf("constructing synthesizer status logger: %w", err)
 	}
 
 	err = symphony.NewController(mgr)
