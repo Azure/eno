@@ -6,7 +6,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/go-logr/zapr"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,6 +18,7 @@ import (
 	"github.com/Azure/eno/internal/controllers/reconciliation"
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/k8s"
+	"github.com/Azure/eno/internal/logging"
 	"github.com/Azure/eno/internal/manager"
 )
 
@@ -40,6 +40,7 @@ func run() error {
 		resourceFilter               string
 		namespaceCreationGracePeriod time.Duration
 		namespaceCleanup             bool
+		enoBuildVersion              string
 
 		mgrOpts = &manager.Options{
 			Rest: ctrl.GetConfigOrDie(),
@@ -60,6 +61,7 @@ func run() error {
 	flag.DurationVar(&namespaceCreationGracePeriod, "ns-creation-grace-period", time.Second, "A namespace is assumed to be missing if it doesn't exist once one of its resources has existed for this long")
 	flag.BoolVar(&namespaceCleanup, "namespace-cleanup", true, "Clean up orphaned resources caused by namespace force-deletions")
 	flag.BoolVar(&recOpts.FailOpen, "fail-open", false, "Report that resources are reconciled once they've been seen, even if reconciliation failed. Overridden by individual resources with 'eno.azure.io/fail-open: true|false'")
+	flag.StringVar(&enoBuildVersion, "eno-build-version", "", "The Eno binary build version")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 
@@ -71,7 +73,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	logger := zapr.NewLogger(zl)
+	logger := logging.NewLoggerWithBuild(zl, enoBuildVersion)
 
 	mgrOpts.CompositionNamespace = compositionNamespace
 	if compositionSelector != "" {

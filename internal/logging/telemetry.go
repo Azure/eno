@@ -7,6 +7,8 @@ import (
 
 	"github.com/Azure/eno/internal/manager"
 	"github.com/go-logr/logr"
+	"github.com/go-logr/zapr"
+	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -29,6 +31,18 @@ func NewLogger() *Logger {
 			logr.FromContextOrDiscard(ctx).V(0).Info(msg, args...)
 		},
 	}
+}
+
+// NewLoggerWithBuild creates a logger with serviceBuild field if buildVersion is provided
+func NewLoggerWithBuild(zl *zap.Logger, buildVersion string) logr.Logger {
+	logger := zapr.NewLogger(zl)
+
+	// Add serviceBuild to all log entries if provided
+	if buildVersion != "" {
+		logger = logger.WithValues("serviceBuild", buildVersion)
+	}
+
+	return logger
 }
 
 func (l *Logger) Log(ctx context.Context, msg string, field ...any) {

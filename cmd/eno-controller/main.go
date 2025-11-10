@@ -64,6 +64,7 @@ func runController() error {
 		containerCreationTimeout  time.Duration
 		statusLogFreq             time.Duration
 		synconf                   = &synthesis.Config{}
+		enoBuildVersion           string
 
 		mgrOpts = &manager.Options{
 			Rest: ctrl.GetConfigOrDie(),
@@ -85,6 +86,7 @@ func runController() error {
 	flag.IntVar(&concurrencyLimit, "concurrency-limit", 10, "Upper bound on active syntheses. This effectively limits the number of running synthesizer pods spawned by Eno.")
 	flag.DurationVar(&selfHealingGracePeriod, "self-healing-grace-period", time.Minute*5, "How long before the self-healing controllers are allowed to start the resynthesis process.")
 	flag.IntVar(&inputRateLimit, "input-qps", 10, "Writes-per-second limit for input controllers")
+	flag.StringVar(&enoBuildVersion, "eno-build-version", "", "The Eno binary build version")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 	watch.SetKindWatchRateLimit(inputRateLimit)
@@ -110,7 +112,7 @@ func runController() error {
 	if err != nil {
 		return err
 	}
-	logger := zapr.NewLogger(zl)
+	logger := logging.NewLoggerWithBuild(zl, enoBuildVersion)
 
 	mgrOpts.Rest.UserAgent = "eno-controller"
 	mgr, err := manager.New(logger, mgrOpts)
@@ -153,7 +155,7 @@ func runController() error {
 		return fmt.Errorf("constructing composition controller: %w", err)
 	}
 
-	err = composition.NewStatusLogger(mgr, statusLogFreq)
+	err = logging.NewCompositionStatusLogger(mgr, statusLogFreq)
 	if err != nil {
 		return fmt.Errorf("constructing composition status logger: %w", err)
 	}
