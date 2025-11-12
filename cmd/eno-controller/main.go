@@ -24,6 +24,7 @@ import (
 	"github.com/Azure/eno/internal/controllers/symphony"
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/controllers/watch"
+	"github.com/Azure/eno/internal/logging"
 
 	"github.com/Azure/eno/internal/config"
 	"github.com/Azure/eno/internal/execution"
@@ -63,6 +64,7 @@ func runController() error {
 		containerCreationTimeout  time.Duration
 		statusLogFreq             time.Duration
 		synconf                   = &synthesis.Config{}
+		enoBuildVersion           string
 
 		mgrOpts = &manager.Options{
 			Rest: ctrl.GetConfigOrDie(),
@@ -109,7 +111,8 @@ func runController() error {
 	if err != nil {
 		return err
 	}
-	logger := zapr.NewLogger(zl)
+	enoBuildVersion = os.Getenv("ENO_BUILD_VERSION")
+	logger := logging.NewLoggerWithBuild(zl, enoBuildVersion)
 
 	mgrOpts.Rest.UserAgent = "eno-controller"
 	mgr, err := manager.New(logger, mgrOpts)
@@ -152,9 +155,14 @@ func runController() error {
 		return fmt.Errorf("constructing composition controller: %w", err)
 	}
 
-	err = composition.NewStatusLogger(mgr, statusLogFreq)
+	err = logging.NewCompositionStatusLogger(mgr, statusLogFreq)
 	if err != nil {
 		return fmt.Errorf("constructing composition status logger: %w", err)
+	}
+
+	err = logging.NewSynthesizerTelemetryLogger(mgr, statusLogFreq)
+	if err != nil {
+		return fmt.Errorf("constructing synthesizer status logger: %w", err)
 	}
 
 	err = symphony.NewController(mgr)

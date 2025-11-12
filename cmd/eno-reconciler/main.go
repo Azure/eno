@@ -6,7 +6,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/go-logr/zapr"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,6 +18,7 @@ import (
 	"github.com/Azure/eno/internal/controllers/reconciliation"
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/k8s"
+	"github.com/Azure/eno/internal/logging"
 	"github.com/Azure/eno/internal/manager"
 )
 
@@ -40,6 +40,7 @@ func run() error {
 		resourceFilter               string
 		namespaceCreationGracePeriod time.Duration
 		namespaceCleanup             bool
+		enoBuildVersion              string
 
 		mgrOpts = &manager.Options{
 			Rest: ctrl.GetConfigOrDie(),
@@ -71,7 +72,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	logger := zapr.NewLogger(zl)
+	enoBuildVersion = os.Getenv("ENO_BUILD_VERSION")
+	logger := logging.NewLoggerWithBuild(zl, enoBuildVersion)
 
 	mgrOpts.CompositionNamespace = compositionNamespace
 	if compositionSelector != "" {
