@@ -34,7 +34,7 @@ func (o *Options) Bind(set *flag.FlagSet) {
 	set.IntVar(&o.Rest.Burst, "burst", 50, "apiserver client rate limiter burst configuration")
 	set.Float64Var(&o.qps, "qps", 20, "Max requests per second to apiserver")
 	set.BoolVar(&o.LeaderElection, "leader-election", false, "Enable leader election")
-	set.StringVar(&o.LeaderElectionNamespace, "leader-election-namespace", os.Getenv("POD_NAMESPACE"), "Determines the namespace in which the leader election resource will be created")
+	set.StringVar(&o.LeaderElectionNamespace, "leader-election-namespace", os.Getenv("ENO_NAMESPACE"), "Determines the namespace in which the leader election resource will be created")
 	set.StringVar(&o.LeaderElectionResourceLock, "leader-election-resource-lock", "", "Determines which resource lock to use for leader election")
 	set.StringVar(&o.LeaderElectionID, "leader-election-id", "", "Determines the name of the resource that leader election will use for holding the leader lock")
 	set.DurationVar(&o.ElectionLeaseDuration, "leader-election-lease-duration", 35*time.Second, "How long before non-leaders will forcibly take leadership")
