@@ -7,6 +7,7 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 )
@@ -255,6 +256,20 @@ func TestCompositionEventType(t *testing.T) {
 		}
 
 		eventType := compositionEventType(comp)
-		assert.Equal(t, "status_update", eventType)
+		assert.Equal(t, "status_created", eventType)
+	})
+
+	t.Run("event type with deletion timestamp", func(t *testing.T) {
+		comp := &apiv1.Composition{}
+		now := metav1.Now()
+		comp.DeletionTimestamp = &now
+		comp.Status = apiv1.CompositionStatus{
+			Simplified: &apiv1.SimplifiedStatus{
+				Status: "Ready",
+			},
+		}
+
+		eventType := compositionEventType(comp)
+		assert.Equal(t, "status_deleting", eventType)
 	})
 }
