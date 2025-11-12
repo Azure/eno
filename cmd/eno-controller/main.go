@@ -70,8 +70,8 @@ func runController() error {
 			Rest: ctrl.GetConfigOrDie(),
 		}
 	)
-	flag.StringVar(&synconf.PodNamespace, "synthesizer-pod-namespace", os.Getenv("ENO_NAMESPACE"), "Namespace to create synthesizer pods in. Defaults to POD_NAMESPACE.")
-	flag.StringVar(&synconf.ExecutorImage, "executor-image", os.Getenv("ENO_CONTROLLER_IMAGE"), "Reference to the image that will be used to execute synthesizers. Defaults to EXECUTOR_IMAGE.")
+	flag.StringVar(&synconf.PodNamespace, "synthesizer-pod-namespace", os.Getenv("POD_NAMESPACE"), "Namespace to create synthesizer pods in. Defaults to POD_NAMESPACE.")
+	flag.StringVar(&synconf.ExecutorImage, "executor-image", os.Getenv("EXECUTOR_IMAGE"), "Reference to the image that will be used to execute synthesizers. Defaults to EXECUTOR_IMAGE.")
 	flag.StringVar(&synconf.PodServiceAccount, "synthesizer-pod-service-account", "", "Service account name to be assigned to synthesizer Pods.")
 	flag.StringVar(&synthesizerPodLabels, "synthesizer-pod-labels", "", "Default labels to apply to synthesizer pods (comma-separated key=value pairs)")
 	flag.StringVar(&synthesizerPodAnnotations, "synthesizer-pod-annotations", "", "Default annotations to apply to synthesizer pods (comma-separated key=value pairs)")
@@ -82,11 +82,10 @@ func runController() error {
 	flag.DurationVar(&watchdogThres, "watchdog-threshold", time.Minute*3, "How long before the watchdog considers a mid-transition resource to be stuck")
 	flag.DurationVar(&rolloutCooldown, "rollout-cooldown", time.Minute, "How long before an update to a related resource (synthesizer, bindings, etc.) will trigger a second composition's re-synthesis")
 	flag.StringVar(&taintToleration, "taint-toleration", "", "Node NoSchedule taint to be tolerated by synthesizer pods e.g. taintKey=taintValue to match on value, just taintKey to match on presence of the taint")
-	flag.StringVar(&nodeAffinity, "node-affinity", os.Getenv("AGENT_POOL_NAME"), "Synthesizer pods will be created with this required node affinity expression e.g. labelKey=labelValue to match on value, just labelKey to match on presence of the label")
+	flag.StringVar(&nodeAffinity, "node-affinity", "", "Synthesizer pods will be created with this required node affinity expression e.g. labelKey=labelValue to match on value, just labelKey to match on presence of the label")
 	flag.IntVar(&concurrencyLimit, "concurrency-limit", 10, "Upper bound on active syntheses. This effectively limits the number of running synthesizer pods spawned by Eno.")
 	flag.DurationVar(&selfHealingGracePeriod, "self-healing-grace-period", time.Minute*5, "How long before the self-healing controllers are allowed to start the resynthesis process.")
 	flag.IntVar(&inputRateLimit, "input-qps", 10, "Writes-per-second limit for input controllers")
-	flag.StringVar(&enoBuildVersion, "eno-build-version", os.Getenv("ENO_BUILD_VERSION"), "The Eno binary build version")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 	watch.SetKindWatchRateLimit(inputRateLimit)
@@ -112,6 +111,7 @@ func runController() error {
 	if err != nil {
 		return err
 	}
+	enoBuildVersion = os.Getenv("ENO_BUILD_VERSION")
 	logger := logging.NewLoggerWithBuild(zl, enoBuildVersion)
 
 	mgrOpts.Rest.UserAgent = "eno-controller"
