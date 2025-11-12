@@ -86,7 +86,7 @@ func runController() error {
 	flag.IntVar(&concurrencyLimit, "concurrency-limit", 10, "Upper bound on active syntheses. This effectively limits the number of running synthesizer pods spawned by Eno.")
 	flag.DurationVar(&selfHealingGracePeriod, "self-healing-grace-period", time.Minute*5, "How long before the self-healing controllers are allowed to start the resynthesis process.")
 	flag.IntVar(&inputRateLimit, "input-qps", 10, "Writes-per-second limit for input controllers")
-	flag.StringVar(&enoBuildVersion, "eno-build-version", "", "The Eno binary build version")
+	flag.StringVar(&enoBuildVersion, "eno-build-version", os.Getenv("ENO_BUILD_VERSION"), "The Eno binary build version")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 	watch.SetKindWatchRateLimit(inputRateLimit)

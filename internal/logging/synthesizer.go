@@ -48,9 +48,9 @@ func NewSynthesizerTelemetryLogger(mgr ctrl.Manager, freq time.Duration) error {
 
 		EventTypeFn: func(synth *apiv1.Synthesizer) string {
 			if synth.DeletionTimestamp != nil {
-				return "deleting"
+				return "status_deleting"
 			}
-			return "active"
+			return "status_created"
 		},
 	}
 	return NewTelemetryController(config, &apiv1.Synthesizer{})

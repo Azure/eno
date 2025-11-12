@@ -81,8 +81,11 @@ func extractCompositionFields(ctx context.Context, comp *apiv1.Composition) []an
 
 // compositionEventType determines the event type for composition logging
 func compositionEventType(comp *apiv1.Composition) string {
+	if comp.DeletionTimestamp != nil {
+		return "status_deleting"
+	}
 	if comp.Status.Simplified == nil {
-		return "status_update"
+		return "status_created"
 	}
 	return "status_update"
 }

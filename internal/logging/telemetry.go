@@ -123,7 +123,7 @@ func (c *TelemetryController[T]) Reconcile(ctx context.Context, req reconcile.Re
 			c.logger.Log(ctx, c.messageFn(),
 				"name", req.NamespacedName.Name,
 				"namespace", req.NamespacedName.Namespace,
-				"eventType", "deleted")
+				"eventType", "status_deleted")
 		}
 		return ctrl.Result{}, nil
 	}
