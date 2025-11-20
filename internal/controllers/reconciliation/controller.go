@@ -281,8 +281,14 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 
 		// When using server side apply, make sure we haven't lost any managedFields metadata.
 		// Eno should always remove fields that are no longer set by the synthesizer, even if another client messed with managedFields.
-		if current != nil && prev != nil && !res.Replace {
-			snap, err := prev.SnapshotWithOverrides(ctx, comp, current, res.Resource)
+		if current != nil && !res.Replace {
+			// Use previous synthesis if available, otherwise use current desired state
+			// to ensure we claim ownership of all fields on first reconciliation
+			prevForManagement := prev
+			if prevForManagement == nil {
+				prevForManagement = res.Resource
+			}
+			snap, err := prevForManagement.SnapshotWithOverrides(ctx, comp, current, res.Resource)
 			if err != nil {
 				return false, fmt.Errorf("snapshotting previous version: %w", err)
 			}
@@ -336,7 +342,7 @@ func (c *Controller) update(ctx context.Context, comp *apiv1.Composition, previo
 			opts = append(opts, client.DryRunAll)
 		}
 		err = c.upstreamClient.Update(ctx, updated, opts...)
-		return
+		return updated, err
 	}
 
 	opts := []client.PatchOption{}
@@ -356,7 +362,7 @@ func (c *Controller) update(ctx context.Context, comp *apiv1.Composition, previo
 	}
 
 	err = c.upstreamClient.Patch(ctx, updated, patch, opts...)
-	return
+	return updated, err
 }
 
 func buildNonStrategicPatch(ctx context.Context, comp *apiv1.Composition, previous *resource.Resource, current *unstructured.Unstructured) (client.Patch, error) {
