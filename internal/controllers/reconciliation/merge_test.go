@@ -766,7 +766,8 @@ func TestEnoTakesOwnershipOfContainers(t *testing.T) {
 	registerControllers(t, mgr)
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 		d := originalDep.DeepCopy()
-		d.Spec.Template.Spec.Containers[0].Image = "nginx:latest"
+		d.Spec.Template.Spec.Containers[0].Image = "nginx:latest" // update the image value
+		d.Spec.Replicas = nil                                     // don't override the current owner
 
 		u := &unstructured.Unstructured{}
 		if err := mgr.GetScheme().Convert(d, u, nil); err != nil {
@@ -782,7 +783,11 @@ func TestEnoTakesOwnershipOfContainers(t *testing.T) {
 	mgr.Start(t)
 
 	// Create with a non-eno field owner
-	require.NoError(t, downstream.Patch(ctx, dep, client.Apply, client.FieldOwner("external-client")))
+	require.NoError(t, downstream.Patch(ctx, dep.DeepCopy(), client.Apply, client.ForceOwnership, client.FieldOwner("external-client")))
+
+	// Update the replicas with another field owner
+	dep.Spec.Replicas = ptr.To(int32(4))
+	require.NoError(t, downstream.Patch(ctx, dep.DeepCopy(), client.Apply, client.ForceOwnership, client.FieldOwner("replicas-owner")))
 
 	// Update image with Eno
 	_, comp := writeGenericComposition(t, upstream)
@@ -800,11 +805,22 @@ func TestEnoTakesOwnershipOfContainers(t *testing.T) {
 		if err != nil {
 			return false
 		}
+		var replicasOwnerSeen bool
 		for _, mf := range dep.ManagedFields {
+			// Prove that Eno takes ownership of existing fields it manages
 			if mf.Manager == "external-client" {
 				t.Logf("still has non-eno field manager: %s", mf.FieldsV1.String())
 				return false
 			}
+
+			// Prove that Eno doesn't take ownership of existing fields it doesn't manage
+			if mf.Manager == "replicas-owner" {
+				replicasOwnerSeen = true
+			}
+		}
+		if !replicasOwnerSeen {
+			t.Logf("haven't seen replicas owner")
+			return false
 		}
 		return true
 	})
