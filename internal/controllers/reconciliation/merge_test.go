@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
@@ -723,4 +724,88 @@ func TestExternallyManagedPropertyAndOverrideRemoved(t *testing.T) {
 	err = mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
 	require.NoError(t, err)
 	assert.Len(t, cm.Data, 0)
+}
+
+func TestEnoTakesOwnershipOfContainers(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	requireSSA(t, mgr)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	dep := &appsv1.Deployment{}
+	dep.APIVersion = "apps/v1"
+	dep.Kind = "Deployment"
+	dep.Name = "test-deployment"
+	dep.Namespace = "default"
+	dep.Spec.Replicas = ptr.To(int32(3))
+	dep.Spec.Selector = &metav1.LabelSelector{
+		MatchLabels: map[string]string{"app": "test"},
+	}
+	dep.Spec.Template = corev1.PodTemplateSpec{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{"app": "test"},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name:  "nginx",
+					Image: "nginx:1.19", // Different initial image
+					Env: []corev1.EnvVar{
+						{
+							Name:  "TEST",
+							Value: "val",
+						},
+					},
+				},
+			},
+		},
+	}
+	originalDep := dep.DeepCopy()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		d := originalDep.DeepCopy()
+		d.Spec.Template.Spec.Containers[0].Image = "nginx:latest"
+
+		u := &unstructured.Unstructured{}
+		if err := mgr.GetScheme().Convert(d, u, nil); err != nil {
+			return nil, err
+		}
+
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{u}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+
+	// Create with a non-eno field owner
+	require.NoError(t, downstream.Patch(ctx, dep, client.Apply, client.FieldOwner("external-client")))
+
+	// Update image with Eno
+	_, comp := writeGenericComposition(t, upstream)
+	waitForReadiness(t, mgr, comp, nil, nil)
+
+	// Verify the image was updated to what Eno specified
+	err := downstream.Get(ctx, client.ObjectKeyFromObject(dep), dep)
+	require.NoError(t, err)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	assert.Equal(t, "nginx:latest", dep.Spec.Template.Spec.Containers[0].Image)
+
+	// Eno should own every property at this point
+	testutil.Eventually(t, func() bool {
+		err := downstream.Get(ctx, client.ObjectKeyFromObject(dep), dep)
+		if err != nil {
+			return false
+		}
+		for _, mf := range dep.ManagedFields {
+			if mf.Manager == "external-client" {
+				t.Logf("still has non-eno field manager: %s", mf.FieldsV1.String())
+				return false
+			}
+		}
+		return true
+	})
 }
