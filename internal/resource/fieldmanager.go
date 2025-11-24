@@ -11,31 +11,48 @@ import (
 
 // MergeEnoManagedFields corrects managed fields drift to ensure Eno can remove fields
 // that are no longer set by the synthesizer, even when another client corrupts the
-// managed fields metadata. Returns corrected managed fields, affected field paths,
+// managed fields metadata. It also takes ownership of fields from migrating field managers
+// when specified. Returns corrected managed fields, affected field paths,
 // and whether correction was needed.
-func MergeEnoManagedFields(prev, current, next []metav1.ManagedFieldsEntry) (copy []metav1.ManagedFieldsEntry, fields string, modified bool) {
+func MergeEnoManagedFields(prev, current, next []metav1.ManagedFieldsEntry, migratingFieldManagers []string) (copy []metav1.ManagedFieldsEntry, fields string, modified bool) {
 	prevEnoSet := parseEnoFields(prev)
 	nextEnoSet := parseEnoFields(next)
+	currentEnoSet := parseEnoFields(current)
 
+	// Only perform migration if Eno has previously managed this resource
 	if prevEnoSet.Empty() {
 		return nil, "", false
 	}
 
-	currentEnoSet := parseEnoFields(current)
+	// Check for fields to take from migrating field managers
+	migratingFields := parseMigratingFields(current, migratingFieldManagers)
 
 	var expectedFields *fieldpath.Set
+
+	// Handle the drift correction logic
 	if !nextEnoSet.Empty() && currentEnoSet.Empty() {
 		expectedFields = prevEnoSet
 	} else {
-		expectedFields = prevEnoSet.Difference(nextEnoSet)
-		if expectedFields.Empty() {
-			return nil, "", false
+		driftFields := prevEnoSet.Difference(nextEnoSet)
+		if !driftFields.Empty() {
+			driftFields = driftFields.Intersection(parseAllFields(current))
+			if !driftFields.Empty() {
+				expectedFields = driftFields
+			}
 		}
+	}
 
-		expectedFields = expectedFields.Intersection(parseAllFields(current))
-		if expectedFields.Empty() {
-			return nil, "", false
+	// Add fields from migrating field managers
+	if !migratingFields.Empty() {
+		if expectedFields == nil {
+			expectedFields = migratingFields
+		} else {
+			expectedFields = expectedFields.Union(migratingFields)
 		}
+	}
+
+	if expectedFields == nil || expectedFields.Empty() {
+		return nil, "", false
 	}
 
 	return adjustManagedFields(prev, expectedFields), expectedFields.String(), true
@@ -94,6 +111,22 @@ func parseAllFields(entries []metav1.ManagedFieldsEntry) *fieldpath.Set {
 			if set := parseFieldsEntry(entry); set != nil {
 				result = result.Union(set)
 			}
+		}
+	}
+	return result
+}
+
+func parseMigratingFields(entries []metav1.ManagedFieldsEntry, migratingFieldManagers []string) *fieldpath.Set {
+	result := &fieldpath.Set{}
+	if len(migratingFieldManagers) == 0 {
+		return result
+	}
+	for _, entry := range entries {
+		if !slices.Contains(migratingFieldManagers, entry.Manager) {
+			continue
+		}
+		if set := parseFieldsEntry(entry); set != nil {
+			result = result.Union(set)
 		}
 	}
 	return result
