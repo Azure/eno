@@ -903,7 +903,10 @@ func TestMigratingFieldManagers(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		cm.ManagedFields = nil
 		cm.Data["bar"] = "legacy-value"
+		cm.APIVersion = "v1"
+		cm.Kind = "ConfigMap"
 		return mgr.DownstreamClient.Patch(ctx, cm, client.Apply, client.ForceOwnership, client.FieldOwner("legacy-tool"))
 	})
 	require.NoError(t, err)
@@ -1011,7 +1014,10 @@ func TestMigratingFieldManagersFieldRemoval(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		cm.ManagedFields = nil
 		cm.Data["bar"] = "legacy-bar-value"
+		cm.APIVersion = "v1"
+		cm.Kind = "ConfigMap"
 		return mgr.DownstreamClient.Patch(ctx, cm, client.Apply, client.ForceOwnership, client.FieldOwner("legacy-tool"))
 	})
 	require.NoError(t, err)
