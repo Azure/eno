@@ -19,30 +19,28 @@ func MergeEnoManagedFields(prev, current, next []metav1.ManagedFieldsEntry, migr
 	nextEnoSet := parseEnoFields(next)
 	currentEnoSet := parseEnoFields(current)
 
-	// Only perform migration if Eno has previously managed this resource
-	if prevEnoSet.Empty() {
-		return nil, "", false
-	}
-
 	// Check for fields to take from migrating field managers
 	migratingFields := parseMigratingFields(current, migratingFieldManagers)
 
 	var expectedFields *fieldpath.Set
 
-	// Handle the drift correction logic
-	if !nextEnoSet.Empty() && currentEnoSet.Empty() {
-		expectedFields = prevEnoSet
-	} else {
-		driftFields := prevEnoSet.Difference(nextEnoSet)
-		if !driftFields.Empty() {
-			driftFields = driftFields.Intersection(parseAllFields(current))
+	// Handle the drift correction logic (only when Eno has previously managed this resource)
+	if !prevEnoSet.Empty() {
+		if !nextEnoSet.Empty() && currentEnoSet.Empty() {
+			expectedFields = prevEnoSet
+		} else {
+			driftFields := prevEnoSet.Difference(nextEnoSet)
 			if !driftFields.Empty() {
-				expectedFields = driftFields
+				driftFields = driftFields.Intersection(parseAllFields(current))
+				if !driftFields.Empty() {
+					expectedFields = driftFields
+				}
 			}
 		}
 	}
 
 	// Add fields from migrating field managers
+	// This works even on first reconciliation when prevEnoSet is empty
 	if !migratingFields.Empty() {
 		if expectedFields == nil {
 			expectedFields = migratingFields
@@ -55,11 +53,18 @@ func MergeEnoManagedFields(prev, current, next []metav1.ManagedFieldsEntry, migr
 		return nil, "", false
 	}
 
+	// When there's no previous Eno fields but we have migrating fields,
+	// we need to build the managed fields from current state
+	if prevEnoSet.Empty() && !migratingFields.Empty() {
+		return adjustManagedFields(current, expectedFields), expectedFields.String(), true
+	}
+
 	return adjustManagedFields(prev, expectedFields), expectedFields.String(), true
 }
 
 func adjustManagedFields(entries []metav1.ManagedFieldsEntry, expected *fieldpath.Set) []metav1.ManagedFieldsEntry {
 	copy := make([]metav1.ManagedFieldsEntry, 0, len(entries))
+	hasEno := false
 
 	for _, entry := range entries {
 		if entry.FieldsV1 == nil {
@@ -75,6 +80,7 @@ func adjustManagedFields(entries []metav1.ManagedFieldsEntry, expected *fieldpat
 
 		var updated *fieldpath.Set
 		if entry.Manager == "eno" && entry.Operation == metav1.ManagedFieldsOperationApply {
+			hasEno = true
 			updated = set.Union(expected)
 		} else {
 			updated = set.Difference(expected)
@@ -88,6 +94,19 @@ func adjustManagedFields(entries []metav1.ManagedFieldsEntry, expected *fieldpat
 
 		entry.FieldsV1 = &metav1.FieldsV1{Raw: js}
 		copy = append(copy, entry)
+	}
+
+	// If there's no "eno" entry yet, add one with the expected fields
+	if !hasEno && !expected.Empty() {
+		js, err := expected.ToJSON()
+		if err == nil {
+			copy = append(copy, metav1.ManagedFieldsEntry{
+				Manager:    "eno",
+				Operation:  metav1.ManagedFieldsOperationApply,
+				FieldsType: "FieldsV1",
+				FieldsV1:   &metav1.FieldsV1{Raw: js},
+			})
+		}
 	}
 
 	return copy

@@ -284,18 +284,27 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 
 		// When using server side apply, make sure we haven't lost any managedFields metadata.
 		// Eno should always remove fields that are no longer set by the synthesizer, even if another client messed with managedFields.
-		if current != nil && prev != nil && !res.Replace {
-			snap, err := prev.SnapshotWithOverrides(ctx, comp, current, res.Resource)
-			if err != nil {
-				return false, fmt.Errorf("snapshotting previous version: %w", err)
-			}
-			dryRunPrev := snap.Unstructured()
-			err = c.upstreamClient.Patch(ctx, dryRunPrev, client.Apply, client.ForceOwnership, client.FieldOwner("eno"), client.DryRunAll)
-			if err != nil {
-				return false, fmt.Errorf("getting managed fields values for previous version: %w", err)
+		// Also handle taking ownership from migrating field managers.
+		if current != nil && !res.Replace {
+			var dryRunPrev *unstructured.Unstructured
+			if prev != nil {
+				snap, err := prev.SnapshotWithOverrides(ctx, comp, current, res.Resource)
+				if err != nil {
+					return false, fmt.Errorf("snapshotting previous version: %w", err)
+				}
+				dryRunPrev = snap.Unstructured()
+				err = c.upstreamClient.Patch(ctx, dryRunPrev, client.Apply, client.ForceOwnership, client.FieldOwner("eno"), client.DryRunAll)
+				if err != nil {
+					return false, fmt.Errorf("getting managed fields values for previous version: %w", err)
+				}
 			}
 
-			merged, fields, modified := resource.MergeEnoManagedFields(dryRunPrev.GetManagedFields(), current.GetManagedFields(), dryRun.GetManagedFields(), c.migratingFieldManagers)
+			var prevManagedFields []metav1.ManagedFieldsEntry
+			if dryRunPrev != nil {
+				prevManagedFields = dryRunPrev.GetManagedFields()
+			}
+
+			merged, fields, modified := resource.MergeEnoManagedFields(prevManagedFields, current.GetManagedFields(), dryRun.GetManagedFields(), c.migratingFieldManagers)
 			if modified {
 				current.SetManagedFields(merged)
 

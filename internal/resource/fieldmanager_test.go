@@ -391,14 +391,18 @@ func TestMigratingFieldManagers(t *testing.T) {
 			},
 		},
 		{
-			Name:           "empty previous eno fields with migrating manager",
-			ExpectModified: false,
+			Name:           "empty previous eno fields with migrating manager - first reconciliation",
+			ExpectModified: true,
 			Previous:       []metav1.ManagedFieldsEntry{},
 			Current: []metav1.ManagedFieldsEntry{
 				makeFields(t, "legacy-tool", []string{"bar"}),
 			},
 			Next:              []metav1.ManagedFieldsEntry{},
 			MigratingManagers: []string{"legacy-tool"},
+			Expected: []metav1.ManagedFieldsEntry{
+				makeFields(t, "legacy-tool", []string{}), // Fields removed from legacy-tool
+				makeFields(t, "eno", []string{"bar"}),    // Fields added to eno
+			},
 		},
 	}
 
