@@ -28,13 +28,9 @@ func MergeEnoManagedFields(prev, current, next []metav1.ManagedFieldsEntry, migr
 	if !prevEnoSet.Empty() {
 		if !nextEnoSet.Empty() && currentEnoSet.Empty() {
 			expectedFields = prevEnoSet
-		} else {
-			driftFields := prevEnoSet.Difference(nextEnoSet)
-			if !driftFields.Empty() {
-				driftFields = driftFields.Intersection(parseAllFields(current))
-				if !driftFields.Empty() {
-					expectedFields = driftFields
-				}
+		} else if driftFields := prevEnoSet.Difference(nextEnoSet); !driftFields.Empty() {
+			if driftFields = driftFields.Intersection(parseAllFields(current)); !driftFields.Empty() {
+				expectedFields = driftFields
 			}
 		}
 	}
@@ -55,11 +51,12 @@ func MergeEnoManagedFields(prev, current, next []metav1.ManagedFieldsEntry, migr
 
 	// When there's no previous Eno fields but we have migrating fields,
 	// we need to build the managed fields from current state
+	base := prev
 	if prevEnoSet.Empty() && !migratingFields.Empty() {
-		return adjustManagedFields(current, expectedFields), expectedFields.String(), true
+		base = current
 	}
 
-	return adjustManagedFields(prev, expectedFields), expectedFields.String(), true
+	return adjustManagedFields(base, expectedFields), expectedFields.String(), true
 }
 
 func adjustManagedFields(entries []metav1.ManagedFieldsEntry, expected *fieldpath.Set) []metav1.ManagedFieldsEntry {
