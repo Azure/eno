@@ -855,6 +855,9 @@ func TestMigratingFieldManagers(t *testing.T) {
 
 	requireSSA(t, mgr)
 	registerControllers(t, mgr)
+
+	// Use a variable to change Eno's desired state during resynthesis
+	enoValue := "eno-value"
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 		output := &krmv1.ResourceList{}
 		output.Items = []*unstructured.Unstructured{{
@@ -865,7 +868,7 @@ func TestMigratingFieldManagers(t *testing.T) {
 					"name":      "test-obj",
 					"namespace": "default",
 				},
-				"data": map[string]any{"foo": "eno-value"},
+				"data": map[string]any{"foo": enoValue},
 			},
 		}}
 		return output, nil
@@ -922,7 +925,8 @@ func TestMigratingFieldManagers(t *testing.T) {
 		return false
 	})
 
-	// Force a resynthesis to trigger field manager migration
+	// Change Eno's desired state and force a resynthesis to trigger field manager migration
+	enoValue = "eno-value-updated"
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		comp.Spec.SynthesisEnv = []apiv1.EnvVar{{Name: "TRIGGER", Value: "resynthesis"}}
@@ -950,7 +954,8 @@ func TestMigratingFieldManagers(t *testing.T) {
 		}
 		// Eno should have taken ownership, and legacy-tool should no longer own fields
 		// (or should own an empty set of fields)
-		return hasEno && !hasLegacy
+		// Also verify the value was updated
+		return hasEno && !hasLegacy && cm.Data["foo"] == "eno-value-updated"
 	})
 }
 
@@ -964,9 +969,10 @@ func TestMigratingFieldManagersFieldRemoval(t *testing.T) {
 
 	// Start with synthesizer that includes a field
 	includeField := true
+	fooValue := "eno-value"
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 		output := &krmv1.ResourceList{}
-		data := map[string]any{"foo": "eno-value"}
+		data := map[string]any{"foo": fooValue}
 		if includeField {
 			data["bar"] = "eno-bar-value"
 		}
@@ -1028,8 +1034,9 @@ func TestMigratingFieldManagersFieldRemoval(t *testing.T) {
 		return cm.Data["bar"] == "legacy-bar-value"
 	})
 
-	// Now remove the field from Eno's desired state
+	// Now remove the field from Eno's desired state and change foo to trigger reconciliation
 	includeField = false
+	fooValue = "eno-value-updated"
 
 	// Force resynthesis
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
@@ -1050,10 +1057,10 @@ func TestMigratingFieldManagersFieldRemoval(t *testing.T) {
 	testutil.Eventually(t, func() bool {
 		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
 		_, exists := cm.Data["bar"]
-		return !exists // Field should be removed
+		return !exists && cm.Data["foo"] == "eno-value-updated" // Field should be removed and foo should be updated
 	})
 
-	// Verify foo is still present
+	// Verify foo is still present with the updated value
 	require.NoError(t, mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm))
-	assert.Equal(t, "eno-value", cm.Data["foo"])
+	assert.Equal(t, "eno-value-updated", cm.Data["foo"])
 }
