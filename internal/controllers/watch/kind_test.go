@@ -265,3 +265,151 @@ func TestBuildRequests(t *testing.T) {
 		})
 	}
 }
+
+func TestRemoveInputRevision(t *testing.T) {
+	tests := []struct {
+		name      string
+		comp      *apiv1.Composition
+		key       string
+		expected  bool
+		finalRevs []apiv1.InputRevisions
+	}{
+		{
+			name: "remove existing revision",
+			comp: &apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Key: "rev1", Revision: ptr.To(1)},
+						{Key: "rev2", Revision: ptr.To(2)},
+					},
+				},
+			},
+			key:      "rev1",
+			expected: true,
+			finalRevs: []apiv1.InputRevisions{
+				{Key: "rev2", Revision: ptr.To(2)},
+			},
+		},
+		{
+			name: "remove last revision",
+			comp: &apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Key: "rev1", Revision: ptr.To(1)},
+					},
+				},
+			},
+			key:       "rev1",
+			expected:  true,
+			finalRevs: []apiv1.InputRevisions{},
+		},
+		{
+			name: "no removal if key not found",
+			comp: &apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Key: "rev1", Revision: ptr.To(1)},
+					},
+				},
+			},
+			key:      "rev2",
+			expected: false,
+			finalRevs: []apiv1.InputRevisions{
+				{Key: "rev1", Revision: ptr.To(1)},
+			},
+		},
+		{
+			name: "remove from middle of list",
+			comp: &apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Key: "rev1", Revision: ptr.To(1)},
+						{Key: "rev2", Revision: ptr.To(2)},
+						{Key: "rev3", Revision: ptr.To(3)},
+					},
+				},
+			},
+			key:      "rev2",
+			expected: true,
+			finalRevs: []apiv1.InputRevisions{
+				{Key: "rev1", Revision: ptr.To(1)},
+				{Key: "rev3", Revision: ptr.To(3)},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := removeInputRevision(tt.comp, tt.key)
+			assert.Equal(t, tt.expected, result)
+			assert.Equal(t, tt.finalRevs, tt.comp.Status.InputRevisions)
+		})
+	}
+}
+
+func TestIsOptionalRef(t *testing.T) {
+	tests := []struct {
+		name     string
+		synth    *apiv1.Synthesizer
+		key      string
+		expected bool
+	}{
+		{
+			name: "optional ref returns true",
+			synth: &apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "required", Optional: false},
+						{Key: "optional", Optional: true},
+					},
+				},
+			},
+			key:      "optional",
+			expected: true,
+		},
+		{
+			name: "required ref returns false",
+			synth: &apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "required", Optional: false},
+						{Key: "optional", Optional: true},
+					},
+				},
+			},
+			key:      "required",
+			expected: false,
+		},
+		{
+			name: "non-existent key returns false",
+			synth: &apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "required", Optional: false},
+					},
+				},
+			},
+			key:      "nonexistent",
+			expected: false,
+		},
+		{
+			name: "ref without optional field defaults to false",
+			synth: &apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "default"},
+					},
+				},
+			},
+			key:      "default",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isOptionalRef(tt.synth, tt.key)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
