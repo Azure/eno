@@ -543,7 +543,19 @@ func TestOptionalInputMissing(t *testing.T) {
 	// Status should be Ready, not MissingInputs, because the input is optional
 	testutil.Eventually(t, func() bool {
 		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		return err == nil && comp.Status.Simplified != nil && comp.Status.Simplified.Status == "Ready"
+		if err != nil {
+			t.Logf("failed to get composition: %v", err)
+			return false
+		}
+		if comp.Status.Simplified == nil {
+			t.Logf("composition status is nil")
+			return false
+		}
+		if comp.Status.Simplified.Status != "Ready" {
+			t.Logf("composition status is %s, error: %s", comp.Status.Simplified.Status, comp.Status.Simplified.Error)
+			return false
+		}
+		return true
 	})
 
 	// The synthesized output should exist
@@ -552,7 +564,11 @@ func TestOptionalInputMissing(t *testing.T) {
 	output.Namespace = "default"
 	testutil.Eventually(t, func() bool {
 		err := upstream.Get(ctx, client.ObjectKeyFromObject(output), output)
-		return err == nil
+		if err != nil {
+			t.Logf("failed to get output ConfigMap: %v", err)
+			return false
+		}
+		return true
 	})
 }
 
