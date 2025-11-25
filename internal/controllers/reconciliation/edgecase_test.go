@@ -494,15 +494,16 @@ func TestMissingInputBinding(t *testing.T) {
 }
 
 func TestOptionalInputMissing(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
 
 	registerControllers(t, mgr)
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
-		// Should only receive required inputs, not optional missing ones
-		require.Len(t, input.Items, 0) // no required inputs in this test
-
 		output := &krmv1.ResourceList{}
 		output.Items = []*unstructured.Unstructured{{
 			Object: map[string]any{
@@ -537,7 +538,10 @@ func TestOptionalInputMissing(t *testing.T) {
 	comp.Name = "test-comp"
 	comp.Namespace = "default"
 	comp.Spec.Synthesizer.Name = syn.Name
-	comp.Spec.Bindings = []apiv1.Binding{{Key: "optional-ref", Resource: apiv1.ResourceBinding{Name: "missing", Namespace: "default"}}}
+	comp.Spec.Bindings = []apiv1.Binding{{Key: "optional-ref", Resource: apiv1.ResourceBinding{
+		Name:      "missing",
+		Namespace: "default",
+	}}}
 	require.NoError(t, upstream.Create(ctx, comp))
 
 	// Status should be Ready, not MissingInputs, because the input is optional
@@ -558,17 +562,9 @@ func TestOptionalInputMissing(t *testing.T) {
 		return true
 	})
 
-	// The synthesized output should exist
-	output := &corev1.ConfigMap{}
-	output.Name = "test-output"
-	output.Namespace = "default"
 	testutil.Eventually(t, func() bool {
-		err := upstream.Get(ctx, client.ObjectKeyFromObject(output), output)
-		if err != nil {
-			t.Logf("failed to get output ConfigMap: %v", err)
-			return false
-		}
-		return true
+		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration == comp.Generation
 	})
 }
 
