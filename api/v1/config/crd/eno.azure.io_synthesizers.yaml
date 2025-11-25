@@ -1084,6 +1084,13 @@ spec:
                     key:
                       description: Key corresponds to bindings to this ref.
                       type: string
+                    optional:
+                      default: false
+                      description: |-
+                        Optional indicates that this input is not required for synthesis to proceed.
+                        When true, synthesis will not be blocked if the input is missing.
+                        When false (default), synthesis will fail with "MissingInputs" if the input is not available.
+                      type: boolean
                     resource:
                       description: A reference to a resource kind/group.
                       properties:

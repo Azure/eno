@@ -122,6 +122,11 @@ func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, s
 
 		err := e.Reader.Get(ctx, client.ObjectKeyFromObject(obj), obj)
 		if err != nil {
+			// If the ref is optional and the resource is not found, skip it
+			if r.Optional && errors.IsNotFound(err) {
+				logger.V(1).Info("skipping optional input that was not found", "key", key)
+				continue
+			}
 			return nil, nil, fmt.Errorf("getting resource for ref %q: %w", key, err)
 		}
 		anno := obj.GetAnnotations()
