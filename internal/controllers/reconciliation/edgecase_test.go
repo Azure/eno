@@ -522,7 +522,15 @@ func TestOptionalInputMissing(t *testing.T) {
 	syn := &apiv1.Synthesizer{}
 	syn.Name = "test-syn"
 	syn.Spec.Image = "create"
-	syn.Spec.Refs = []apiv1.Ref{{Key: "optional-ref", Optional: true}}
+	syn.Spec.Refs = []apiv1.Ref{{
+		Key:      "optional-ref",
+		Optional: true,
+		Resource: apiv1.ResourceRef{
+			Group:   "",
+			Version: "v1",
+			Kind:    "ConfigMap",
+		},
+	}}
 	require.NoError(t, upstream.Create(ctx, syn))
 
 	comp := &apiv1.Composition{}
