@@ -204,6 +204,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 }
 
 func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composition, prev *resource.Resource, res *resource.Snapshot, current *unstructured.Unstructured) (bool, error) {
+	// res is snap
 	if res.Disable {
 		return false, nil
 	}
@@ -270,6 +271,25 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 		}
 		logger.V(0).Info("patched resource", "resourceVersion", updated.GetResourceVersion())
 		return true, nil
+	}
+
+	// Migrate ownership for resoruces that support it
+	if current != nil && !c.disableSSA && shouldMigrateOwnership(res.GVK) {
+		scope := getMigrationScope(res.GVK)
+		if scope != "" {
+			migrated, err := c.MigrateOwnership(ctx, current, scope)
+			if err != nil {
+				logger.Error(err, "failed to migrate ownership")
+				return false, fmt.Errorf("ownership migration failed: %w", err)
+			}
+			if migrated {
+				current, err = c.getCurrent(ctx, res.Resource)
+				if err != nil {
+					return false, fmt.Errorf("re-fetching after migration: %w", err)
+				}
+				logger.Info("migrated ownerhsip, re-fetched current status", "current", current)
+			}
+		}
 	}
 
 	// Dry-run the update to see if it's needed
@@ -470,6 +490,93 @@ func summarizeError(err error) string {
 	default:
 		return ""
 	}
+}
+
+// MigrateOwnership ensures eno owns all fields under the specified scope by performing
+// a Server side apply with force. Returns true if migration was performed, false if already owned
+func (c *Controller) MigrateOwnership(ctx context.Context, resource *unstructured.Unstructured, scope string) (bool, error) {
+	logger := logr.FromContextOrDiscard(ctx).WithValues(
+		"resource", resource.GetName(),
+		"namespace", resource.GetNamespace(),
+		"kind", resource.GetKind(),
+		"scope", scope,
+	)
+
+	// Check current ownership
+	ownershipStatus, err := CheckOwnership(resource, scope, enoFieldManager)
+	if err != nil {
+		return false, fmt.Errorf("checking ownership failed: %w", err)
+	}
+
+	// If scope does not exist, there is nothing to migrate from
+	if !ownershipStatus.ScopeExists {
+		logger.Info("scope does not exist, skipping migration")
+		return false, nil
+	}
+
+	// If the field are already fully owned by eno, then no migration needed
+	if ownershipStatus.FullyOwnedByEno {
+		logger.Info("resource already fully owned by eno, skipping migration")
+		return false, nil
+	}
+
+	// Warn about Update managers - SSA with ForceOwnership cannot forcefully take ownership from Update operations
+	// These need manual intervention (e.g., deleting the resource and letting eno recreate it)
+	if len(ownershipStatus.OtherUpdateManagers) > 0 {
+		logger.Info("WARNING: scope has managers using Update operation - SSA ForceOwnership cannot migrate from Update operations",
+			"updateManagers", ownershipStatus.OtherUpdateManagers,
+			"applyManagers", ownershipStatus.OtherManagers,
+			"scope", scope)
+		// Continue anyway to migrate from Apply managers if any exist
+		if len(ownershipStatus.OtherManagers) == 0 {
+			logger.Info("no Apply managers to migrate from, skipping")
+			return false, nil
+		}
+	}
+
+	logger.Info("Migrating ownership to eno", "otherManagers", ownershipStatus.OtherManagers, "otherUpdateManagers", ownershipStatus.OtherUpdateManagers, "scope", scope)
+
+	// For scope-specific ownership migration, we need to build a minimal object that:
+	// 1. Contains the complete path structure to the scope
+	// 2. Contains only the scope's content (not sibling fields)
+	// 3. Uses the current values from the cluster (no modifications)
+	// This ensures SSA with ForceOwnership only claims the specific scope without affecting other fields
+
+	scopePath := strings.Split(scope, ".")
+	scopeContent, found, err := unstructured.NestedFieldCopy(resource.Object, scopePath...)
+	if err != nil {
+		return false, fmt.Errorf("extracting scope content: %w", err)
+	}
+	if !found {
+		// This should not happen since we have already checked ownership
+		return false, fmt.Errorf("scope not found despite passing previous CheckOwnership check")
+	}
+
+	// Build minimal object with only the scope path and its content
+	// This is critical: we're building a sparse object that only contains the field we want to claim
+	migrationObj := &unstructured.Unstructured{}
+	migrationObj.SetGroupVersionKind(resource.GroupVersionKind())
+	migrationObj.SetName(resource.GetName())
+	migrationObj.SetNamespace(resource.GetNamespace())
+
+	// Set only the scope content - SSA will only claim ownership of this specific field path
+	if err := unstructured.SetNestedField(migrationObj.Object, scopeContent, scopePath...); err != nil {
+		return false, fmt.Errorf("failed setting scope content: %w", err)
+	}
+
+	// Use ForceOwnership to claim the field from other managers
+	// This will update managedFields for only the specified scope, not the entire resource
+	patchOpts := []client.PatchOption{
+		client.ForceOwnership,
+		client.FieldOwner(enoFieldManager),
+	}
+
+	if err := c.upstreamClient.Patch(ctx, migrationObj, client.Apply, patchOpts...); err != nil {
+		return false, fmt.Errorf("failed to patch object %w", err)
+	}
+
+	logger.Info("successfully migrated ownership to eno")
+	return true, nil
 }
 
 // isErrMissingNS returns true when given the client-go error returned by mutating requests that do not include a namespace.
