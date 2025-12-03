@@ -520,17 +520,26 @@ func (c *Controller) MigrateOwnership(ctx context.Context, resource *unstructure
 		return false, nil
 	}
 
-	// Warn about Update managers - SSA with ForceOwnership cannot forcefully take ownership from Update operations
-	// These need manual intervention (e.g., deleting the resource and letting eno recreate it)
+	// Handle Update managers - SSA with ForceOwnership cannot forcefully take ownership from Update operations
+	// We need to manually remove the scope from their managedFields before SSA can take over
 	if len(ownershipStatus.OtherUpdateManagers) > 0 {
-		logger.Info("WARNING: scope has managers using Update operation - SSA ForceOwnership cannot migrate from Update operations",
+		logger.Info("Detected managers using Update operation - will manually remove scope from their managedFields",
 			"updateManagers", ownershipStatus.OtherUpdateManagers,
 			"applyManagers", ownershipStatus.OtherManagers,
 			"scope", scope)
-		// Continue anyway to migrate from Apply managers if any exist
-		if len(ownershipStatus.OtherManagers) == 0 {
-			logger.Info("no Apply managers to migrate from, skipping")
-			return false, nil
+
+		// Remove the scope from Update managers' managedFields
+		modified, err := removeScopeFromManagedFields(resource, scope, ownershipStatus.OtherUpdateManagers)
+		if err != nil {
+			return false, fmt.Errorf("removing scope from Update managers: %w", err)
+		}
+
+		if modified {
+			// Update the resource to persist the managedFields changes
+			if err := c.upstreamClient.Update(ctx, resource, client.FieldOwner("eno")); err != nil {
+				return false, fmt.Errorf("updating managedFields to remove Update managers: %w", err)
+			}
+			logger.Info("successfully removed scope from Update managers' managedFields")
 		}
 	}
 

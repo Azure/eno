@@ -141,3 +141,103 @@ func CheckOwnership(resource *unstructured.Unstructured, scope string, enoManage
 	status.FullyOwnedByEno = enoOwnsField && len(status.OtherManagers) == 0 && len(status.OtherUpdateManagers) == 0
 	return status, nil
 }
+
+// removeScopeFromManagedFields removes all fields under the specified scope from the given managers' managedFields entries.
+// This is necessary for Update managers since SSA with ForceOwnership cannot take ownership from Update operations.
+// Returns true if managedFields were modified, false otherwise.
+func removeScopeFromManagedFields(resource *unstructured.Unstructured, scope string, managers []string) (bool, error) {
+	if len(managers) == 0 {
+		return false, nil
+	}
+
+	scopePath := strings.Split(scope, ".")
+	managedFields := resource.GetManagedFields()
+	modified := false
+	newManagedFields := make([]metav1.ManagedFieldsEntry, 0, len(managedFields))
+
+	for _, entry := range managedFields {
+		// Check if this is one of the managers we need to modify
+		shouldModify := false
+		for _, mgr := range managers {
+			if entry.Manager == mgr {
+				shouldModify = true
+				break
+			}
+		}
+
+		if !shouldModify {
+			newManagedFields = append(newManagedFields, entry)
+			continue
+		}
+
+		// Parse the fieldsV1
+		if entry.FieldsV1 == nil {
+			newManagedFields = append(newManagedFields, entry)
+			continue
+		}
+
+		var fieldsMap map[string]interface{}
+		if err := json.Unmarshal(entry.FieldsV1.Raw, &fieldsMap); err != nil {
+			return false, fmt.Errorf("parsing fieldsV1 for manager %s: %w", entry.Manager, err)
+		}
+
+		// Remove the scope from the fields
+		if removeScopeFromFieldsMap(fieldsMap, scopePath) {
+			modified = true
+
+			// If the fieldsMap is now empty, skip this entry entirely
+			if len(fieldsMap) == 0 || (len(fieldsMap) == 1 && fieldsMap["f:metadata"] != nil) {
+				// Only metadata left, remove the entire entry
+				continue
+			}
+
+			// Marshal back to JSON
+			updatedFields, err := json.Marshal(fieldsMap)
+			if err != nil {
+				return false, fmt.Errorf("marshaling updated fieldsV1 for manager %s: %w", entry.Manager, err)
+			}
+			entry.FieldsV1.Raw = updatedFields
+		}
+
+		newManagedFields = append(newManagedFields, entry)
+	}
+
+	if modified {
+		resource.SetManagedFields(newManagedFields)
+	}
+
+	return modified, nil
+}
+
+// removeScopeFromFieldsMap recursively removes the scope path from a fieldsV1 map.
+// Returns true if the map was modified.
+func removeScopeFromFieldsMap(fieldsMap map[string]interface{}, scopePath []string) bool {
+	if len(scopePath) == 0 {
+		return false
+	}
+
+	// Navigate to the parent of the scope
+	current := fieldsMap
+	for i := 0; i < len(scopePath)-1; i++ {
+		fieldKey := "f:" + scopePath[i]
+		next, ok := current[fieldKey]
+		if !ok {
+			return false // Scope doesn't exist in this manager's fields
+		}
+
+		nextMap, ok := next.(map[string]interface{})
+		if !ok {
+			return false
+		}
+		current = nextMap
+	}
+
+	// Remove the final scope field
+	lastFieldKey := "f:" + scopePath[len(scopePath)-1]
+	if _, exists := current[lastFieldKey]; exists {
+		delete(current, lastFieldKey)
+		return true
+	}
+
+	return false
+}
