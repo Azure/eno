@@ -271,6 +271,30 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 
 	// Dry-run the update to see if it's needed
 	if !c.disableSSA {
+		// Before the dry-run, normalize conflicting field managers to "eno" to prevent SSA validation errors
+		// caused by multiple managers owning overlapping fields. When managers are renamed to "eno", the
+		// subsequent SSA Apply will treat eno as the sole owner and automatically merge the managedFields
+		// entries into a single consolidated entry for eno.
+		if current != nil {
+			wasModified, updatedManagers, err := resource.NormalizeConflictingManagers(current)
+			if err != nil {
+				return false, fmt.Errorf("normalize conflicting manager failed: %w", err)
+			}
+			if wasModified {
+				logger.Info("Normalized Conflicting Manager for eno", "updatedManager", updatedManagers, "managedFieldsBefore", current.GetManagedFields())
+				err = c.upstreamClient.Update(ctx, current)
+				if err != nil {
+					return false, fmt.Errorf("normalizing managedFields failed: %w", err)
+				}
+				// refetch the current before apply dry-run
+				current, err = c.getCurrent(ctx, res.Resource)
+				if err != nil {
+					return false, fmt.Errorf("re-fetching after normalizing manager failed: %w", err)
+				}
+
+				logger.Info("Successfully normalized field manager to eno", "managedFieldsAfterRefetch", current.GetManagedFields())
+			}
+		}
 		dryRun, err := c.update(ctx, comp, prev, res, current, true)
 		if err != nil {
 			return false, fmt.Errorf("dry-run applying update: %w", err)

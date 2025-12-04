@@ -2,11 +2,19 @@ package resource
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"slices"
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
+)
+
+const (
+	enoManager     = "eno"
+	specAnnotation = "f:spec"
 )
 
 // MergeEnoManagedFields corrects managed fields drift to ensure Eno can remove fields
@@ -125,4 +133,182 @@ func compareEnoManagedFields(a, b []metav1.ManagedFieldsEntry) bool {
 		return false
 	}
 	return equality.Semantic.DeepEqual(a[ai].FieldsV1, b[ab].FieldsV1)
+}
+
+func NormalizeConflictingManagers(current *unstructured.Unstructured) (modified bool, updatedManagers []string, err error) {
+	managedFields := current.GetManagedFields()
+	if len(managedFields) == 0 {
+		return false, nil, nil
+	}
+
+	// Check if normalization is needed
+	hasNonEnoSpecOwner, enoEntryCount, err := analyzeManagerConflicts(managedFields)
+	if err != nil {
+		return false, nil, err
+	}
+
+	// Skip normalization if there are no conflicts and at most one eno entry
+	if !hasNonEnoSpecOwner && enoEntryCount <= 1 {
+		return false, nil, nil
+	}
+
+	// Merge all eno entries first to get the combined fieldset
+	mergedEnoSet, mergedEnoTime := mergeEnoEntries(managedFields)
+
+	// Build new managedFields list, renaming non-eno spec owners and excluding eno entries
+	newManagedFields := make([]metav1.ManagedFieldsEntry, 0, len(managedFields))
+	modified = false
+
+	for i := range managedFields {
+		entry := &managedFields[i]
+
+		// Skip eno Apply entries - they will be merged into one entry later
+		if entry.Manager == enoManager && entry.Operation == metav1.ManagedFieldsOperationApply {
+			modified = true
+			continue
+		}
+
+		// Keep entries without fieldsV1 as-is
+		if entry.FieldsV1 == nil {
+			newManagedFields = append(newManagedFields, *entry)
+			continue
+		}
+
+		// Rename non-eno managers that own f:spec
+		renamed, err := renameSpecOwners(entry)
+		if err != nil {
+			return false, nil, err
+		}
+		if renamed {
+			updatedManagers = append(updatedManagers, managedFields[i].Manager)
+			modified = true
+		}
+
+		newManagedFields = append(newManagedFields, *entry)
+	}
+
+	// Add the merged eno entry if we found any eno entries
+	if mergedEnoSet != nil && !mergedEnoSet.Empty() {
+		mergedEntry, err := createMergedEnoEntry(mergedEnoSet, mergedEnoTime, managedFields)
+		if err != nil {
+			return false, nil, err
+		}
+		newManagedFields = append(newManagedFields, mergedEntry)
+	}
+
+	if modified {
+		current.SetManagedFields(newManagedFields)
+	}
+
+	return modified, updatedManagers, nil
+}
+
+// analyzeManagerConflicts checks if there are non-eno managers owning f:spec
+// and counts the number of eno entries
+func analyzeManagerConflicts(managedFields []metav1.ManagedFieldsEntry) (hasNonEnoSpecOwner bool, enoEntryCount int, err error) {
+	for i := range managedFields {
+		entry := &managedFields[i]
+
+		if entry.Manager == enoManager {
+			enoEntryCount++
+			continue
+		}
+
+		if entry.FieldsV1 == nil {
+			continue
+		}
+
+		fieldsV1 := make(map[string]interface{})
+		if err = json.Unmarshal(entry.FieldsV1.Raw, &fieldsV1); err != nil {
+			return false, 0, fmt.Errorf("failed to unmarshal fieldsv1: %w", err)
+		}
+
+		if _, hasSpec := fieldsV1[specAnnotation]; hasSpec {
+			hasNonEnoSpecOwner = true
+			break
+		}
+	}
+
+	return hasNonEnoSpecOwner, enoEntryCount, nil
+}
+
+// mergeEnoEntries merges all eno Apply entries into a single fieldpath.Set
+// and tracks the most recent timestamp
+func mergeEnoEntries(managedFields []metav1.ManagedFieldsEntry) (*fieldpath.Set, *metav1.Time) {
+	var mergedSet *fieldpath.Set
+	var latestTime *metav1.Time
+
+	for i := range managedFields {
+		entry := &managedFields[i]
+
+		if entry.Manager == enoManager && entry.Operation == metav1.ManagedFieldsOperationApply {
+			if mergedSet == nil {
+				mergedSet = &fieldpath.Set{}
+			}
+			if set := parseFieldsEntry(*entry); set != nil {
+				mergedSet = mergedSet.Union(set)
+			}
+			if latestTime == nil || (entry.Time != nil && entry.Time.After(latestTime.Time)) {
+				latestTime = entry.Time
+			}
+		}
+	}
+
+	return mergedSet, latestTime
+}
+
+// renameSpecOwners renames non-eno managers that own f:spec to "eno" and changes their operation to Apply
+func renameSpecOwners(entry *metav1.ManagedFieldsEntry) (renamed bool, err error) {
+	if entry.Manager == enoManager || entry.FieldsV1 == nil {
+		return false, nil
+	}
+
+	fieldsV1 := make(map[string]interface{})
+	if err = json.Unmarshal(entry.FieldsV1.Raw, &fieldsV1); err != nil {
+		return false, fmt.Errorf("failed to unmarshal fieldsv1: %w", err)
+	}
+
+	if ownsSpec(fieldsV1) {
+		entry.Manager = enoManager
+		entry.Operation = metav1.ManagedFieldsOperationApply
+		return true, nil
+	}
+
+	return false, nil
+}
+
+// createMergedEnoEntry creates a single managedFields entry from the merged eno fieldpath.Set
+func createMergedEnoEntry(mergedSet *fieldpath.Set, timestamp *metav1.Time, managedFields []metav1.ManagedFieldsEntry) (metav1.ManagedFieldsEntry, error) {
+	js, err := mergedSet.ToJSON()
+	if err != nil {
+		return metav1.ManagedFieldsEntry{}, fmt.Errorf("failed to serialize merged eno fields: %w", err)
+	}
+
+	// Find an existing eno entry to use as a template for apiVersion and fieldsType
+	var apiVersion string
+	var fieldsType string
+	for i := range managedFields {
+		if managedFields[i].Manager == enoManager {
+			apiVersion = managedFields[i].APIVersion
+			fieldsType = managedFields[i].FieldsType
+			break
+		}
+	}
+	if fieldsType == "" {
+		fieldsType = "FieldsV1"
+	}
+
+	return metav1.ManagedFieldsEntry{
+		Manager:    enoManager,
+		Operation:  metav1.ManagedFieldsOperationApply,
+		APIVersion: apiVersion,
+		Time:       timestamp,
+		FieldsType: fieldsType,
+		FieldsV1:   &metav1.FieldsV1{Raw: js},
+	}, nil
+}
+func ownsSpec(fieldsV1 map[string]interface{}) bool {
+	// fieldsV1 structure: {"f:spec": {...}, "f:metadata": {...}}
+	_, hasSpec := fieldsV1[specAnnotation]
+	return hasSpec
 }
