@@ -179,8 +179,15 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 	meta := &metav1.PartialObjectMetadata{}
 	meta.SetGroupVersionKind(k.gvk)
 	err := k.client.Get(ctx, req.NamespacedName, meta)
-	if err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+	isDeleted := errors.IsNotFound(err)
+	if err != nil && !isDeleted {
+		return ctrl.Result{}, err
+	}
+
+	// If deleted, we still need to process it to remove from compositions
+	if isDeleted {
+		meta.SetName(req.Name)
+		meta.SetNamespace(req.Namespace)
 	}
 
 	list := &apiv1.SynthesizerList{}
@@ -205,7 +212,7 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 			}
-			modified, err := k.updateCompositions(ctx, logger, &synth, meta, list)
+			modified, err := k.updateCompositions(ctx, logger, &synth, meta, list, isDeleted)
 			if modified || err != nil {
 				return ctrl.Result{}, err
 			}
@@ -218,7 +225,7 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 		}
-		modified, err := k.updateCompositions(ctx, logger, &synth, meta, list)
+		modified, err := k.updateCompositions(ctx, logger, &synth, meta, list, isDeleted)
 		if modified || err != nil {
 			return ctrl.Result{}, err
 		}
@@ -227,15 +234,27 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 	return ctrl.Result{}, nil
 }
 
-func (k *KindWatchController) updateCompositions(ctx context.Context, logger logr.Logger, synth *apiv1.Synthesizer, meta *metav1.PartialObjectMetadata, list *apiv1.CompositionList) (bool, error) {
+func (k *KindWatchController) updateCompositions(ctx context.Context, logger logr.Logger, synth *apiv1.Synthesizer, meta *metav1.PartialObjectMetadata, list *apiv1.CompositionList, isDeleted bool) (bool, error) {
 	for _, comp := range list.Items {
 		key := findRefKey(&comp, synth, meta)
 		if key == "" {
 			continue
 		}
 
-		revs := apiv1.NewInputRevisions(meta, key)
-		if !setInputRevisions(&comp, revs) {
+		var modified bool
+		if isDeleted {
+			// Only remove InputRevisions for optional refs
+			// Required refs should trigger MissingInputs status instead
+			if isOptionalRef(synth, key) {
+				modified = removeInputRevision(&comp, key)
+			}
+			// For required refs, do nothing - the composition controller will handle MissingInputs
+		} else {
+			revs := apiv1.NewInputRevisions(meta, key)
+			modified = setInputRevisions(&comp, revs)
+		}
+
+		if !modified {
 			continue
 		}
 
@@ -274,6 +293,25 @@ func findRefKey(comp *apiv1.Composition, synth *apiv1.Synthesizer, meta *metav1.
 	}
 
 	return ""
+}
+
+func isOptionalRef(synth *apiv1.Synthesizer, key string) bool {
+	for _, ref := range synth.Spec.Refs {
+		if ref.Key == key {
+			return ref.Optional
+		}
+	}
+	return false
+}
+
+func removeInputRevision(comp *apiv1.Composition, key string) bool {
+	for i, ir := range comp.Status.InputRevisions {
+		if ir.Key == key {
+			comp.Status.InputRevisions = append(comp.Status.InputRevisions[:i], comp.Status.InputRevisions[i+1:]...)
+			return true
+		}
+	}
+	return false
 }
 
 func setInputRevisions(comp *apiv1.Composition, revs *apiv1.InputRevisions) bool {
