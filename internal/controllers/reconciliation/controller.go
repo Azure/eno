@@ -37,6 +37,7 @@ type Options struct {
 
 	DisableServerSideApply bool
 	FailOpen               bool
+	MigratingFieldManagers []string
 
 	Timeout               time.Duration
 	ReadinessPollInterval time.Duration
@@ -44,16 +45,17 @@ type Options struct {
 }
 
 type Controller struct {
-	client                client.Client
-	writeBuffer           *flowcontrol.ResourceSliceWriteBuffer
-	resourceClient        *resource.Cache
-	resourceFilter        cel.Program
-	timeout               time.Duration
-	readinessPollInterval time.Duration
-	upstreamClient        client.Client
-	minReconcileInterval  time.Duration
-	disableSSA            bool
-	failOpen              bool
+	client                 client.Client
+	writeBuffer            *flowcontrol.ResourceSliceWriteBuffer
+	resourceClient         *resource.Cache
+	resourceFilter         cel.Program
+	timeout                time.Duration
+	readinessPollInterval  time.Duration
+	upstreamClient         client.Client
+	minReconcileInterval   time.Duration
+	disableSSA             bool
+	failOpen               bool
+	migratingFieldManagers []string
 }
 
 func New(mgr ctrl.Manager, opts Options) error {
@@ -70,16 +72,17 @@ func New(mgr ctrl.Manager, opts Options) error {
 	}
 
 	c := &Controller{
-		client:                opts.Manager.GetClient(),
-		writeBuffer:           opts.WriteBuffer,
-		resourceClient:        cache,
-		resourceFilter:        opts.ResourceFilter,
-		timeout:               opts.Timeout,
-		readinessPollInterval: opts.ReadinessPollInterval,
-		upstreamClient:        upstreamClient,
-		minReconcileInterval:  opts.MinReconcileInterval,
-		disableSSA:            opts.DisableServerSideApply,
-		failOpen:              opts.FailOpen,
+		client:                 opts.Manager.GetClient(),
+		writeBuffer:            opts.WriteBuffer,
+		resourceClient:         cache,
+		resourceFilter:         opts.ResourceFilter,
+		timeout:                opts.Timeout,
+		readinessPollInterval:  opts.ReadinessPollInterval,
+		upstreamClient:         upstreamClient,
+		minReconcileInterval:   opts.MinReconcileInterval,
+		disableSSA:             opts.DisableServerSideApply,
+		failOpen:               opts.FailOpen,
+		migratingFieldManagers: opts.MigratingFieldManagers,
 	}
 
 	return builder.TypedControllerManagedBy[resource.Request](mgr).
@@ -281,18 +284,27 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 
 		// When using server side apply, make sure we haven't lost any managedFields metadata.
 		// Eno should always remove fields that are no longer set by the synthesizer, even if another client messed with managedFields.
-		if current != nil && prev != nil && !res.Replace {
-			snap, err := prev.SnapshotWithOverrides(ctx, comp, current, res.Resource)
-			if err != nil {
-				return false, fmt.Errorf("snapshotting previous version: %w", err)
-			}
-			dryRunPrev := snap.Unstructured()
-			err = c.upstreamClient.Patch(ctx, dryRunPrev, client.Apply, client.ForceOwnership, client.FieldOwner("eno"), client.DryRunAll)
-			if err != nil {
-				return false, fmt.Errorf("getting managed fields values for previous version: %w", err)
+		// Also handle taking ownership from migrating field managers.
+		if current != nil && !res.Replace {
+			var dryRunPrev *unstructured.Unstructured
+			if prev != nil {
+				snap, err := prev.SnapshotWithOverrides(ctx, comp, current, res.Resource)
+				if err != nil {
+					return false, fmt.Errorf("snapshotting previous version: %w", err)
+				}
+				dryRunPrev = snap.Unstructured()
+				err = c.upstreamClient.Patch(ctx, dryRunPrev, client.Apply, client.ForceOwnership, client.FieldOwner("eno"), client.DryRunAll)
+				if err != nil {
+					return false, fmt.Errorf("getting managed fields values for previous version: %w", err)
+				}
 			}
 
-			merged, fields, modified := resource.MergeEnoManagedFields(dryRunPrev.GetManagedFields(), current.GetManagedFields(), dryRun.GetManagedFields())
+			var prevManagedFields []metav1.ManagedFieldsEntry
+			if dryRunPrev != nil {
+				prevManagedFields = dryRunPrev.GetManagedFields()
+			}
+
+			merged, fields, modified := resource.MergeEnoManagedFields(prevManagedFields, current.GetManagedFields(), dryRun.GetManagedFields(), c.migratingFieldManagers)
 			if modified {
 				current.SetManagedFields(merged)
 

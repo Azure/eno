@@ -847,3 +847,220 @@ func TestOverrideTransferResource(t *testing.T) {
 		return syn1.Name == cm.Annotations["synthName"]
 	})
 }
+
+func TestMigratingFieldManagers(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	requireSSA(t, mgr)
+	registerControllers(t, mgr)
+
+	// Use a variable to change Eno's desired state during resynthesis
+	enoValue := "eno-value"
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+				"data": map[string]any{"foo": enoValue},
+			},
+		}}
+		return output, nil
+	})
+
+	// Setup with migrating field managers
+	setupTestSubjectForOptions(t, mgr, Options{
+		Manager:                mgr.Manager,
+		Timeout:                time.Minute,
+		ReadinessPollInterval:  time.Hour,
+		DisableServerSideApply: mgr.NoSsaSupport,
+		MigratingFieldManagers: []string{"legacy-tool"},
+	})
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	// Wait for initial reconciliation
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	// Resource should be created with Eno as the field manager
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	testutil.Eventually(t, func() bool {
+		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return err == nil && cm.Data["foo"] == "eno-value"
+	})
+
+	// Simulate a legacy tool taking ownership of a field by updating managed fields
+	// This simulates the scenario where a field was previously managed by another tool
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		if err != nil {
+			return err
+		}
+		cm.ManagedFields = nil
+		cm.Data["bar"] = "legacy-value"
+		cm.APIVersion = "v1"
+		cm.Kind = "ConfigMap"
+		return mgr.DownstreamClient.Patch(ctx, cm, client.Apply, client.ForceOwnership, client.FieldOwner("legacy-tool"))
+	})
+	require.NoError(t, err)
+
+	// Verify the field is owned by legacy-tool
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		for _, entry := range cm.GetManagedFields() {
+			if entry.Manager == "legacy-tool" {
+				return true
+			}
+		}
+		return false
+	})
+
+	// Change Eno's desired state and force a resynthesis to trigger field manager migration
+	enoValue = "eno-value-updated"
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Spec.SynthesisEnv = []apiv1.EnvVar{{Name: "TRIGGER", Value: "resynthesis"}}
+		return upstream.Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	// Wait for reconciliation
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	// Verify that Eno has taken ownership from legacy-tool
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		hasEno := false
+		hasLegacy := false
+		for _, entry := range cm.GetManagedFields() {
+			if entry.Manager == "eno" {
+				hasEno = true
+			}
+			if entry.Manager == "legacy-tool" {
+				hasLegacy = true
+			}
+		}
+		// Eno should have taken ownership, and legacy-tool should no longer own fields
+		// (or should own an empty set of fields)
+		// Also verify the value was updated
+		return hasEno && !hasLegacy && cm.Data["foo"] == "eno-value-updated"
+	})
+}
+
+func TestMigratingFieldManagersFieldRemoval(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	requireSSA(t, mgr)
+	registerControllers(t, mgr)
+
+	// Start with synthesizer that includes a field
+	includeField := true
+	fooValue := "eno-value"
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		data := map[string]any{"foo": fooValue}
+		if includeField {
+			data["bar"] = "eno-bar-value"
+		}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+				},
+				"data": data,
+			},
+		}}
+		return output, nil
+	})
+
+	// Setup with migrating field managers
+	setupTestSubjectForOptions(t, mgr, Options{
+		Manager:                mgr.Manager,
+		Timeout:                time.Minute,
+		ReadinessPollInterval:  time.Hour,
+		DisableServerSideApply: mgr.NoSsaSupport,
+		MigratingFieldManagers: []string{"legacy-tool"},
+	})
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	// Wait for initial reconciliation
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	testutil.Eventually(t, func() bool {
+		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return err == nil && cm.Data["bar"] == "eno-bar-value"
+	})
+
+	// Simulate legacy tool taking ownership of the "bar" field
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		if err != nil {
+			return err
+		}
+		cm.ManagedFields = nil
+		cm.Data["bar"] = "legacy-bar-value"
+		cm.APIVersion = "v1"
+		cm.Kind = "ConfigMap"
+		return mgr.DownstreamClient.Patch(ctx, cm, client.Apply, client.ForceOwnership, client.FieldOwner("legacy-tool"))
+	})
+	require.NoError(t, err)
+
+	// Verify legacy-tool owns the field
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["bar"] == "legacy-bar-value"
+	})
+
+	// Now remove the field from Eno's desired state and change foo to trigger reconciliation
+	includeField = false
+	fooValue = "eno-value-updated"
+
+	// Force resynthesis
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		comp.Spec.SynthesisEnv = []apiv1.EnvVar{{Name: "REMOVE_FIELD", Value: "true"}}
+		return upstream.Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	// Wait for reconciliation
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	// The critical test: since Eno took ownership from legacy-tool,
+	// it should be able to remove the field even though it was originally owned by legacy-tool.
+	// This is the whole point of the migration feature - to allow safe field removal during migrations.
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		_, exists := cm.Data["bar"]
+		return !exists && cm.Data["foo"] == "eno-value-updated" // Field should be removed and foo should be updated
+	})
+
+	// Verify foo is still present with the updated value
+	require.NoError(t, mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm))
+	assert.Equal(t, "eno-value-updated", cm.Data["foo"])
+}

@@ -252,7 +252,7 @@ func TestManagedFields(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.Name, func(t *testing.T) {
-			merged, _, modified := MergeEnoManagedFields(tc.Previous, tc.Current, tc.Next)
+			merged, _, modified := MergeEnoManagedFields(tc.Previous, tc.Current, tc.Next, nil)
 			assert.Equal(t, tc.ExpectModified, modified)
 			assert.Equal(t, parseFieldEntries(tc.Expected), parseFieldEntries(merged))
 
@@ -295,4 +295,129 @@ func parseFieldEntries(entries []metav1.ManagedFieldsEntry) []*fieldpath.Set {
 		sets[i] = set
 	}
 	return sets
+}
+
+func TestMigratingFieldManagers(t *testing.T) {
+	tests := []struct {
+		Name                    string
+		ExpectModified          bool
+		Previous, Current, Next []metav1.ManagedFieldsEntry
+		MigratingManagers       []string
+		Expected                []metav1.ManagedFieldsEntry
+	}{
+		{
+			Name:           "take ownership from single migrating manager",
+			ExpectModified: true,
+			Previous: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo"}),
+			},
+			Current: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo"}),
+				makeFields(t, "legacy-tool", []string{"bar"}),
+			},
+			Next: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo"}),
+			},
+			MigratingManagers: []string{"legacy-tool"},
+			Expected: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo", "bar"}),
+			},
+		},
+		{
+			Name:           "take ownership from multiple migrating managers",
+			ExpectModified: true,
+			Previous: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo"}),
+			},
+			Current: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo"}),
+				makeFields(t, "legacy-tool-1", []string{"bar"}),
+				makeFields(t, "legacy-tool-2", []string{"baz"}),
+			},
+			Next: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo"}),
+			},
+			MigratingManagers: []string{"legacy-tool-1", "legacy-tool-2"},
+			Expected: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo", "bar", "baz"}),
+			},
+		},
+		{
+			Name:           "no migrating managers configured",
+			ExpectModified: false,
+			Previous: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo"}),
+			},
+			Current: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo"}),
+				makeFields(t, "other-tool", []string{"bar"}),
+			},
+			Next: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo"}),
+			},
+			MigratingManagers: nil,
+		},
+		{
+			Name:           "migrating manager not present in current",
+			ExpectModified: false,
+			Previous: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo"}),
+			},
+			Current: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo"}),
+			},
+			Next: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo"}),
+			},
+			MigratingManagers: []string{"legacy-tool"},
+		},
+		{
+			Name:           "take ownership from migrating manager and handle drift",
+			ExpectModified: true,
+			Previous: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo", "removed"}),
+			},
+			Current: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo"}),
+				makeFields(t, "drift-tool", []string{"removed"}),
+				makeFields(t, "legacy-tool", []string{"bar"}),
+			},
+			Next: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo"}),
+			},
+			MigratingManagers: []string{"legacy-tool"},
+			Expected: []metav1.ManagedFieldsEntry{
+				makeFields(t, "eno", []string{"foo", "removed", "bar"}),
+			},
+		},
+		{
+			Name:           "empty previous eno fields with migrating manager - first reconciliation",
+			ExpectModified: true,
+			Previous:       []metav1.ManagedFieldsEntry{},
+			Current: []metav1.ManagedFieldsEntry{
+				makeFields(t, "legacy-tool", []string{"bar"}),
+			},
+			Next:              []metav1.ManagedFieldsEntry{},
+			MigratingManagers: []string{"legacy-tool"},
+			Expected: []metav1.ManagedFieldsEntry{
+				makeFields(t, "legacy-tool", []string{}), // Fields removed from legacy-tool
+				makeFields(t, "eno", []string{"bar"}),    // Fields added to eno
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.Name, func(t *testing.T) {
+			merged, _, modified := MergeEnoManagedFields(tc.Previous, tc.Current, tc.Next, tc.MigratingManagers)
+			assert.Equal(t, tc.ExpectModified, modified)
+			if tc.Expected != nil {
+				assert.Equal(t, parseFieldEntries(tc.Expected), parseFieldEntries(merged))
+			}
+
+			// Prove that the current slice wasn't mutated
+			if tc.ExpectModified {
+				assert.NotEqual(t, tc.Current, merged)
+			}
+		})
+	}
 }
