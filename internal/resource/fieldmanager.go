@@ -2,7 +2,6 @@ package resource
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"slices"
 
@@ -138,25 +137,31 @@ func compareEnoManagedFields(a, b []metav1.ManagedFieldsEntry) bool {
 // legacyManagers is the list of well-known field managers from before eno adoption
 // that should be normalized during migration. Only these managers will be renamed to "eno".
 var legacyManagers = map[string]bool{
-	"kubectl":                 true,
-	"Go-http-client":          true,
-	"kube-controller-manager": true,
+	"kubectl":         true,
+	"Go-http-client":  true,
+	"helm-controller": true,
+	// To-Do: enable etcd opeartor migration if in the future
+	// "etcd-operator":   false,
 }
 
-func NormalizeConflictingManagers(current *unstructured.Unstructured) (modified bool, updatedManagers []string, err error) {
+func NormalizeConflictingManagers(current *unstructured.Unstructured, migratingManagers []string) (modified bool, updatedManagers []string, err error) {
 	managedFields := current.GetManagedFields()
 	if len(managedFields) == 0 {
 		return false, nil, nil
 	}
 
+	// Build the unique list of managers to migrate by combining hardcoded legacy managers
+	// with user-provided migratingManagers (avoiding duplicates)
+	uniqueMigratingManagers := buildUniqueManagersList(migratingManagers)
+
 	// Check if normalization is needed
-	hasLegacySpecOwner, enoEntryCount, err := analyzeManagerConflicts(managedFields)
+	hasLegacyManager, enoEntryCount, err := analyzeManagerConflicts(managedFields, uniqueMigratingManagers)
 	if err != nil {
 		return false, nil, err
 	}
 
-	// Skip normalization if there are no conflicts and at most one eno entry
-	if !hasLegacySpecOwner && enoEntryCount <= 1 {
+	// Skip normalization if there are no legacy managers and at most one eno entry
+	if !hasLegacyManager && enoEntryCount <= 1 {
 		return false, nil, nil
 	}
 
@@ -182,10 +187,10 @@ func NormalizeConflictingManagers(current *unstructured.Unstructured) (modified 
 			continue
 		}
 
-		// Rename legacy managers that own f:spec
+		// Rename legacy managers to take ownership of their fields
 		// Save original manager name before renaming
 		originalManager := entry.Manager
-		renamed, err := renameLegacySpecOwner(entry)
+		renamed, err := renameLegacyManager(entry, uniqueMigratingManagers)
 		if err != nil {
 			return false, nil, err
 		}
@@ -213,9 +218,29 @@ func NormalizeConflictingManagers(current *unstructured.Unstructured) (modified 
 	return modified, updatedManagers, nil
 }
 
-// analyzeManagerConflicts checks if there are non-eno managers owning f:spec
+// buildUniqueManagersList combines hardcoded legacyManagers with user-provided migratingManagers,
+// avoiding duplicates. Returns a map of all managers that should be migrated to eno.
+func buildUniqueManagersList(migratingManagers []string) map[string]bool {
+	unique := make(map[string]bool)
+
+	// Start with hardcoded legacy managers
+	for manager := range legacyManagers {
+		unique[manager] = true
+	}
+
+	// Add user-provided managers (duplicates are automatically handled by map)
+	for _, manager := range migratingManagers {
+		if manager != "" {
+			unique[manager] = true
+		}
+	}
+
+	return unique
+}
+
+// analyzeManagerConflicts checks if there are legacy managers present
 // and counts the number of eno entries
-func analyzeManagerConflicts(managedFields []metav1.ManagedFieldsEntry) (hasNonEnoSpecOwner bool, enoEntryCount int, err error) {
+func analyzeManagerConflicts(managedFields []metav1.ManagedFieldsEntry, uniqueMigratingManagers map[string]bool) (hasLegacyManager bool, enoEntryCount int, err error) {
 	for i := range managedFields {
 		entry := &managedFields[i]
 
@@ -224,22 +249,13 @@ func analyzeManagerConflicts(managedFields []metav1.ManagedFieldsEntry) (hasNonE
 			continue
 		}
 
-		if entry.FieldsV1 == nil {
-			continue
-		}
-
-		fieldsV1 := make(map[string]interface{})
-		if err = json.Unmarshal(entry.FieldsV1.Raw, &fieldsV1); err != nil {
-			return false, 0, fmt.Errorf("failed to unmarshal fieldsv1: %w", err)
-		}
-
-		if _, hasSpec := fieldsV1[specAnnotation]; hasSpec {
-			hasNonEnoSpecOwner = true
-			break
+		// Check if this is a legacy manager we need to normalize
+		if uniqueMigratingManagers[entry.Manager] {
+			hasLegacyManager = true
 		}
 	}
 
-	return hasNonEnoSpecOwner, enoEntryCount, nil
+	return hasLegacyManager, enoEntryCount, nil
 }
 
 // mergeEnoEntries merges all eno Apply entries into a single fieldpath.Set
@@ -267,29 +283,21 @@ func mergeEnoEntries(managedFields []metav1.ManagedFieldsEntry) (*fieldpath.Set,
 	return mergedSet, latestTime
 }
 
-// renameLegacySpecOwner renames legacy managers that own f:spec to "eno" and changes their operation to Apply
-func renameLegacySpecOwner(entry *metav1.ManagedFieldsEntry) (renamed bool, err error) {
+// renameLegacyManager renames legacy managers to "eno" and changes their operation to Apply.
+// Takes ownership of ALL fields from legacy managers to prevent orphaned fields.
+func renameLegacyManager(entry *metav1.ManagedFieldsEntry, uniqueMigratingManagers map[string]bool) (renamed bool, err error) {
 	if entry.Manager == enoManager || entry.FieldsV1 == nil {
 		return false, nil
 	}
 
-	// Only rename legacy managers
-	if !legacyManagers[entry.Manager] {
+	// Only rename legacy managers - take ownership of all their fields
+	if !uniqueMigratingManagers[entry.Manager] {
 		return false, nil
 	}
 
-	fieldsV1 := make(map[string]interface{})
-	if err = json.Unmarshal(entry.FieldsV1.Raw, &fieldsV1); err != nil {
-		return false, fmt.Errorf("failed to unmarshal fieldsv1: %w", err)
-	}
-
-	if ownsSpec(fieldsV1) {
-		entry.Manager = enoManager
-		entry.Operation = metav1.ManagedFieldsOperationApply
-		return true, nil
-	}
-
-	return false, nil
+	entry.Manager = enoManager
+	entry.Operation = metav1.ManagedFieldsOperationApply
+	return true, nil
 }
 
 // createMergedEnoEntry creates a single managedFields entry from the merged eno fieldpath.Set
