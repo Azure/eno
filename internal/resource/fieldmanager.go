@@ -135,6 +135,14 @@ func compareEnoManagedFields(a, b []metav1.ManagedFieldsEntry) bool {
 	return equality.Semantic.DeepEqual(a[ai].FieldsV1, b[ab].FieldsV1)
 }
 
+// legacyManagers is the list of well-known field managers from before eno adoption
+// that should be normalized during migration. Only these managers will be renamed to "eno".
+var legacyManagers = map[string]bool{
+	"kubectl":                 true,
+	"Go-http-client":          true,
+	"kube-controller-manager": true,
+}
+
 func NormalizeConflictingManagers(current *unstructured.Unstructured) (modified bool, updatedManagers []string, err error) {
 	managedFields := current.GetManagedFields()
 	if len(managedFields) == 0 {
@@ -142,13 +150,13 @@ func NormalizeConflictingManagers(current *unstructured.Unstructured) (modified 
 	}
 
 	// Check if normalization is needed
-	hasNonEnoSpecOwner, enoEntryCount, err := analyzeManagerConflicts(managedFields)
+	hasLegacySpecOwner, enoEntryCount, err := analyzeManagerConflicts(managedFields)
 	if err != nil {
 		return false, nil, err
 	}
 
 	// Skip normalization if there are no conflicts and at most one eno entry
-	if !hasNonEnoSpecOwner && enoEntryCount <= 1 {
+	if !hasLegacySpecOwner && enoEntryCount <= 1 {
 		return false, nil, nil
 	}
 
@@ -174,13 +182,15 @@ func NormalizeConflictingManagers(current *unstructured.Unstructured) (modified 
 			continue
 		}
 
-		// Rename non-eno managers that own f:spec
-		renamed, err := renameSpecOwners(entry)
+		// Rename legacy managers that own f:spec
+		// Save original manager name before renaming
+		originalManager := entry.Manager
+		renamed, err := renameLegacySpecOwner(entry)
 		if err != nil {
 			return false, nil, err
 		}
 		if renamed {
-			updatedManagers = append(updatedManagers, managedFields[i].Manager)
+			updatedManagers = append(updatedManagers, originalManager)
 			modified = true
 		}
 
@@ -257,9 +267,14 @@ func mergeEnoEntries(managedFields []metav1.ManagedFieldsEntry) (*fieldpath.Set,
 	return mergedSet, latestTime
 }
 
-// renameSpecOwners renames non-eno managers that own f:spec to "eno" and changes their operation to Apply
-func renameSpecOwners(entry *metav1.ManagedFieldsEntry) (renamed bool, err error) {
+// renameLegacySpecOwner renames legacy managers that own f:spec to "eno" and changes their operation to Apply
+func renameLegacySpecOwner(entry *metav1.ManagedFieldsEntry) (renamed bool, err error) {
 	if entry.Manager == enoManager || entry.FieldsV1 == nil {
+		return false, nil
+	}
+
+	// Only rename legacy managers
+	if !legacyManagers[entry.Manager] {
 		return false, nil
 	}
 
