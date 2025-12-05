@@ -102,10 +102,24 @@ func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, s
 	rl := &krmv1.ResourceList{
 		Kind:       krmv1.ResourceListKind,
 		APIVersion: krmv1.SchemeGroupVersion.String(),
+		FunctionConfig: &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion":   "v1",
+				"kind":         "ConfigMap",
+				"optionalRefs": []string{},
+			},
+		},
 	}
 	revs := []apiv1.InputRevisions{}
 	for _, r := range syn.Spec.Refs {
 		key := r.Key
+
+		// Track all optional refs in FunctionConfig
+		if r.Optional {
+			optRefs, _, _ := unstructured.NestedStringSlice(rl.FunctionConfig.Object, "optionalRefs")
+			optRefs = append(optRefs, key)
+			unstructured.SetNestedStringSlice(rl.FunctionConfig.Object, optRefs, "optionalRefs")
+		}
 
 		// Get the resource
 		start := time.Now()
