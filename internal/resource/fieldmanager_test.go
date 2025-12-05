@@ -323,8 +323,9 @@ func TestNormalizeConflictingManagers(t *testing.T) {
 					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:replicas":{}}}`)},
 				},
 			},
-			expectModified: true,
-			expectManagers: []string{"eno", "kube-controller-manager"},
+			migratingManagers: []string{"Go-http-client"},
+			expectModified:    true,
+			expectManagers:    []string{"eno", "kube-controller-manager"},
 		},
 		{
 			name: "do not normalize manager owning only f:status",
@@ -362,8 +363,9 @@ func TestNormalizeConflictingManagers(t *testing.T) {
 					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}},"f:metadata":{"f:labels":{}}}`)},
 				},
 			},
-			expectModified: true,
-			expectManagers: []string{"eno"},
+			migratingManagers: []string{"Go-http-client"},
+			expectModified:    true,
+			expectManagers:    []string{"eno"},
 		},
 		{
 			name: "skip entry already owned by eno",
@@ -400,8 +402,9 @@ func TestNormalizeConflictingManagers(t *testing.T) {
 					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:ready":{}}}`)},
 				},
 			},
-			expectModified: true,
-			expectManagers: []string{"eno", "eno", "kube-controller-manager"},
+			migratingManagers: []string{"Go-http-client", "kubectl"},
+			expectModified:    true,
+			expectManagers:    []string{"eno", "eno", "kube-controller-manager"},
 		},
 		{
 			name:           "empty managed fields",
@@ -476,8 +479,9 @@ func TestNormalizeConflictingManagers(t *testing.T) {
 					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:template":{}}}`)},
 				},
 			},
-			expectModified: true,
-			expectManagers: []string{"eno", "eno"},
+			migratingManagers: []string{"kubectl"},
+			expectModified:    true,
+			expectManagers:    []string{"eno", "eno"},
 		},
 		{
 			name: "custom migratingManagers with unique manager",
@@ -500,7 +504,7 @@ func TestNormalizeConflictingManagers(t *testing.T) {
 			expectManagers:    []string{"eno", "kube-controller-manager"},
 		},
 		{
-			name: "custom migratingManagers with duplicate of hardcoded manager - should not duplicate",
+			name: "custom migratingManagers with duplicate manager - should not duplicate",
 			managedFields: []metav1.ManagedFieldsEntry{
 				{
 					Manager:    "kubectl",
@@ -515,7 +519,7 @@ func TestNormalizeConflictingManagers(t *testing.T) {
 					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:template":{}}}`)},
 				},
 			},
-			migratingManagers: []string{"kubectl"},
+			migratingManagers: []string{"kubectl", "Go-http-client", "kubectl"},
 			expectModified:    true,
 			expectManagers:    []string{"eno", "eno"},
 		},
@@ -566,7 +570,7 @@ func TestNormalizeConflictingManagers(t *testing.T) {
 			expectManagers:    []string{"eno", "eno"},
 		},
 		{
-			name: "empty migratingManagers - should use only hardcoded managers",
+			name: "empty migratingManagers - should not normalize",
 			managedFields: []metav1.ManagedFieldsEntry{
 				{
 					Manager:    "kubectl",
@@ -582,8 +586,8 @@ func TestNormalizeConflictingManagers(t *testing.T) {
 				},
 			},
 			migratingManagers: []string{},
-			expectModified:    true,
-			expectManagers:    []string{"eno", "unknown-operator"},
+			expectModified:    false,
+			expectManagers:    []string{"kubectl", "unknown-operator"},
 		},
 		{
 			name: "migratingManagers with empty strings - should filter out empty strings",

@@ -63,7 +63,7 @@ func run() error {
 	flag.DurationVar(&namespaceCreationGracePeriod, "ns-creation-grace-period", time.Second, "A namespace is assumed to be missing if it doesn't exist once one of its resources has existed for this long")
 	flag.BoolVar(&namespaceCleanup, "namespace-cleanup", true, "Clean up orphaned resources caused by namespace force-deletions")
 	flag.BoolVar(&recOpts.FailOpen, "fail-open", false, "Report that resources are reconciled once they've been seen, even if reconciliation failed. Overridden by individual resources with 'eno.azure.io/fail-open: true|false'")
-	flag.StringVar(&migratingFieldManagers, "migrating-field-managers", "", "Comma-separated list of Kubernetes SSA field manager names to take ownership from during migrations")
+	flag.StringVar(&migratingFieldManagers, "migrating-field-managers", os.Getenv("MIGRATING_FIELD_MANAGERS"), "Comma-separated list of Kubernetes SSA field manager names to take ownership from during migrations")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 

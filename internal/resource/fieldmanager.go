@@ -12,8 +12,7 @@ import (
 )
 
 const (
-	enoManager     = "eno"
-	specAnnotation = "f:spec"
+	enoManager = "eno"
 )
 
 // MergeEnoManagedFields corrects managed fields drift to ensure Eno can remove fields
@@ -134,24 +133,13 @@ func compareEnoManagedFields(a, b []metav1.ManagedFieldsEntry) bool {
 	return equality.Semantic.DeepEqual(a[ai].FieldsV1, b[ab].FieldsV1)
 }
 
-// legacyManagers is the list of well-known field managers from before eno adoption
-// that should be normalized during migration. Only these managers will be renamed to "eno".
-var legacyManagers = map[string]bool{
-	"kubectl":         true,
-	"Go-http-client":  true,
-	"helm-controller": true,
-	// To-Do: enable etcd opeartor migration if in the future
-	// "etcd-operator":   false,
-}
-
 func NormalizeConflictingManagers(current *unstructured.Unstructured, migratingManagers []string) (modified bool, updatedManagers []string, err error) {
 	managedFields := current.GetManagedFields()
 	if len(managedFields) == 0 {
 		return false, nil, nil
 	}
 
-	// Build the unique list of managers to migrate by combining hardcoded legacy managers
-	// with user-provided migratingManagers (avoiding duplicates)
+	// Build the unique list of managers to migrate from user-provided migratingManagers
 	uniqueMigratingManagers := buildUniqueManagersList(migratingManagers)
 
 	// Check if normalization is needed
@@ -218,15 +206,10 @@ func NormalizeConflictingManagers(current *unstructured.Unstructured, migratingM
 	return modified, updatedManagers, nil
 }
 
-// buildUniqueManagersList combines hardcoded legacyManagers with user-provided migratingManagers,
-// avoiding duplicates. Returns a map of all managers that should be migrated to eno.
+// buildUniqueManagersList creates a deduplicated map from the migratingManagers slice.
+// Returns a map of all managers that should be migrated to eno.
 func buildUniqueManagersList(migratingManagers []string) map[string]bool {
 	unique := make(map[string]bool)
-
-	// Start with hardcoded legacy managers
-	for manager := range legacyManagers {
-		unique[manager] = true
-	}
 
 	// Add user-provided managers (duplicates are automatically handled by map)
 	for _, manager := range migratingManagers {
@@ -329,9 +312,4 @@ func createMergedEnoEntry(mergedSet *fieldpath.Set, timestamp *metav1.Time, mana
 		FieldsType: fieldsType,
 		FieldsV1:   &metav1.FieldsV1{Raw: js},
 	}, nil
-}
-func ownsSpec(fieldsV1 map[string]interface{}) bool {
-	// fieldsV1 structure: {"f:spec": {...}, "f:metadata": {...}}
-	_, hasSpec := fieldsV1[specAnnotation]
-	return hasSpec
 }
