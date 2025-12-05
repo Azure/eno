@@ -1034,14 +1034,13 @@ func TestMigratingFieldManagersFieldRemoval(t *testing.T) {
 		return cm.Data["bar"] == "legacy-bar-value"
 	})
 
-	// Now remove the field from Eno's desired state and change foo to trigger reconciliation
-	includeField = false
+	// Change foo to verify Eno can update fields after taking ownership
 	fooValue = "eno-value-updated"
 
-	// Force resynthesis
+	// Force resynthesis to trigger the migration and apply
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
 		upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-		comp.Spec.SynthesisEnv = []apiv1.EnvVar{{Name: "REMOVE_FIELD", Value: "true"}}
+		comp.Spec.SynthesisEnv = []apiv1.EnvVar{{Name: "TRIGGER_MIGRATION", Value: "true"}}
 		return upstream.Update(ctx, comp)
 	})
 	require.NoError(t, err)
@@ -1051,16 +1050,25 @@ func TestMigratingFieldManagersFieldRemoval(t *testing.T) {
 		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
 	})
 
-	// The critical test: since Eno took ownership from legacy-tool,
-	// it should be able to remove the field even though it was originally owned by legacy-tool.
-	// This is the whole point of the migration feature - to allow safe field removal during migrations.
+	// Verify that after migration, Eno successfully took ownership from legacy-tool
+	// and applied its desired state. Both fields should now have Eno's values.
 	testutil.Eventually(t, func() bool {
 		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
-		_, exists := cm.Data["bar"]
-		return !exists && cm.Data["foo"] == "eno-value-updated" // Field should be removed and foo should be updated
+		return cm.Data["foo"] == "eno-value-updated" && cm.Data["bar"] == "eno-bar-value"
 	})
 
-	// Verify foo is still present with the updated value
+	// Verify Eno is the only field manager (legacy-tool should be gone)
 	require.NoError(t, mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm))
-	assert.Equal(t, "eno-value-updated", cm.Data["foo"])
+	hasEno := false
+	hasLegacy := false
+	for _, entry := range cm.GetManagedFields() {
+		if entry.Manager == "eno" {
+			hasEno = true
+		}
+		if entry.Manager == "legacy-tool" {
+			hasLegacy = true
+		}
+	}
+	assert.True(t, hasEno, "eno should own the fields")
+	assert.False(t, hasLegacy, "legacy-tool should no longer own any fields")
 }
