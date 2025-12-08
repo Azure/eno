@@ -156,7 +156,7 @@ func NormalizeConflictingManagers(current *unstructured.Unstructured, migratingM
 	// Merge all eno entries first to get the combined fieldset
 	mergedEnoSet, mergedEnoTime := mergeEnoEntries(managedFields)
 
-	// Build new managedFields list, renaming non-eno spec owners and excluding eno entries
+	// Build new managedFields list, merging legacy managers into eno and excluding original eno entries
 	newManagedFields := make([]metav1.ManagedFieldsEntry, 0, len(managedFields))
 	modified = false
 
@@ -175,18 +175,26 @@ func NormalizeConflictingManagers(current *unstructured.Unstructured, migratingM
 			continue
 		}
 
-		// Rename legacy managers to take ownership of their fields
-		// Save original manager name before renaming
+		// Check if this is a legacy manager that should be migrated to eno
 		originalManager := entry.Manager
-		renamed, err := renameLegacyManager(entry, uniqueMigratingManagers)
-		if err != nil {
-			return false, nil, err
-		}
-		if renamed {
+		if uniqueMigratingManagers[entry.Manager] {
+			// Merge legacy manager's fields into the eno fieldset instead of creating a separate entry
+			if mergedEnoSet == nil {
+				mergedEnoSet = &fieldpath.Set{}
+			}
+			if set := parseFieldsEntry(*entry); set != nil {
+				mergedEnoSet = mergedEnoSet.Union(set)
+			}
+			// Update the timestamp to the most recent
+			if mergedEnoTime == nil || (entry.Time != nil && entry.Time.After(mergedEnoTime.Time)) {
+				mergedEnoTime = entry.Time
+			}
 			updatedManagers = append(updatedManagers, originalManager)
 			modified = true
+			continue // Don't add this entry - it's been merged into eno
 		}
 
+		// Keep non-eno, non-legacy managers as-is
 		newManagedFields = append(newManagedFields, *entry)
 	}
 
@@ -264,23 +272,6 @@ func mergeEnoEntries(managedFields []metav1.ManagedFieldsEntry) (*fieldpath.Set,
 	}
 
 	return mergedSet, latestTime
-}
-
-// renameLegacyManager renames legacy managers to "eno" and changes their operation to Apply.
-// Takes ownership of ALL fields from legacy managers to prevent orphaned fields.
-func renameLegacyManager(entry *metav1.ManagedFieldsEntry, uniqueMigratingManagers map[string]bool) (renamed bool, err error) {
-	if entry.Manager == enoManager || entry.FieldsV1 == nil {
-		return false, nil
-	}
-
-	// Only rename legacy managers - take ownership of all their fields
-	if !uniqueMigratingManagers[entry.Manager] {
-		return false, nil
-	}
-
-	entry.Manager = enoManager
-	entry.Operation = metav1.ManagedFieldsOperationApply
-	return true, nil
 }
 
 // createMergedEnoEntry creates a single managedFields entry from the merged eno fieldpath.Set

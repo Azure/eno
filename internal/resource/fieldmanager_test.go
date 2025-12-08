@@ -325,7 +325,7 @@ func TestNormalizeConflictingManagers(t *testing.T) {
 			},
 			migratingManagers: []string{"Go-http-client"},
 			expectModified:    true,
-			expectManagers:    []string{"eno", "kube-controller-manager"},
+			expectManagers:    []string{"kube-controller-manager", "eno"},
 		},
 		{
 			name: "do not normalize manager owning only f:status",
@@ -404,7 +404,7 @@ func TestNormalizeConflictingManagers(t *testing.T) {
 			},
 			migratingManagers: []string{"Go-http-client", "kubectl"},
 			expectModified:    true,
-			expectManagers:    []string{"eno", "eno", "kube-controller-manager"},
+			expectManagers:    []string{"kube-controller-manager", "eno"},
 		},
 		{
 			name:           "empty managed fields",
@@ -481,7 +481,7 @@ func TestNormalizeConflictingManagers(t *testing.T) {
 			},
 			migratingManagers: []string{"kubectl"},
 			expectModified:    true,
-			expectManagers:    []string{"eno", "eno"},
+			expectManagers:    []string{"eno"},
 		},
 		{
 			name: "custom migratingManagers with unique manager",
@@ -501,7 +501,7 @@ func TestNormalizeConflictingManagers(t *testing.T) {
 			},
 			migratingManagers: []string{"custom-operator"},
 			expectModified:    true,
-			expectManagers:    []string{"eno", "kube-controller-manager"},
+			expectManagers:    []string{"kube-controller-manager", "eno"},
 		},
 		{
 			name: "custom migratingManagers with duplicate manager - should not duplicate",
@@ -521,7 +521,7 @@ func TestNormalizeConflictingManagers(t *testing.T) {
 			},
 			migratingManagers: []string{"kubectl", "Go-http-client", "kubectl"},
 			expectModified:    true,
-			expectManagers:    []string{"eno", "eno"},
+			expectManagers:    []string{"eno"},
 		},
 		{
 			name: "custom migratingManagers with multiple new managers",
@@ -547,7 +547,7 @@ func TestNormalizeConflictingManagers(t *testing.T) {
 			},
 			migratingManagers: []string{"operator-a", "operator-b"},
 			expectModified:    true,
-			expectManagers:    []string{"eno", "eno", "kube-controller-manager"},
+			expectManagers:    []string{"kube-controller-manager", "eno"},
 		},
 		{
 			name: "custom migratingManagers with hardcoded and new managers - should merge all unique",
@@ -567,7 +567,7 @@ func TestNormalizeConflictingManagers(t *testing.T) {
 			},
 			migratingManagers: []string{"custom-operator", "kubectl"},
 			expectModified:    true,
-			expectManagers:    []string{"eno", "eno"},
+			expectManagers:    []string{"eno"},
 		},
 		{
 			name: "empty migratingManagers - should not normalize",
