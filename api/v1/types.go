@@ -19,4 +19,5 @@ func init() {
 	SchemeBuilder.Register(&CompositionList{}, &Composition{})
 	SchemeBuilder.Register(&SymphonyList{}, &Symphony{})
 	SchemeBuilder.Register(&ResourceSliceList{}, &ResourceSlice{})
+	SchemeBuilder.Register(&InputMirrorList{}, &InputMirror{})
 }
