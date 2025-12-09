@@ -2,11 +2,15 @@ package resource
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
 )
 
@@ -295,4 +299,574 @@ func parseFieldEntries(entries []metav1.ManagedFieldsEntry) []*fieldpath.Set {
 		sets[i] = set
 	}
 	return sets
+}
+
+func TestNormalizeConflictingManagers(t *testing.T) {
+	tests := []struct {
+		name              string
+		managedFields     []metav1.ManagedFieldsEntry
+		migratingManagers []string
+		expectModified    bool
+		expectManagers    []string // expected manager names after normalization
+	}{
+		{
+			name: "normalize Go-http-client owning f:spec",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "Go-http-client",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}}}`)},
+				},
+				{
+					Manager:    "kube-controller-manager",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:replicas":{}}}`)},
+				},
+			},
+			migratingManagers: []string{"Go-http-client"},
+			expectModified:    true,
+			expectManagers:    []string{"kube-controller-manager", "eno"},
+		},
+		{
+			name: "do not normalize manager owning only f:status",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "kube-controller-manager",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:replicas":{}}}`)},
+				},
+			},
+			expectModified: false,
+			expectManagers: []string{"kube-controller-manager"},
+		},
+		{
+			name: "do not normalize manager owning only f:metadata",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "kube-controller-manager",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:metadata":{"f:ownerReferences":{}}}`)},
+				},
+			},
+			expectModified: false,
+			expectManagers: []string{"kube-controller-manager"},
+		},
+		{
+			name: "normalize manager owning both f:spec and f:metadata",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "Go-http-client",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}},"f:metadata":{"f:labels":{}}}`)},
+				},
+			},
+			migratingManagers: []string{"Go-http-client"},
+			expectModified:    true,
+			expectManagers:    []string{"eno"},
+		},
+		{
+			name: "skip entry already owned by eno",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "eno",
+					Operation:  metav1.ManagedFieldsOperationApply,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}}}`)},
+				},
+			},
+			expectModified: false,
+			expectManagers: []string{"eno"},
+		},
+		{
+			name: "normalize multiple managers owning f:spec",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "Go-http-client",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:template":{}}}`)},
+				},
+				{
+					Manager:    "kubectl",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}}}`)},
+				},
+				{
+					Manager:    "kube-controller-manager",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:ready":{}}}`)},
+				},
+			},
+			migratingManagers: []string{"Go-http-client", "kubectl"},
+			expectModified:    true,
+			expectManagers:    []string{"kube-controller-manager", "eno"},
+		},
+		{
+			name:           "empty managed fields",
+			managedFields:  []metav1.ManagedFieldsEntry{},
+			expectModified: false,
+			expectManagers: []string{},
+		},
+		{
+			name: "nil FieldsV1",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "Go-http-client",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   nil,
+				},
+			},
+			expectModified: false,
+			expectManagers: []string{"Go-http-client"},
+		},
+		{
+			name: "eno already owns f:spec, other manager owns f:status only - should not normalize",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "eno",
+					Operation:  metav1.ManagedFieldsOperationApply,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}}}`)},
+				},
+				{
+					Manager:    "manager",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:conditions":{}}}`)},
+				},
+			},
+			expectModified: false,
+			expectManagers: []string{"eno", "manager"},
+		},
+		{
+			name: "eno already owns f:spec, another eno entry owns different f:spec - should merge into one",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "eno",
+					Operation:  metav1.ManagedFieldsOperationApply,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}}}`)},
+				},
+				{
+					Manager:    "eno",
+					Operation:  metav1.ManagedFieldsOperationApply,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:template":{}}}`)},
+				},
+			},
+			expectModified: true,
+			expectManagers: []string{"eno"},
+		},
+		{
+			name: "eno already owns f:spec, other manager also owns f:spec - should normalize",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "eno",
+					Operation:  metav1.ManagedFieldsOperationApply,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}}}`)},
+				},
+				{
+					Manager:    "kubectl",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:template":{}}}`)},
+				},
+			},
+			migratingManagers: []string{"kubectl"},
+			expectModified:    true,
+			expectManagers:    []string{"eno"},
+		},
+		{
+			name: "custom migratingManagers with unique manager",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "custom-operator",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}}}`)},
+				},
+				{
+					Manager:    "kube-controller-manager",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:ready":{}}}`)},
+				},
+			},
+			migratingManagers: []string{"custom-operator"},
+			expectModified:    true,
+			expectManagers:    []string{"kube-controller-manager", "eno"},
+		},
+		{
+			name: "custom migratingManagers with duplicate manager - should not duplicate",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "kubectl",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}}}`)},
+				},
+				{
+					Manager:    "Go-http-client",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:template":{}}}`)},
+				},
+			},
+			migratingManagers: []string{"kubectl", "Go-http-client", "kubectl"},
+			expectModified:    true,
+			expectManagers:    []string{"eno"},
+		},
+		{
+			name: "custom migratingManagers with multiple new managers",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "operator-a",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}}}`)},
+				},
+				{
+					Manager:    "operator-b",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:template":{}}}`)},
+				},
+				{
+					Manager:    "kube-controller-manager",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:ready":{}}}`)},
+				},
+			},
+			migratingManagers: []string{"operator-a", "operator-b"},
+			expectModified:    true,
+			expectManagers:    []string{"kube-controller-manager", "eno"},
+		},
+		{
+			name: "custom migratingManagers with hardcoded and new managers - should merge all unique",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "kubectl",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}}}`)},
+				},
+				{
+					Manager:    "custom-operator",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:template":{}}}`)},
+				},
+			},
+			migratingManagers: []string{"custom-operator", "kubectl"},
+			expectModified:    true,
+			expectManagers:    []string{"eno"},
+		},
+		{
+			name: "empty migratingManagers - should not normalize",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "kubectl",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}}}`)},
+				},
+				{
+					Manager:    "unknown-operator",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:template":{}}}`)},
+				},
+			},
+			migratingManagers: []string{},
+			expectModified:    false,
+			expectManagers:    []string{"kubectl", "unknown-operator"},
+		},
+		{
+			name: "migratingManagers with empty strings - should filter out empty strings",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "custom-operator",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}}}`)},
+				},
+			},
+			migratingManagers: []string{"", "custom-operator", ""},
+			expectModified:    true,
+			expectManagers:    []string{"eno"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			obj := &unstructured.Unstructured{}
+			obj.SetManagedFields(tc.managedFields)
+
+			modified, err := NormalizeConflictingManagers(context.Background(), obj, tc.migratingManagers)
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectModified, modified)
+
+			actualManagers := make([]string, 0)
+			for _, entry := range obj.GetManagedFields() {
+				actualManagers = append(actualManagers, entry.Manager)
+			}
+			assert.Equal(t, tc.expectManagers, actualManagers)
+
+			// If modified, verify that managers owning f:spec have operation changed to Apply
+			if tc.expectModified {
+				for _, entry := range obj.GetManagedFields() {
+					if entry.Manager == "eno" && entry.FieldsV1 != nil {
+						fieldsV1 := make(map[string]interface{})
+						err := json.Unmarshal(entry.FieldsV1.Raw, &fieldsV1)
+						require.NoError(t, err)
+						if _, hasSpec := fieldsV1["f:spec"]; hasSpec {
+							assert.Equal(t, metav1.ManagedFieldsOperationApply, entry.Operation)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+// parseFieldPath converts a path string to field components with "f:" prefix
+// Examples: ".spec.replicas" -> ["f:spec", "f:replicas"]
+//
+//	"f:spec.f:replicas" -> ["f:spec", "f:replicas"]
+func parseFieldPath(path string) []string {
+	// Remove leading dot if present
+	path = strings.TrimPrefix(path, ".")
+
+	// Split by dots
+	parts := strings.Split(path, ".")
+
+	var components []string
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		// Add "f:" prefix if not already present
+		if !strings.HasPrefix(part, "f:") {
+			part = "f:" + part
+		}
+		components = append(components, part)
+	}
+	return components
+}
+
+// hasNestedField checks if a nested field path exists in the fieldsMap
+// Example: hasNestedField(map, ["f:spec", "f:replicas"]) checks if map["f:spec"]["f:replicas"] exists
+func hasNestedField(fieldsMap map[string]interface{}, components []string) bool {
+	if len(components) == 0 {
+		return false
+	}
+
+	current := fieldsMap
+	for i, component := range components {
+		val, exists := current[component]
+		if !exists {
+			return false
+		}
+
+		// If this is the last component, we're done
+		if i == len(components)-1 {
+			return true
+		}
+
+		// Otherwise, expect a nested map
+		nextMap, ok := val.(map[string]interface{})
+		if !ok {
+			return false
+		}
+		current = nextMap
+	}
+
+	return true
+}
+
+func TestNormalizeConflictingManagers_FieldMerging(t *testing.T) {
+	tests := []struct {
+		name              string
+		managedFields     []metav1.ManagedFieldsEntry
+		migratingManagers []string
+		expectModified    bool
+		// Verify that specific fields are present in the merged eno entry
+		expectEnoFields []string
+	}{
+		{
+			name: "merge two eno entries with different fields",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "eno",
+					Operation:  metav1.ManagedFieldsOperationApply,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}}}`)},
+				},
+				{
+					Manager:    "eno",
+					Operation:  metav1.ManagedFieldsOperationApply,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:template":{"f:metadata":{}}}}`)},
+				},
+			},
+			expectModified:  true,
+			expectEnoFields: []string{".spec", ".spec.replicas", ".spec.template", ".spec.template.metadata"},
+		},
+		{
+			name: "merge legacy manager fields into existing eno entry",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "eno",
+					Operation:  metav1.ManagedFieldsOperationApply,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}}}`)},
+				},
+				{
+					Manager:    "kubectl",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:selector":{}}}`)},
+				},
+			},
+			migratingManagers: []string{"kubectl"},
+			expectModified:    true,
+			expectEnoFields:   []string{".spec", ".spec.replicas", ".spec.selector"},
+		},
+		{
+			name: "merge multiple legacy managers into eno",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "kubectl",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}}}`)},
+				},
+				{
+					Manager:    "Go-http-client",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:template":{}}}`)},
+				},
+				{
+					Manager:    "custom-operator",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:metadata":{"f:labels":{}}}`)},
+				},
+			},
+			migratingManagers: []string{"kubectl", "Go-http-client", "custom-operator"},
+			expectModified:    true,
+			expectEnoFields:   []string{".spec", ".spec.replicas", ".spec.template", ".metadata", ".metadata.labels"},
+		},
+		{
+			name: "merge eno entries and legacy managers together",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "eno",
+					Operation:  metav1.ManagedFieldsOperationApply,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}}}`)},
+				},
+				{
+					Manager:    "eno",
+					Operation:  metav1.ManagedFieldsOperationApply,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:paused":{}}}`)},
+				},
+				{
+					Manager:    "kubectl",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:selector":{}}}`)},
+				},
+				{
+					Manager:    "Go-http-client",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:metadata":{"f:annotations":{}}}`)},
+				},
+			},
+			migratingManagers: []string{"kubectl", "Go-http-client"},
+			expectModified:    true,
+			expectEnoFields:   []string{".spec", ".spec.replicas", ".spec.paused", ".spec.selector", ".metadata", ".metadata.annotations"},
+		},
+		{
+			name: "only merge specified legacy managers, not others",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "kubectl",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}}}`)},
+				},
+				{
+					Manager:    "kube-controller-manager",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:ready":{}}}`)},
+				},
+			},
+			migratingManagers: []string{"kubectl"},
+			expectModified:    true,
+			expectEnoFields:   []string{".spec", ".spec.replicas"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			obj := &unstructured.Unstructured{}
+			obj.SetManagedFields(tc.managedFields)
+
+			modified, err := NormalizeConflictingManagers(context.Background(), obj, tc.migratingManagers)
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectModified, modified)
+
+			// Find the eno entry
+			var enoEntry *metav1.ManagedFieldsEntry
+			for _, entry := range obj.GetManagedFields() {
+				if entry.Manager == "eno" && entry.Operation == metav1.ManagedFieldsOperationApply {
+					enoEntry = &entry
+					break
+				}
+			}
+
+			require.NotNil(t, enoEntry, "expected to find an eno managed fields entry")
+			require.NotNil(t, enoEntry.FieldsV1, "expected eno entry to have FieldsV1")
+
+			// Deserialize the FieldsV1 JSON to verify all expected field components exist
+			var fieldsMap map[string]interface{}
+			err = json.Unmarshal(enoEntry.FieldsV1.Raw, &fieldsMap)
+			require.NoError(t, err)
+
+			// Verify all expected fields are present in the JSON structure
+			for _, expectedPath := range tc.expectEnoFields {
+				// Convert path like ".spec.replicas" to ["f:spec", "f:replicas"]
+				// or "f:spec.f:replicas" to ["f:spec", "f:replicas"]
+				components := parseFieldPath(expectedPath)
+				assert.True(t, hasNestedField(fieldsMap, components),
+					"expected eno entry to contain field path: %s (components: %v)", expectedPath, components)
+			}
+
+			// Verify that migrated managers are no longer present
+			for _, entry := range obj.GetManagedFields() {
+				for _, migratingMgr := range tc.migratingManagers {
+					if migratingMgr != "" && entry.Manager == migratingMgr {
+						t.Errorf("expected legacy manager %s to be removed, but it's still present", migratingMgr)
+					}
+				}
+			}
+		})
+	}
 }
