@@ -2,9 +2,11 @@ package resource
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"slices"
 
+	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -133,10 +135,12 @@ func compareEnoManagedFields(a, b []metav1.ManagedFieldsEntry) bool {
 	return equality.Semantic.DeepEqual(a[ai].FieldsV1, b[ab].FieldsV1)
 }
 
-func NormalizeConflictingManagers(current *unstructured.Unstructured, migratingManagers []string) (modified bool, updatedManagers []string, err error) {
+func NormalizeConflictingManagers(ctx context.Context, current *unstructured.Unstructured, migratingManagers []string) (modified bool, err error) {
 	managedFields := current.GetManagedFields()
+	logger := logr.FromContextOrDiscard(ctx)
+	logger.Info("NormalizingConflictingManager", "Name", current.GetName(), "Namespace", current.GetNamespace())
 	if len(managedFields) == 0 {
-		return false, nil, nil
+		return false, nil
 	}
 
 	// Build the unique list of managers to migrate from user-provided migratingManagers
@@ -145,12 +149,11 @@ func NormalizeConflictingManagers(current *unstructured.Unstructured, migratingM
 	// Check if normalization is needed
 	hasLegacyManager, enoEntryCount, err := analyzeManagerConflicts(managedFields, uniqueMigratingManagers)
 	if err != nil {
-		return false, nil, err
+		return false, err
 	}
-
 	// Skip normalization if there are no legacy managers and at most one eno entry
 	if !hasLegacyManager && enoEntryCount <= 1 {
-		return false, nil, nil
+		return false, nil
 	}
 
 	// Merge all eno entries first to get the combined fieldset
@@ -177,12 +180,15 @@ func NormalizeConflictingManagers(current *unstructured.Unstructured, migratingM
 
 		// keep non-eno, non-legacy managers as is
 		if !uniqueMigratingManagers[entry.Manager] {
+			logger.Info("NormalizeConflictingManagers non-eno and non-legacy manager found, skipping normalizing", "manager", entry.Manager,
+				"resourceName", current.GetName(), "resourceNamespace", current.GetNamespace())
 			newManagedFields = append(newManagedFields, *entry)
 			continue
 		}
 
+		logger.Info("NormalizeConflictingManagers found migrating managers", "manager", entry.Manager,
+			"resoruceName", current.GetName(), "resourceNamespace", current.GetNamespace())
 		// Check if this is a legacy manager that should be migrated to eno
-		originalManager := entry.Manager
 		// Merge legacy manager's fields into the eno fieldset instead of creating a separate entry
 		if mergedEnoSet == nil {
 			mergedEnoSet = &fieldpath.Set{}
@@ -194,7 +200,6 @@ func NormalizeConflictingManagers(current *unstructured.Unstructured, migratingM
 		if mergedEnoTime == nil || (entry.Time != nil && entry.Time.After(mergedEnoTime.Time)) {
 			mergedEnoTime = entry.Time
 		}
-		updatedManagers = append(updatedManagers, originalManager)
 		modified = true
 	}
 
@@ -202,7 +207,7 @@ func NormalizeConflictingManagers(current *unstructured.Unstructured, migratingM
 	if mergedEnoSet != nil && !mergedEnoSet.Empty() {
 		mergedEntry, err := createMergedEnoEntry(mergedEnoSet, mergedEnoTime, managedFields)
 		if err != nil {
-			return false, nil, err
+			return false, err
 		}
 		newManagedFields = append(newManagedFields, mergedEntry)
 	}
@@ -211,7 +216,7 @@ func NormalizeConflictingManagers(current *unstructured.Unstructured, migratingM
 		current.SetManagedFields(newManagedFields)
 	}
 
-	return modified, updatedManagers, nil
+	return modified, nil
 }
 
 // buildUniqueManagersList creates a deduplicated map from the migratingManagers slice.

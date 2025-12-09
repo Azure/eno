@@ -2,6 +2,7 @@ package resource
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -611,7 +612,7 @@ func TestNormalizeConflictingManagers(t *testing.T) {
 			obj := &unstructured.Unstructured{}
 			obj.SetManagedFields(tc.managedFields)
 
-			modified, _, err := NormalizeConflictingManagers(obj, tc.migratingManagers)
+			modified, err := NormalizeConflictingManagers(context.Background(), obj, tc.migratingManagers)
 
 			require.NoError(t, err)
 			assert.Equal(t, tc.expectModified, modified)
@@ -827,7 +828,7 @@ func TestNormalizeConflictingManagers_FieldMerging(t *testing.T) {
 			obj := &unstructured.Unstructured{}
 			obj.SetManagedFields(tc.managedFields)
 
-			modified, _, err := NormalizeConflictingManagers(obj, tc.migratingManagers)
+			modified, err := NormalizeConflictingManagers(context.Background(), obj, tc.migratingManagers)
 
 			require.NoError(t, err)
 			assert.Equal(t, tc.expectModified, modified)

@@ -279,12 +279,12 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 		// subsequent SSA Apply will treat eno as the sole owner and automatically merge the managedFields
 		// entries into a single consolidated entry for eno.
 		if current != nil {
-			wasModified, updatedManagers, err := resource.NormalizeConflictingManagers(current, c.migratingFieldManagers)
+			wasModified, err := resource.NormalizeConflictingManagers(ctx, current, c.migratingFieldManagers)
 			if err != nil {
 				return false, fmt.Errorf("normalize conflicting manager failed: %w", err)
 			}
 			if wasModified {
-				logger.Info("Normalized conflicting managers to eno", "renamedManagers", updatedManagers)
+				logger.Info("Normalized conflicting managers to eno")
 				err = c.upstreamClient.Update(ctx, current, client.FieldOwner("eno"))
 				if err != nil {
 					return false, fmt.Errorf("normalizing managedFields failed: %w", err)
@@ -295,7 +295,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 					return false, fmt.Errorf("re-fetching after normalizing manager failed: %w", err)
 				}
 
-				logger.Info("Successfully normalized field managers to eno", "renamedManagers", updatedManagers)
+				logger.Info("Successfully normalized field managers to eno")
 			}
 		}
 		dryRun, err := c.update(ctx, comp, prev, res, current, true)
