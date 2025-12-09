@@ -285,7 +285,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 			}
 			if wasModified {
 				logger.Info("Normalized conflicting managers to eno", "renamedManagers", updatedManagers)
-				err = c.upstreamClient.Update(ctx, current)
+				err = c.upstreamClient.Update(ctx, current, client.FieldOwner("eno"))
 				if err != nil {
 					return false, fmt.Errorf("normalizing managedFields failed: %w", err)
 				}
