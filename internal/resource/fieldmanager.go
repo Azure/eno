@@ -175,27 +175,27 @@ func NormalizeConflictingManagers(current *unstructured.Unstructured, migratingM
 			continue
 		}
 
-		// Check if this is a legacy manager that should be migrated to eno
-		originalManager := entry.Manager
-		if uniqueMigratingManagers[entry.Manager] {
-			// Merge legacy manager's fields into the eno fieldset instead of creating a separate entry
-			if mergedEnoSet == nil {
-				mergedEnoSet = &fieldpath.Set{}
-			}
-			if set := parseFieldsEntry(*entry); set != nil {
-				mergedEnoSet = mergedEnoSet.Union(set)
-			}
-			// Update the timestamp to the most recent
-			if mergedEnoTime == nil || (entry.Time != nil && entry.Time.After(mergedEnoTime.Time)) {
-				mergedEnoTime = entry.Time
-			}
-			updatedManagers = append(updatedManagers, originalManager)
-			modified = true
-			continue // Don't add this entry - it's been merged into eno
+		// keep non-eno, non-legacy managers as is
+		if !uniqueMigratingManagers[entry.Manager] {
+			newManagedFields = append(newManagedFields, *entry)
+			continue
 		}
 
-		// Keep non-eno, non-legacy managers as-is
-		newManagedFields = append(newManagedFields, *entry)
+		// Check if this is a legacy manager that should be migrated to eno
+		originalManager := entry.Manager
+		// Merge legacy manager's fields into the eno fieldset instead of creating a separate entry
+		if mergedEnoSet == nil {
+			mergedEnoSet = &fieldpath.Set{}
+		}
+		if set := parseFieldsEntry(*entry); set != nil {
+			mergedEnoSet = mergedEnoSet.Union(set)
+		}
+		// Update the timestamp to the most recent
+		if mergedEnoTime == nil || (entry.Time != nil && entry.Time.After(mergedEnoTime.Time)) {
+			mergedEnoTime = entry.Time
+		}
+		updatedManagers = append(updatedManagers, originalManager)
+		modified = true
 	}
 
 	// Add the merged eno entry if we found any eno entries
