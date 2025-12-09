@@ -86,9 +86,10 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			return ctrl.Result{}, err
 		}
 		if !ok {
-			logger.V(1).Info("waiting for cache to reflect previous operation")
+			logger.V(1).Info(fmt.Sprintf("waiting %s for cache to reflect previous operation on composition %s/%s", wait.Truncate(time.Millisecond), c.lastApplied.Composition.Namespace, c.lastApplied.Composition.Name))
 			return ctrl.Result{RequeueAfter: wait}, nil
 		}
+		logger.V(1).Info(fmt.Sprintf("cache consistency confirmed for previous operation on composition %s/%s", c.lastApplied.Composition.Namespace, c.lastApplied.Composition.Name))
 		c.lastApplied = nil
 	}
 
@@ -99,6 +100,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, err
 	}
 	synthsByName, synthEpoch := indexSynthesizers(synths.Items)
+	logger.V(1).Info(fmt.Sprintf("loaded %d synthesizers with epoch %s", len(synths.Items), synthEpoch))
 
 	comps := &apiv1.CompositionList{}
 	err = c.client.List(ctx, comps)
@@ -107,9 +109,11 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, err
 	}
 	nextSlot := c.getNextCooldownSlot(comps)
+	logger.V(1).Info(fmt.Sprintf("loaded %d compositions, next cooldown slot at %s", len(comps.Items), nextSlot.Format("15:04:05")))
 
 	var inFlight int
 	var op *op
+	var missingSynths []string
 	for _, comp := range comps.Items {
 		comp := comp
 		if comp.Synthesizing() {
@@ -119,10 +123,12 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		if missedReconciliation(&comp, c.watchdogThreshold) {
 			synth := synthsByName[comp.Spec.Synthesizer.Name]
 			stuckReconciling.WithLabelValues(comp.Spec.Synthesizer.Name, getSynthOwner(&synth)).Inc()
+			logger.V(1).Info(fmt.Sprintf("composition %s/%s missed reconciliation threshold", comp.Namespace, comp.Name))
 		}
 
 		synth, ok := synthsByName[comp.Spec.Synthesizer.Name]
 		if !ok {
+			missingSynths = append(missingSynths, comp.Spec.Synthesizer.Name)
 			continue
 		}
 
@@ -133,11 +139,22 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 	freeSynthesisSlots.Set(float64(c.concurrencyLimit - inFlight))
 
-	if op == nil || inFlight >= c.concurrencyLimit {
+	logger.V(1).Info(fmt.Sprintf("scheduling analysis: %d in-flight, %d available slots, %d missing synthesizers", inFlight, c.concurrencyLimit-inFlight, len(missingSynths)))
+	if len(missingSynths) > 0 {
+		logger.V(1).Info(fmt.Sprintf("missing synthesizers: %v", missingSynths))
+	}
+
+	if op == nil {
+		logger.V(1).Info("no synthesis operations to dispatch")
+		return ctrl.Result{}, nil
+	}
+	if inFlight >= c.concurrencyLimit {
+		logger.V(1).Info(fmt.Sprintf("concurrency limit reached: %d/%d slots used", inFlight, c.concurrencyLimit))
 		return ctrl.Result{}, nil
 	}
 	if !op.NotBefore.IsZero() { // the next op isn't ready to be dispathced yet
 		if wait := time.Until(op.NotBefore); wait > 0 {
+			logger.V(1).Info(fmt.Sprintf("next operation not ready, waiting %s until %s", wait.Truncate(time.Second), op.NotBefore.Format("15:04:05")))
 			return ctrl.Result{RequeueAfter: wait}, nil
 		}
 	}
@@ -149,9 +166,11 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			logger.Error(err, "updating synthesizer epoch")
 			return ctrl.Result{}, err
 		}
-		logger.V(1).Info("updated global synthesizer epoch")
+		logger.V(1).Info(fmt.Sprintf("updated global synthesizer epoch to %s for composition %s/%s", synthEpoch, op.Composition.Namespace, op.Composition.Name))
 		return ctrl.Result{}, nil
 	}
+
+	logger.V(1).Info(fmt.Sprintf("dispatching synthesis for composition %s/%s with reason %s", op.Composition.Namespace, op.Composition.Name, op.Reason))
 
 	if err := c.dispatchOp(ctx, op); err != nil {
 		if errors.IsInvalid(err) {
@@ -164,7 +183,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	op.Dispatched = time.Now()
 	c.lastApplied = op
-	logger.V(1).Info("dispatched synthesis", "synthesisUUID", op.id)
+	logger.V(1).Info(fmt.Sprintf("successfully dispatched synthesis %s for composition %s/%s", op.id, op.Composition.Namespace, op.Composition.Name))
 
 	return ctrl.Result{}, nil
 }
