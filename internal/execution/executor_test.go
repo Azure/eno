@@ -1045,3 +1045,244 @@ func TestWithOptionalInputs(t *testing.T) {
 		assert.NotNil(t, comp.Status.CurrentSynthesis.Synthesized)
 	})
 }
+
+func TestGetOperationIDandOperationOrigin(t *testing.T) {
+	tests := []struct {
+		name                    string
+		synthesisEnv            []apiv1.EnvVar
+		expectedOperationID     string
+		expectedOperationOrigin string
+	}{
+		{
+			name: "both operationID and operationOrigin present",
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: "op-12345"},
+				{Name: "operationOrigin", Value: "user-action"},
+				{Name: "otherEnv", Value: "someValue"},
+			},
+			expectedOperationID:     "op-12345",
+			expectedOperationOrigin: "user-action",
+		},
+		{
+			name: "only operationID present",
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: "op-67890"},
+				{Name: "someOther", Value: "value"},
+			},
+			expectedOperationID:     "op-67890",
+			expectedOperationOrigin: "",
+		},
+		{
+			name: "only operationOrigin present",
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationOrigin", Value: "api-request"},
+			},
+			expectedOperationID:     "",
+			expectedOperationOrigin: "api-request",
+		},
+		{
+			name: "neither present",
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "unrelated", Value: "value"},
+			},
+			expectedOperationID:     "",
+			expectedOperationOrigin: "",
+		},
+		{
+			name:                    "empty synthesisEnv",
+			synthesisEnv:            []apiv1.EnvVar{},
+			expectedOperationID:     "",
+			expectedOperationOrigin: "",
+		},
+		{
+			name:                    "nil synthesisEnv",
+			synthesisEnv:            nil,
+			expectedOperationID:     "",
+			expectedOperationOrigin: "",
+		},
+		{
+			name: "operationID with empty value",
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: ""},
+				{Name: "operationOrigin", Value: "test-origin"},
+			},
+			expectedOperationID:     "",
+			expectedOperationOrigin: "test-origin",
+		},
+		{
+			name: "multiple env vars with correct values at end",
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "env1", Value: "val1"},
+				{Name: "env2", Value: "val2"},
+				{Name: "env3", Value: "val3"},
+				{Name: "operationID", Value: "final-op-id"},
+				{Name: "operationOrigin", Value: "final-origin"},
+			},
+			expectedOperationID:     "final-op-id",
+			expectedOperationOrigin: "final-origin",
+		},
+		{
+			name: "duplicate keys - last one wins",
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: "first-id"},
+				{Name: "operationID", Value: "second-id"},
+				{Name: "operationOrigin", Value: "first-origin"},
+				{Name: "operationOrigin", Value: "second-origin"},
+			},
+			expectedOperationID:     "second-id",
+			expectedOperationOrigin: "second-origin",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			comp := &apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					SynthesisEnv: tt.synthesisEnv,
+				},
+			}
+
+			operationID, operationOrigin := getOperationIDandOperationOrigin(comp)
+
+			assert.Equal(t, tt.expectedOperationID, operationID, "operationID mismatch")
+			assert.Equal(t, tt.expectedOperationOrigin, operationOrigin, "operationOrigin mismatch")
+		})
+	}
+}
+
+func TestSynthesizeWithIgnoreSideEffects(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	require.NoError(t, apiv1.SchemeBuilder.AddToScheme(scheme))
+
+	tests := []struct {
+		name          string
+		synthesisEnv  []apiv1.EnvVar
+		annotations   map[string]string
+		expectError   bool
+		errorContains string
+	}{
+		{
+			name: "ignore-side-effects with valid operationID and operationOrigin",
+			annotations: map[string]string{
+				"eno.azure.io/ignore-side-effects": "true",
+			},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: "op-123"},
+				{Name: "operationOrigin", Value: "api-request"},
+			},
+			expectError: false,
+		},
+		{
+			name: "ignore-side-effects with missing operationID",
+			annotations: map[string]string{
+				"eno.azure.io/ignore-side-effects": "true",
+			},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationOrigin", Value: "api-request"},
+			},
+			expectError:   true,
+			errorContains: "OperationId and operationOrigin required",
+		},
+		{
+			name: "ignore-side-effects with missing operationOrigin",
+			annotations: map[string]string{
+				"eno.azure.io/ignore-side-effects": "true",
+			},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: "op-123"},
+			},
+			expectError:   true,
+			errorContains: "OperationId and operationOrigin required",
+		},
+		{
+			name: "ignore-side-effects with empty operationID value",
+			annotations: map[string]string{
+				"eno.azure.io/ignore-side-effects": "true",
+			},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: ""},
+				{Name: "operationOrigin", Value: "api-request"},
+			},
+			expectError:   true,
+			errorContains: "OperationId and operationOrigin required",
+		},
+		{
+			name: "ignore-side-effects with empty operationOrigin value",
+			annotations: map[string]string{
+				"eno.azure.io/ignore-side-effects": "true",
+			},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: "op-123"},
+				{Name: "operationOrigin", Value: ""},
+			},
+			expectError:   true,
+			errorContains: "OperationId and operationOrigin required",
+		},
+		{
+			name: "ignore-side-effects false - no validation required",
+			annotations: map[string]string{
+				"eno.azure.io/ignore-side-effects": "false",
+			},
+			synthesisEnv: []apiv1.EnvVar{},
+			expectError:  false,
+		},
+		{
+			name:         "no ignore-side-effects annotation - no validation required",
+			annotations:  map[string]string{},
+			synthesisEnv: []apiv1.EnvVar{},
+			expectError:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cli := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithStatusSubresource(&apiv1.ResourceSlice{}, &apiv1.Composition{}).
+				Build()
+
+			syn := &apiv1.Synthesizer{}
+			syn.Name = "test-synth"
+			syn.Spec.Image = "test-image"
+			err := cli.Create(ctx, syn)
+			require.NoError(t, err)
+
+			comp := &apiv1.Composition{}
+			comp.Name = "test-comp"
+			comp.Namespace = "default"
+			comp.Annotations = tt.annotations
+			comp.Spec.Synthesizer.Name = syn.Name
+			comp.Spec.SynthesisEnv = tt.synthesisEnv
+			err = cli.Create(ctx, comp)
+			require.NoError(t, err)
+
+			comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+			err = cli.Status().Update(ctx, comp)
+			require.NoError(t, err)
+
+			e := &Executor{
+				Reader: cli,
+				Writer: cli,
+				Handler: func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+					return &krmv1.ResourceList{}, nil
+				},
+			}
+
+			env := &Env{
+				CompositionName:      comp.Name,
+				CompositionNamespace: comp.Namespace,
+				SynthesisUUID:        "test-uuid",
+			}
+
+			err = e.Synthesize(ctx, env)
+
+			if tt.expectError {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errorContains)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
