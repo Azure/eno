@@ -29,12 +29,14 @@ type Executor struct {
 
 func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 	logger := logr.FromContextOrDiscard(ctx)
+	logger.V(0).Info("starting synthesis", "synthesisuuid", env.SynthesisUUID)
 
 	comp := &apiv1.Composition{}
 	comp.Name = env.CompositionName
 	comp.Namespace = env.CompositionNamespace
 	err := e.Reader.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 	if err != nil {
+		logger.Error(err, "unable to fetch composition")
 		return fmt.Errorf("fetching composition: %w", err)
 	}
 
@@ -42,22 +44,27 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 	syn.Name = comp.Spec.Synthesizer.Name
 	err = e.Reader.Get(ctx, client.ObjectKeyFromObject(syn), syn)
 	if err != nil {
+		logger.Error(err, "unable to fetch synthesizer")
 		return fmt.Errorf("fetching synthesizer: %w", err)
 	}
 
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", syn.Name)
 	ctx = logr.NewContext(ctx, logger)
+	logger.V(0).Info("fetched composition and synthesizer resources")
 
 	if reason, skip := skipSynthesis(comp, syn, env); skip {
 		logger.V(0).Info("synthesis is no longer relevant - skipping", "reason", reason)
 		return nil
 	}
 
+	logger.V(0).Info("building synthesizer input")
 	input, revs, err := e.buildPodInput(ctx, comp, syn)
 	if err != nil {
+		logger.Error(err, "unable to build synthesizer input")
 		return fmt.Errorf("building synthesizer input: %w", err)
 	}
 
+	logger.V(0).Info("executing synthesizer")
 	var sliceRefs []*apiv1.ResourceSliceRef
 	output, err := e.Handler(ctx, syn, input)
 	if err != nil {
@@ -69,25 +76,33 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 		}}}
 
 		if err := e.updateComposition(ctx, env, comp, syn, sliceRefs, revs, output); err != nil {
+			logger.Error(err, "unable to update composition with synthesizer error")
 			return err
 		}
 		return err
 	}
 
 	err = findResultError(output)
+	logger.V(0).Info("validating synthesized resources")
 	if err := e.preflightValidateResources(output); err != nil {
+		logger.Error(err, "preflight validation failed for synthesized resources")
 		return err
 	}
 	if err == nil {
+		logger.V(0).Info("writing resource slices")
 		sliceRefs, err = e.writeSlices(ctx, comp, output)
 		if err != nil {
+			logger.Error(err, "failed to write resource slices")
 			return err
 		}
 	}
 
+	logger.V(0).Info("updating composition status")
 	if err := e.updateComposition(ctx, env, comp, syn, sliceRefs, revs, output); err != nil {
+		logger.Error(err, "failed to update composition status after synthesis")
 		return err
 	}
+	logger.V(0).Info("synthesis completed successfully")
 	return err
 }
 
@@ -141,6 +156,7 @@ func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, s
 				logger.V(1).Info("skipping optional input that was not found", "key", key)
 				continue
 			}
+			logger.Error(err, "failed to get resource for input reference", "key", key, "name", obj.GetName(), "namespace", obj.GetNamespace())
 			return nil, nil, fmt.Errorf("getting resource for ref %q: %w", key, err)
 		}
 		anno := obj.GetAnnotations()
@@ -174,11 +190,13 @@ func (e *Executor) writeSlices(ctx context.Context, comp *apiv1.Composition, rl 
 
 	previous, err := e.fetchPreviousSlices(ctx, comp)
 	if err != nil {
+		logger.Error(err, "failed to fetch previous resource slices")
 		return nil, err
 	}
 
 	slices, err := resource.Slice(comp, previous, rl.Items, maxSliceJsonBytes)
 	if err != nil {
+		logger.Error(err, "failed to slice resources", "maxSliceBytes", maxSliceJsonBytes, "resourceCount", len(rl.Items))
 		return nil, err
 	}
 
@@ -188,6 +206,7 @@ func (e *Executor) writeSlices(ctx context.Context, comp *apiv1.Composition, rl 
 
 		err = e.writeResourceSlice(ctx, slice)
 		if err != nil {
+			logger.Error(err, "failed to write resource slice", "sliceIndex", i, "resourceSliceName", slice.Name, "resourceCount", len(slice.Spec.Resources))
 			return nil, fmt.Errorf("creating resource slice %d: %w", i, err)
 		}
 
@@ -219,6 +238,7 @@ func (e *Executor) fetchPreviousSlices(ctx context.Context, comp *apiv1.Composit
 			continue
 		}
 		if err != nil {
+			logger.Error(err, "failed to fetch current resource slice", "resourceSliceName", slice.Name, "namespace", slice.Namespace)
 			return nil, fmt.Errorf("fetching current resource slice %q: %w", slice.Name, err)
 		}
 		slices = append(slices, slice)
@@ -250,6 +270,7 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 		comp := &apiv1.Composition{}
 		err := e.Reader.Get(ctx, client.ObjectKeyFromObject(oldComp), comp)
 		if err != nil {
+			logger.Error(err, "failed to get composition for status update", "compositionName", oldComp.Name, "compositionNamespace", oldComp.Namespace)
 			return err
 		}
 
@@ -281,6 +302,7 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 
 		err = e.Writer.Status().Update(ctx, comp)
 		if err != nil {
+			logger.Error(err, "failed to update composition status", "compositionName", comp.Name, "compositionNamespace", comp.Namespace)
 			return err
 		}
 
