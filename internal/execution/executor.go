@@ -156,7 +156,7 @@ func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, s
 				logger.V(1).Info("skipping optional input that was not found", "key", key)
 				continue
 			}
-			logger.Error(err, "failed to get resource for input reference", "key", key, "name", obj.GetName(), "namespace", obj.GetNamespace())
+			logger.Error(err, "failed to get resource for input reference", "key", key)
 			return nil, nil, fmt.Errorf("getting resource for ref %q: %w", key, err)
 		}
 		anno := obj.GetAnnotations()
@@ -207,7 +207,7 @@ func (e *Executor) writeSlices(ctx context.Context, comp *apiv1.Composition, rl 
 
 		err = e.writeResourceSlice(ctx, slice)
 		if err != nil {
-			logger.Error(err, "failed to write resource slice", "sliceIndex", i, "resourceSliceName", slice.Name, "resourceCount", len(slice.Spec.Resources))
+			logger.Error(err, "failed to write resource slice", "sliceIndex", i)
 			return nil, fmt.Errorf("creating resource slice %d: %w", i, err)
 		}
 
@@ -239,7 +239,7 @@ func (e *Executor) fetchPreviousSlices(ctx context.Context, comp *apiv1.Composit
 			continue
 		}
 		if err != nil {
-			logger.Error(err, "failed to fetch current resource slice", "resourceSliceName", slice.Name, "namespace", slice.Namespace)
+			logger.Error(err, "failed to fetch current resource slice", "resourceSliceName", slice.Name)
 			return nil, fmt.Errorf("fetching current resource slice %q: %w", slice.Name, err)
 		}
 		slices = append(slices, slice)
@@ -271,7 +271,7 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 		comp := &apiv1.Composition{}
 		err := e.Reader.Get(ctx, client.ObjectKeyFromObject(oldComp), comp)
 		if err != nil {
-			logger.Error(err, "failed to get composition for status update", "compositionName", oldComp.Name, "compositionNamespace", oldComp.Namespace)
+			logger.Error(err, "failed to get composition for status update")
 			return err
 		}
 
@@ -303,7 +303,7 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 
 		err = e.Writer.Status().Update(ctx, comp)
 		if err != nil {
-			logger.Error(err, "failed to update composition status", "compositionName", comp.Name, "compositionNamespace", comp.Namespace)
+			logger.Error(err, "failed to update composition status")
 			return err
 		}
 
