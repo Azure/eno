@@ -29,7 +29,7 @@ type Executor struct {
 
 func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 	logger := logr.FromContextOrDiscard(ctx)
-	logger.V(0).Info("starting synthesis", "synthesisuuid", env.SynthesisUUID)
+	logger.Info("starting synthesis", "synthesisuuid", env.SynthesisUUID)
 
 	comp := &apiv1.Composition{}
 	comp.Name = env.CompositionName
@@ -50,21 +50,21 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", syn.Name)
 	ctx = logr.NewContext(ctx, logger)
-	logger.V(0).Info("fetched composition and synthesizer resources")
+	logger.Info("fetched composition and synthesizer resources")
 
 	if reason, skip := skipSynthesis(comp, syn, env); skip {
-		logger.V(0).Info("synthesis is no longer relevant - skipping", "reason", reason)
+		logger.Info("synthesis is no longer relevant - skipping", "reason", reason)
 		return nil
 	}
 
-	logger.V(0).Info("building synthesizer input")
+	logger.Info("building synthesizer input")
 	input, revs, err := e.buildPodInput(ctx, comp, syn)
 	if err != nil {
 		logger.Error(err, "unable to build synthesizer input")
 		return fmt.Errorf("building synthesizer input: %w", err)
 	}
 
-	logger.V(0).Info("executing synthesizer")
+	logger.Info("executing synthesizer")
 	var sliceRefs []*apiv1.ResourceSliceRef
 	output, err := e.Handler(ctx, syn, input)
 	if err != nil {
@@ -83,13 +83,13 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 	}
 
 	err = findResultError(output)
-	logger.V(0).Info("validating synthesized resources")
+	logger.Info("validating synthesized resources")
 	if err := e.preflightValidateResources(output); err != nil {
 		logger.Error(err, "preflight validation failed for synthesized resources")
 		return err
 	}
 	if err == nil {
-		logger.V(0).Info("writing resource slices")
+		logger.Info("writing resource slices")
 		sliceRefs, err = e.writeSlices(ctx, comp, output)
 		if err != nil {
 			logger.Error(err, "failed to write resource slices")
@@ -97,12 +97,12 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 		}
 	}
 
-	logger.V(0).Info("updating composition status")
+	logger.Info("updating composition status")
 	if err := e.updateComposition(ctx, env, comp, syn, sliceRefs, revs, output); err != nil {
 		logger.Error(err, "failed to update composition status after synthesis")
 		return err
 	}
-	logger.V(0).Info("synthesis completed successfully")
+	logger.Info("synthesis completed successfully")
 	return err
 }
 
@@ -166,12 +166,13 @@ func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, s
 		anno["eno.azure.io/input-key"] = key
 		obj.SetAnnotations(anno)
 		rl.Items = append(rl.Items, obj)
-		logger.V(0).Info("retrieved input", "key", key, "latency", time.Since(start).Abs().Milliseconds())
+		logger.Info("retrieved input", "key", key, "latency", time.Since(start).Abs().Milliseconds())
 
 		// Store the revision to be written to the synthesis status later
 		revs = append(revs, *apiv1.NewInputRevisions(obj, key))
 	}
 
+	logger.Info("completed building synthesizer input", "inputCount", len(rl.Items))
 	return rl, revs, nil
 }
 
@@ -289,7 +290,7 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 		}
 
 		if reason, skip := skipSynthesis(comp, syn, env); skip {
-			logger.V(0).Info("synthesis is no longer relevant - discarding its output", "reason", reason)
+			logger.Info("synthesis is no longer relevant - discarding its output", "reason", reason)
 			return nil
 		}
 
@@ -306,7 +307,7 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 			return err
 		}
 
-		logger.V(0).Info("composition status has been updated following successful synthesis")
+		logger.Info("composition status has been updated following successful synthesis")
 		return nil
 	})
 }
