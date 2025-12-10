@@ -156,7 +156,7 @@ func (e *Executor) buildPodInput(ctx context.Context, comp *apiv1.Composition, s
 				logger.V(1).Info("skipping optional input that was not found", "key", key)
 				continue
 			}
-			logger.Error(err, "failed to get resource for input reference", "key", key)
+			logger.Error(err, "failed to get resource for input reference", "key", key, "name", obj.GetName(), "namespace", obj.GetNamespace())
 			return nil, nil, fmt.Errorf("getting resource for ref %q: %w", key, err)
 		}
 		anno := obj.GetAnnotations()
