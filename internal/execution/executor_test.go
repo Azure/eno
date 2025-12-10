@@ -920,6 +920,13 @@ func TestWithOptionalInputs(t *testing.T) {
 				assert.Equal(t, "ConfigMap", rl.Items[0].GetKind())
 				assert.Equal(t, "required-input", rl.Items[0].GetName())
 
+				// Verify FunctionConfig contains the missing optional ref
+				require.NotNil(t, rl.FunctionConfig)
+				optRefs, found, err := unstructured.NestedStringSlice(rl.FunctionConfig.Object, "optionalRefs")
+				require.NoError(t, err)
+				require.True(t, found)
+				assert.Contains(t, optRefs, "optional")
+
 				out := &unstructured.Unstructured{
 					Object: map[string]any{
 						"apiVersion": "v1",
@@ -1017,6 +1024,13 @@ func TestWithOptionalInputs(t *testing.T) {
 				names := []string{rl.Items[0].GetName(), rl.Items[1].GetName()}
 				assert.Contains(t, names, "required-input")
 				assert.Contains(t, names, "optional-input")
+
+				// Verify FunctionConfig contains the optional ref
+				require.NotNil(t, rl.FunctionConfig)
+				optRefs, found, err := unstructured.NestedStringSlice(rl.FunctionConfig.Object, "optionalRefs")
+				require.NoError(t, err)
+				require.True(t, found)
+				assert.Contains(t, optRefs, "optional")
 
 				out := &unstructured.Unstructured{
 					Object: map[string]any{
