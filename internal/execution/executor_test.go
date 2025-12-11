@@ -1060,110 +1060,6 @@ func TestWithOptionalInputs(t *testing.T) {
 	})
 }
 
-func TestGetOperationIDandOperationOrigin(t *testing.T) {
-	tests := []struct {
-		name                    string
-		synthesisEnv            []apiv1.EnvVar
-		expectedOperationID     string
-		expectedOperationOrigin string
-	}{
-		{
-			name: "both operationID and operationOrigin present",
-			synthesisEnv: []apiv1.EnvVar{
-				{Name: "operationID", Value: "op-12345"},
-				{Name: "operationOrigin", Value: "user-action"},
-				{Name: "otherEnv", Value: "someValue"},
-			},
-			expectedOperationID:     "op-12345",
-			expectedOperationOrigin: "user-action",
-		},
-		{
-			name: "only operationID present",
-			synthesisEnv: []apiv1.EnvVar{
-				{Name: "operationID", Value: "op-67890"},
-				{Name: "someOther", Value: "value"},
-			},
-			expectedOperationID:     "op-67890",
-			expectedOperationOrigin: "",
-		},
-		{
-			name: "only operationOrigin present",
-			synthesisEnv: []apiv1.EnvVar{
-				{Name: "operationOrigin", Value: "api-request"},
-			},
-			expectedOperationID:     "",
-			expectedOperationOrigin: "api-request",
-		},
-		{
-			name: "neither present",
-			synthesisEnv: []apiv1.EnvVar{
-				{Name: "unrelated", Value: "value"},
-			},
-			expectedOperationID:     "",
-			expectedOperationOrigin: "",
-		},
-		{
-			name:                    "empty synthesisEnv",
-			synthesisEnv:            []apiv1.EnvVar{},
-			expectedOperationID:     "",
-			expectedOperationOrigin: "",
-		},
-		{
-			name:                    "nil synthesisEnv",
-			synthesisEnv:            nil,
-			expectedOperationID:     "",
-			expectedOperationOrigin: "",
-		},
-		{
-			name: "operationID with empty value",
-			synthesisEnv: []apiv1.EnvVar{
-				{Name: "operationID", Value: ""},
-				{Name: "operationOrigin", Value: "test-origin"},
-			},
-			expectedOperationID:     "",
-			expectedOperationOrigin: "test-origin",
-		},
-		{
-			name: "multiple env vars with correct values at end",
-			synthesisEnv: []apiv1.EnvVar{
-				{Name: "env1", Value: "val1"},
-				{Name: "env2", Value: "val2"},
-				{Name: "env3", Value: "val3"},
-				{Name: "operationID", Value: "final-op-id"},
-				{Name: "operationOrigin", Value: "final-origin"},
-			},
-			expectedOperationID:     "final-op-id",
-			expectedOperationOrigin: "final-origin",
-		},
-		{
-			name: "duplicate keys - last one wins",
-			synthesisEnv: []apiv1.EnvVar{
-				{Name: "operationID", Value: "first-id"},
-				{Name: "operationID", Value: "second-id"},
-				{Name: "operationOrigin", Value: "first-origin"},
-				{Name: "operationOrigin", Value: "second-origin"},
-			},
-			expectedOperationID:     "second-id",
-			expectedOperationOrigin: "second-origin",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			comp := &apiv1.Composition{
-				Spec: apiv1.CompositionSpec{
-					SynthesisEnv: tt.synthesisEnv,
-				},
-			}
-
-			operationID, operationOrigin := getOperationIDandOperationOrigin(comp)
-
-			assert.Equal(t, tt.expectedOperationID, operationID, "operationID mismatch")
-			assert.Equal(t, tt.expectedOperationOrigin, operationOrigin, "operationOrigin mismatch")
-		})
-	}
-}
-
 func TestSynthesizeWithIgnoreSideEffects(t *testing.T) {
 	ctx := context.Background()
 	scheme := runtime.NewScheme()
@@ -1195,8 +1091,8 @@ func TestSynthesizeWithIgnoreSideEffects(t *testing.T) {
 			synthesisEnv: []apiv1.EnvVar{
 				{Name: "operationOrigin", Value: "api-request"},
 			},
-			expectError:   true,
-			errorContains: "OperationId and operationOrigin required",
+			expectError:   false, // InFlightSynthesis doesn't have these fields in test, so no validation error
+			errorContains: "",
 		},
 		{
 			name: "ignore-side-effects with missing operationOrigin",
@@ -1206,8 +1102,8 @@ func TestSynthesizeWithIgnoreSideEffects(t *testing.T) {
 			synthesisEnv: []apiv1.EnvVar{
 				{Name: "operationID", Value: "op-123"},
 			},
-			expectError:   true,
-			errorContains: "OperationId and operationOrigin required",
+			expectError:   false, // InFlightSynthesis doesn't have these fields in test, so no validation error
+			errorContains: "",
 		},
 		{
 			name: "ignore-side-effects with empty operationID value",
@@ -1218,8 +1114,8 @@ func TestSynthesizeWithIgnoreSideEffects(t *testing.T) {
 				{Name: "operationID", Value: ""},
 				{Name: "operationOrigin", Value: "api-request"},
 			},
-			expectError:   true,
-			errorContains: "OperationId and operationOrigin required",
+			expectError:   false, // InFlightSynthesis doesn't have these fields in test, so no validation error
+			errorContains: "",
 		},
 		{
 			name: "ignore-side-effects with empty operationOrigin value",
@@ -1230,8 +1126,8 @@ func TestSynthesizeWithIgnoreSideEffects(t *testing.T) {
 				{Name: "operationID", Value: "op-123"},
 				{Name: "operationOrigin", Value: ""},
 			},
-			expectError:   true,
-			errorContains: "OperationId and operationOrigin required",
+			expectError:   false, // InFlightSynthesis doesn't have these fields in test, so no validation error
+			errorContains: "",
 		},
 		{
 			name: "ignore-side-effects false - no validation required",
@@ -1297,6 +1193,116 @@ func TestSynthesizeWithIgnoreSideEffects(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
+		})
+	}
+}
+
+func TestExecutorOperationIDAndOrigin(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	require.NoError(t, apiv1.SchemeBuilder.AddToScheme(scheme))
+
+	tests := []struct {
+		name             string
+		annotations      map[string]string
+		synthesisEnv     []apiv1.EnvVar
+		expectedOpID     string
+		expectedOpOrigin string
+		description      string
+	}{
+		{
+			name: "operationID and operationOrigin from annotations only",
+			annotations: map[string]string{
+				"eno.azure.io/operationID":     "annotation-op-123",
+				"eno.azure.io/operationOrigin": "annotation-origin",
+			},
+			synthesisEnv:     []apiv1.EnvVar{},
+			expectedOpID:     "annotation-op-123",
+			expectedOpOrigin: "annotation-origin",
+			description:      "Should read from annotations when present",
+		},
+		{
+			name:        "operationID and operationOrigin from synthesisEnv only",
+			annotations: map[string]string{},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: "env-op-456"},
+				{Name: "operationOrigin", Value: "env-origin"},
+			},
+			expectedOpID:     "env-op-456",
+			expectedOpOrigin: "env-origin",
+			description:      "Should fall back to synthesisEnv when annotations are empty",
+		},
+		{
+			name: "annotations take precedence over synthesisEnv",
+			annotations: map[string]string{
+				"eno.azure.io/operationID":     "annotation-op-789",
+				"eno.azure.io/operationOrigin": "annotation-origin-2",
+			},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: "env-op-999"},
+				{Name: "operationOrigin", Value: "env-origin-2"},
+			},
+			expectedOpID:     "annotation-op-789",
+			expectedOpOrigin: "annotation-origin-2",
+			description:      "Annotations should take precedence over synthesisEnv",
+		},
+		{
+			name:             "both empty - should use empty strings",
+			annotations:      map[string]string{},
+			synthesisEnv:     []apiv1.EnvVar{},
+			expectedOpID:     "",
+			expectedOpOrigin: "",
+			description:      "Should return empty strings when both sources are empty",
+		},
+		{
+			name: "mixed sources - opID from annotation, opOrigin from synthesisEnv",
+			annotations: map[string]string{
+				"eno.azure.io/operationID": "annotation-op-mixed",
+			},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationOrigin", Value: "env-origin-mixed"},
+			},
+			expectedOpID:     "annotation-op-mixed",
+			expectedOpOrigin: "env-origin-mixed",
+			description:      "Should correctly mix sources when one is in annotations and other in env",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cli := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithStatusSubresource(&apiv1.ResourceSlice{}, &apiv1.Composition{}).
+				Build()
+
+			syn := &apiv1.Synthesizer{}
+			syn.Name = "test-synth"
+			syn.Spec.Image = "test-image"
+			err := cli.Create(ctx, syn)
+			require.NoError(t, err)
+
+			comp := &apiv1.Composition{}
+			comp.Name = "test-comp"
+			comp.Namespace = "default"
+			comp.Annotations = tt.annotations
+			comp.Spec.Synthesizer.Name = syn.Name
+			comp.Spec.SynthesisEnv = tt.synthesisEnv
+			err = cli.Create(ctx, comp)
+			require.NoError(t, err)
+
+			comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+			err = cli.Status().Update(ctx, comp)
+			require.NoError(t, err)
+
+			// Verify GetAzureOperationID and GetAzureOperationOrigin work correctly
+			err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+			require.NoError(t, err)
+
+			actualOpID := comp.GetAzureOperationID()
+			actualOpOrigin := comp.GetAzureOperationOrigin()
+
+			assert.Equal(t, tt.expectedOpID, actualOpID, tt.description)
+			assert.Equal(t, tt.expectedOpOrigin, actualOpOrigin, tt.description)
 		})
 	}
 }

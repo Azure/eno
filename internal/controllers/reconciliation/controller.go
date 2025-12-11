@@ -113,7 +113,8 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		return ctrl.Result{}, err
 	}
 	synthesisUUID := comp.Status.GetCurrentSynthesisUUID()
-	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisUUID", synthesisUUID)
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisUUID", synthesisUUID,
+		"operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 
 	if comp.Status.CurrentSynthesis == nil {
 		return ctrl.Result{}, nil // nothing to do
@@ -224,7 +225,8 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 		if err != nil {
 			return true, client.IgnoreNotFound(fmt.Errorf("deleting resource: %w", err))
 		}
-		logger.V(0).Info("deleted resource")
+		logger.Info(fmt.Sprintf("deleted resource. Name: [%s], Namespace: [%s], ResourceVersion: [%s]",
+			res.Unstructured().GetName(), res.Unstructured().GetNamespace(), res.Unstructured().GetResourceVersion()))
 		return true, nil
 	}
 
@@ -244,7 +246,8 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 		if err != nil {
 			return false, fmt.Errorf("creating resource: %w", err)
 		}
-		logger.V(0).Info("created resource")
+		logger.Info(fmt.Sprintf("created resource. Name: [%s], Namespace: [%s], ResourceVersion: [%s]",
+			res.Unstructured().GetName(), res.Unstructured().GetNamespace(), res.Unstructured().GetResourceVersion()))
 		return true, nil
 	}
 
@@ -268,7 +271,8 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 			logger.V(0).Info("resource didn't change after patch")
 			return false, nil
 		}
-		logger.V(0).Info("patched resource", "resourceVersion", updated.GetResourceVersion())
+		logger.Info(fmt.Sprintf("patched resource. Name: [%s], Namespace: [%s], ResourceVersion: [%s]",
+			updated.GetName(), updated.GetNamespace(), updated.GetResourceVersion()))
 		return true, nil
 	}
 
@@ -327,7 +331,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 				if err != nil {
 					return false, fmt.Errorf("updating managed fields metadata: %w", err)
 				}
-				logger.V(0).Info("corrected drift in managed fields metadata", "fields", fields)
+				logger.Info("corrected drift in managed fields metadata", "fields", fields)
 				return true, nil
 			}
 		}
@@ -346,7 +350,8 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 	if current != nil {
 		logger = logger.WithValues("oldResourceVersion", current.GetResourceVersion())
 	}
-	logger.V(0).Info("applied resource", "resourceVersion", updated.GetResourceVersion())
+	logger.Info(fmt.Sprintf("applied resource. Name: [%s], Namespace: [%s], ResourceVersion: [%s]",
+		updated.GetName(), updated.GetNamespace(), updated.GetResourceVersion()))
 	return true, nil
 }
 

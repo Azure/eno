@@ -47,7 +47,8 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 		logger.Error(err, "failed to get symphony")
 		return ctrl.Result{}, err
 	}
-	logger = logger.WithValues("symphonyName", symph.Name, "symphonyNamespace", symph.Namespace, "symphonyGeneration", symph.Generation)
+	logger = logger.WithValues("symphonyName", symph.Name, "symphonyNamespace", symph.Namespace, "symphonyGeneration", symph.Generation,
+		"operationID", symph.GetAzureOperationID(), "operationOrigin", symph.GetAzureOperationOrigin())
 	ctx = logr.NewContext(ctx, logger)
 
 	if controllerutil.AddFinalizer(symph, "eno.azure.io/cleanup") {
@@ -215,7 +216,8 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		if err != nil {
 			return false, fmt.Errorf("setting composition's controller: %w", err)
 		}
-		logger := logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace)
+		logger := logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace,
+			"operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 
 		// Compose missing variations
 		idx := slices.IndexFunc(comps.Items, func(existing apiv1.Composition) bool {

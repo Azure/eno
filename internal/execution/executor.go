@@ -27,11 +27,6 @@ type Executor struct {
 	Handler SynthesizerHandle
 }
 
-const (
-	OperationIdKey      string = "operationID"
-	OperationOrigionKey string = "operationOrigin"
-)
-
 func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 	logger := logr.FromContextOrDiscard(ctx)
 
@@ -50,20 +45,8 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 		return fmt.Errorf("fetching synthesizer: %w", err)
 	}
 
-	var operationId, operationOrigin string
-	if comp.ShouldIgnoreSideEffects() { // we expect that if a comp has ignore side effects to be true then we need to have synthesisEnv present
-		operationId, operationOrigin = getOperationIDandOperationOrigin(comp)
-		if operationId == "" || operationOrigin == "" {
-			return fmt.Errorf("OperationId and operationOrigin required for ignoreSideEffect compositions, missing either operationId or operation origin. operationID: %s. operation Origin: %s",
-				operationId, operationOrigin)
-		}
-	}
-	// else {
-	// 	// To-Do: Need to find a way to signal that t his synthesis is part of an inputChange/Comp Change/SynthesizerChange
-	// }
-
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", syn.Name,
-		"operationID", operationId, "operationOrigin", operationOrigin)
+		"operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	ctx = logr.NewContext(ctx, logger)
 	if reason, skip := skipSynthesis(comp, syn, env); skip {
 		logger.V(0).Info("synthesis is no longer relevant - skipping", "reason", reason)
@@ -336,18 +319,4 @@ func findResultError(rl *krmv1.ResourceList) error {
 		}
 	}
 	return nil
-}
-
-func getOperationIDandOperationOrigin(comp *apiv1.Composition) (operationID string, operationOrigin string) {
-	synthesisEnv := comp.Spec.SynthesisEnv
-	for _, envVar := range synthesisEnv {
-		if envVar.Name == OperationIdKey {
-			operationID = envVar.Value
-		}
-
-		if envVar.Name == OperationOrigionKey {
-			operationOrigin = envVar.Value
-		}
-	}
-	return
 }

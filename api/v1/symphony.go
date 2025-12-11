@@ -72,3 +72,11 @@ type Variation struct {
 	// when it fails to synthesize, reconcile, or become ready.
 	Optional bool `json:"optional,omitempty"`
 }
+
+func (c *Symphony) GetAzureOperationID() string {
+	return c.Annotations[enoAzureOperationIDKey]
+}
+
+func (c *Symphony) GetAzureOperationOrigin() string {
+	return c.Annotations[enoAzureOperationOrigin]
+}

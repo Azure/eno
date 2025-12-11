@@ -68,7 +68,8 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 	comp.Name = pod.GetLabels()[compositionNameLabelKey]
 	comp.Namespace = pod.GetLabels()[compositionNamespaceLabelKey]
 	err = p.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisAge", synthesisAge(comp))
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisAge", synthesisAge(comp),
+		"operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	if errors.IsNotFound(err) || comp.DeletionTimestamp != nil {
 		logger = logger.WithValues("reason", "CompositionDeleted")
 		return ctrl.Result{}, p.deletePod(ctx, pod, logger)

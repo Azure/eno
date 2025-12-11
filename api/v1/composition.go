@@ -8,6 +8,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const (
+	enoAzureOperationIDKey         = "eno.azure.io/operationID"
+	enoAzureOperationOrigin        = "eno.azure.io/operationOrigin"
+	OperationIdKey          string = "operationID"
+	OperationOrigionKey     string = "operationOrigin"
+)
+
 // +kubebuilder:object:root=true
 type CompositionList struct {
 	metav1.TypeMeta `json:",inline"`
@@ -214,6 +221,33 @@ func (c *Composition) ShouldForceResynthesis() bool {
 
 func (c *Composition) ShouldOrphanResources() bool {
 	return c.Annotations["eno.azure.io/deletion-strategy"] == "orphan"
+}
+
+func (c *Composition) GetAzureOperationID() string {
+	opId := c.Annotations[enoAzureOperationIDKey]
+	if opId == "" {
+		opId = getSynthesisEnvValue(&c.Spec, OperationIdKey)
+	}
+
+	return opId
+}
+
+func (c *Composition) GetAzureOperationOrigin() string {
+	opOrigin := c.Annotations[enoAzureOperationOrigin]
+	if opOrigin == "" {
+		opOrigin = getSynthesisEnvValue(&c.Spec, OperationOrigionKey)
+	}
+	return opOrigin
+}
+
+func getSynthesisEnvValue(spec *CompositionSpec, key string) string {
+	synthesisEnv := spec.SynthesisEnv
+	for _, envVar := range synthesisEnv {
+		if envVar.Name == key {
+			return envVar.Value
+		}
+	}
+	return ""
 }
 
 func (s *CompositionStatus) getLatestSynthesisUUID() string {

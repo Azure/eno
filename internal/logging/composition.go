@@ -22,7 +22,6 @@ func NewCompositionStatusLogger(mgr ctrl.Manager, freq time.Duration) error {
 			PredicateFn:     compositionPredicate,
 			ExtractFieldsFn: extractCompositionFields,
 			EventTypeFn:     compositionEventType,
-			MessageFn:       func() string { return "current composition status" },
 			ControllerName:  "compositionStatusLogger",
 			Logger:          NewLogger(),
 		},
