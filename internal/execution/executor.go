@@ -28,15 +28,16 @@ type Executor struct {
 }
 
 func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
-	logger := logr.FromContextOrDiscard(ctx)
-	logger.Info("starting synthesis", "synthesisuuid", env.SynthesisUUID)
+	logger := logr.FromContextOrDiscard(ctx).WithValues("synthesisUUID", env.SynthesisUUID)
+	ctx = logr.NewContext(ctx, logger)
+	logger.Info("starting synthesis")
 
 	comp := &apiv1.Composition{}
 	comp.Name = env.CompositionName
 	comp.Namespace = env.CompositionNamespace
 	err := e.Reader.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 	if err != nil {
-		logger.Error(err, "unable to fetch composition")
+		logger.Error(err, fmt.Sprintf("unable to fetch compositionNamespace %q compositionName %q", comp.Namespace, comp.Name))
 		return fmt.Errorf("fetching composition: %w", err)
 	}
 
@@ -44,7 +45,7 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 	syn.Name = comp.Spec.Synthesizer.Name
 	err = e.Reader.Get(ctx, client.ObjectKeyFromObject(syn), syn)
 	if err != nil {
-		logger.Error(err, "unable to fetch synthesizer")
+		logger.Error(err, fmt.Sprintf("unable to fetch synthesizer %q for compositionNamespace %q compositionName %q", syn.Name, comp.Namespace, comp.Name))
 		return fmt.Errorf("fetching synthesizer: %w", err)
 	}
 
