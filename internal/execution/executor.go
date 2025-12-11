@@ -28,7 +28,11 @@ type Executor struct {
 }
 
 func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
-	logger := logr.FromContextOrDiscard(ctx).WithValues("synthesisUUID", env.SynthesisUUID)
+	logger := logr.FromContextOrDiscard(ctx).WithValues(
+		"synthesisUUID", env.SynthesisUUID,
+		"compositionName", env.CompositionName,
+		"compositionNamespace", env.CompositionNamespace,
+	)
 	ctx = logr.NewContext(ctx, logger)
 	logger.Info("starting synthesis")
 
@@ -36,8 +40,6 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 	comp.Name = env.CompositionName
 	comp.Namespace = env.CompositionNamespace
 
-	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace)
-	ctx = logr.NewContext(ctx, logger)
 	err := e.Reader.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 	if err != nil {
 		logger.Error(err, "unable to fetch composition")
