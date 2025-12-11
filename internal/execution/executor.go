@@ -35,22 +35,25 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 	comp := &apiv1.Composition{}
 	comp.Name = env.CompositionName
 	comp.Namespace = env.CompositionNamespace
+
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace)
+	ctx = logr.NewContext(ctx, logger)
 	err := e.Reader.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 	if err != nil {
-		logger.Error(err, fmt.Sprintf("unable to fetch compositionNamespace %q compositionName %q", comp.Namespace, comp.Name))
+		logger.Error(err, "unable to fetch composition")
 		return fmt.Errorf("fetching composition: %w", err)
 	}
 
 	syn := &apiv1.Synthesizer{}
 	syn.Name = comp.Spec.Synthesizer.Name
+	logger = logger.WithValues("synthesizerName", syn.Name)
+	ctx = logr.NewContext(ctx, logger)
 	err = e.Reader.Get(ctx, client.ObjectKeyFromObject(syn), syn)
 	if err != nil {
-		logger.Error(err, fmt.Sprintf("unable to fetch synthesizer %q for compositionNamespace %q compositionName %q", syn.Name, comp.Namespace, comp.Name))
+		logger.Error(err, "unable to fetch synthesizer")
 		return fmt.Errorf("fetching synthesizer: %w", err)
 	}
 
-	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", syn.Name)
-	ctx = logr.NewContext(ctx, logger)
 	logger.Info("fetched composition and synthesizer resources")
 
 	if reason, skip := skipSynthesis(comp, syn, env); skip {
