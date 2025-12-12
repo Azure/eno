@@ -517,3 +517,137 @@ func TestRemoveInput(t *testing.T) {
 		return len(comp.Status.InputRevisions) == 0
 	})
 }
+
+func TestOptionalInputCreatedLater(t *testing.T) {
+	mgr := testutil.NewManager(t)
+	require.NoError(t, NewController(mgr.Manager))
+	mgr.Start(t)
+
+	ctx := testutil.NewContext(t)
+	cli := mgr.GetClient()
+
+	// Create synthesizer with one required and one optional input
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	synth.Spec.Refs = []apiv1.Ref{
+		{
+			Key: "required",
+			Resource: apiv1.ResourceRef{
+				Version: "v1",
+				Kind:    "ConfigMap",
+			},
+		},
+		{
+			Key:      "optional",
+			Optional: true,
+			Resource: apiv1.ResourceRef{
+				Version: "v1",
+				Kind:    "ConfigMap",
+			},
+		},
+	}
+	require.NoError(t, cli.Create(ctx, synth))
+
+	// Create only the required input
+	requiredInput := &corev1.ConfigMap{}
+	requiredInput.Name = "required-input"
+	requiredInput.Namespace = "default"
+	require.NoError(t, cli.Create(ctx, requiredInput))
+
+	// Create composition with bindings for both inputs (optional doesn't exist yet)
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = synth.Name
+	comp.Spec.Bindings = []apiv1.Binding{
+		{
+			Key: "required",
+			Resource: apiv1.ResourceBinding{
+				Name:      requiredInput.Name,
+				Namespace: requiredInput.Namespace,
+			},
+		},
+		{
+			Key: "optional",
+			Resource: apiv1.ResourceBinding{
+				Name:      "optional-input",
+				Namespace: "default",
+			},
+		},
+	}
+	require.NoError(t, cli.Create(ctx, comp))
+
+	// Status should be populated with only the required input
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return len(comp.Status.InputRevisions) == 1 && comp.Status.InputRevisions[0].Key == "required"
+	})
+
+	initialRequiredRV := comp.Status.InputRevisions[0].ResourceVersion
+
+	// Now create the optional input
+	optionalInput := &corev1.ConfigMap{}
+	optionalInput.Name = "optional-input"
+	optionalInput.Namespace = "default"
+	optionalInput.Data = map[string]string{"foo": "bar"}
+	require.NoError(t, cli.Create(ctx, optionalInput))
+
+	// Status should now include both inputs
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		if len(comp.Status.InputRevisions) != 2 {
+			return false
+		}
+
+		// Verify both keys are present
+		keys := make(map[string]bool)
+		for _, rev := range comp.Status.InputRevisions {
+			keys[rev.Key] = true
+		}
+		return keys["required"] && keys["optional"]
+	})
+
+	// The required input's resource version should remain the same
+	for _, rev := range comp.Status.InputRevisions {
+		if rev.Key == "required" {
+			assert.Equal(t, initialRequiredRV, rev.ResourceVersion, "required input should not have changed")
+		}
+		if rev.Key == "optional" {
+			assert.NotEmpty(t, rev.ResourceVersion, "optional input should have a resource version")
+		}
+	}
+
+	// Update the optional input
+	initialOptionalRV := ""
+	for _, rev := range comp.Status.InputRevisions {
+		if rev.Key == "optional" {
+			initialOptionalRV = rev.ResourceVersion
+			break
+		}
+	}
+
+	// Fetch the current version before updating
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(optionalInput), optionalInput))
+	optionalInput.Data["foo"] = "updated"
+	require.NoError(t, cli.Update(ctx, optionalInput))
+
+	// Status should reflect the updated optional input
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		for _, rev := range comp.Status.InputRevisions {
+			if rev.Key == "optional" {
+				return rev.ResourceVersion != initialOptionalRV
+			}
+		}
+		return false
+	})
+
+	// Delete the optional input
+	require.NoError(t, cli.Delete(ctx, optionalInput))
+
+	// Status should revert to only the required input
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return len(comp.Status.InputRevisions) == 1 && comp.Status.InputRevisions[0].Key == "required"
+	})
+}

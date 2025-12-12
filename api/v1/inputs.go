@@ -62,6 +62,13 @@ type Ref struct {
 	// A non-deferred input will trigger a synthesis immediately, whereas a
 	// deferred input will respect the cooldown period.
 	Defer bool `json:"defer,omitempty"`
+
+	// Optional indicates that this input is not required for synthesis to proceed.
+	// When true, synthesis will not be blocked if the input is missing.
+	// When false (default), synthesis will fail with "MissingInputs" if the input is not available.
+	//
+	// +kubebuilder:default=false
+	Optional bool `json:"optional,omitempty"`
 }
 
 // A reference to a resource kind/group.

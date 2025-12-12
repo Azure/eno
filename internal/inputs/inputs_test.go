@@ -205,6 +205,100 @@ func TestExist(t *testing.T) {
 			},
 			Expectation: false,
 		},
+		{
+			Name: "Optional ref missing should not block synthesis",
+			Composition: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{
+						{Key: "key1"},
+					},
+				},
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Key: "key1"},
+					},
+				},
+			},
+			Synthesizer: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "key1"},
+						{Key: "key2", Optional: true},
+					},
+				},
+			},
+			Expectation: true,
+		},
+		{
+			Name: "Required ref missing should block synthesis",
+			Composition: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{
+						{Key: "key1"},
+					},
+				},
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Key: "key1"},
+					},
+				},
+			},
+			Synthesizer: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "key1"},
+						{Key: "key2", Optional: false},
+					},
+				},
+			},
+			Expectation: false,
+		},
+		{
+			Name: "All optional refs missing should allow synthesis",
+			Composition: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{},
+				},
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{},
+				},
+			},
+			Synthesizer: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "key1", Optional: true},
+						{Key: "key2", Optional: true},
+					},
+				},
+			},
+			Expectation: true,
+		},
+		{
+			Name: "Optional ref present in InputRevisions",
+			Composition: apiv1.Composition{
+				Spec: apiv1.CompositionSpec{
+					Bindings: []apiv1.Binding{
+						{Key: "key1"},
+						{Key: "key2"},
+					},
+				},
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Key: "key1"},
+						{Key: "key2"},
+					},
+				},
+			},
+			Synthesizer: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "key1"},
+						{Key: "key2", Optional: true},
+					},
+				},
+			},
+			Expectation: true,
+		},
 	}
 
 	for _, tt := range tests {

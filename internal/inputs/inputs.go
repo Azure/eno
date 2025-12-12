@@ -7,8 +7,14 @@ import (
 )
 
 // Exist returns true when all of the inputs required by a synthesizer are represented by the given composition's status.
+// Optional refs are not required to exist and will not cause this function to return false.
 func Exist(syn *apiv1.Synthesizer, c *apiv1.Composition) bool {
 	for _, ref := range syn.Spec.Refs {
+		// Skip optional refs - they are not required to exist
+		if ref.Optional {
+			continue
+		}
+
 		found := slices.ContainsFunc(c.Status.InputRevisions, func(current apiv1.InputRevisions) bool {
 			return ref.Key == current.Key
 		})
