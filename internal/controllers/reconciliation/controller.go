@@ -282,7 +282,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 		// caused by multiple managers owning overlapping fields. When managers are renamed to "eno", the
 		// subsequent SSA Apply will treat eno as the sole owner and automatically merge the managedFields
 		// entries into a single consolidated entry for eno.
-		if current != nil {
+		if current != nil && len(c.migratingFieldManagers) > 0 {
 			wasModified, err := resource.NormalizeConflictingManagers(ctx, current, c.migratingFieldManagers)
 			if err != nil {
 				return false, fmt.Errorf("normalize conflicting manager failed: %w", err)
