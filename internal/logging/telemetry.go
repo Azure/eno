@@ -120,7 +120,11 @@ func (c *TelemetryController[T]) Reconcile(ctx context.Context, req reconcile.Re
 	if err != nil {
 		if client.IgnoreNotFound(err) == nil {
 			// Object was deleted - log with minimal info
-			c.logger.Log(ctx, c.messageFn(),
+			msg := ""
+			if c.messageFn != nil {
+				msg = c.messageFn()
+			}
+			c.logger.Log(ctx, msg,
 				"name", req.NamespacedName.Name,
 				"namespace", req.NamespacedName.Namespace,
 				"eventType", "status_deleted")
@@ -134,7 +138,11 @@ func (c *TelemetryController[T]) Reconcile(ctx context.Context, req reconcile.Re
 
 	// add event type to fields
 	fields = append([]any{"eventType", eventType}, fields...)
-	c.logger.Log(ctx, c.messageFn(), fields...)
+	msg := ""
+	if c.messageFn != nil {
+		msg = c.messageFn()
+	}
+	c.logger.Log(ctx, msg, fields...)
 
 	if c.frequency > 0 {
 		jitter := time.Duration(float64(c.frequency) * 0.2 * (0.5 - rand.Float64()))
