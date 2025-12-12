@@ -225,8 +225,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 		if err != nil {
 			return true, client.IgnoreNotFound(fmt.Errorf("deleting resource: %w", err))
 		}
-		logger.Info(fmt.Sprintf("deleted resource. Name: [%s], Namespace: [%s], ResourceVersion: [%s]",
-			res.Unstructured().GetName(), res.Unstructured().GetNamespace(), res.Unstructured().GetResourceVersion()))
+		logger.Info("deleted resource")
 		return true, nil
 	}
 
@@ -246,8 +245,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 		if err != nil {
 			return false, fmt.Errorf("creating resource: %w", err)
 		}
-		logger.Info(fmt.Sprintf("created resource. Name: [%s], Namespace: [%s], ResourceVersion: [%s]",
-			res.Unstructured().GetName(), res.Unstructured().GetNamespace(), res.Unstructured().GetResourceVersion()))
+		logger.Info("created resource")
 		return true, nil
 	}
 
@@ -271,8 +269,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 			logger.V(0).Info("resource didn't change after patch")
 			return false, nil
 		}
-		logger.Info(fmt.Sprintf("patched resource. Name: [%s], Namespace: [%s], ResourceVersion: [%s]",
-			updated.GetName(), updated.GetNamespace(), updated.GetResourceVersion()))
+		logger.Info("patched resource", "resourceVersion", updated.GetResourceVersion())
 		return true, nil
 	}
 
@@ -350,8 +347,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 	if current != nil {
 		logger = logger.WithValues("oldResourceVersion", current.GetResourceVersion())
 	}
-	logger.Info(fmt.Sprintf("applied resource. Name: [%s], Namespace: [%s], ResourceVersion: [%s]",
-		updated.GetName(), updated.GetNamespace(), updated.GetResourceVersion()))
+	logger.Info("applied resource")
 	return true, nil
 }
 
