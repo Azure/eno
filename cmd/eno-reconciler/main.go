@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -41,6 +42,7 @@ func run() error {
 		namespaceCreationGracePeriod time.Duration
 		namespaceCleanup             bool
 		enoBuildVersion              string
+		migratingFieldManagers       string
 
 		mgrOpts = &manager.Options{
 			Rest: ctrl.GetConfigOrDie(),
@@ -61,6 +63,7 @@ func run() error {
 	flag.DurationVar(&namespaceCreationGracePeriod, "ns-creation-grace-period", time.Second, "A namespace is assumed to be missing if it doesn't exist once one of its resources has existed for this long")
 	flag.BoolVar(&namespaceCleanup, "namespace-cleanup", true, "Clean up orphaned resources caused by namespace force-deletions")
 	flag.BoolVar(&recOpts.FailOpen, "fail-open", false, "Report that resources are reconciled once they've been seen, even if reconciliation failed. Overridden by individual resources with 'eno.azure.io/fail-open: true|false'")
+	flag.StringVar(&migratingFieldManagers, "migrating-field-managers", os.Getenv("MIGRATING_FIELD_MANAGERS"), "Comma-separated list of Kubernetes SSA field manager names to take ownership from during migrations")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 
@@ -124,6 +127,13 @@ func run() error {
 	recOpts.Manager = mgr
 	recOpts.WriteBuffer = writeBuffer
 	recOpts.Downstream = remoteConfig
+
+	if migratingFieldManagers != "" {
+		recOpts.MigratingFieldManagers = strings.Split(migratingFieldManagers, ",")
+		for i := range recOpts.MigratingFieldManagers {
+			recOpts.MigratingFieldManagers[i] = strings.TrimSpace(recOpts.MigratingFieldManagers[i])
+		}
+	}
 
 	err = reconciliation.New(mgr, recOpts)
 	if err != nil {

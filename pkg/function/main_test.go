@@ -157,7 +157,7 @@ func TestMainInputMissing(t *testing.T) {
 	}
 
 	require.NoError(t, main(fn, &mainConfig{}, ir, ow))
-	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[],\"results\":[{\"message\":\"error while reading input with key \\\"test-cm\\\": input \\\"test-cm\\\" was not found\",\"severity\":\"error\"}]}\n", outBuf.String())
+	assert.Equal(t, "{\"apiVersion\":\"config.kubernetes.io/v1\",\"kind\":\"ResourceList\",\"items\":[],\"results\":[{\"message\":\"error while reading input with key \\\"test-cm\\\": input \\\"test-cm\\\": input not found\",\"severity\":\"error\"}]}\n", outBuf.String())
 }
 
 func TestMainError(t *testing.T) {

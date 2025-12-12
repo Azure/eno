@@ -37,6 +37,7 @@ type Options struct {
 
 	DisableServerSideApply bool
 	FailOpen               bool
+	MigratingFieldManagers []string
 
 	Timeout               time.Duration
 	ReadinessPollInterval time.Duration
@@ -44,16 +45,17 @@ type Options struct {
 }
 
 type Controller struct {
-	client                client.Client
-	writeBuffer           *flowcontrol.ResourceSliceWriteBuffer
-	resourceClient        *resource.Cache
-	resourceFilter        cel.Program
-	timeout               time.Duration
-	readinessPollInterval time.Duration
-	upstreamClient        client.Client
-	minReconcileInterval  time.Duration
-	disableSSA            bool
-	failOpen              bool
+	client                 client.Client
+	writeBuffer            *flowcontrol.ResourceSliceWriteBuffer
+	resourceClient         *resource.Cache
+	resourceFilter         cel.Program
+	timeout                time.Duration
+	readinessPollInterval  time.Duration
+	upstreamClient         client.Client
+	minReconcileInterval   time.Duration
+	disableSSA             bool
+	failOpen               bool
+	migratingFieldManagers []string
 }
 
 func New(mgr ctrl.Manager, opts Options) error {
@@ -70,16 +72,17 @@ func New(mgr ctrl.Manager, opts Options) error {
 	}
 
 	c := &Controller{
-		client:                opts.Manager.GetClient(),
-		writeBuffer:           opts.WriteBuffer,
-		resourceClient:        cache,
-		resourceFilter:        opts.ResourceFilter,
-		timeout:               opts.Timeout,
-		readinessPollInterval: opts.ReadinessPollInterval,
-		upstreamClient:        upstreamClient,
-		minReconcileInterval:  opts.MinReconcileInterval,
-		disableSSA:            opts.DisableServerSideApply,
-		failOpen:              opts.FailOpen,
+		client:                 opts.Manager.GetClient(),
+		writeBuffer:            opts.WriteBuffer,
+		resourceClient:         cache,
+		resourceFilter:         opts.ResourceFilter,
+		timeout:                opts.Timeout,
+		readinessPollInterval:  opts.ReadinessPollInterval,
+		upstreamClient:         upstreamClient,
+		minReconcileInterval:   opts.MinReconcileInterval,
+		disableSSA:             opts.DisableServerSideApply,
+		failOpen:               opts.FailOpen,
+		migratingFieldManagers: opts.MigratingFieldManagers,
 	}
 
 	return builder.TypedControllerManagedBy[resource.Request](mgr).
@@ -271,6 +274,30 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 
 	// Dry-run the update to see if it's needed
 	if !c.disableSSA {
+		// Before the dry-run, normalize conflicting field managers to "eno" to prevent SSA validation errors
+		// caused by multiple managers owning overlapping fields. When managers are renamed to "eno", the
+		// subsequent SSA Apply will treat eno as the sole owner and automatically merge the managedFields
+		// entries into a single consolidated entry for eno.
+		if current != nil {
+			wasModified, err := resource.NormalizeConflictingManagers(ctx, current, c.migratingFieldManagers)
+			if err != nil {
+				return false, fmt.Errorf("normalize conflicting manager failed: %w", err)
+			}
+			if wasModified {
+				logger.Info("Normalized conflicting managers to eno")
+				err = c.upstreamClient.Update(ctx, current, client.FieldOwner("eno"))
+				if err != nil {
+					return false, fmt.Errorf("normalizing managedFields failed: %w", err)
+				}
+				// refetch the current before apply dry-run
+				current, err = c.getCurrent(ctx, res.Resource)
+				if err != nil {
+					return false, fmt.Errorf("re-fetching after normalizing manager failed: %w", err)
+				}
+
+				logger.Info("Successfully normalized field managers to eno")
+			}
+		}
 		dryRun, err := c.update(ctx, comp, prev, res, current, true)
 		if err != nil {
 			return false, fmt.Errorf("dry-run applying update: %w", err)
