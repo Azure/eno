@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/google/cel-go/cel"
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/Azure/eno/internal/resource"
 	"github.com/go-logr/logr"
+	"github.com/google/cel-go/cel"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -85,7 +85,8 @@ func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", comp.Spec.Synthesizer.Name)
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", comp.Spec.Synthesizer.Name,
+		"operationOrigin", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	ctx = logr.NewContext(ctx, logger)
 
 	// The reconciliation controller assumes that the previous synthesis will be loaded first

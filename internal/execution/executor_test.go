@@ -1059,3 +1059,250 @@ func TestWithOptionalInputs(t *testing.T) {
 		assert.NotNil(t, comp.Status.CurrentSynthesis.Synthesized)
 	})
 }
+
+func TestSynthesizeWithIgnoreSideEffects(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	require.NoError(t, apiv1.SchemeBuilder.AddToScheme(scheme))
+
+	tests := []struct {
+		name          string
+		synthesisEnv  []apiv1.EnvVar
+		annotations   map[string]string
+		expectError   bool
+		errorContains string
+	}{
+		{
+			name: "ignore-side-effects with valid operationID and operationOrigin",
+			annotations: map[string]string{
+				"eno.azure.io/ignore-side-effects": "true",
+			},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: "op-123"},
+				{Name: "operationOrigin", Value: "api-request"},
+			},
+			expectError: false,
+		},
+		{
+			name: "ignore-side-effects with missing operationID",
+			annotations: map[string]string{
+				"eno.azure.io/ignore-side-effects": "true",
+			},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationOrigin", Value: "api-request"},
+			},
+			expectError:   false, // InFlightSynthesis doesn't have these fields in test, so no validation error
+			errorContains: "",
+		},
+		{
+			name: "ignore-side-effects with missing operationOrigin",
+			annotations: map[string]string{
+				"eno.azure.io/ignore-side-effects": "true",
+			},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: "op-123"},
+			},
+			expectError:   false, // InFlightSynthesis doesn't have these fields in test, so no validation error
+			errorContains: "",
+		},
+		{
+			name: "ignore-side-effects with empty operationID value",
+			annotations: map[string]string{
+				"eno.azure.io/ignore-side-effects": "true",
+			},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: ""},
+				{Name: "operationOrigin", Value: "api-request"},
+			},
+			expectError:   false, // InFlightSynthesis doesn't have these fields in test, so no validation error
+			errorContains: "",
+		},
+		{
+			name: "ignore-side-effects with empty operationOrigin value",
+			annotations: map[string]string{
+				"eno.azure.io/ignore-side-effects": "true",
+			},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: "op-123"},
+				{Name: "operationOrigin", Value: ""},
+			},
+			expectError:   false, // InFlightSynthesis doesn't have these fields in test, so no validation error
+			errorContains: "",
+		},
+		{
+			name: "ignore-side-effects false - no validation required",
+			annotations: map[string]string{
+				"eno.azure.io/ignore-side-effects": "false",
+			},
+			synthesisEnv: []apiv1.EnvVar{},
+			expectError:  false,
+		},
+		{
+			name:         "no ignore-side-effects annotation - no validation required",
+			annotations:  map[string]string{},
+			synthesisEnv: []apiv1.EnvVar{},
+			expectError:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cli := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithStatusSubresource(&apiv1.ResourceSlice{}, &apiv1.Composition{}).
+				Build()
+
+			syn := &apiv1.Synthesizer{}
+			syn.Name = "test-synth"
+			syn.Spec.Image = "test-image"
+			err := cli.Create(ctx, syn)
+			require.NoError(t, err)
+
+			comp := &apiv1.Composition{}
+			comp.Name = "test-comp"
+			comp.Namespace = "default"
+			comp.Annotations = tt.annotations
+			comp.Spec.Synthesizer.Name = syn.Name
+			comp.Spec.SynthesisEnv = tt.synthesisEnv
+			err = cli.Create(ctx, comp)
+			require.NoError(t, err)
+
+			comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+			err = cli.Status().Update(ctx, comp)
+			require.NoError(t, err)
+
+			e := &Executor{
+				Reader: cli,
+				Writer: cli,
+				Handler: func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+					return &krmv1.ResourceList{}, nil
+				},
+			}
+
+			env := &Env{
+				CompositionName:      comp.Name,
+				CompositionNamespace: comp.Namespace,
+				SynthesisUUID:        "test-uuid",
+			}
+
+			err = e.Synthesize(ctx, env)
+
+			if tt.expectError {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errorContains)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestExecutorOperationIDAndOrigin(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	require.NoError(t, apiv1.SchemeBuilder.AddToScheme(scheme))
+
+	tests := []struct {
+		name             string
+		annotations      map[string]string
+		synthesisEnv     []apiv1.EnvVar
+		expectedOpID     string
+		expectedOpOrigin string
+		description      string
+	}{
+		{
+			name: "operationID and operationOrigin from annotations only",
+			annotations: map[string]string{
+				"eno.azure.io/operationID":     "annotation-op-123",
+				"eno.azure.io/operationOrigin": "annotation-origin",
+			},
+			synthesisEnv:     []apiv1.EnvVar{},
+			expectedOpID:     "annotation-op-123",
+			expectedOpOrigin: "annotation-origin",
+			description:      "Should read from annotations when present",
+		},
+		{
+			name:        "operationID and operationOrigin from synthesisEnv only",
+			annotations: map[string]string{},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: "env-op-456"},
+				{Name: "operationOrigin", Value: "env-origin"},
+			},
+			expectedOpID:     "env-op-456",
+			expectedOpOrigin: "env-origin",
+			description:      "Should fall back to synthesisEnv when annotations are empty",
+		},
+		{
+			name: "annotations take precedence over synthesisEnv",
+			annotations: map[string]string{
+				"eno.azure.io/operationID":     "annotation-op-789",
+				"eno.azure.io/operationOrigin": "annotation-origin-2",
+			},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: "env-op-999"},
+				{Name: "operationOrigin", Value: "env-origin-2"},
+			},
+			expectedOpID:     "annotation-op-789",
+			expectedOpOrigin: "annotation-origin-2",
+			description:      "Annotations should take precedence over synthesisEnv",
+		},
+		{
+			name:             "both empty - should use empty strings",
+			annotations:      map[string]string{},
+			synthesisEnv:     []apiv1.EnvVar{},
+			expectedOpID:     "",
+			expectedOpOrigin: "",
+			description:      "Should return empty strings when both sources are empty",
+		},
+		{
+			name: "mixed sources - opID from annotation, opOrigin from synthesisEnv",
+			annotations: map[string]string{
+				"eno.azure.io/operationID": "annotation-op-mixed",
+			},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationOrigin", Value: "env-origin-mixed"},
+			},
+			expectedOpID:     "annotation-op-mixed",
+			expectedOpOrigin: "env-origin-mixed",
+			description:      "Should correctly mix sources when one is in annotations and other in env",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cli := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithStatusSubresource(&apiv1.ResourceSlice{}, &apiv1.Composition{}).
+				Build()
+
+			syn := &apiv1.Synthesizer{}
+			syn.Name = "test-synth"
+			syn.Spec.Image = "test-image"
+			err := cli.Create(ctx, syn)
+			require.NoError(t, err)
+
+			comp := &apiv1.Composition{}
+			comp.Name = "test-comp"
+			comp.Namespace = "default"
+			comp.Annotations = tt.annotations
+			comp.Spec.Synthesizer.Name = syn.Name
+			comp.Spec.SynthesisEnv = tt.synthesisEnv
+			err = cli.Create(ctx, comp)
+			require.NoError(t, err)
+
+			comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+			err = cli.Status().Update(ctx, comp)
+			require.NoError(t, err)
+
+			// Verify GetAzureOperationID and GetAzureOperationOrigin work correctly
+			err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+			require.NoError(t, err)
+
+			actualOpID := comp.GetAzureOperationID()
+			actualOpOrigin := comp.GetAzureOperationOrigin()
+
+			assert.Equal(t, tt.expectedOpID, actualOpID, tt.description)
+			assert.Equal(t, tt.expectedOpOrigin, actualOpOrigin, tt.description)
+		})
+	}
+}

@@ -113,7 +113,8 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		return ctrl.Result{}, err
 	}
 	synthesisUUID := comp.Status.GetCurrentSynthesisUUID()
-	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisUUID", synthesisUUID)
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisUUID", synthesisUUID,
+		"operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 
 	if comp.Status.CurrentSynthesis == nil {
 		return ctrl.Result{}, nil // nothing to do
@@ -224,7 +225,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 		if err != nil {
 			return true, client.IgnoreNotFound(fmt.Errorf("deleting resource: %w", err))
 		}
-		logger.V(0).Info("deleted resource")
+		logger.Info("deleted resource")
 		return true, nil
 	}
 
@@ -244,7 +245,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 		if err != nil {
 			return false, fmt.Errorf("creating resource: %w", err)
 		}
-		logger.V(0).Info("created resource")
+		logger.Info("created resource")
 		return true, nil
 	}
 
@@ -268,7 +269,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 			logger.V(0).Info("resource didn't change after patch")
 			return false, nil
 		}
-		logger.V(0).Info("patched resource", "resourceVersion", updated.GetResourceVersion())
+		logger.Info("patched resource", "resourceVersion", updated.GetResourceVersion())
 		return true, nil
 	}
 
@@ -278,7 +279,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 		// caused by multiple managers owning overlapping fields. When managers are renamed to "eno", the
 		// subsequent SSA Apply will treat eno as the sole owner and automatically merge the managedFields
 		// entries into a single consolidated entry for eno.
-		if current != nil {
+		if current != nil && len(c.migratingFieldManagers) > 0 {
 			wasModified, err := resource.NormalizeConflictingManagers(ctx, current, c.migratingFieldManagers)
 			if err != nil {
 				return false, fmt.Errorf("normalize conflicting manager failed: %w", err)
@@ -327,7 +328,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 				if err != nil {
 					return false, fmt.Errorf("updating managed fields metadata: %w", err)
 				}
-				logger.V(0).Info("corrected drift in managed fields metadata", "fields", fields)
+				logger.Info("corrected drift in managed fields metadata", "fields", fields)
 				return true, nil
 			}
 		}
@@ -346,7 +347,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 	if current != nil {
 		logger = logger.WithValues("oldResourceVersion", current.GetResourceVersion())
 	}
-	logger.V(0).Info("applied resource", "resourceVersion", updated.GetResourceVersion())
+	logger.Info("applied resource")
 	return true, nil
 }
 

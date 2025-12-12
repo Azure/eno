@@ -26,8 +26,8 @@ func (c *pruningController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		logger.Error(err, "failed to get composition")
 		return ctrl.Result{}, err
 	}
-
-	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", comp.Spec.Synthesizer.Name)
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", comp.Spec.Synthesizer.Name,
+		"operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	ctx = logr.NewContext(ctx, logger)
 
 	synth := &apiv1.Synthesizer{}

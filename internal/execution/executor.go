@@ -56,6 +56,9 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 		return fmt.Errorf("fetching synthesizer: %w", err)
 	}
 
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", syn.Name,
+		"operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
+	ctx = logr.NewContext(ctx, logger)
 	logger.Info("fetched composition and synthesizer resources")
 
 	if reason, skip := skipSynthesis(comp, syn, env); skip {
