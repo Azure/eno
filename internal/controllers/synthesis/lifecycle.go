@@ -103,6 +103,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisUUID", comp.Status.InFlightSynthesis.UUID,
 		"operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
+	ctx = logr.NewContext(ctx, logger)
 
 	syn := &apiv1.Synthesizer{}
 	syn.Name = comp.Spec.Synthesizer.Name
@@ -113,6 +114,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	if syn != nil {
 		logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
+		ctx = logr.NewContext(ctx, logger)
 	}
 
 	// Confirm that a pod doesn't already exist for this synthesis without trusting informers.
@@ -123,11 +125,13 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		synthesisIDLabelKey: comp.Status.InFlightSynthesis.UUID,
 	})
 	if err != nil {
+		logger.Error(err, fmt.Sprintf("Error while listing Pods in Namespace[%s], SynthesisUUID[%s]",
+			c.config.PodNamespace, comp.Status.InFlightSynthesis.UUID))
 		return ctrl.Result{}, fmt.Errorf("checking for existing pod: %w", err)
 	}
 	for _, pod := range pods.Items {
 		if pod.DeletionTimestamp == nil {
-			logger.V(1).Info(fmt.Sprintf("refusing to create new synthesizer pod because the pod %q already exists and has not been deleted", pod.Name))
+			logger.Info(fmt.Sprintf("refusing to create new synthesizer pod because the pod [%q] already exists and has not been deleted", pod.Name))
 			return ctrl.Result{}, nil
 		}
 	}
@@ -136,9 +140,10 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	pod := newPod(c.config, comp, syn)
 	err = c.client.Create(ctx, pod)
 	if err != nil {
+		logger.Error(err, fmt.Sprintf("failed to create pod Name[%s], Namespace[%s]", pod.GetName(), pod.GetNamespace()))
 		return ctrl.Result{}, fmt.Errorf("creating pod: %w", err)
 	}
-	logger.V(0).Info("created synthesizer pod", "podName", pod.Name)
+	logger.Info("created synthesizer pod", "podName", pod.Name)
 	sytheses.Inc()
 
 	return ctrl.Result{}, nil

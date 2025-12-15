@@ -73,6 +73,7 @@ func newReconstitutionSource(mgr ctrl.Manager, resourceFilter cel.Program) (sour
 
 func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx)
+	logger.Info("reconstituting composition resources", "compositionName", req.Name, "compositionNamespace", req.Namespace)
 
 	comp := &apiv1.Composition{}
 	err := r.client.Get(ctx, req.NamespacedName, comp)
@@ -90,25 +91,32 @@ func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) 
 	ctx = logr.NewContext(ctx, logger)
 
 	// The reconciliation controller assumes that the previous synthesis will be loaded first
+	logger.Info("populating cache with previous synthesis")
 	filled, err := r.populateCache(ctx, comp, comp.Status.PreviousSynthesis)
 	if err != nil {
 		logger.Error(err, "failed to process previous state")
 		return ctrl.Result{}, err
 	}
 	if filled {
+		logger.Info("cache filled with previous synthesis, requeueing", "synthesisUUID", comp.Status.PreviousSynthesis.UUID)
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	logger.Info("populating cache with current synthesis")
 	filled, err = r.populateCache(ctx, comp, comp.Status.CurrentSynthesis)
 	if err != nil {
 		logger.Error(err, "failed to process current state")
 		return ctrl.Result{}, err
 	}
 	if filled {
+		logger.Info("cache filled with current synthesis, requeueing", "synthesisUUID", comp.Status.CurrentSynthesis.UUID)
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	logger.Info("purging stale syntheses from cache")
 	r.cache.Purge(ctx, req.NamespacedName, comp)
+
+	logger.Info("reconstitution complete")
 	return ctrl.Result{}, nil
 }
 

@@ -137,25 +137,30 @@ func (o *op) SynthRolloutOrderHash() []byte {
 
 func (o *op) HasBeenPatched(ctx context.Context, cli client.Reader, grace time.Duration) (bool, time.Duration, error) {
 	logger := logr.FromContextOrDiscard(ctx)
+	logger.Info("checking if operation has been patched")
 
 	wait := time.Since(o.Dispatched)
 	if wait > grace {
-		logger.V(1).Info("operation cache grace period expired", "synthesisUUID", o.id)
+		logger.Info("operation cache grace period expired", "synthesisUUID", o.id)
 		return true, wait, nil
 	}
 
 	comp := &apiv1.Composition{}
 	err := cli.Get(ctx, client.ObjectKeyFromObject(o.Composition), comp)
 	if err != nil {
+		logger.Error(err, "failed to get composition while checking patch status")
 		return false, 0, err
 	}
 
 	if syn := comp.Status.CurrentSynthesis; syn != nil && syn.UUID == o.id.String() {
+		logger.Info("operation found in current synthesis", "waitTime", wait.Milliseconds())
 		return true, wait, nil
 	}
 	if syn := comp.Status.InFlightSynthesis; syn != nil && syn.UUID == o.id.String() {
+		logger.Info("operation found in in-flight synthesis", "waitTime", wait.Milliseconds())
 		return true, wait, nil
 	}
+	logger.Info("operation not yet reflected in cache", "waitTime", wait.Milliseconds())
 	return false, wait, nil
 }
 

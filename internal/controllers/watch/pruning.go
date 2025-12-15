@@ -40,8 +40,10 @@ func (c *pruningController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	for i, ir := range comp.Status.InputRevisions {
 		if hasBindingKey(comp, synth, ir.Key) {
+			logger.Info("input revision still has binding, keeping", "key", ir.Key, "revision", ir.Revision)
 			continue
 		}
+		logger.Info("pruning input revision - no longer has binding", "key", ir.Key, "revision", ir.Revision, "index", i)
 		comp.Status.InputRevisions = append(comp.Status.InputRevisions[:i], comp.Status.InputRevisions[i+1:]...)
 		err = c.client.Status().Update(ctx, comp)
 		if err != nil {
@@ -49,7 +51,7 @@ func (c *pruningController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, err
 		}
 
-		logger.V(1).Info("pruned old input revision from composition status", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", ir.Key)
+		logger.Info("pruned old input revision from composition status", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", ir.Key)
 		return ctrl.Result{}, nil
 	}
 

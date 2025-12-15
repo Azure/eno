@@ -63,9 +63,9 @@ func NewKindWatchController(ctx context.Context, parent *WatchController, resour
 	k.cancel = cancel
 
 	go func() {
-		logger.V(1).Info("starting kind watch controller")
+		logger.Info("starting kind watch controller")
 		rrc.Start(ctx)
-		logger.V(1).Info("kind watch controller stopped")
+		logger.Info("kind watch controller stopped")
 	}()
 
 	return k, nil
@@ -170,31 +170,36 @@ func (k *KindWatchController) Stop(ctx context.Context) {
 	if k.cancel != nil {
 		k.cancel()
 	}
-	logger.V(1).Info("stopping kind watch controller")
+	logger.Info("stopping kind watch controller")
 }
 
 func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx).WithValues("group", k.gvk.Group, "version", k.gvk.Version, "kind", k.gvk.Kind)
 
+	logger.Info("reconciling watched resource")
 	meta := &metav1.PartialObjectMetadata{}
 	meta.SetGroupVersionKind(k.gvk)
 	err := k.client.Get(ctx, req.NamespacedName, meta)
 	isDeleted := errors.IsNotFound(err)
 	if err != nil && !isDeleted {
+		logger.Error(err, "failed to get watched resource")
 		return ctrl.Result{}, err
 	}
 
 	// If deleted, we still need to process it to remove from compositions
 	if isDeleted {
+		logger.Info("watched resource deleted, processing deletion")
 		meta.SetName(req.Name)
 		meta.SetNamespace(req.Namespace)
 	}
 
+	logger.Info("watched resource exists, processing update", "resourceVersion", meta.GetResourceVersion())
 	list := &apiv1.SynthesizerList{}
 	err = k.client.List(ctx, list, client.MatchingFields{
 		manager.IdxSynthesizersByRef: path.Join(k.gvk.Group, k.gvk.Version, k.gvk.Kind),
 	})
 	if err != nil {
+		logger.Error(err, "failed to list synthesizers for resource kind")
 		return ctrl.Result{}, fmt.Errorf("listing synthesizers: %w", err)
 	}
 	rand.Shuffle(len(list.Items), func(i, j int) { list.Items[i], list.Items[j] = list.Items[j], list.Items[i] })
@@ -210,6 +215,7 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 				manager.IdxCompositionsBySynthesizer: synth.Name,
 			})
 			if err != nil {
+				logger.Error(err, "failed to list compositions for synthesizer", "synthesizerName", synth.Name)
 				return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 			}
 			modified, err := k.updateCompositions(ctx, logger, &synth, meta, list, isDeleted)
@@ -223,6 +229,7 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 			manager.IdxCompositionsByBinding: path.Join(synth.Name, meta.Namespace, meta.Name),
 		})
 		if err != nil {
+			logger.Error(err, "failed to list compositions by binding", "synthesizerName", synth.Name)
 			return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 		}
 		modified, err := k.updateCompositions(ctx, logger, &synth, meta, list, isDeleted)
@@ -231,6 +238,7 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
+	logger.Info("finished reconciling watched resource")
 	return ctrl.Result{}, nil
 }
 

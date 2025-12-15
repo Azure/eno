@@ -50,6 +50,8 @@ func (c *WatchController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, err
 	}
 
+	logger.Info("reconciling watch controllers", "synthesizerCount", len(synths.Items), "activeControllers", len(c.refControllers))
+
 	// It's important to randomize the order over which we iterate the synths,
 	// otherwise one bad resource reference can block the loop
 	rand.Shuffle(len(synths.Items), func(i, j int) { synths.Items[i], synths.Items[j] = synths.Items[j], synths.Items[i] })
@@ -58,23 +60,28 @@ func (c *WatchController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	synthsByRef := map[apiv1.ResourceRef]struct{}{}
 	for _, syn := range synths.Items {
 		if syn.DeletionTimestamp != nil {
+			logger.Info("skipping deleted synthesizer", "synthesizerName", syn.Name)
 			continue
 		}
+		logger.Info("processing synthesizer refs", "synthesizerName", syn.Name, "refCount", len(syn.Spec.Refs))
 		for _, ref := range syn.Spec.Refs {
 			ref := ref
 			synthsByRef[ref.Resource] = struct{}{}
 
 			current := c.refControllers[ref.Resource]
 			if current != nil {
+				logger.Info("controller already running for resource", "resource", ref.Resource)
 				continue // already running
 			}
 
+			logger.Info("creating new kind watch controller", "resource", ref.Resource, "synthesizerName", syn.Name)
 			rc, err := NewKindWatchController(ctx, c, &ref.Resource)
 			if err != nil {
 				logger.Error(err, "failed to create kind watch controller", "resource", ref.Resource)
 				return ctrl.Result{}, err
 			}
 			c.refControllers[ref.Resource] = rc
+			logger.Info("successfully started kind watch controller", "resource", ref.Resource, "totalControllers", len(c.refControllers))
 			return ctrl.Result{Requeue: true}, nil
 		}
 	}

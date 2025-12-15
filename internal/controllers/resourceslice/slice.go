@@ -56,7 +56,7 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		err := s.client.Get(ctx, client.ObjectKeyFromObject(slice), slice)
 		if errors.IsNotFound(err) {
 			if comp.DeletionTimestamp != nil {
-				logger.V(1).Info("resource slice is missing, ignoring because composition is being deleted", "resourceSliceName", ref.Name)
+				logger.Info("resource slice is missing, ignoring because composition is being deleted", "resourceSliceName", ref.Name)
 				continue
 			}
 			return s.handleMissingSlice(ctx, comp, ref.Name)
@@ -102,19 +102,20 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 	err = s.client.Status().Update(ctx, comp)
 	if errors.IsConflict(err) {
+		logger.Error(err, "Failed to update composition satus due to conflict")
 		return ctrl.Result{}, fmt.Errorf("conflict while updating composition status to reflect resource slices - will retry")
 	}
 	if err != nil {
 		logger.Error(err, "failed to update composition status")
 		return ctrl.Result{}, err
 	}
-	logger.V(1).Info("aggregated resource status into composition", "reconciled", snapshot.Reconciled, "ready", snapshot.Ready)
+	logger.Info("aggregated resource status into composition", "reconciled", snapshot.Reconciled, "ready", snapshot.Ready)
 
 	return ctrl.Result{}, nil
 }
 
 func (s *sliceController) handleMissingSlice(ctx context.Context, comp *apiv1.Composition, sliceName string) (ctrl.Result, error) {
-	logger := logr.FromContextOrDiscard(ctx)
+	logger := logr.FromContextOrDiscard(ctx).WithValues("resourceSliceName", sliceName)
 
 	// We can't do anything about missing resource slices if synthesis is already in-flight or it isn't safe to resynthesize
 	if comp.ShouldIgnoreSideEffects() || comp.Status.InFlightSynthesis != nil || comp.ShouldForceResynthesis() {
@@ -137,18 +138,20 @@ func (s *sliceController) handleMissingSlice(ctx context.Context, comp *apiv1.Co
 	meta.Namespace = comp.Namespace
 	err := s.client.Get(ctx, client.ObjectKeyFromObject(meta), meta)
 	if err == nil {
-		logger.V(1).Info("resource slice is not missing!", "resourceSliceName", sliceName)
+		logger.Info("resource slice is not missing!", "resourceSliceName", sliceName)
 		return ctrl.Result{}, nil
 	}
 	if !errors.IsNotFound(err) {
+		logger.Error(err, "failed to get resourceslice")
 		return ctrl.Result{}, fmt.Errorf("getting resource slice metadata: %w", err)
 	}
 
 	// Resynthesis is required
-	logger.Info("resource slice is missing - resynthesizing", "resourceSliceName", sliceName)
+	logger.Info("resource slice is missing - resynthesizing")
 	comp.ForceResynthesis()
 	err = s.client.Update(ctx, comp)
 	if err != nil {
+		logger.Error(err, "failed to update composition")
 		return ctrl.Result{}, fmt.Errorf("updating composition pending resynthesis: %w", err)
 	}
 	return ctrl.Result{}, nil
@@ -160,20 +163,24 @@ func processCompositionTransition(ctx context.Context, comp *apiv1.Composition, 
 	synthesisMatches := comp.Status.CurrentSynthesis == nil || ((comp.Status.CurrentSynthesis.Reconciled != nil) == snapshot.Reconciled && (comp.Status.CurrentSynthesis.Ready != nil) == snapshot.Ready)
 	errorsMatch := comp.Status.Simplified == nil || comp.Status.Simplified.Status != "Reconciling" || comp.Status.Simplified.Error == snapshot.Error
 	if synthesisMatches && errorsMatch {
+		logger.Info("no composition status change detected", "snapshotReconciled", snapshot.Reconciled, "snapshotReady", snapshot.Ready, "snapshotError", snapshot.Error)
 		return false // either no change or no synthesis yet
 	}
 
 	// The composition's simplified error message is owned by this controller while the synthesis is being reconciled
 	if comp.Status.Simplified != nil && comp.Status.Simplified.Status == "Reconciling" {
+		logger.Info("updating composition simplified error", "previousError", comp.Status.Simplified.Error, "newError", snapshot.Error)
 		comp.Status.Simplified.Error = snapshot.Error
 	}
 
 	if comp.Status.CurrentSynthesis == nil {
+		logger.Info("no current synthesis, returning early")
 		return true // nothing else to do
 	}
 
 	// Empty compositions should logically become ready immediately after reconciliation
 	if len(comp.Status.CurrentSynthesis.ResourceSlices) == 0 {
+		logger.Info("empty composition, setting ready time to reconciled time")
 		snapshot.ReadyTime = comp.Status.CurrentSynthesis.Reconciled
 	}
 

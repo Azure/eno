@@ -86,7 +86,7 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 			logger.Error(err, "failed to update composition")
 			return ctrl.Result{}, err
 		}
-		logger.V(1).Info("added cleanup finalizer to composition")
+		logger.Info("added cleanup finalizer to composition")
 		return ctrl.Result{}, nil
 	}
 
@@ -94,6 +94,7 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 	synth.Name = comp.Spec.Synthesizer.Name
 	err = c.client.Get(ctx, client.ObjectKeyFromObject(synth), synth)
 	if errors.IsNotFound(err) {
+		logger.Info(fmt.Sprintf("synthesizer not found for composition[%s], namespace[%s], synthName[%s]", comp.GetName(), comp.GetNamespace(), comp.Spec.Synthesizer.Name))
 		synth = nil
 		err = nil
 	}
@@ -154,12 +155,12 @@ func (c *compositionController) reconcileDeletedComposition(ctx context.Context,
 				logger.Error(err, "failed to update current composition generation")
 				return ctrl.Result{}, err
 			}
-			logger.V(1).Info("updated composition status to reflect deletion", "synthesisUUID", comp.Status.CurrentSynthesis.UUID)
+			logger.Info("updated composition status to reflect deletion", "synthesisUUID", comp.Status.CurrentSynthesis.UUID)
 			return ctrl.Result{}, nil
 		}
 
 		if syn.Reconciled == nil {
-			logger.V(1).Info("refusing to remove composition finalizer because it is still being reconciled")
+			logger.Info("refusing to remove composition finalizer because it is still being reconciled")
 			return ctrl.Result{}, nil
 		}
 	}
@@ -171,24 +172,26 @@ func (c *compositionController) reconcileDeletedComposition(ctx context.Context,
 			return ctrl.Result{}, err
 		}
 
-		logger.V(1).Info("removed finalizer from composition")
+		logger.Info("removed finalizer from composition")
 	}
 
 	return ctrl.Result{}, nil
 }
 
 func (c *compositionController) reconcileSimplifiedStatus(ctx context.Context, synth *apiv1.Synthesizer, comp *apiv1.Composition) (bool, error) {
+	logger := logr.FromContextOrDiscard(ctx)
 	next := buildSimplifiedStatus(synth, comp)
 	if equality.Semantic.DeepEqual(next, comp.Status.Simplified) {
 		return false, nil
 	}
 
+	logger.Info("composition status changed", "previousStatus", comp.Status.Simplified, "currentStatus", next)
 	copy := comp.DeepCopy()
 	copy.Status.Simplified = next
 	if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(comp)); err != nil {
 		return false, fmt.Errorf("patching simplified status: %w", err)
 	}
-
+	logger.Info("sucessfully updated status for composition")
 	return true, nil
 }
 

@@ -105,6 +105,7 @@ func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 	logger := logr.FromContextOrDiscard(ctx).WithValues("resourceSliceName", sliceNSN.Name, "resourceSliceNamespace", sliceNSN.Namespace, "controller", "writeBuffer")
 	ctx = logr.NewContext(ctx, logger)
 
+	logger.Info("processing write buffer queue item", "requeues", w.queue.NumRequeues(item))
 	w.mut.Lock()
 	insertionTime := w.insertionTime[sliceNSN]
 	updates := w.state[sliceNSN]
@@ -113,14 +114,17 @@ func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 	// Limit the number of operations per patch request
 	const max = (10000 / 2) - 2 // 2 ops to initialize status + 2 ops per resource
 	if len(updates) > max {
+		logger.Info("limiting updates per patch request", "totalUpdates", len(updates), "processingNow", max, "deferredUpdates", len(updates)-max)
 		w.state[sliceNSN] = updates[max:]
 		updates = updates[:max]
 	}
 	w.mut.Unlock()
 
+	logger.Info("dequeued resource slice updates", "updateCount", len(updates), "queueAge", time.Since(insertionTime).Milliseconds())
 	// We only forget the rate limit once the update queue for this slice is empty.
 	// So the first write is fast, but a steady stream of writes will be throttled exponentially.
 	if len(updates) == 0 {
+		logger.Info("no updates to process, forgetting rate limit")
 		w.queue.Forget(item)
 		w.mut.Lock()
 		delete(w.insertionTime, sliceNSN)
@@ -129,22 +133,26 @@ func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 	}
 
 	if w.updateSlice(ctx, insertionTime, sliceNSN, updates) {
+		logger.Info("successfully updated resource slice, re-queueing to process remaining updates")
 		w.queue.AddRateLimited(item)
 		return true
 	}
 
 	// Put the updates back in the buffer to retry on the next attempt
+	logger.Info("failed to update resource slice, returning updates to buffer for retry", "updateCount", len(updates))
 	w.mut.Lock()
 	w.state[sliceNSN] = append(updates, w.state[sliceNSN]...)
 	w.mut.Unlock()
 	w.queue.AddRateLimited(item)
 
+	logger.Info("re-queued resource slice with rate limiting")
 	return true
 }
 
 func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, insertionTime time.Time, sliceNSN types.NamespacedName, updates []*resourceSliceStatusUpdate) (success bool) {
 	logger := logr.FromContextOrDiscard(ctx)
 
+	logger.Info("updating resource slice", "updateCount", len(updates))
 	slice := &apiv1.ResourceSlice{}
 	slice.Name = sliceNSN.Name
 	slice.Namespace = sliceNSN.Namespace
@@ -156,9 +164,11 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, insertionTim
 
 	patches := w.buildPatch(slice, updates)
 	if len(patches) == 0 {
+		logger.Info("no patches to apply after building patch")
 		return true // nothing to do!
 	}
 
+	logger.Info("built patches for resource slice", "patchCount", len(patches), "updateCount", len(updates))
 	patchJson, err := json.Marshal(&patches)
 	if err != nil {
 		logger.Error(err, "unable to encode patch")
@@ -166,7 +176,7 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, insertionTim
 	}
 	err = w.client.Status().Patch(ctx, slice, client.RawPatch(types.JSONPatchType, patchJson))
 	if errors.IsNotFound(err) {
-		logger.V(1).Info("resource slice deleted - dropping buffered status updates")
+		logger.Info("resource slice deleted - dropping buffered status updates")
 		return true
 	}
 	if err != nil {
@@ -174,7 +184,7 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, insertionTim
 		return false
 	}
 
-	logger.V(1).Info(fmt.Sprintf("updated the status of %d resources in slice", len(updates)), "latency", time.Since(insertionTime).Abs().Milliseconds())
+	logger.Info(fmt.Sprintf("updated the status of %d resources in slice", len(updates)), "latency", time.Since(insertionTime).Abs().Milliseconds())
 	sliceStatusUpdates.Inc()
 	return true
 }
