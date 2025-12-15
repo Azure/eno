@@ -314,23 +314,27 @@ func (c *Controller) syncOverlayResource(
 		mirror.Spec.SymphonyRef = corev1.LocalObjectReference{Name: symphony.Name}
 		mirror.Spec.SourceResource = ref.Resource
 
-		// Serialize the resource data
-		rawData, err := json.Marshal(obj.Object)
-		if err != nil {
-			return fmt.Errorf("marshaling resource data: %w", err)
-		}
-		mirror.Status.Data = &runtime.RawExtension{Raw: rawData}
-		mirror.Status.LastSyncTime = &metav1.Time{Time: time.Now()}
-		mirror.Status.SyncGeneration = obj.GetResourceVersion()
-
-		// Update conditions
-		setSyncedCondition(mirror, true, "SyncSuccess", "Successfully synced from overlay cluster")
-
 		return nil
 	})
 
 	if err != nil {
 		return 0, fmt.Errorf("creating/updating InputMirror: %w", err)
+	}
+
+	// Update status separately - CreateOrUpdate only updates spec, not status subresource
+	rawData, err := json.Marshal(obj.Object)
+	if err != nil {
+		return 0, fmt.Errorf("marshaling resource data: %w", err)
+	}
+	mirror.Status.Data = &runtime.RawExtension{Raw: rawData}
+	mirror.Status.LastSyncTime = &metav1.Time{Time: time.Now()}
+	mirror.Status.SyncGeneration = obj.GetResourceVersion()
+
+	// Update conditions
+	setSyncedCondition(mirror, true, "SyncSuccess", "Successfully synced from overlay cluster")
+
+	if err := c.client.Status().Update(ctx, mirror); err != nil {
+		return 0, fmt.Errorf("updating InputMirror status: %w", err)
 	}
 
 	logger.V(1).Info("synced overlay resource", "result", result, "mirrorName", mirrorName)
