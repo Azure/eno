@@ -72,21 +72,31 @@ func (o *Op) UnmarshalJSON(data []byte) error {
 // Apply applies the operation to the "mutated" object if the condition is met by the "current" object.
 func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutated *unstructured.Unstructured) (Status, error) {
 	logger := logr.FromContextOrDiscard(ctx)
+	logger.Info("applying mutation operation", "path", o.Path.String(), "hasCondition", o.Condition != nil, "currentExists", current != nil)
 
 	if o.Condition != nil {
 		val, err := enocel.Eval(ctx, o.Condition, comp, current, o.Path)
 		if err != nil && current == nil {
 			if !strings.HasPrefix(err.Error(), "no such ") { // e.g. "no such property" or "no such key"
-				logger.V(1).Info("override condition is invalid", "error", err)
+				logger.Info("override condition is invalid", "error", err, "path", o.Path.String())
+			} else {
+				logger.Info("condition evaluation failed on missing resource", "error", err, "path", o.Path.String())
 			}
 			return StatusInvalidCondition, nil
 		}
 		if b, ok := val.Value().(bool); !ok || !b {
+			logger.Info("mutation condition not met, skipping", "path", o.Path.String(), "conditionResult", val.Value(), "resultType", fmt.Sprintf("%T", val.Value()))
 			return StatusInactive, nil // condition not met
 		}
 	}
-
-	return o.Path.Apply(mutated.Object, o.Value)
+	logger.Info("applying mutation to path", "path", o.Path.String(), "valueType", fmt.Sprintf("%T", o.Value))
+	status, err := o.Path.Apply(mutated.Object, o.Value)
+	if err != nil {
+		logger.Error(err, "failed to apply mutation", "path", o.Path.String(), "status", status)
+		return status, err
+	}
+	logger.Info("successfully applied mutation", "path", o.Path.String(), "status", status)
+	return status, nil
 }
 
 // unquoteKey removes quotes from a key string, handling both single and double quotes

@@ -86,9 +86,10 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			return ctrl.Result{}, err
 		}
 		if !ok {
-			logger.V(1).Info("waiting for cache to reflect previous operation")
+			logger.Info("waiting for cache to reflect previous operation", "waitDuration", wait, "compositionName", c.lastApplied.Composition.Name, "compositionNamespace", c.lastApplied.Composition.Namespace)
 			return ctrl.Result{RequeueAfter: wait}, nil
 		}
+		logger.Info("cache has reflected previous operation, proceeding", "compositionName", c.lastApplied.Composition.Name, "compositionNamespace", c.lastApplied.Composition.Namespace)
 		c.lastApplied = nil
 	}
 
@@ -99,6 +100,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, err
 	}
 	synthsByName, synthEpoch := indexSynthesizers(synths.Items)
+	logger.Info("listed synthesizers", "synthesizerCount", len(synths.Items), "synthEpoch", synthEpoch)
 
 	comps := &apiv1.CompositionList{}
 	err = c.client.List(ctx, comps)
@@ -107,6 +109,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, err
 	}
 	nextSlot := c.getNextCooldownSlot(comps)
+	logger.Info("listed compositions", "compositionCount", len(comps.Items), "nextCooldownSlot", nextSlot)
 
 	var inFlight int
 	var op *op
@@ -119,6 +122,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		if missedReconciliation(&comp, c.watchdogThreshold) {
 			synth := synthsByName[comp.Spec.Synthesizer.Name]
 			stuckReconciling.WithLabelValues(comp.Spec.Synthesizer.Name, getSynthOwner(&synth)).Inc()
+			logger.Info("detected composition missed reconciliation", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", comp.Spec.Synthesizer.Name)
 		}
 
 		synth, ok := synthsByName[comp.Spec.Synthesizer.Name]
@@ -134,10 +138,12 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	freeSynthesisSlots.Set(float64(c.concurrencyLimit - inFlight))
 
 	if op == nil || inFlight >= c.concurrencyLimit {
+		logger.Info("concurrency limit reached, deferring synthesis", "inFlight", inFlight, "limit", c.concurrencyLimit, "nextCompositionName", op.Composition.Name, "nextCompositionNamespace", op.Composition.Namespace)
 		return ctrl.Result{}, nil
 	}
 	if !op.NotBefore.IsZero() { // the next op isn't ready to be dispathced yet
 		if wait := time.Until(op.NotBefore); wait > 0 {
+			logger.Info("synthesis operation not ready, waiting for cooldown", "compositionName", op.Composition.Name, "compositionNamespace", op.Composition.Namespace, "waitDuration", wait, "notBefore", op.NotBefore)
 			return ctrl.Result{RequeueAfter: wait}, nil
 		}
 	}
@@ -150,10 +156,11 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			logger.Error(err, "updating synthesizer epoch")
 			return ctrl.Result{}, err
 		}
-		logger.V(1).Info("updated global synthesizer epoch")
+		logger.Info("updated global synthesizer epoch")
 		return ctrl.Result{}, nil
 	}
 
+	logger.Info("dispatching synthesis operation", "synthesisUUID", op.id)
 	if err := c.dispatchOp(ctx, op); err != nil {
 		if errors.IsInvalid(err) {
 			logger.Error(err, "conflict while dispatching synthesis")
@@ -165,7 +172,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	op.Dispatched = time.Now()
 	c.lastApplied = op
-	logger.V(1).Info("dispatched synthesis", "synthesisUUID", op.id)
+	logger.Info("successfully dispatched synthesis", "synthesisUUID", op.id, "dispatchLatency", time.Since(start).Milliseconds())
 
 	return ctrl.Result{}, nil
 }

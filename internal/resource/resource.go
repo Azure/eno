@@ -123,7 +123,10 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 	res.Ref.Kind = parsed.GetKind()
 	logger = logger.WithValues("resourceKind", parsed.GetKind(), "resourceName", parsed.GetName(), "resourceNamespace", parsed.GetNamespace())
 
+	logger.Info("creating new resource", "apiVersion", parsed.GetAPIVersion(), "strict", strict)
+
 	if res.Ref.Name == "" || res.Ref.Kind == "" || parsed.GetAPIVersion() == "" {
+		logger.Error(nil, "resource missing required fields", "hasName", res.Ref.Name != "", "hasKind", res.Ref.Kind != "", "hasAPIVersion", parsed.GetAPIVersion() != "")
 		return nil, fmt.Errorf("missing name, kind, or apiVersion")
 	}
 
@@ -133,12 +136,14 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		apiVersion, _, _ := unstructured.NestedString(parsed.Object, "patch", "apiVersion")
 		gv, err := schema.ParseGroupVersion(apiVersion)
 		if err != nil {
+			logger.Error(err, "failed to parse patch apiVersion", "apiVersion", apiVersion)
 			return nil, fmt.Errorf("parsing patch apiVersion: %w", err)
 		}
 		res.GVK.Group = gv.Group
 		res.GVK.Version = gv.Version
 
 		res.GVK.Kind, _, _ = unstructured.NestedString(parsed.Object, "patch", "kind")
+		logger.Info("parsed patch resource", "targetGroup", res.GVK.Group, "targetVersion", res.GVK.Version, "targetKind", res.GVK.Kind)
 	}
 
 	if res.GVK.Group == "apiextensions.k8s.io" && res.GVK.Kind == "CustomResourceDefinition" {
@@ -153,10 +158,13 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		anno = map[string]string{}
 	}
 
+	logger.Info("processing resource annotations", "annotationCount", len(anno), "labelCount", len(res.Labels))
 	const overridesKey = "eno.azure.io/overrides"
 	if js, ok := anno[overridesKey]; ok {
+		logger.Info("parsing overrides annotation", "overridesLength", len(js))
 		err := json.Unmarshal([]byte(js), &res.overrides)
 		if strict && err != nil {
+			logger.Error(err, "invalid override in strict mode")
 			return nil, fmt.Errorf("invalid override: %w", err)
 		}
 		if err != nil {
@@ -166,12 +174,14 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 
 	const failOpenKey = "eno.azure.io/fail-open"
 	if str, ok := anno[failOpenKey]; ok {
+		logger.Info("parsing fail-open annotation", "value", str)
 		b, err := strconv.ParseBool(str)
 		if strict && err != nil {
+			logger.Error(err, "invalid fail-open annotation in strict mode", "value", str)
 			return nil, fmt.Errorf("invalid fail-open annotation value: %q", str)
 		}
 		if err != nil {
-			logger.V(0).Info("invalid fail-open annotation - ignoring")
+			logger.Info("invalid fail-open annotation - ignoring")
 		} else {
 			res.FailOpen = &b
 		}
@@ -179,12 +189,14 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 
 	const readinessGroupKey = "eno.azure.io/readiness-group"
 	if str, ok := anno[readinessGroupKey]; ok {
+		logger.Info("parsing readiness-group annotation", "value", str)
 		rg, err := strconv.Atoi(str)
 		if strict && err != nil {
+			logger.Error(err, "invalid readiness group in strict mode", "value", str)
 			return nil, fmt.Errorf("invalid readiness group value: %q", str)
 		}
 		if err != nil {
-			logger.V(0).Info("invalid readiness group - ignoring")
+			logger.Info("invalid readiness group - ignoring")
 		} else {
 			res.readinessGroup = rg
 		}
@@ -192,12 +204,14 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 
 	const deletionGroupKey = "eno.azure.io/deletion-group"
 	if str, ok := anno[deletionGroupKey]; ok {
+		logger.Info("parsing deletion-group annotation", "value", str)
 		rg, err := strconv.Atoi(str)
 		if strict && err != nil {
+			logger.Error(err, "invalid deletion group in strict mode", "value", str)
 			return nil, fmt.Errorf("invalid deletion group value: %q", str)
 		}
 		if err != nil {
-			logger.V(0).Info("invalid deletion group - ignoring")
+			logger.Info("invalid deletion group - ignoring")
 		} else {
 			res.deletionGroup = &rg
 		}
@@ -213,8 +227,10 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 			name = "default"
 		}
 
+		logger.Info("parsing readiness check", "checkName", name, "expression", value)
 		check, err := readiness.ParseCheck(value)
 		if strict && err != nil {
+			logger.Error(err, "invalid readiness expression in strict mode", "checkName", name, "expression", value)
 			return nil, fmt.Errorf("invalid readiness expression: %w", err)
 		}
 		if err != nil {
@@ -225,7 +241,7 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		res.ReadinessChecks = append(res.ReadinessChecks, check)
 	}
 	sort.Slice(res.ReadinessChecks, func(i, j int) bool { return res.ReadinessChecks[i].Name < res.ReadinessChecks[j].Name })
-
+	logger.Info("resource created successfully")
 	return res, nil
 }
 
