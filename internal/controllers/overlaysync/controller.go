@@ -21,6 +21,7 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/go-logr/logr"
+	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -48,6 +49,12 @@ const (
 	overlayClientTimeout = 30 * time.Second
 	overlayClientQPS     = 5
 	overlayClientBurst   = 10
+
+	// maxSyncConcurrency limits parallel overlay resource fetches per Symphony.
+	// This prevents overwhelming the overlay cluster's API server while still
+	// providing significant speedup over sequential syncing.
+	// With 100 refs at ~50ms each: sequential = 5s, parallel (10) = 500ms
+	maxSyncConcurrency = 10
 )
 
 // AllowedSyncKinds defines which resource kinds can be synced from overlay.
@@ -141,18 +148,8 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
-	// Sync each overlay resource ref
-	var minRequeue time.Duration
-	for _, ref := range symphony.Spec.OverlayResourceRefs {
-		requeue, err := c.syncOverlayResource(ctx, symphony, overlayClient, ref)
-		if err != nil {
-			logger.Error(err, "failed to sync overlay resource", "key", ref.Key)
-			// Continue with other refs
-		}
-		if requeue > 0 && (minRequeue == 0 || requeue < minRequeue) {
-			minRequeue = requeue
-		}
-	}
+	// Sync all overlay resource refs in parallel with bounded concurrency
+	minRequeue := c.syncOverlayResourcesParallel(ctx, symphony, overlayClient)
 
 	// Clean up InputMirrors for refs that no longer exist
 	if err := c.cleanupOrphanedMirrors(ctx, symphony); err != nil {
@@ -254,6 +251,87 @@ func (c *Controller) getOrCreateOverlayClient(ctx context.Context, symphony *api
 	// SECURITY: Don't log secret name in production, only log that client was created
 	logger.V(1).Info("created overlay client")
 	return oc, nil
+}
+
+// syncResult holds the result of syncing a single overlay resource
+type syncResult struct {
+	key     string
+	requeue time.Duration
+	err     error
+}
+
+// syncOverlayResourcesParallel syncs all overlay resource refs in parallel with bounded concurrency.
+// This reduces reconcile latency from O(n * latency) to O(n/concurrency * latency).
+// For example, with 100 refs at ~50ms each: sequential = 5s, parallel (10) = ~500ms.
+func (c *Controller) syncOverlayResourcesParallel(
+	ctx context.Context,
+	symphony *apiv1.Symphony,
+	overlayClient client.Client,
+) time.Duration {
+	logger := logr.FromContextOrDiscard(ctx)
+	refs := symphony.Spec.OverlayResourceRefs
+
+	if len(refs) == 0 {
+		return DefaultSyncInterval
+	}
+
+	// Use a semaphore to limit concurrent overlay API calls
+	sem := make(chan struct{}, maxSyncConcurrency)
+	results := make(chan syncResult, len(refs))
+
+	// Use errgroup for structured concurrency, but we don't fail fast on errors
+	// since we want to sync as many refs as possible
+	g, ctx := errgroup.WithContext(ctx)
+
+	for _, ref := range refs {
+		ref := ref // capture loop variable
+		g.Go(func() error {
+			// Acquire semaphore
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				results <- syncResult{key: ref.Key, err: ctx.Err()}
+				return nil
+			}
+
+			requeue, err := c.syncOverlayResource(ctx, symphony, overlayClient, ref)
+			results <- syncResult{key: ref.Key, requeue: requeue, err: err}
+			return nil // Don't propagate errors - we handle them individually
+		})
+	}
+
+	// Wait for all goroutines to complete
+	_ = g.Wait()
+	close(results)
+
+	// Process results and determine minimum requeue time
+	var minRequeue time.Duration
+	var successCount, failCount int
+
+	for result := range results {
+		if result.err != nil {
+			logger.Error(result.err, "failed to sync overlay resource", "key", result.key)
+			failCount++
+			continue
+		}
+		successCount++
+		if result.requeue > 0 && (minRequeue == 0 || result.requeue < minRequeue) {
+			minRequeue = result.requeue
+		}
+	}
+
+	logger.V(1).Info("completed parallel overlay sync",
+		"total", len(refs),
+		"success", successCount,
+		"failed", failCount,
+		"minRequeue", minRequeue,
+	)
+
+	if minRequeue == 0 {
+		return DefaultSyncInterval
+	}
+	return minRequeue
 }
 
 // syncOverlayResource syncs a single overlay resource to an InputMirror
