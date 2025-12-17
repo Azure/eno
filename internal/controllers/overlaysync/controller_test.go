@@ -12,6 +12,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/workqueue"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
@@ -81,9 +83,11 @@ func TestReconcile_NoOverlayRefs(t *testing.T) {
 		Build()
 
 	controller := &Controller{
-		client:         client,
-		scheme:         scheme,
-		clientCacheTTL: 10 * time.Minute,
+		client:          client,
+		scheme:          scheme,
+		watcherCacheTTL: 30 * time.Minute,
+		allowedKinds:    AllowedSyncKinds,
+		reconcileQueue:  workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[ctrl.Request]()),
 	}
 
 	result, err := controller.Reconcile(context.Background(), reconcile.Request{
@@ -128,9 +132,11 @@ func TestReconcile_NoCredentials(t *testing.T) {
 		Build()
 
 	controller := &Controller{
-		client:         client,
-		scheme:         scheme,
-		clientCacheTTL: 10 * time.Minute,
+		client:          client,
+		scheme:          scheme,
+		watcherCacheTTL: 30 * time.Minute,
+		allowedKinds:    AllowedSyncKinds,
+		reconcileQueue:  workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[ctrl.Request]()),
 	}
 
 	result, err := controller.Reconcile(context.Background(), reconcile.Request{
@@ -155,9 +161,11 @@ func TestReconcile_SymphonyNotFound(t *testing.T) {
 		Build()
 
 	controller := &Controller{
-		client:         client,
-		scheme:         scheme,
-		clientCacheTTL: 10 * time.Minute,
+		client:          client,
+		scheme:          scheme,
+		watcherCacheTTL: 30 * time.Minute,
+		allowedKinds:    AllowedSyncKinds,
+		reconcileQueue:  workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[ctrl.Request]()),
 	}
 
 	result, err := controller.Reconcile(context.Background(), reconcile.Request{

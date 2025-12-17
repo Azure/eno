@@ -1,11 +1,18 @@
 // Package overlaysync implements the OverlaySyncController which syncs resources
 // from overlay clusters to the underlay as InputMirror resources.
 //
+// ARCHITECTURE:
+// This controller uses a watch-based approach for real-time sync instead of polling:
+// 1. Each Symphony with overlay refs gets a dedicated "overlay watcher"
+// 2. The watcher sets up dynamic informers on the overlay cluster for each ref
+// 3. When a watched resource changes, the informer triggers a reconcile
+// 4. The reconciler syncs the changed resource to the corresponding InputMirror
+//
 // SECURITY CONSIDERATIONS:
 // - Overlay credentials are stored in Secrets and never logged
 // - Secret access is restricted to the Symphony's namespace by default
 // - REST client has timeouts to prevent resource exhaustion
-// - Cached clients are invalidated on credential rotation
+// - Cached watchers are invalidated on credential rotation
 // - Only specified resource types can be synced (no arbitrary access)
 package overlaysync
 
@@ -29,7 +36,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/dynamic/dynamicinformer"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -39,8 +50,12 @@ const (
 	// ConditionTypeSynced indicates whether the InputMirror has been successfully synced
 	ConditionTypeSynced = "Synced"
 
-	// DefaultSyncInterval is the default interval for re-syncing overlay resources
-	DefaultSyncInterval = 5 * time.Minute
+	// FallbackSyncInterval is used when watches fail or as a safety net for missed events.
+	// Watches provide real-time updates, so this is only a fallback.
+	FallbackSyncInterval = 30 * time.Minute
+
+	// WatchResyncPeriod is how often the informer re-lists all objects as a consistency check
+	WatchResyncPeriod = 10 * time.Minute
 
 	// FinalizerName is the finalizer added to InputMirrors
 	FinalizerName = "eno.azure.io/overlay-sync"
@@ -65,11 +80,25 @@ var AllowedSyncKinds = map[schema.GroupKind]bool{
 	// Explicitly NOT allowing: Secret, ServiceAccount, etc.
 }
 
-// overlayClient holds a cached client for an overlay cluster
-type overlayClient struct {
-	client         client.Client
-	createdAt      time.Time
+// overlayWatcher manages watch connections to a single overlay cluster.
+// It maintains dynamic informers for each resource type being watched.
+type overlayWatcher struct {
+	mu sync.RWMutex
+
+	symphonyKey    string // namespace/name of the symphony
 	credentialHash string // Hash of credentials to detect rotation
+	createdAt      time.Time
+
+	// Dynamic client and informer factory for the overlay cluster
+	dynamicClient   dynamic.Interface
+	informerFactory dynamicinformer.DynamicSharedInformerFactory
+	stopCh          chan struct{}
+
+	// Track which GVRs we're watching
+	watchedGVRs map[schema.GroupVersionResource]struct{}
+
+	// Reference to the controller for enqueuing reconciles
+	controller *Controller
 }
 
 // Controller reconciles Symphonies with overlay resource refs, syncing resources
@@ -78,23 +107,29 @@ type Controller struct {
 	client client.Client
 	scheme *runtime.Scheme
 
-	// overlayClients caches overlay cluster clients keyed by symphony namespace/name
-	overlayClients sync.Map
+	// overlayWatchers manages watch connections keyed by symphony namespace/name
+	overlayWatchers sync.Map
 
-	// clientCacheTTL determines how long overlay clients are cached
-	clientCacheTTL time.Duration
+	// watcherCacheTTL determines how long overlay watchers are cached before refresh
+	watcherCacheTTL time.Duration
 
 	// allowedKinds can be overridden for testing
 	allowedKinds map[schema.GroupKind]bool
+
+	// reconcileQueue is used by informer callbacks to enqueue Symphony reconciles
+	reconcileQueue workqueue.TypedRateLimitingInterface[ctrl.Request]
 }
 
 // NewController creates a new OverlaySyncController and registers it with the manager.
 func NewController(mgr ctrl.Manager) error {
 	c := &Controller{
-		client:         mgr.GetClient(),
-		scheme:         mgr.GetScheme(),
-		clientCacheTTL: 10 * time.Minute,
-		allowedKinds:   AllowedSyncKinds,
+		client:          mgr.GetClient(),
+		scheme:          mgr.GetScheme(),
+		watcherCacheTTL: 30 * time.Minute,
+		allowedKinds:    AllowedSyncKinds,
+		reconcileQueue: workqueue.NewTypedRateLimitingQueue(
+			workqueue.DefaultTypedControllerRateLimiter[ctrl.Request](),
+		),
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
@@ -110,8 +145,8 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	symphony := &apiv1.Symphony{}
 	if err := c.client.Get(ctx, req.NamespacedName, symphony); err != nil {
 		if errors.IsNotFound(err) {
-			// Symphony deleted, overlay clients will be cleaned up by GC
-			c.overlayClients.Delete(req.String())
+			// Symphony deleted, cleanup watcher
+			c.cleanupWatcher(req.String())
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
@@ -125,41 +160,56 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	// Skip if no overlay resource refs defined
 	if len(symphony.Spec.OverlayResourceRefs) == 0 {
+		c.cleanupWatcher(req.String())
 		return ctrl.Result{}, nil
 	}
 
 	// Skip if no overlay credentials provided
 	if symphony.Spec.OverlayCredentials == nil {
 		logger.V(1).Info("symphony has overlay resource refs but no credentials, skipping")
+		c.cleanupWatcher(req.String())
 		return ctrl.Result{}, nil
 	}
 
 	// Handle deletion
 	if symphony.DeletionTimestamp != nil {
 		// InputMirrors will be garbage collected via owner references
-		c.overlayClients.Delete(req.String())
+		c.cleanupWatcher(req.String())
 		return ctrl.Result{}, nil
 	}
 
-	// Get or create overlay client
-	overlayClient, err := c.getOrCreateOverlayClient(ctx, symphony)
+	// Get or create overlay watcher with watches
+	watcher, err := c.getOrCreateOverlayWatcher(ctx, symphony)
 	if err != nil {
-		logger.Error(err, "failed to create overlay client")
+		logger.Error(err, "failed to create overlay watcher")
+		return ctrl.Result{RequeueAfter: time.Minute}, nil
+	}
+
+	// Ensure informers are set up for all resource refs
+	if err := watcher.ensureInformers(ctx, symphony); err != nil {
+		logger.Error(err, "failed to setup informers")
 		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
 	// Sync all overlay resource refs in parallel with bounded concurrency
-	minRequeue := c.syncOverlayResourcesParallel(ctx, symphony, overlayClient)
+	// This handles the initial sync and any changes detected by watches
+	c.syncOverlayResourcesParallel(ctx, symphony, watcher)
 
 	// Clean up InputMirrors for refs that no longer exist
 	if err := c.cleanupOrphanedMirrors(ctx, symphony); err != nil {
 		logger.Error(err, "failed to cleanup orphaned mirrors")
 	}
 
-	if minRequeue > 0 {
-		return ctrl.Result{RequeueAfter: minRequeue}, nil
+	// With watches, we only need periodic reconciles as a fallback safety net
+	return ctrl.Result{RequeueAfter: FallbackSyncInterval}, nil
+}
+
+// cleanupWatcher stops and removes the overlay watcher for a symphony
+func (c *Controller) cleanupWatcher(key string) {
+	if val, ok := c.overlayWatchers.LoadAndDelete(key); ok {
+		watcher := val.(*overlayWatcher)
+		close(watcher.stopCh)
 	}
-	return ctrl.Result{RequeueAfter: DefaultSyncInterval}, nil
 }
 
 // hashCredentials creates a SHA256 hash of credential data for change detection.
@@ -169,9 +219,9 @@ func hashCredentials(data []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
-// getOrCreateOverlayClient gets a cached overlay client or creates a new one.
-// Security: Credentials are never logged, client has timeouts, cache invalidates on rotation.
-func (c *Controller) getOrCreateOverlayClient(ctx context.Context, symphony *apiv1.Symphony) (client.Client, error) {
+// getOrCreateOverlayWatcher gets a cached overlay watcher or creates a new one.
+// Security: Credentials are never logged, watchers have timeouts, cache invalidates on rotation.
+func (c *Controller) getOrCreateOverlayWatcher(ctx context.Context, symphony *apiv1.Symphony) (*overlayWatcher, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 	key := fmt.Sprintf("%s/%s", symphony.Namespace, symphony.Name)
 
@@ -184,7 +234,6 @@ func (c *Controller) getOrCreateOverlayClient(ctx context.Context, symphony *api
 	}
 
 	// SECURITY: Only allow accessing secrets in the Symphony's namespace
-	// This prevents cross-namespace credential access
 	if secretKey.Namespace == "" {
 		secretKey.Namespace = symphony.Namespace
 	}
@@ -211,14 +260,15 @@ func (c *Controller) getOrCreateOverlayClient(ctx context.Context, symphony *api
 	credHash := hashCredentials(kubeconfigData)
 
 	// Check cache - invalidate if credentials changed or TTL expired
-	if cached, ok := c.overlayClients.Load(key); ok {
-		oc := cached.(*overlayClient)
-		if time.Since(oc.createdAt) < c.clientCacheTTL && oc.credentialHash == credHash {
-			return oc.client, nil
+	if cached, ok := c.overlayWatchers.Load(key); ok {
+		watcher := cached.(*overlayWatcher)
+		if time.Since(watcher.createdAt) < c.watcherCacheTTL && watcher.credentialHash == credHash {
+			return watcher, nil
 		}
-		// Cache expired or credentials rotated
-		logger.V(1).Info("invalidating cached overlay client",
-			"reason", map[bool]string{true: "credential_rotation", false: "ttl_expired"}[oc.credentialHash != credHash])
+		// Cache expired or credentials rotated - cleanup old watcher
+		logger.V(1).Info("invalidating cached overlay watcher",
+			"reason", map[bool]string{true: "credential_rotation", false: "ttl_expired"}[watcher.credentialHash != credHash])
+		c.cleanupWatcher(key)
 	}
 
 	// Create REST config from kubeconfig
@@ -227,37 +277,179 @@ func (c *Controller) getOrCreateOverlayClient(ctx context.Context, symphony *api
 		return nil, fmt.Errorf("parsing kubeconfig: %w", err)
 	}
 
-	// SECURITY: Apply rate limiting and timeouts to prevent resource exhaustion
+	// SECURITY: Apply rate limiting and timeouts
 	restConfig.Timeout = overlayClientTimeout
 	restConfig.QPS = overlayClientQPS
 	restConfig.Burst = overlayClientBurst
-
-	// Set a meaningful user agent for audit logs on the overlay
 	restConfig.UserAgent = "eno-overlay-sync-controller"
 
-	// Create client
-	oc, err := client.New(restConfig, client.Options{})
+	// Create dynamic client for informers
+	dynamicClient, err := dynamic.NewForConfig(restConfig)
 	if err != nil {
-		return nil, fmt.Errorf("creating overlay client: %w", err)
+		return nil, fmt.Errorf("creating dynamic client: %w", err)
 	}
 
-	// Cache the client with credential hash for rotation detection
-	c.overlayClients.Store(key, &overlayClient{
-		client:         oc,
-		createdAt:      time.Now(),
-		credentialHash: credHash,
-	})
+	// Create informer factory
+	stopCh := make(chan struct{})
+	informerFactory := dynamicinformer.NewDynamicSharedInformerFactory(dynamicClient, WatchResyncPeriod)
 
-	// SECURITY: Don't log secret name in production, only log that client was created
-	logger.V(1).Info("created overlay client")
-	return oc, nil
+	watcher := &overlayWatcher{
+		symphonyKey:     key,
+		credentialHash:  credHash,
+		createdAt:       time.Now(),
+		dynamicClient:   dynamicClient,
+		informerFactory: informerFactory,
+		stopCh:          stopCh,
+		watchedGVRs:     make(map[schema.GroupVersionResource]struct{}),
+		controller:      c,
+	}
+
+	// Cache the watcher
+	c.overlayWatchers.Store(key, watcher)
+	logger.V(1).Info("created overlay watcher")
+
+	return watcher, nil
+}
+
+// ensureInformers sets up informers for all resource refs in the symphony
+func (w *overlayWatcher) ensureInformers(ctx context.Context, symphony *apiv1.Symphony) error {
+	logger := logr.FromContextOrDiscard(ctx)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// Track which GVRs we need
+	neededGVRs := make(map[schema.GroupVersionResource][]apiv1.OverlayResourceRef)
+	for _, ref := range symphony.Spec.OverlayResourceRefs {
+		gvr := schema.GroupVersionResource{
+			Group:    ref.Resource.Group,
+			Version:  ref.Resource.Version,
+			Resource: pluralize(ref.Resource.Kind),
+		}
+		neededGVRs[gvr] = append(neededGVRs[gvr], ref)
+	}
+
+	// Set up informers for new GVRs
+	for gvr, refs := range neededGVRs {
+		if _, exists := w.watchedGVRs[gvr]; exists {
+			continue
+		}
+
+		logger.V(1).Info("setting up informer for GVR", "gvr", gvr.String())
+
+		informer := w.informerFactory.ForResource(gvr).Informer()
+
+		// Add event handler that triggers reconcile on changes
+		_, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				w.enqueueReconcile(ctx, symphony, refs, obj)
+			},
+			UpdateFunc: func(oldObj, newObj interface{}) {
+				w.enqueueReconcile(ctx, symphony, refs, newObj)
+			},
+			DeleteFunc: func(obj interface{}) {
+				w.enqueueReconcile(ctx, symphony, refs, obj)
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("adding event handler for %s: %w", gvr.String(), err)
+		}
+
+		w.watchedGVRs[gvr] = struct{}{}
+	}
+
+	// Start the informer factory (idempotent if already started)
+	w.informerFactory.Start(w.stopCh)
+
+	// Wait for caches to sync
+	synced := w.informerFactory.WaitForCacheSync(w.stopCh)
+	for gvr, ok := range synced {
+		if !ok {
+			logger.Error(nil, "failed to sync informer cache", "gvr", gvr.String())
+		}
+	}
+
+	return nil
+}
+
+// enqueueReconcile checks if the object matches any refs and enqueues a reconcile if so
+func (w *overlayWatcher) enqueueReconcile(ctx context.Context, symphony *apiv1.Symphony, refs []apiv1.OverlayResourceRef, obj interface{}) {
+	logger := logr.FromContextOrDiscard(ctx)
+
+	u, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		// Handle DeletedFinalStateUnknown
+		if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
+			u, ok = tombstone.Obj.(*unstructured.Unstructured)
+			if !ok {
+				return
+			}
+		} else {
+			return
+		}
+	}
+
+	// Check if this object matches any of our refs
+	for _, ref := range refs {
+		if matchesRef(u, ref) {
+			logger.V(2).Info("overlay resource changed, enqueueing reconcile",
+				"resource", u.GetName(),
+				"namespace", u.GetNamespace(),
+				"key", ref.Key,
+			)
+			// Enqueue the symphony for reconcile
+			w.controller.reconcileQueue.Add(ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      symphony.Name,
+					Namespace: symphony.Namespace,
+				},
+			})
+			return
+		}
+	}
+}
+
+// matchesRef checks if an unstructured object matches an overlay resource ref
+func matchesRef(obj *unstructured.Unstructured, ref apiv1.OverlayResourceRef) bool {
+	return obj.GetName() == ref.Resource.Name &&
+		obj.GetNamespace() == ref.Resource.Namespace
+}
+
+// pluralize converts a Kind to its plural resource name (simple heuristic)
+func pluralize(kind string) string {
+	lower := string(kind[0]+32) + kind[1:] // lowercase first letter
+	if lower[len(lower)-1] == 's' {
+		return lower + "es"
+	}
+	if lower[len(lower)-1] == 'y' {
+		return lower[:len(lower)-1] + "ies"
+	}
+	return lower + "s"
+}
+
+// getResource fetches a resource from the overlay cluster using the dynamic client
+func (w *overlayWatcher) getResource(ctx context.Context, ref apiv1.OverlayResourceRef) (*unstructured.Unstructured, error) {
+	gvr := schema.GroupVersionResource{
+		Group:    ref.Resource.Group,
+		Version:  ref.Resource.Version,
+		Resource: pluralize(ref.Resource.Kind),
+	}
+
+	var obj *unstructured.Unstructured
+	var err error
+
+	if ref.Resource.Namespace != "" {
+		obj, err = w.dynamicClient.Resource(gvr).Namespace(ref.Resource.Namespace).Get(ctx, ref.Resource.Name, metav1.GetOptions{})
+	} else {
+		obj, err = w.dynamicClient.Resource(gvr).Get(ctx, ref.Resource.Name, metav1.GetOptions{})
+	}
+
+	return obj, err
 }
 
 // syncResult holds the result of syncing a single overlay resource
 type syncResult struct {
-	key     string
-	requeue time.Duration
-	err     error
+	key string
+	err error
 }
 
 // syncOverlayResourcesParallel syncs all overlay resource refs in parallel with bounded concurrency.
@@ -266,13 +458,13 @@ type syncResult struct {
 func (c *Controller) syncOverlayResourcesParallel(
 	ctx context.Context,
 	symphony *apiv1.Symphony,
-	overlayClient client.Client,
-) time.Duration {
+	watcher *overlayWatcher,
+) {
 	logger := logr.FromContextOrDiscard(ctx)
 	refs := symphony.Spec.OverlayResourceRefs
 
 	if len(refs) == 0 {
-		return DefaultSyncInterval
+		return
 	}
 
 	// Use a semaphore to limit concurrent overlay API calls
@@ -295,8 +487,8 @@ func (c *Controller) syncOverlayResourcesParallel(
 				return nil
 			}
 
-			requeue, err := c.syncOverlayResource(ctx, symphony, overlayClient, ref)
-			results <- syncResult{key: ref.Key, requeue: requeue, err: err}
+			err := c.syncOverlayResource(ctx, symphony, watcher, ref)
+			results <- syncResult{key: ref.Key, err: err}
 			return nil // Don't propagate errors - we handle them individually
 		})
 	}
@@ -305,8 +497,7 @@ func (c *Controller) syncOverlayResourcesParallel(
 	_ = g.Wait()
 	close(results)
 
-	// Process results and determine minimum requeue time
-	var minRequeue time.Duration
+	// Process results
 	var successCount, failCount int
 
 	for result := range results {
@@ -316,60 +507,39 @@ func (c *Controller) syncOverlayResourcesParallel(
 			continue
 		}
 		successCount++
-		if result.requeue > 0 && (minRequeue == 0 || result.requeue < minRequeue) {
-			minRequeue = result.requeue
-		}
 	}
 
 	logger.V(1).Info("completed parallel overlay sync",
 		"total", len(refs),
 		"success", successCount,
 		"failed", failCount,
-		"minRequeue", minRequeue,
 	)
-
-	if minRequeue == 0 {
-		return DefaultSyncInterval
-	}
-	return minRequeue
 }
 
 // syncOverlayResource syncs a single overlay resource to an InputMirror
 func (c *Controller) syncOverlayResource(
 	ctx context.Context,
 	symphony *apiv1.Symphony,
-	overlayClient client.Client,
+	watcher *overlayWatcher,
 	ref apiv1.OverlayResourceRef,
-) (time.Duration, error) {
+) error {
 	logger := logr.FromContextOrDiscard(ctx).WithValues("key", ref.Key, "resourceName", ref.Resource.Name)
 
 	// SECURITY: Validate the resource kind is allowed to be synced
 	gk := schema.GroupKind{Group: ref.Resource.Group, Kind: ref.Resource.Kind}
 	if !c.allowedKinds[gk] {
-		return 0, fmt.Errorf("security: resource kind %q is not allowed to be synced from overlay", gk.String())
+		return fmt.Errorf("security: resource kind %q is not allowed to be synced from overlay", gk.String())
 	}
 
-	// Fetch from overlay
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   ref.Resource.Group,
-		Version: ref.Resource.Version,
-		Kind:    ref.Resource.Kind,
-	})
-
-	objKey := types.NamespacedName{
-		Name:      ref.Resource.Name,
-		Namespace: ref.Resource.Namespace,
-	}
-
-	err := overlayClient.Get(ctx, objKey, obj)
+	// Fetch from overlay using the watcher's dynamic client
+	obj, err := watcher.getResource(ctx, ref)
 	if err != nil {
 		if errors.IsNotFound(err) && ref.Optional {
 			logger.V(1).Info("optional overlay resource not found, skipping")
 			// Update InputMirror to reflect missing state
 			return c.updateMirrorMissing(ctx, symphony, ref)
 		}
-		return 0, fmt.Errorf("getting overlay resource: %w", err)
+		return fmt.Errorf("getting overlay resource: %w", err)
 	}
 
 	// Create/Update InputMirror
@@ -396,13 +566,13 @@ func (c *Controller) syncOverlayResource(
 	})
 
 	if err != nil {
-		return 0, fmt.Errorf("creating/updating InputMirror: %w", err)
+		return fmt.Errorf("creating/updating InputMirror: %w", err)
 	}
 
 	// Update status separately - CreateOrUpdate only updates spec, not status subresource
 	rawData, err := json.Marshal(obj.Object)
 	if err != nil {
-		return 0, fmt.Errorf("marshaling resource data: %w", err)
+		return fmt.Errorf("marshaling resource data: %w", err)
 	}
 	mirror.Status.Data = &runtime.RawExtension{Raw: rawData}
 	mirror.Status.LastSyncTime = &metav1.Time{Time: time.Now()}
@@ -412,17 +582,11 @@ func (c *Controller) syncOverlayResource(
 	setSyncedCondition(mirror, true, "SyncSuccess", "Successfully synced from overlay cluster")
 
 	if err := c.client.Status().Update(ctx, mirror); err != nil {
-		return 0, fmt.Errorf("updating InputMirror status: %w", err)
+		return fmt.Errorf("updating InputMirror status: %w", err)
 	}
 
 	logger.V(1).Info("synced overlay resource", "result", result, "mirrorName", mirrorName)
-
-	// Determine requeue interval
-	syncInterval := DefaultSyncInterval
-	if ref.SyncInterval != nil {
-		syncInterval = ref.SyncInterval.Duration
-	}
-	return syncInterval, nil
+	return nil
 }
 
 // updateMirrorMissing updates the InputMirror to reflect that the source resource is missing
@@ -430,31 +594,23 @@ func (c *Controller) updateMirrorMissing(
 	ctx context.Context,
 	symphony *apiv1.Symphony,
 	ref apiv1.OverlayResourceRef,
-) (time.Duration, error) {
+) error {
 	mirrorName := inputMirrorName(symphony.Name, ref.Key)
 	mirror := &apiv1.InputMirror{}
 	err := c.client.Get(ctx, types.NamespacedName{Name: mirrorName, Namespace: symphony.Namespace}, mirror)
 	if errors.IsNotFound(err) {
 		// No mirror exists, nothing to update
-		return DefaultSyncInterval, nil
+		return nil
 	}
 	if err != nil {
-		return 0, err
+		return err
 	}
 
 	// Update condition to reflect missing state
 	setSyncedCondition(mirror, false, "SourceNotFound", "Optional source resource not found in overlay")
 	mirror.Status.Data = nil
 
-	if err := c.client.Status().Update(ctx, mirror); err != nil {
-		return 0, err
-	}
-
-	syncInterval := DefaultSyncInterval
-	if ref.SyncInterval != nil {
-		syncInterval = ref.SyncInterval.Duration
-	}
-	return syncInterval, nil
+	return c.client.Status().Update(ctx, mirror)
 }
 
 // cleanupOrphanedMirrors removes InputMirrors for refs that no longer exist in the Symphony
