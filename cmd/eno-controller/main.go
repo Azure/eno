@@ -170,9 +170,6 @@ func runController() error {
 		return fmt.Errorf("constructing symphony controller: %w", err)
 	}
 
-	// Note: OverlaySyncController has been moved to eno-reconciler
-	// where it uses the reconciler's --remote-kubeconfig for overlay access
-
 	return mgr.Start(ctx)
 }
 
