@@ -40,12 +40,12 @@ type SymphonySpec struct {
 	// +kubebuilder:validation:MaxItems:=50
 	SynthesisEnv []EnvVar `json:"synthesisEnv,omitempty"` // deprecated synthesis env should always be variation scoped.
 
-	// OverlayResourceRefs specifies resources to sync from the overlay cluster.
+	// RemoteResourceRefs specifies resources to sync from the remote cluster.
 	// Each ref results in an InputMirror being created that can be bound as an input.
-	// The overlay cluster is accessed via the eno-reconciler's --remote-kubeconfig.
+	// The remote cluster is accessed via the eno-reconciler's --remote-kubeconfig.
 	// +optional
 	// +kubebuilder:validation:MaxItems:=20
-	OverlayResourceRefs []OverlayResourceRef `json:"overlayResourceRefs,omitempty"`
+	RemoteResourceRefs []RemoteResourceRef `json:"remoteResourceRefs,omitempty"`
 }
 
 type SymphonyStatus struct {

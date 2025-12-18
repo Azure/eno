@@ -13,8 +13,8 @@ type InputMirrorList struct {
 	Items           []InputMirror `json:"items"`
 }
 
-// InputMirror stores a copy of a resource from an overlay cluster.
-// It is created and managed by the OverlaySyncController based on Symphony.spec.overlayResourceRefs.
+// InputMirror stores a copy of a resource from a remote cluster.
+// It is created and managed by the RemoteSyncController based on Symphony.spec.remoteResourceRefs.
 // Compositions can bind to InputMirrors just like any other resource.
 //
 // +kubebuilder:object:root=true
@@ -37,8 +37,8 @@ type InputMirrorSpec struct {
 	// SymphonyRef points to the owning Symphony
 	SymphonyRef corev1.LocalObjectReference `json:"symphonyRef"`
 
-	// SourceResource describes what resource to sync from the overlay
-	SourceResource OverlayResourceSelector `json:"sourceResource"`
+	// SourceResource describes what resource to sync from the remote cluster
+	SourceResource RemoteResourceSelector `json:"sourceResource"`
 }
 
 type InputMirrorStatus struct {
@@ -59,8 +59,8 @@ type InputMirrorStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
-// OverlayResourceSelector describes a resource to sync from an overlay cluster
-type OverlayResourceSelector struct {
+// RemoteResourceSelector describes a resource to sync from a remote cluster
+type RemoteResourceSelector struct {
 	// API Group of the resource (empty string for core API group)
 	// +optional
 	Group string `json:"group,omitempty"`
@@ -79,21 +79,21 @@ type OverlayResourceSelector struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-// OverlayResourceRef defines a resource to sync from an overlay cluster
-type OverlayResourceRef struct {
+// RemoteResourceRef defines a resource to sync from a remote cluster
+type RemoteResourceRef struct {
 	// Key that will be used to reference this input in Composition bindings.
 	// This key maps to an auto-created InputMirror resource.
 	Key string `json:"key"`
 
-	// Resource specifies what to fetch from the overlay cluster
-	Resource OverlayResourceSelector `json:"resource"`
+	// Resource specifies what to fetch from the remote cluster
+	Resource RemoteResourceSelector `json:"resource"`
 
 	// SyncInterval determines how often to re-sync the resource.
 	// +kubebuilder:default="5m"
 	// +optional
 	SyncInterval *metav1.Duration `json:"syncInterval,omitempty"`
 
-	// Optional indicates that synthesis can proceed if this resource doesn't exist in the overlay.
+	// Optional indicates that synthesis can proceed if this resource doesn't exist in the remote cluster.
 	// +kubebuilder:default=false
 	// +optional
 	Optional bool `json:"optional,omitempty"`

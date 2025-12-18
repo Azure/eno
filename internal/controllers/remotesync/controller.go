@@ -1,20 +1,20 @@
-// Package overlaysync implements the OverlaySyncController which syncs resources
-// from overlay clusters to the underlay as InputMirror resources.
+// Package remotesync implements the RemoteSyncController which syncs resources
+// from remote clusters to the local cluster as InputMirror resources.
 //
 // ARCHITECTURE:
 // This controller runs in the eno-reconciler and uses the reconciler's existing
-// overlay client (configured via --remote-kubeconfig) to watch and sync resources:
-// 1. The controller is initialized with a pre-configured overlay REST config
-// 2. It sets up dynamic informers on the overlay cluster for each Symphony's refs
+// remote client (configured via --remote-kubeconfig) to watch and sync resources:
+// 1. The controller is initialized with a pre-configured remote REST config
+// 2. It sets up dynamic informers on the remote cluster for each Symphony's refs
 // 3. When a watched resource changes, the informer triggers a reconcile
-// 4. The reconciler syncs the changed resource to the corresponding InputMirror on the underlay
+// 4. The reconciler syncs the changed resource to the corresponding InputMirror on the local cluster
 //
 // SECURITY CONSIDERATIONS:
-// - Overlay credentials are managed by the reconciler's --remote-kubeconfig flag
+// - Remote credentials are managed by the reconciler's --remote-kubeconfig flag
 // - No credentials stored in Symphony specs
 // - REST client has timeouts to prevent resource exhaustion
 // - Only specified resource types can be synced (no arbitrary access)
-package overlaysync
+package remotesync
 
 import (
 	"context"
@@ -56,21 +56,21 @@ const (
 	WatchResyncPeriod = 10 * time.Minute
 
 	// FinalizerName is the finalizer added to InputMirrors
-	FinalizerName = "eno.azure.io/overlay-sync"
+	FinalizerName = "eno.azure.io/remote-sync"
 
 	// Client timeout settings for security
-	overlayClientTimeout = 30 * time.Second
-	overlayClientQPS     = 5
-	overlayClientBurst   = 10
+	remoteClientTimeout = 30 * time.Second
+	remoteClientQPS     = 5
+	remoteClientBurst   = 10
 
-	// maxSyncConcurrency limits parallel overlay resource fetches per Symphony.
-	// This prevents overwhelming the overlay cluster's API server while still
+	// maxSyncConcurrency limits parallel remote resource fetches per Symphony.
+	// This prevents overwhelming the remote cluster's API server while still
 	// providing significant speedup over sequential syncing.
 	// With 100 refs at ~50ms each: sequential = 5s, parallel (10) = 500ms
 	maxSyncConcurrency = 10
 )
 
-// AllowedSyncKinds defines which resource kinds can be synced from overlay.
+// AllowedSyncKinds defines which resource kinds can be synced from remote.
 // This is a security control to prevent syncing sensitive resources.
 var AllowedSyncKinds = map[schema.GroupKind]bool{
 	{Group: "", Kind: "ConfigMap"}: true,
@@ -78,12 +78,12 @@ var AllowedSyncKinds = map[schema.GroupKind]bool{
 	// Explicitly NOT allowing: Secret, ServiceAccount, etc.
 }
 
-// overlayWatcher manages watch connections to the overlay cluster.
+// remoteWatcher manages watch connections to the remote cluster.
 // It maintains dynamic informers for each resource type being watched.
-type overlayWatcher struct {
+type remoteWatcher struct {
 	mu sync.RWMutex
 
-	// Dynamic client and informer factory for the overlay cluster
+	// Dynamic client and informer factory for the remote cluster
 	dynamicClient   dynamic.Interface
 	informerFactory dynamicinformer.DynamicSharedInformerFactory
 	stopCh          chan struct{}
@@ -95,15 +95,15 @@ type overlayWatcher struct {
 	controller *Controller
 }
 
-// Controller reconciles Symphonies with overlay resource refs, syncing resources
-// from overlay clusters to InputMirror resources on the underlay.
+// Controller reconciles Symphonies with remote resource refs, syncing resources
+// from remote clusters to InputMirror resources on the local cluster.
 type Controller struct {
 	client client.Client
 	scheme *runtime.Scheme
 
-	// overlayWatcher is the shared watcher for the overlay cluster
-	// initialized once from the overlay REST config passed to NewController
-	overlayWatcher *overlayWatcher
+	// remoteWatcher is the shared watcher for the remote cluster
+	// initialized once from the remote REST config passed to NewController
+	remoteWatcher *remoteWatcher
 
 	// allowedKinds can be overridden for testing
 	allowedKinds map[schema.GroupKind]bool
@@ -112,10 +112,10 @@ type Controller struct {
 	reconcileQueue workqueue.TypedRateLimitingInterface[ctrl.Request]
 }
 
-// NewController creates a new OverlaySyncController and registers it with the manager.
-// The overlayConfig is the REST config for the overlay cluster (typically from --remote-kubeconfig).
-// If overlayConfig is nil, the controller will not sync any resources.
-func NewController(mgr ctrl.Manager, overlayConfig *rest.Config) error {
+// NewController creates a new RemoteSyncController and registers it with the manager.
+// The remoteConfig is the REST config for the remote cluster (typically from --remote-kubeconfig).
+// If remoteConfig is nil, the controller will not sync any resources.
+func NewController(mgr ctrl.Manager, remoteConfig *rest.Config) error {
 	c := &Controller{
 		client:       mgr.GetClient(),
 		scheme:       mgr.GetScheme(),
@@ -125,24 +125,24 @@ func NewController(mgr ctrl.Manager, overlayConfig *rest.Config) error {
 		),
 	}
 
-	// Initialize the shared overlay watcher if config is provided
-	if overlayConfig != nil {
-		watcher, err := newOverlayWatcher(overlayConfig, c)
+	// Initialize the shared remote watcher if config is provided
+	if remoteConfig != nil {
+		watcher, err := newRemoteWatcher(remoteConfig, c)
 		if err != nil {
-			return fmt.Errorf("creating overlay watcher: %w", err)
+			return fmt.Errorf("creating remote watcher: %w", err)
 		}
-		c.overlayWatcher = watcher
+		c.remoteWatcher = watcher
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Symphony{}).
 		Owns(&apiv1.InputMirror{}).
-		WithLogConstructor(manager.NewLogConstructor(mgr, "overlaySyncController")).
+		WithLogConstructor(manager.NewLogConstructor(mgr, "remoteSyncController")).
 		Complete(c)
 }
 
-// newOverlayWatcher creates a new overlay watcher from the given REST config
-func newOverlayWatcher(config *rest.Config, controller *Controller) (*overlayWatcher, error) {
+// newRemoteWatcher creates a new remote watcher from the given REST config
+func newRemoteWatcher(config *rest.Config, controller *Controller) (*remoteWatcher, error) {
 	// Create dynamic client for informers
 	dynamicClient, err := dynamic.NewForConfig(config)
 	if err != nil {
@@ -153,7 +153,7 @@ func newOverlayWatcher(config *rest.Config, controller *Controller) (*overlayWat
 	stopCh := make(chan struct{})
 	informerFactory := dynamicinformer.NewDynamicSharedInformerFactory(dynamicClient, WatchResyncPeriod)
 
-	return &overlayWatcher{
+	return &remoteWatcher{
 		dynamicClient:   dynamicClient,
 		informerFactory: informerFactory,
 		stopCh:          stopCh,
@@ -165,8 +165,8 @@ func newOverlayWatcher(config *rest.Config, controller *Controller) (*overlayWat
 func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	// Skip if no overlay watcher configured (no --remote-kubeconfig)
-	if c.overlayWatcher == nil {
+	// Skip if no remote watcher configured (no --remote-kubeconfig)
+	if c.remoteWatcher == nil {
 		return ctrl.Result{}, nil
 	}
 
@@ -184,8 +184,8 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	)
 	ctx = logr.NewContext(ctx, logger)
 
-	// Skip if no overlay resource refs defined
-	if len(symphony.Spec.OverlayResourceRefs) == 0 {
+	// Skip if no remote resource refs defined
+	if len(symphony.Spec.RemoteResourceRefs) == 0 {
 		return ctrl.Result{}, nil
 	}
 
@@ -196,14 +196,14 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	// Ensure informers are set up for all resource refs
-	if err := c.overlayWatcher.ensureInformers(ctx, symphony); err != nil {
+	if err := c.remoteWatcher.ensureInformers(ctx, symphony); err != nil {
 		logger.Error(err, "failed to setup informers")
 		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
-	// Sync all overlay resource refs in parallel with bounded concurrency
+	// Sync all remote resource refs in parallel with bounded concurrency
 	// This handles the initial sync and any changes detected by watches
-	c.syncOverlayResourcesParallel(ctx, symphony, c.overlayWatcher)
+	c.syncRemoteResourcesParallel(ctx, symphony, c.remoteWatcher)
 
 	// Clean up InputMirrors for refs that no longer exist
 	if err := c.cleanupOrphanedMirrors(ctx, symphony); err != nil {
@@ -215,14 +215,14 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 }
 
 // ensureInformers sets up informers for all resource refs in the symphony
-func (w *overlayWatcher) ensureInformers(ctx context.Context, symphony *apiv1.Symphony) error {
+func (w *remoteWatcher) ensureInformers(ctx context.Context, symphony *apiv1.Symphony) error {
 	logger := logr.FromContextOrDiscard(ctx)
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
 	// Track which GVRs we need
-	neededGVRs := make(map[schema.GroupVersionResource][]apiv1.OverlayResourceRef)
-	for _, ref := range symphony.Spec.OverlayResourceRefs {
+	neededGVRs := make(map[schema.GroupVersionResource][]apiv1.RemoteResourceRef)
+	for _, ref := range symphony.Spec.RemoteResourceRefs {
 		gvr := schema.GroupVersionResource{
 			Group:    ref.Resource.Group,
 			Version:  ref.Resource.Version,
@@ -275,7 +275,7 @@ func (w *overlayWatcher) ensureInformers(ctx context.Context, symphony *apiv1.Sy
 }
 
 // enqueueReconcile checks if the object matches any refs and enqueues a reconcile if so
-func (w *overlayWatcher) enqueueReconcile(ctx context.Context, symphony *apiv1.Symphony, refs []apiv1.OverlayResourceRef, obj interface{}) {
+func (w *remoteWatcher) enqueueReconcile(ctx context.Context, symphony *apiv1.Symphony, refs []apiv1.RemoteResourceRef, obj interface{}) {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	u, ok := obj.(*unstructured.Unstructured)
@@ -294,7 +294,7 @@ func (w *overlayWatcher) enqueueReconcile(ctx context.Context, symphony *apiv1.S
 	// Check if this object matches any of our refs
 	for _, ref := range refs {
 		if matchesRef(u, ref) {
-			logger.V(2).Info("overlay resource changed, enqueueing reconcile",
+			logger.V(2).Info("remote resource changed, enqueueing reconcile",
 				"resource", u.GetName(),
 				"namespace", u.GetNamespace(),
 				"key", ref.Key,
@@ -311,8 +311,8 @@ func (w *overlayWatcher) enqueueReconcile(ctx context.Context, symphony *apiv1.S
 	}
 }
 
-// matchesRef checks if an unstructured object matches an overlay resource ref
-func matchesRef(obj *unstructured.Unstructured, ref apiv1.OverlayResourceRef) bool {
+// matchesRef checks if an unstructured object matches a remote resource ref
+func matchesRef(obj *unstructured.Unstructured, ref apiv1.RemoteResourceRef) bool {
 	return obj.GetName() == ref.Resource.Name &&
 		obj.GetNamespace() == ref.Resource.Namespace
 }
@@ -329,8 +329,8 @@ func pluralize(kind string) string {
 	return lower + "s"
 }
 
-// getResource fetches a resource from the overlay cluster using the dynamic client
-func (w *overlayWatcher) getResource(ctx context.Context, ref apiv1.OverlayResourceRef) (*unstructured.Unstructured, error) {
+// getResource fetches a resource from the remote cluster using the dynamic client
+func (w *remoteWatcher) getResource(ctx context.Context, ref apiv1.RemoteResourceRef) (*unstructured.Unstructured, error) {
 	gvr := schema.GroupVersionResource{
 		Group:    ref.Resource.Group,
 		Version:  ref.Resource.Version,
@@ -349,22 +349,22 @@ func (w *overlayWatcher) getResource(ctx context.Context, ref apiv1.OverlayResou
 	return obj, err
 }
 
-// syncResult holds the result of syncing a single overlay resource
+// syncResult holds the result of syncing a single remote resource
 type syncResult struct {
 	key string
 	err error
 }
 
-// syncOverlayResourcesParallel syncs all overlay resource refs in parallel with bounded concurrency.
+// syncRemoteResourcesParallel syncs all remote resource refs in parallel with bounded concurrency.
 // This reduces reconcile latency from O(n * latency) to O(n/concurrency * latency).
 // For example, with 100 refs at ~50ms each: sequential = 5s, parallel (10) = ~500ms.
-func (c *Controller) syncOverlayResourcesParallel(
+func (c *Controller) syncRemoteResourcesParallel(
 	ctx context.Context,
 	symphony *apiv1.Symphony,
-	watcher *overlayWatcher,
+	watcher *remoteWatcher,
 ) {
 	logger := logr.FromContextOrDiscard(ctx)
-	refs := symphony.Spec.OverlayResourceRefs
+	refs := symphony.Spec.RemoteResourceRefs
 
 	if len(refs) == 0 {
 		return
@@ -390,7 +390,7 @@ func (c *Controller) syncOverlayResourcesParallel(
 				return nil
 			}
 
-			err := c.syncOverlayResource(ctx, symphony, watcher, ref)
+			err := c.syncRemoteResource(ctx, symphony, watcher, ref)
 			results <- syncResult{key: ref.Key, err: err}
 			return nil // Don't propagate errors - we handle them individually
 		})
@@ -405,44 +405,44 @@ func (c *Controller) syncOverlayResourcesParallel(
 
 	for result := range results {
 		if result.err != nil {
-			logger.Error(result.err, "failed to sync overlay resource", "key", result.key)
+			logger.Error(result.err, "failed to sync remote resource", "key", result.key)
 			failCount++
 			continue
 		}
 		successCount++
 	}
 
-	logger.V(1).Info("completed parallel overlay sync",
+	logger.V(1).Info("completed parallel remote sync",
 		"total", len(refs),
 		"success", successCount,
 		"failed", failCount,
 	)
 }
 
-// syncOverlayResource syncs a single overlay resource to an InputMirror
-func (c *Controller) syncOverlayResource(
+// syncRemoteResource syncs a single remote resource to an InputMirror
+func (c *Controller) syncRemoteResource(
 	ctx context.Context,
 	symphony *apiv1.Symphony,
-	watcher *overlayWatcher,
-	ref apiv1.OverlayResourceRef,
+	watcher *remoteWatcher,
+	ref apiv1.RemoteResourceRef,
 ) error {
 	logger := logr.FromContextOrDiscard(ctx).WithValues("key", ref.Key, "resourceName", ref.Resource.Name)
 
 	// SECURITY: Validate the resource kind is allowed to be synced
 	gk := schema.GroupKind{Group: ref.Resource.Group, Kind: ref.Resource.Kind}
 	if !c.allowedKinds[gk] {
-		return fmt.Errorf("security: resource kind %q is not allowed to be synced from overlay", gk.String())
+		return fmt.Errorf("security: resource kind %q is not allowed to be synced from remote", gk.String())
 	}
 
-	// Fetch from overlay using the watcher's dynamic client
+	// Fetch from remote using the watcher's dynamic client
 	obj, err := watcher.getResource(ctx, ref)
 	if err != nil {
 		if errors.IsNotFound(err) && ref.Optional {
-			logger.V(1).Info("optional overlay resource not found, skipping")
+			logger.V(1).Info("optional remote resource not found, skipping")
 			// Update InputMirror to reflect missing state
 			return c.updateMirrorMissing(ctx, symphony, ref)
 		}
-		return fmt.Errorf("getting overlay resource: %w", err)
+		return fmt.Errorf("getting remote resource: %w", err)
 	}
 
 	// Create/Update InputMirror
@@ -482,13 +482,13 @@ func (c *Controller) syncOverlayResource(
 	mirror.Status.SyncGeneration = obj.GetResourceVersion()
 
 	// Update conditions
-	setSyncedCondition(mirror, true, "SyncSuccess", "Successfully synced from overlay cluster")
+	setSyncedCondition(mirror, true, "SyncSuccess", "Successfully synced from remote cluster")
 
 	if err := c.client.Status().Update(ctx, mirror); err != nil {
 		return fmt.Errorf("updating InputMirror status: %w", err)
 	}
 
-	logger.V(1).Info("synced overlay resource", "result", result, "mirrorName", mirrorName)
+	logger.V(1).Info("synced remote resource", "result", result, "mirrorName", mirrorName)
 	return nil
 }
 
@@ -496,7 +496,7 @@ func (c *Controller) syncOverlayResource(
 func (c *Controller) updateMirrorMissing(
 	ctx context.Context,
 	symphony *apiv1.Symphony,
-	ref apiv1.OverlayResourceRef,
+	ref apiv1.RemoteResourceRef,
 ) error {
 	mirrorName := inputMirrorName(symphony.Name, ref.Key)
 	mirror := &apiv1.InputMirror{}
@@ -510,7 +510,7 @@ func (c *Controller) updateMirrorMissing(
 	}
 
 	// Update condition to reflect missing state
-	setSyncedCondition(mirror, false, "SourceNotFound", "Optional source resource not found in overlay")
+	setSyncedCondition(mirror, false, "SourceNotFound", "Optional source resource not found in remote cluster")
 	mirror.Status.Data = nil
 
 	return c.client.Status().Update(ctx, mirror)
@@ -534,7 +534,7 @@ func (c *Controller) cleanupOrphanedMirrors(ctx context.Context, symphony *apiv1
 
 	// Build set of expected mirror names
 	expected := make(map[string]struct{})
-	for _, ref := range symphony.Spec.OverlayResourceRefs {
+	for _, ref := range symphony.Spec.RemoteResourceRefs {
 		expected[inputMirrorName(symphony.Name, ref.Key)] = struct{}{}
 	}
 

@@ -1,4 +1,4 @@
-package overlaysync
+package remotesync
 
 import (
 	"context"
@@ -59,7 +59,7 @@ func TestSetSyncedCondition(t *testing.T) {
 	assert.Equal(t, "SyncFailed", mirror.Status.Conditions[0].Reason)
 }
 
-func TestReconcile_NoOverlayRefs(t *testing.T) {
+func TestReconcile_NoRemoteRefs(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, apiv1.SchemeBuilder.AddToScheme(scheme))
 	require.NoError(t, corev1.AddToScheme(scheme))
@@ -70,7 +70,7 @@ func TestReconcile_NoOverlayRefs(t *testing.T) {
 			Namespace: "test-ns",
 		},
 		Spec: apiv1.SymphonySpec{
-			// No OverlayResourceRefs
+			// No RemoteResourceRefs
 		},
 	}
 
@@ -83,7 +83,7 @@ func TestReconcile_NoOverlayRefs(t *testing.T) {
 		client:       client,
 		scheme:       scheme,
 		allowedKinds: AllowedSyncKinds,
-		// overlayWatcher nil - simulates no overlay config provided
+		// remoteWatcher nil - simulates no remote config provided
 	}
 
 	result, err := controller.Reconcile(context.Background(), reconcile.Request{
@@ -97,7 +97,7 @@ func TestReconcile_NoOverlayRefs(t *testing.T) {
 	assert.Equal(t, reconcile.Result{}, result)
 }
 
-func TestReconcile_NoOverlayWatcher(t *testing.T) {
+func TestReconcile_NoRemoteWatcher(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, apiv1.SchemeBuilder.AddToScheme(scheme))
 	require.NoError(t, corev1.AddToScheme(scheme))
@@ -108,10 +108,10 @@ func TestReconcile_NoOverlayWatcher(t *testing.T) {
 			Namespace: "test-ns",
 		},
 		Spec: apiv1.SymphonySpec{
-			OverlayResourceRefs: []apiv1.OverlayResourceRef{
+			RemoteResourceRefs: []apiv1.RemoteResourceRef{
 				{
 					Key: "test",
-					Resource: apiv1.OverlayResourceSelector{
+					Resource: apiv1.RemoteResourceSelector{
 						Kind:    "ConfigMap",
 						Version: "v1",
 						Name:    "test-cm",
@@ -130,7 +130,7 @@ func TestReconcile_NoOverlayWatcher(t *testing.T) {
 		client:       client,
 		scheme:       scheme,
 		allowedKinds: AllowedSyncKinds,
-		// overlayWatcher nil - no overlay config provided to eno-reconciler
+		// remoteWatcher nil - no remote config provided to eno-reconciler
 	}
 
 	result, err := controller.Reconcile(context.Background(), reconcile.Request{
@@ -141,7 +141,7 @@ func TestReconcile_NoOverlayWatcher(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	// Should return empty result since no overlay watcher available
+	// Should return empty result since no remote watcher available
 	assert.Equal(t, reconcile.Result{}, result)
 }
 
