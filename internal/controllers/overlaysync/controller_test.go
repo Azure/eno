@@ -3,7 +3,6 @@ package overlaysync
 import (
 	"context"
 	"testing"
-	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/stretchr/testify/assert"
@@ -12,8 +11,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/util/workqueue"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
@@ -83,11 +80,10 @@ func TestReconcile_NoOverlayRefs(t *testing.T) {
 		Build()
 
 	controller := &Controller{
-		client:          client,
-		scheme:          scheme,
-		watcherCacheTTL: 30 * time.Minute,
-		allowedKinds:    AllowedSyncKinds,
-		reconcileQueue:  workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[ctrl.Request]()),
+		client:       client,
+		scheme:       scheme,
+		allowedKinds: AllowedSyncKinds,
+		// overlayWatcher nil - simulates no overlay config provided
 	}
 
 	result, err := controller.Reconcile(context.Background(), reconcile.Request{
@@ -101,7 +97,7 @@ func TestReconcile_NoOverlayRefs(t *testing.T) {
 	assert.Equal(t, reconcile.Result{}, result)
 }
 
-func TestReconcile_NoCredentials(t *testing.T) {
+func TestReconcile_NoOverlayWatcher(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, apiv1.SchemeBuilder.AddToScheme(scheme))
 	require.NoError(t, corev1.AddToScheme(scheme))
@@ -122,7 +118,6 @@ func TestReconcile_NoCredentials(t *testing.T) {
 					},
 				},
 			},
-			// No OverlayCredentials
 		},
 	}
 
@@ -132,11 +127,10 @@ func TestReconcile_NoCredentials(t *testing.T) {
 		Build()
 
 	controller := &Controller{
-		client:          client,
-		scheme:          scheme,
-		watcherCacheTTL: 30 * time.Minute,
-		allowedKinds:    AllowedSyncKinds,
-		reconcileQueue:  workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[ctrl.Request]()),
+		client:       client,
+		scheme:       scheme,
+		allowedKinds: AllowedSyncKinds,
+		// overlayWatcher nil - no overlay config provided to eno-reconciler
 	}
 
 	result, err := controller.Reconcile(context.Background(), reconcile.Request{
@@ -147,7 +141,7 @@ func TestReconcile_NoCredentials(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	// Should return empty result since no credentials
+	// Should return empty result since no overlay watcher available
 	assert.Equal(t, reconcile.Result{}, result)
 }
 
@@ -161,11 +155,9 @@ func TestReconcile_SymphonyNotFound(t *testing.T) {
 		Build()
 
 	controller := &Controller{
-		client:          client,
-		scheme:          scheme,
-		watcherCacheTTL: 30 * time.Minute,
-		allowedKinds:    AllowedSyncKinds,
-		reconcileQueue:  workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[ctrl.Request]()),
+		client:       client,
+		scheme:       scheme,
+		allowedKinds: AllowedSyncKinds,
 	}
 
 	result, err := controller.Reconcile(context.Background(), reconcile.Request{

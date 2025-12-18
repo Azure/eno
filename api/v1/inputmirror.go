@@ -79,17 +79,6 @@ type OverlayResourceSelector struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-// OverlayCredentials specifies how to access an overlay cluster
-type OverlayCredentials struct {
-	// SecretRef references a Secret containing the kubeconfig for the overlay cluster
-	SecretRef corev1.SecretReference `json:"secretRef"`
-
-	// Key within the secret containing the kubeconfig data
-	// +kubebuilder:default="kubeconfig"
-	// +optional
-	Key string `json:"key,omitempty"`
-}
-
 // OverlayResourceRef defines a resource to sync from an overlay cluster
 type OverlayResourceRef struct {
 	// Key that will be used to reference this input in Composition bindings.

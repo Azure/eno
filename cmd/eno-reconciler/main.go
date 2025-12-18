@@ -15,6 +15,7 @@ import (
 
 	"github.com/Azure/eno/internal/cel"
 	"github.com/Azure/eno/internal/controllers/liveness"
+	"github.com/Azure/eno/internal/controllers/overlaysync"
 	"github.com/Azure/eno/internal/controllers/reconciliation"
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/k8s"
@@ -128,6 +129,13 @@ func run() error {
 	err = reconciliation.New(mgr, recOpts)
 	if err != nil {
 		return fmt.Errorf("constructing reconciliation controller: %w", err)
+	}
+
+	// OverlaySyncController uses remoteConfig (overlay) to watch resources
+	// and syncs them to InputMirrors on the underlay (mgr's client)
+	err = overlaysync.NewController(mgr, remoteConfig)
+	if err != nil {
+		return fmt.Errorf("constructing overlay sync controller: %w", err)
 	}
 
 	return mgr.Start(ctx)

@@ -2,24 +2,22 @@
 // from overlay clusters to the underlay as InputMirror resources.
 //
 // ARCHITECTURE:
-// This controller uses a watch-based approach for real-time sync instead of polling:
-// 1. Each Symphony with overlay refs gets a dedicated "overlay watcher"
-// 2. The watcher sets up dynamic informers on the overlay cluster for each ref
+// This controller runs in the eno-reconciler and uses the reconciler's existing
+// overlay client (configured via --remote-kubeconfig) to watch and sync resources:
+// 1. The controller is initialized with a pre-configured overlay REST config
+// 2. It sets up dynamic informers on the overlay cluster for each Symphony's refs
 // 3. When a watched resource changes, the informer triggers a reconcile
-// 4. The reconciler syncs the changed resource to the corresponding InputMirror
+// 4. The reconciler syncs the changed resource to the corresponding InputMirror on the underlay
 //
 // SECURITY CONSIDERATIONS:
-// - Overlay credentials are stored in Secrets and never logged
-// - Secret access is restricted to the Symphony's namespace by default
+// - Overlay credentials are managed by the reconciler's --remote-kubeconfig flag
+// - No credentials stored in Symphony specs
 // - REST client has timeouts to prevent resource exhaustion
-// - Cached watchers are invalidated on credential rotation
 // - Only specified resource types can be synced (no arbitrary access)
 package overlaysync
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -38,8 +36,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -80,14 +78,10 @@ var AllowedSyncKinds = map[schema.GroupKind]bool{
 	// Explicitly NOT allowing: Secret, ServiceAccount, etc.
 }
 
-// overlayWatcher manages watch connections to a single overlay cluster.
+// overlayWatcher manages watch connections to the overlay cluster.
 // It maintains dynamic informers for each resource type being watched.
 type overlayWatcher struct {
 	mu sync.RWMutex
-
-	symphonyKey    string // namespace/name of the symphony
-	credentialHash string // Hash of credentials to detect rotation
-	createdAt      time.Time
 
 	// Dynamic client and informer factory for the overlay cluster
 	dynamicClient   dynamic.Interface
@@ -107,11 +101,9 @@ type Controller struct {
 	client client.Client
 	scheme *runtime.Scheme
 
-	// overlayWatchers manages watch connections keyed by symphony namespace/name
-	overlayWatchers sync.Map
-
-	// watcherCacheTTL determines how long overlay watchers are cached before refresh
-	watcherCacheTTL time.Duration
+	// overlayWatcher is the shared watcher for the overlay cluster
+	// initialized once from the overlay REST config passed to NewController
+	overlayWatcher *overlayWatcher
 
 	// allowedKinds can be overridden for testing
 	allowedKinds map[schema.GroupKind]bool
@@ -121,15 +113,25 @@ type Controller struct {
 }
 
 // NewController creates a new OverlaySyncController and registers it with the manager.
-func NewController(mgr ctrl.Manager) error {
+// The overlayConfig is the REST config for the overlay cluster (typically from --remote-kubeconfig).
+// If overlayConfig is nil, the controller will not sync any resources.
+func NewController(mgr ctrl.Manager, overlayConfig *rest.Config) error {
 	c := &Controller{
-		client:          mgr.GetClient(),
-		scheme:          mgr.GetScheme(),
-		watcherCacheTTL: 30 * time.Minute,
-		allowedKinds:    AllowedSyncKinds,
+		client:       mgr.GetClient(),
+		scheme:       mgr.GetScheme(),
+		allowedKinds: AllowedSyncKinds,
 		reconcileQueue: workqueue.NewTypedRateLimitingQueue(
 			workqueue.DefaultTypedControllerRateLimiter[ctrl.Request](),
 		),
+	}
+
+	// Initialize the shared overlay watcher if config is provided
+	if overlayConfig != nil {
+		watcher, err := newOverlayWatcher(overlayConfig, c)
+		if err != nil {
+			return fmt.Errorf("creating overlay watcher: %w", err)
+		}
+		c.overlayWatcher = watcher
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
@@ -139,14 +141,38 @@ func NewController(mgr ctrl.Manager) error {
 		Complete(c)
 }
 
+// newOverlayWatcher creates a new overlay watcher from the given REST config
+func newOverlayWatcher(config *rest.Config, controller *Controller) (*overlayWatcher, error) {
+	// Create dynamic client for informers
+	dynamicClient, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("creating dynamic client: %w", err)
+	}
+
+	// Create informer factory
+	stopCh := make(chan struct{})
+	informerFactory := dynamicinformer.NewDynamicSharedInformerFactory(dynamicClient, WatchResyncPeriod)
+
+	return &overlayWatcher{
+		dynamicClient:   dynamicClient,
+		informerFactory: informerFactory,
+		stopCh:          stopCh,
+		watchedGVRs:     make(map[schema.GroupVersionResource]struct{}),
+		controller:      controller,
+	}, nil
+}
+
 func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx)
+
+	// Skip if no overlay watcher configured (no --remote-kubeconfig)
+	if c.overlayWatcher == nil {
+		return ctrl.Result{}, nil
+	}
 
 	symphony := &apiv1.Symphony{}
 	if err := c.client.Get(ctx, req.NamespacedName, symphony); err != nil {
 		if errors.IsNotFound(err) {
-			// Symphony deleted, cleanup watcher
-			c.cleanupWatcher(req.String())
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
@@ -160,40 +186,24 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	// Skip if no overlay resource refs defined
 	if len(symphony.Spec.OverlayResourceRefs) == 0 {
-		c.cleanupWatcher(req.String())
-		return ctrl.Result{}, nil
-	}
-
-	// Skip if no overlay credentials provided
-	if symphony.Spec.OverlayCredentials == nil {
-		logger.V(1).Info("symphony has overlay resource refs but no credentials, skipping")
-		c.cleanupWatcher(req.String())
 		return ctrl.Result{}, nil
 	}
 
 	// Handle deletion
 	if symphony.DeletionTimestamp != nil {
 		// InputMirrors will be garbage collected via owner references
-		c.cleanupWatcher(req.String())
 		return ctrl.Result{}, nil
 	}
 
-	// Get or create overlay watcher with watches
-	watcher, err := c.getOrCreateOverlayWatcher(ctx, symphony)
-	if err != nil {
-		logger.Error(err, "failed to create overlay watcher")
-		return ctrl.Result{RequeueAfter: time.Minute}, nil
-	}
-
 	// Ensure informers are set up for all resource refs
-	if err := watcher.ensureInformers(ctx, symphony); err != nil {
+	if err := c.overlayWatcher.ensureInformers(ctx, symphony); err != nil {
 		logger.Error(err, "failed to setup informers")
 		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
 	// Sync all overlay resource refs in parallel with bounded concurrency
 	// This handles the initial sync and any changes detected by watches
-	c.syncOverlayResourcesParallel(ctx, symphony, watcher)
+	c.syncOverlayResourcesParallel(ctx, symphony, c.overlayWatcher)
 
 	// Clean up InputMirrors for refs that no longer exist
 	if err := c.cleanupOrphanedMirrors(ctx, symphony); err != nil {
@@ -202,113 +212,6 @@ func (c *Controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	// With watches, we only need periodic reconciles as a fallback safety net
 	return ctrl.Result{RequeueAfter: FallbackSyncInterval}, nil
-}
-
-// cleanupWatcher stops and removes the overlay watcher for a symphony
-func (c *Controller) cleanupWatcher(key string) {
-	if val, ok := c.overlayWatchers.LoadAndDelete(key); ok {
-		watcher := val.(*overlayWatcher)
-		close(watcher.stopCh)
-	}
-}
-
-// hashCredentials creates a SHA256 hash of credential data for change detection.
-// This allows detecting credential rotation without storing the credentials.
-func hashCredentials(data []byte) string {
-	h := sha256.Sum256(data)
-	return hex.EncodeToString(h[:])
-}
-
-// getOrCreateOverlayWatcher gets a cached overlay watcher or creates a new one.
-// Security: Credentials are never logged, watchers have timeouts, cache invalidates on rotation.
-func (c *Controller) getOrCreateOverlayWatcher(ctx context.Context, symphony *apiv1.Symphony) (*overlayWatcher, error) {
-	logger := logr.FromContextOrDiscard(ctx)
-	key := fmt.Sprintf("%s/%s", symphony.Namespace, symphony.Name)
-
-	// Get the kubeconfig secret first to check for credential rotation
-	creds := symphony.Spec.OverlayCredentials
-	secret := &corev1.Secret{}
-	secretKey := types.NamespacedName{
-		Name:      creds.SecretRef.Name,
-		Namespace: creds.SecretRef.Namespace,
-	}
-
-	// SECURITY: Only allow accessing secrets in the Symphony's namespace
-	if secretKey.Namespace == "" {
-		secretKey.Namespace = symphony.Namespace
-	}
-	if secretKey.Namespace != symphony.Namespace {
-		return nil, fmt.Errorf("security: credential secret must be in symphony namespace %q, got %q",
-			symphony.Namespace, secretKey.Namespace)
-	}
-
-	if err := c.client.Get(ctx, secretKey, secret); err != nil {
-		return nil, fmt.Errorf("getting overlay credentials secret: %w", err)
-	}
-
-	// Get kubeconfig data - NEVER log this
-	kubeconfigKey := creds.Key
-	if kubeconfigKey == "" {
-		kubeconfigKey = "kubeconfig"
-	}
-	kubeconfigData, ok := secret.Data[kubeconfigKey]
-	if !ok {
-		return nil, fmt.Errorf("kubeconfig key %q not found in secret", kubeconfigKey)
-	}
-
-	// Hash credentials to detect rotation without storing them
-	credHash := hashCredentials(kubeconfigData)
-
-	// Check cache - invalidate if credentials changed or TTL expired
-	if cached, ok := c.overlayWatchers.Load(key); ok {
-		watcher := cached.(*overlayWatcher)
-		if time.Since(watcher.createdAt) < c.watcherCacheTTL && watcher.credentialHash == credHash {
-			return watcher, nil
-		}
-		// Cache expired or credentials rotated - cleanup old watcher
-		logger.V(1).Info("invalidating cached overlay watcher",
-			"reason", map[bool]string{true: "credential_rotation", false: "ttl_expired"}[watcher.credentialHash != credHash])
-		c.cleanupWatcher(key)
-	}
-
-	// Create REST config from kubeconfig
-	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigData)
-	if err != nil {
-		return nil, fmt.Errorf("parsing kubeconfig: %w", err)
-	}
-
-	// SECURITY: Apply rate limiting and timeouts
-	restConfig.Timeout = overlayClientTimeout
-	restConfig.QPS = overlayClientQPS
-	restConfig.Burst = overlayClientBurst
-	restConfig.UserAgent = "eno-overlay-sync-controller"
-
-	// Create dynamic client for informers
-	dynamicClient, err := dynamic.NewForConfig(restConfig)
-	if err != nil {
-		return nil, fmt.Errorf("creating dynamic client: %w", err)
-	}
-
-	// Create informer factory
-	stopCh := make(chan struct{})
-	informerFactory := dynamicinformer.NewDynamicSharedInformerFactory(dynamicClient, WatchResyncPeriod)
-
-	watcher := &overlayWatcher{
-		symphonyKey:     key,
-		credentialHash:  credHash,
-		createdAt:       time.Now(),
-		dynamicClient:   dynamicClient,
-		informerFactory: informerFactory,
-		stopCh:          stopCh,
-		watchedGVRs:     make(map[schema.GroupVersionResource]struct{}),
-		controller:      c,
-	}
-
-	// Cache the watcher
-	c.overlayWatchers.Store(key, watcher)
-	logger.V(1).Info("created overlay watcher")
-
-	return watcher, nil
 }
 
 // ensureInformers sets up informers for all resource refs in the symphony
