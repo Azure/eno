@@ -19,7 +19,7 @@ import (
 
 	v1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/controllers/composition"
-	"github.com/Azure/eno/internal/controllers/overlaysync"
+	"github.com/Azure/eno/internal/controllers/remotesync"
 	"github.com/Azure/eno/internal/controllers/resourceslice"
 	"github.com/Azure/eno/internal/controllers/scheduling"
 	"github.com/Azure/eno/internal/controllers/symphony"
@@ -171,9 +171,9 @@ func runController() error {
 		return fmt.Errorf("constructing symphony controller: %w", err)
 	}
 
-	err = overlaysync.NewController(mgr)
+	err = remotesync.NewController(mgr)
 	if err != nil {
-		return fmt.Errorf("constructing overlay sync controller: %w", err)
+		return fmt.Errorf("constructing remote sync controller: %w", err)
 	}
 
 	return mgr.Start(ctx)

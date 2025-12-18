@@ -40,17 +40,17 @@ type SymphonySpec struct {
 	// +kubebuilder:validation:MaxItems:=50
 	SynthesisEnv []EnvVar `json:"synthesisEnv,omitempty"` // deprecated synthesis env should always be variation scoped.
 
-	// OverlayCredentials specifies how to access the overlay cluster.
-	// When set, the OverlaySyncController will use these credentials to sync
-	// resources specified in OverlayResourceRefs.
+	// RemoteCredentials specifies how to access the remote cluster.
+	// When set, the RemoteSyncController will use these credentials to sync
+	// resources specified in RemoteResourceRefs.
 	// +optional
-	OverlayCredentials *OverlayCredentials `json:"overlayCredentials,omitempty"`
+	RemoteCredentials *RemoteCredentials `json:"remoteCredentials,omitempty"`
 
-	// OverlayResourceRefs specifies resources to sync from the overlay cluster.
+	// RemoteResourceRefs specifies resources to sync from the remote cluster.
 	// Each ref results in an InputMirror being created that can be bound as an input.
 	// +optional
 	// +kubebuilder:validation:MaxItems:=20
-	OverlayResourceRefs []OverlayResourceRef `json:"overlayResourceRefs,omitempty"`
+	RemoteResourceRefs []RemoteResourceRef `json:"remoteResourceRefs,omitempty"`
 }
 
 type SymphonyStatus struct {
