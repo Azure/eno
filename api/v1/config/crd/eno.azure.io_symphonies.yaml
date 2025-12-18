@@ -72,6 +72,87 @@ spec:
                   - resource
                   type: object
                 type: array
+              overlayCredentials:
+                description: |-
+                  OverlayCredentials specifies how to access the overlay cluster.
+                  When set, the OverlaySyncController will use these credentials to sync
+                  resources specified in OverlayResourceRefs.
+                properties:
+                  key:
+                    default: kubeconfig
+                    description: Key within the secret containing the kubeconfig data
+                    type: string
+                  secretRef:
+                    description: SecretRef references a Secret containing the kubeconfig
+                      for the overlay cluster
+                    properties:
+                      name:
+                        description: name is unique within a namespace to reference
+                          a secret resource.
+                        type: string
+                      namespace:
+                        description: namespace defines the space within which the
+                          secret name must be unique.
+                        type: string
+                    type: object
+                required:
+                - secretRef
+                type: object
+              overlayResourceRefs:
+                description: |-
+                  OverlayResourceRefs specifies resources to sync from the overlay cluster.
+                  Each ref results in an InputMirror being created that can be bound as an input.
+                items:
+                  description: OverlayResourceRef defines a resource to sync from
+                    an overlay cluster
+                  properties:
+                    key:
+                      description: |-
+                        Key that will be used to reference this input in Composition bindings.
+                        This key maps to an auto-created InputMirror resource.
+                      type: string
+                    optional:
+                      default: false
+                      description: Optional indicates that synthesis can proceed if
+                        this resource doesn't exist in the overlay.
+                      type: boolean
+                    resource:
+                      description: Resource specifies what to fetch from the overlay
+                        cluster
+                      properties:
+                        group:
+                          description: API Group of the resource (empty string for
+                            core API group)
+                          type: string
+                        kind:
+                          description: Kind of the resource (e.g., ConfigMap, Secret)
+                          type: string
+                        name:
+                          description: Name of the resource
+                          type: string
+                        namespace:
+                          description: Namespace of the resource (empty for cluster-scoped
+                            resources)
+                          type: string
+                        version:
+                          description: API Version of the resource
+                          type: string
+                      required:
+                      - kind
+                      - name
+                      - version
+                      type: object
+                    syncInterval:
+                      default: 5m
+                      description: SyncInterval determines how often to re-sync the
+                        resource.
+                      type: string
+                  required:
+                  - key
+                  - resource
+                  type: object
+                maxItems: 20
+                type: array
               synthesisEnv:
                 description: |-
                   SynthesisEnv
