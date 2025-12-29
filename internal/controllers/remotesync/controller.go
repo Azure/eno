@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -319,7 +320,8 @@ func matchesRef(obj *unstructured.Unstructured, ref apiv1.RemoteResourceRef) boo
 
 // pluralize converts a Kind to its plural resource name (simple heuristic)
 func pluralize(kind string) string {
-	lower := string(kind[0]+32) + kind[1:] // lowercase first letter
+	// Use strings.ToLower to properly lowercase the entire string
+	lower := strings.ToLower(kind)
 	if lower[len(lower)-1] == 's' {
 		return lower + "es"
 	}
