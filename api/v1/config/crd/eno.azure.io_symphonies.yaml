@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.18.0
+    controller-gen.kubebuilder.io/version: v0.20.0
   name: symphonies.eno.azure.io
 spec:
   group: eno.azure.io
@@ -72,39 +72,14 @@ spec:
                   - resource
                   type: object
                 type: array
-              overlayCredentials:
+              remoteResourceRefs:
                 description: |-
-                  OverlayCredentials specifies how to access the overlay cluster.
-                  When set, the OverlaySyncController will use these credentials to sync
-                  resources specified in OverlayResourceRefs.
-                properties:
-                  key:
-                    default: kubeconfig
-                    description: Key within the secret containing the kubeconfig data
-                    type: string
-                  secretRef:
-                    description: SecretRef references a Secret containing the kubeconfig
-                      for the overlay cluster
-                    properties:
-                      name:
-                        description: name is unique within a namespace to reference
-                          a secret resource.
-                        type: string
-                      namespace:
-                        description: namespace defines the space within which the
-                          secret name must be unique.
-                        type: string
-                    type: object
-                required:
-                - secretRef
-                type: object
-              overlayResourceRefs:
-                description: |-
-                  OverlayResourceRefs specifies resources to sync from the overlay cluster.
+                  RemoteResourceRefs specifies resources to sync from the remote cluster.
                   Each ref results in an InputMirror being created that can be bound as an input.
+                  The remote cluster is accessed via the eno-reconciler's --remote-kubeconfig.
                 items:
-                  description: OverlayResourceRef defines a resource to sync from
-                    an overlay cluster
+                  description: RemoteResourceRef defines a resource to sync from a
+                    remote cluster
                   properties:
                     key:
                       description: |-
@@ -114,10 +89,10 @@ spec:
                     optional:
                       default: false
                       description: Optional indicates that synthesis can proceed if
-                        this resource doesn't exist in the overlay.
+                        this resource doesn't exist in the remote cluster.
                       type: boolean
                     resource:
-                      description: Resource specifies what to fetch from the overlay
+                      description: Resource specifies what to fetch from the remote
                         cluster
                       properties:
                         group:

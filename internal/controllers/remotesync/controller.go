@@ -39,10 +39,12 @@ import (
 	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 const (
@@ -109,21 +111,22 @@ type Controller struct {
 	// allowedKinds can be overridden for testing
 	allowedKinds map[schema.GroupKind]bool
 
-	// reconcileQueue is used by informer callbacks to enqueue Symphony reconciles
-	reconcileQueue workqueue.TypedRateLimitingInterface[ctrl.Request]
+	// eventChan receives events from informer callbacks to trigger reconciles
+	eventChan chan event.TypedGenericEvent[*apiv1.Symphony]
 }
 
 // NewController creates a new RemoteSyncController and registers it with the manager.
 // The remoteConfig is the REST config for the remote cluster (typically from --remote-kubeconfig).
 // If remoteConfig is nil, the controller will not sync any resources.
 func NewController(mgr ctrl.Manager, remoteConfig *rest.Config) error {
+	// Create buffered event channel to receive watch events from informers
+	eventChan := make(chan event.TypedGenericEvent[*apiv1.Symphony], 100)
+
 	c := &Controller{
 		client:       mgr.GetClient(),
 		scheme:       mgr.GetScheme(),
 		allowedKinds: AllowedSyncKinds,
-		reconcileQueue: workqueue.NewTypedRateLimitingQueue(
-			workqueue.DefaultTypedControllerRateLimiter[ctrl.Request](),
-		),
+		eventChan:    eventChan,
 	}
 
 	// Initialize the shared remote watcher if config is provided
@@ -138,6 +141,7 @@ func NewController(mgr ctrl.Manager, remoteConfig *rest.Config) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Symphony{}).
 		Owns(&apiv1.InputMirror{}).
+		WatchesRawSource(source.Channel(eventChan, &handler.TypedEnqueueRequestForObject[*apiv1.Symphony]{})).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "remoteSyncController")).
 		Complete(c)
 }
@@ -295,18 +299,20 @@ func (w *remoteWatcher) enqueueReconcile(ctx context.Context, symphony *apiv1.Sy
 	// Check if this object matches any of our refs
 	for _, ref := range refs {
 		if matchesRef(u, ref) {
-			logger.V(2).Info("remote resource changed, enqueueing reconcile",
+			logger.V(1).Info("remote resource changed, enqueueing reconcile",
 				"resource", u.GetName(),
 				"namespace", u.GetNamespace(),
 				"key", ref.Key,
 			)
-			// Enqueue the symphony for reconcile
-			w.controller.reconcileQueue.Add(ctrl.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      symphony.Name,
-					Namespace: symphony.Namespace,
-				},
-			})
+			// Send event through the channel to trigger reconcile
+			// Use non-blocking send to avoid blocking informer callbacks
+			select {
+			case w.controller.eventChan <- event.TypedGenericEvent[*apiv1.Symphony]{
+				Object: symphony,
+			}:
+			default:
+				logger.V(1).Info("event channel full, reconcile will happen on next poll")
+			}
 			return
 		}
 	}
@@ -320,7 +326,7 @@ func matchesRef(obj *unstructured.Unstructured, ref apiv1.RemoteResourceRef) boo
 
 // pluralize converts a Kind to its plural resource name (simple heuristic)
 func pluralize(kind string) string {
-	// Use strings.ToLower to properly lowercase the entire string
+	// Use strings.ToLower to properly lowercase the entire string (first letter only is insufficient for multi-word kinds like configMap)
 	lower := strings.ToLower(kind)
 	if lower[len(lower)-1] == 's' {
 		return lower + "es"
