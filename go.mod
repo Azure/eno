@@ -85,3 +85,9 @@ require (
 )
 
 replace github.com/imdario/mergo => github.com/imdario/mergo v0.3.16
+
+retract (
+	v1.0.3 // this release is retraction-only; retract self so @latest falls back
+	v1.0.2 // published by mistake
+	v1.0.1 // tag deleted; break consumers. Will recreate the tag but this version should not be used
+)
