@@ -137,10 +137,15 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 	freeSynthesisSlots.Set(float64(c.concurrencyLimit - inFlight))
 
-	if op == nil || inFlight >= c.concurrencyLimit {
+	if op == nil {
+		return ctrl.Result{}, nil
+	}
+
+	if inFlight >= c.concurrencyLimit {
 		logger.Info("concurrency limit reached, deferring synthesis", "inFlight", inFlight, "limit", c.concurrencyLimit, "nextCompositionName", op.Composition.Name, "nextCompositionNamespace", op.Composition.Namespace)
 		return ctrl.Result{}, nil
 	}
+
 	if !op.NotBefore.IsZero() { // the next op isn't ready to be dispathced yet
 		if wait := time.Until(op.NotBefore); wait > 0 {
 			logger.Info("synthesis operation not ready, waiting for cooldown", "compositionName", op.Composition.Name, "compositionNamespace", op.Composition.Namespace, "waitDuration", wait, "notBefore", op.NotBefore)
