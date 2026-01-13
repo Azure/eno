@@ -138,12 +138,6 @@ func compareEnoManagedFields(a, b []metav1.ManagedFieldsEntry) bool {
 }
 
 func NormalizeConflictingManagers(ctx context.Context, current *unstructured.Unstructured, migratingManagers []string) (modified bool, err error) {
-	// Check for migration annotation - if present, migration has already been attempted
-	annotations := current.GetAnnotations()
-	if annotations != nil && annotations[ownershipMigratedAnnoKey] == ownershipMigratedVersion {
-		return false, nil // Migration already attempted, skip
-	}
-
 	managedFields := current.GetManagedFields()
 	logger := logr.FromContextOrDiscard(ctx)
 	logger.Info("NormalizingConflictingManager", "Name", current.GetName(), "Namespace", current.GetNamespace())
@@ -160,13 +154,9 @@ func NormalizeConflictingManagers(ctx context.Context, current *unstructured.Uns
 		return false, err
 	}
 	// Skip normalization if there are no legacy managers and at most one eno entry
-	// Note: Don't set annotation here since no migration was attempted
 	if !hasLegacyManager && enoEntryCount <= 1 {
 		return false, nil
 	}
-
-	// If we reach here, we're attempting migration, so we should set the annotation
-	// to prevent future migration attempts regardless of outcome
 
 	// Merge all eno entries first to get the combined fieldset
 	mergedEnoSet, mergedEnoTime := mergeEnoEntries(managedFields)
@@ -244,14 +234,6 @@ func NormalizeConflictingManagers(ctx context.Context, current *unstructured.Uns
 	if modified {
 		current.SetManagedFields(newManagedFields)
 	}
-
-	// Always set the annotation after attempting migration to ensure this only runs once
-	annotations = current.GetAnnotations()
-	if annotations == nil {
-		annotations = make(map[string]string)
-	}
-	annotations[ownershipMigratedAnnoKey] = ownershipMigratedVersion
-	current.SetAnnotations(annotations)
 
 	return modified, nil
 }

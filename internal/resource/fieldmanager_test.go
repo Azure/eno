@@ -878,10 +878,9 @@ func TestNormalizeConflictingManagers_AnnotationGating(t *testing.T) {
 		managedFields     []metav1.ManagedFieldsEntry
 		migratingManagers []string
 		expectModified    bool
-		expectAnnotation  bool
 	}{
 		{
-			name: "no-op when migration annotation present with v1",
+			name: "migration occurs even with annotation present (no longer gates)",
 			annotations: map[string]string{
 				"eno.azure.com/ownership-migrated": "v1",
 			},
@@ -894,11 +893,10 @@ func TestNormalizeConflictingManagers_AnnotationGating(t *testing.T) {
 				},
 			},
 			migratingManagers: []string{"kubectl"},
-			expectModified:    false,
-			expectAnnotation:  true, // annotation should remain
+			expectModified:    true,
 		},
 		{
-			name:        "migration occurs and sets annotation when not present",
+			name:        "migration occurs when annotation not present",
 			annotations: nil,
 			managedFields: []metav1.ManagedFieldsEntry{
 				{
@@ -910,7 +908,6 @@ func TestNormalizeConflictingManagers_AnnotationGating(t *testing.T) {
 			},
 			migratingManagers: []string{"kubectl"},
 			expectModified:    true,
-			expectAnnotation:  true, // annotation should be set
 		},
 		{
 			name: "migration occurs when annotation present with wrong value",
@@ -927,10 +924,9 @@ func TestNormalizeConflictingManagers_AnnotationGating(t *testing.T) {
 			},
 			migratingManagers: []string{"kubectl"},
 			expectModified:    true,
-			expectAnnotation:  true, // annotation should be updated to v1
 		},
 		{
-			name: "no-op when no conflicting managers present - no annotation set",
+			name: "no-op when no conflicting managers present",
 			annotations: map[string]string{
 				"other-annotation": "value",
 			},
@@ -944,7 +940,6 @@ func TestNormalizeConflictingManagers_AnnotationGating(t *testing.T) {
 			},
 			migratingManagers: []string{"kubectl"},
 			expectModified:    false,
-			expectAnnotation:  false, // no migration occurred, no annotation set
 		},
 	}
 
@@ -961,15 +956,15 @@ func TestNormalizeConflictingManagers_AnnotationGating(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.expectModified, modified)
 
-			annotations := obj.GetAnnotations()
-			if tc.expectAnnotation {
-				require.NotNil(t, annotations)
-				assert.Equal(t, "v1", annotations["eno.azure.com/ownership-migrated"])
+			// Verify that annotations are not modified by the function
+			// (the function should not set or remove the migration annotation)
+			originalAnnotations := tc.annotations
+			currentAnnotations := obj.GetAnnotations()
+
+			if originalAnnotations == nil {
+				assert.Nil(t, currentAnnotations, "annotations should remain nil if they were originally nil")
 			} else {
-				if annotations != nil {
-					_, exists := annotations["eno.azure.com/ownership-migrated"]
-					assert.False(t, exists, "annotation should not be set when no migration occurs")
-				}
+				assert.Equal(t, originalAnnotations, currentAnnotations, "annotations should not be modified")
 			}
 		})
 	}
