@@ -160,9 +160,13 @@ func NormalizeConflictingManagers(ctx context.Context, current *unstructured.Uns
 		return false, err
 	}
 	// Skip normalization if there are no legacy managers and at most one eno entry
+	// Note: Don't set annotation here since no migration was attempted
 	if !hasLegacyManager && enoEntryCount <= 1 {
 		return false, nil
 	}
+
+	// If we reach here, we're attempting migration, so we should set the annotation
+	// to prevent future migration attempts regardless of outcome
 
 	// Merge all eno entries first to get the combined fieldset
 	mergedEnoSet, mergedEnoTime := mergeEnoEntries(managedFields)
@@ -348,8 +352,8 @@ func createMergedEnoEntry(mergedSet *fieldpath.Set, timestamp *metav1.Time, mana
 }
 
 // filterAllowedFieldPaths filters a fieldpath.Set to only include paths that are safe to migrate.
-// Allowed paths: spec.*, metadata.labels.*, metadata.annotations.*
-// Excluded paths: metadata.finalizers, metadata.deletionTimestamp, status.*, and other metadata fields
+// Allowed paths: spec.*, data.*, stringData.*, binaryData.*, metadata.labels.*, metadata.annotations.*
+// Excluded paths: metadata.finalizers, metadata.deletionTimestamp, metadata.ownerReferences, status.*, and other metadata fields
 func filterAllowedFieldPaths(set *fieldpath.Set) *fieldpath.Set {
 	if set == nil || set.Empty() {
 		return &fieldpath.Set{}
@@ -357,6 +361,9 @@ func filterAllowedFieldPaths(set *fieldpath.Set) *fieldpath.Set {
 
 	allowedPrefixes := []fieldpath.Path{
 		fieldpath.MakePathOrDie("spec"),
+		fieldpath.MakePathOrDie("data"),
+		fieldpath.MakePathOrDie("stringData"),
+		fieldpath.MakePathOrDie("binaryData"),
 		fieldpath.MakePathOrDie("metadata", "labels"),
 		fieldpath.MakePathOrDie("metadata", "annotations"),
 	}
