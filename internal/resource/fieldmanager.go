@@ -253,8 +253,10 @@ func buildUniqueManagersList(migratingManagers []string) map[string]bool {
 	return unique
 }
 
-// analyzeManagerConflicts checks if there are legacy managers present
-// and counts the number of eno entries
+// analyzeManagerConflicts checks if there are legacy managers present that own allowed fields
+// and counts the number of eno entries. Only returns hasLegacyManager=true if a legacy manager
+// owns at least one field from the allowed list (spec, data, etc.), preventing infinite loops
+// when legacy managers only own excluded fields (status, finalizers, etc.).
 func analyzeManagerConflicts(managedFields []metav1.ManagedFieldsEntry, uniqueMigratingManagers map[string]bool) (hasLegacyManager bool, enoEntryCount int, err error) {
 	for i := range managedFields {
 		entry := &managedFields[i]
@@ -266,7 +268,13 @@ func analyzeManagerConflicts(managedFields []metav1.ManagedFieldsEntry, uniqueMi
 
 		// Check if this is a legacy manager we need to normalize
 		if uniqueMigratingManagers[entry.Manager] {
-			hasLegacyManager = true
+			// Only consider it a legacy manager needing migration if it owns at least one allowed field
+			if set := parseFieldsEntry(*entry); set != nil {
+				allowedFields := filterAllowedFieldPaths(set)
+				if !allowedFields.Empty() {
+					hasLegacyManager = true
+				}
+			}
 		}
 	}
 
