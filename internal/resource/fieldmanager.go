@@ -14,9 +14,7 @@ import (
 )
 
 const (
-	enoManager               = "eno"
-	ownershipMigratedAnnoKey = "eno.azure.com/ownership-migrated"
-	ownershipMigratedVersion = "v1"
+	enoManager = "eno"
 )
 
 // MergeEnoManagedFields corrects managed fields drift to ensure Eno can remove fields
