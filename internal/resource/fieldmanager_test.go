@@ -881,6 +881,23 @@ func TestNormalizeConflictingManagers_AnnotationGating(t *testing.T) {
 		expectAnnotation  bool
 	}{
 		{
+			name: "no-op when migration annotation present with v1",
+			annotations: map[string]string{
+				"eno.azure.com/ownership-migrated": "v1",
+			},
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "kubectl",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}}}`)},
+				},
+			},
+			migratingManagers: []string{"kubectl"},
+			expectModified:    false,
+			expectAnnotation:  true, // annotation should remain
+		},
+		{
 			name:        "migration occurs and sets annotation when not present",
 			annotations: nil,
 			managedFields: []metav1.ManagedFieldsEntry{

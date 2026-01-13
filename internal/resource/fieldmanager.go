@@ -138,10 +138,10 @@ func compareEnoManagedFields(a, b []metav1.ManagedFieldsEntry) bool {
 }
 
 func NormalizeConflictingManagers(ctx context.Context, current *unstructured.Unstructured, migratingManagers []string) (modified bool, err error) {
-	// Check for migration annotation - if present, this object has already been migrated
+	// Check for migration annotation - if present, migration has already been attempted
 	annotations := current.GetAnnotations()
 	if annotations != nil && annotations[ownershipMigratedAnnoKey] == ownershipMigratedVersion {
-		return false, nil // Already migrated, skip
+		return false, nil // Migration already attempted, skip
 	}
 
 	managedFields := current.GetManagedFields()
@@ -239,14 +239,15 @@ func NormalizeConflictingManagers(ctx context.Context, current *unstructured.Uns
 
 	if modified {
 		current.SetManagedFields(newManagedFields)
-		// Set the annotation to prevent re-running migration
-		annotations := current.GetAnnotations()
-		if annotations == nil {
-			annotations = make(map[string]string)
-		}
-		annotations[ownershipMigratedAnnoKey] = ownershipMigratedVersion
-		current.SetAnnotations(annotations)
 	}
+
+	// Always set the annotation after attempting migration to ensure this only runs once
+	annotations = current.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	annotations[ownershipMigratedAnnoKey] = ownershipMigratedVersion
+	current.SetAnnotations(annotations)
 
 	return modified, nil
 }
