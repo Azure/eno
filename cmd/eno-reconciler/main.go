@@ -43,6 +43,7 @@ func run() error {
 		namespaceCleanup             bool
 		enoBuildVersion              string
 		migratingFieldManagers       string
+		migratingFields              string
 
 		mgrOpts = &manager.Options{
 			Rest: ctrl.GetConfigOrDie(),
@@ -64,6 +65,7 @@ func run() error {
 	flag.BoolVar(&namespaceCleanup, "namespace-cleanup", true, "Clean up orphaned resources caused by namespace force-deletions")
 	flag.BoolVar(&recOpts.FailOpen, "fail-open", false, "Report that resources are reconciled once they've been seen, even if reconciliation failed. Overridden by individual resources with 'eno.azure.io/fail-open: true|false'")
 	flag.StringVar(&migratingFieldManagers, "migrating-field-managers", os.Getenv("MIGRATING_FIELD_MANAGERS"), "Comma-separated list of Kubernetes SSA field manager names to take ownership from during migrations")
+	flag.StringVar(&migratingFields, "migrating-fields", os.Getenv("MIGRATING_FIELDS"), "Comma-seperated list of fields Kubernetes fields(metadata.labels, spec, stringData...) to migrate the ownership to eno")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 
@@ -133,6 +135,17 @@ func run() error {
 		for i := range recOpts.MigratingFieldManagers {
 			recOpts.MigratingFieldManagers[i] = strings.TrimSpace(recOpts.MigratingFieldManagers[i])
 		}
+	} else {
+		recOpts.MigratingFieldManagers = []string{"Go-http-client", "helm-controller", "kubectl-edit"}
+	}
+
+	if migratingFields != "" {
+		recOpts.MigratingFields = strings.Split(migratingFields, ",")
+		for i := range recOpts.MigratingFields {
+			recOpts.MigratingFields[i] = strings.TrimSpace(recOpts.MigratingFields[i])
+		}
+	} else {
+		recOpts.MigratingFields = []string{"spec", "metadata.labels", "metadata.annotations"}
 	}
 
 	err = reconciliation.New(mgr, recOpts)

@@ -881,6 +881,7 @@ func TestMigratingFieldManagers(t *testing.T) {
 		ReadinessPollInterval:  time.Hour,
 		DisableServerSideApply: mgr.NoSsaSupport,
 		MigratingFieldManagers: []string{"legacy-tool"},
+		MigratingFields:        []string{"data"},
 	})
 	mgr.Start(t)
 	_, comp := writeGenericComposition(t, upstream)
@@ -997,6 +998,7 @@ func TestMigratingFieldManagersFieldRemoval(t *testing.T) {
 		ReadinessPollInterval:  time.Hour,
 		DisableServerSideApply: mgr.NoSsaSupport,
 		MigratingFieldManagers: []string{"legacy-tool"},
+		MigratingFields:        []string{"data"},
 	})
 	mgr.Start(t)
 	_, comp := writeGenericComposition(t, upstream)
