@@ -69,8 +69,8 @@ func TestSummarizeErrorIntegration(t *testing.T) {
 	mgr.Start(t)
 
 	test := func(t *testing.T, fn func() error) {
-		a := summarizeError(fn())
-		b := summarizeError(fn())
+		a := summarizeError(ctx, fn())
+		b := summarizeError(ctx, fn())
 		assert.Equal(t, a, b, "the error message should be stable across operations")
 		t.Logf("message for %q: %s", t.Name(), a)
 	}
@@ -144,7 +144,7 @@ func TestSummarizeErrorIntegration(t *testing.T) {
 		require.NoError(t, upstream.Create(ctx, obj))
 
 		obj.SetResourceVersion("10000000")
-		assert.Empty(t, summarizeError(upstream.Update(ctx, obj)))
+		assert.Empty(t, summarizeError(ctx, upstream.Update(ctx, obj)))
 	})
 
 	t.Run("conflict/apply", func(t *testing.T) {
@@ -161,7 +161,7 @@ func TestSummarizeErrorIntegration(t *testing.T) {
 		require.NoError(t, upstream.Create(ctx, obj))
 
 		obj.SetResourceVersion("10000000")
-		assert.Empty(t, summarizeError(upstream.Patch(ctx, obj, client.Apply, client.FieldOwner("eno"))))
+		assert.Empty(t, summarizeError(ctx, upstream.Patch(ctx, obj, client.Apply, client.FieldOwner("eno"))))
 	})
 
 	t.Run("conflict/create", func(t *testing.T) {
@@ -176,7 +176,7 @@ func TestSummarizeErrorIntegration(t *testing.T) {
 			},
 		}
 		require.NoError(t, upstream.Create(ctx, obj.DeepCopy()))
-		assert.Empty(t, summarizeError(upstream.Create(ctx, obj)))
+		assert.Empty(t, summarizeError(ctx, upstream.Create(ctx, obj)))
 	})
 
 	t.Run("unknown-kind/create", func(t *testing.T) {

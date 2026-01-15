@@ -473,7 +473,7 @@ func patchResourceError(ctx context.Context, err error) flowcontrol.StatusPatchF
 	return func(rs *apiv1.ResourceState) *apiv1.ResourceState {
 		logger := logr.FromContextOrDiscard(ctx)
 		str := summarizeError(ctx, err)
-		logger.Info("summarized resource error for status patch", "errorSummary", str)
+		logger.Info("summarized resource error for status patch", "originalError", err, "errorSummary", str)
 		if rs != nil && (rs.Reconciled || (rs.ReconciliationError != nil && *rs.ReconciliationError == str)) {
 			logger.Info("no resource error status change detected")
 			return nil
@@ -491,13 +491,13 @@ func summarizeError(ctx context.Context, err error) string {
 	logger := logr.FromContextOrDiscard(ctx)
 	logger.Info("summarizing error for status patch", "error", err)
 	if err == nil {
-		logger.Info("no error provided, returning empty summary")
+		logger.Info("no error to summarize")
 		return ""
 	}
 
 	statusErr := &errors.StatusError{}
 	if !goerrors.As(err, &statusErr) {
-		logger.Info("non-StatusError, returning full error message")
+		logger.Info("error is not a StatusError, using full message")
 		return err.Error()
 	}
 	status := statusErr.Status()
@@ -505,7 +505,7 @@ func summarizeError(ctx context.Context, err error) string {
 	// SSA is sloppy with the status codes
 	if spl := strings.SplitAfter(status.Message, "failed to create typed patch object"); len(spl) > 1 {
 		reason := strings.TrimSpace(spl[1])
-		logger.Info("SSA patch error, extracting reason", "reason", reason)
+		logger.Info("extracted reason from SSA patch error", "statusMessage", status.Message, "extractedReason", reason)
 		return reason
 	}
 
@@ -517,11 +517,11 @@ func summarizeError(ctx context.Context, err error) string {
 		metav1.StatusReasonGone,
 		metav1.StatusReasonForbidden,
 		metav1.StatusReasonUnauthorized:
-		logger.Info("status reason suitable for summarization", "reason", status.Reason, "message", status.Message)
+		logger.Info("using status message for summarizable error", "statusReason", status.Reason, "statusMessage", status.Message)
 		return status.Message
 
 	default:
-		logger.Info("status reason not suitable for summarization, returning full error message", "reason", status.Reason)
+		logger.Info("using full error message for non-summarizable status", "statusReason", status.Reason)
 		return err.Error()
 	}
 }
