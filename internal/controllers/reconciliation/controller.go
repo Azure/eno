@@ -38,6 +38,7 @@ type Options struct {
 	DisableServerSideApply bool
 	FailOpen               bool
 	MigratingFieldManagers []string
+	MigratingFields        []string
 
 	Timeout               time.Duration
 	ReadinessPollInterval time.Duration
@@ -56,6 +57,7 @@ type Controller struct {
 	disableSSA             bool
 	failOpen               bool
 	migratingFieldManagers []string
+	migratingFields        []string
 }
 
 func New(mgr ctrl.Manager, opts Options) error {
@@ -83,6 +85,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 		disableSSA:             opts.DisableServerSideApply,
 		failOpen:               opts.FailOpen,
 		migratingFieldManagers: opts.MigratingFieldManagers,
+		migratingFields:        opts.MigratingFields,
 	}
 
 	return builder.TypedControllerManagedBy[resource.Request](mgr).
@@ -296,7 +299,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 		// subsequent SSA Apply will treat eno as the sole owner and automatically merge the managedFields
 		// entries into a single consolidated entry for eno.
 		if current != nil && len(c.migratingFieldManagers) > 0 {
-			wasModified, err := resource.NormalizeConflictingManagers(ctx, current, c.migratingFieldManagers)
+			wasModified, err := resource.NormalizeConflictingManagers(ctx, current, c.migratingFieldManagers, c.migratingFields)
 			if err != nil {
 				return false, fmt.Errorf("normalize conflicting manager failed: %w", err)
 			}
