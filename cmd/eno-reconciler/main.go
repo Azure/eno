@@ -135,8 +135,6 @@ func run() error {
 		for i := range recOpts.MigratingFieldManagers {
 			recOpts.MigratingFieldManagers[i] = strings.TrimSpace(recOpts.MigratingFieldManagers[i])
 		}
-	} else {
-		recOpts.MigratingFieldManagers = []string{"Go-http-client", "helm-controller", "kubectl-edit"}
 	}
 
 	if migratingFields != "" {
@@ -144,8 +142,6 @@ func run() error {
 		for i := range recOpts.MigratingFields {
 			recOpts.MigratingFields[i] = strings.TrimSpace(recOpts.MigratingFields[i])
 		}
-	} else {
-		recOpts.MigratingFields = []string{"spec", "metadata.labels", "metadata.annotations"}
 	}
 
 	err = reconciliation.New(mgr, recOpts)
