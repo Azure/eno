@@ -154,7 +154,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	}
 	if err != nil {
 		logger.Error(err, "resource reconciliation failed")
-		c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceError(err))
+		c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceError(ctx, err))
 		return ctrl.Result{}, err
 	}
 	if modified {
@@ -469,10 +469,13 @@ func patchResourceState(deleted bool, ready *metav1.Time) flowcontrol.StatusPatc
 	}
 }
 
-func patchResourceError(err error) flowcontrol.StatusPatchFn {
+func patchResourceError(ctx context.Context, err error) flowcontrol.StatusPatchFn {
 	return func(rs *apiv1.ResourceState) *apiv1.ResourceState {
-		str := summarizeError(err)
+		logger := logr.FromContextOrDiscard(ctx)
+		str := summarizeError(ctx, err)
+		logger.Info("summarized resource error for status patch", "errorSummary", str)
 		if rs != nil && (rs.Reconciled || (rs.ReconciliationError != nil && *rs.ReconciliationError == str)) {
+			logger.Info("no resource error status change detected")
 			return nil
 		}
 		return &apiv1.ResourceState{
@@ -484,16 +487,26 @@ func patchResourceError(err error) flowcontrol.StatusPatchFn {
 	}
 }
 
-func summarizeError(err error) string {
-	statusErr := &errors.StatusError{}
-	if err == nil || !goerrors.As(err, &statusErr) {
+func summarizeError(ctx context.Context, err error) string {
+	logger := logr.FromContextOrDiscard(ctx)
+	logger.Info("summarizing error for status patch", "error", err)
+	if err == nil {
+		logger.Info("no error provided, returning empty summary")
 		return ""
+	}
+
+	statusErr := &errors.StatusError{}
+	if !goerrors.As(err, &statusErr) {
+		logger.Info("non-StatusError, returning full error message")
+		return err.Error()
 	}
 	status := statusErr.Status()
 
 	// SSA is sloppy with the status codes
 	if spl := strings.SplitAfter(status.Message, "failed to create typed patch object"); len(spl) > 1 {
-		return strings.TrimSpace(spl[1])
+		reason := strings.TrimSpace(spl[1])
+		logger.Info("SSA patch error, extracting reason", "reason", reason)
+		return reason
 	}
 
 	switch status.Reason {
@@ -504,10 +517,12 @@ func summarizeError(err error) string {
 		metav1.StatusReasonGone,
 		metav1.StatusReasonForbidden,
 		metav1.StatusReasonUnauthorized:
+		logger.Info("status reason suitable for summarization", "reason", status.Reason, "message", status.Message)
 		return status.Message
 
 	default:
-		return ""
+		logger.Info("status reason not suitable for summarization, returning full error message", "reason", status.Reason)
+		return err.Error()
 	}
 }
 
