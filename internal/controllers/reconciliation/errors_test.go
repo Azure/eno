@@ -144,7 +144,8 @@ func TestSummarizeErrorIntegration(t *testing.T) {
 		require.NoError(t, upstream.Create(ctx, obj))
 
 		obj.SetResourceVersion("10000000")
-		assert.Empty(t, summarizeError(ctx, upstream.Update(ctx, obj)))
+		assert.NotEmpty(t, summarizeError(ctx, upstream.Update(ctx, obj)))
+		assert.Contains(t, summarizeError(ctx, upstream.Update(ctx, obj)), "Operation cannot be fulfilled")
 	})
 
 	t.Run("conflict/apply", func(t *testing.T) {
@@ -161,7 +162,8 @@ func TestSummarizeErrorIntegration(t *testing.T) {
 		require.NoError(t, upstream.Create(ctx, obj))
 
 		obj.SetResourceVersion("10000000")
-		assert.Empty(t, summarizeError(ctx, upstream.Patch(ctx, obj, client.Apply, client.FieldOwner("eno"))))
+		assert.NotEmpty(t, summarizeError(ctx, upstream.Patch(ctx, obj, client.Apply, client.FieldOwner("eno"))))
+		assert.Contains(t, summarizeError(ctx, upstream.Patch(ctx, obj, client.Apply, client.FieldOwner("eno"))), "Operation cannot be fulfilled")
 	})
 
 	t.Run("conflict/create", func(t *testing.T) {
@@ -176,7 +178,8 @@ func TestSummarizeErrorIntegration(t *testing.T) {
 			},
 		}
 		require.NoError(t, upstream.Create(ctx, obj.DeepCopy()))
-		assert.Empty(t, summarizeError(ctx, upstream.Create(ctx, obj)))
+		assert.NotEmpty(t, summarizeError(ctx, upstream.Create(ctx, obj)))
+		assert.Contains(t, summarizeError(ctx, upstream.Create(ctx, obj)), "already exists")
 	})
 
 	t.Run("unknown-kind/create", func(t *testing.T) {
