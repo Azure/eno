@@ -1,6 +1,7 @@
 package reconciliation
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -117,6 +118,42 @@ func TestShouldFailOpen(t *testing.T) {
 	assert.False(t, c.shouldFailOpen(&resource.Resource{FailOpen: nil}))
 	assert.False(t, c.shouldFailOpen(&resource.Resource{FailOpen: ptr.To(false)}))
 	assert.True(t, c.shouldFailOpen(&resource.Resource{FailOpen: ptr.To(true)}))
+}
+
+func TestSummarizeError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected string
+	}{
+		{
+			name:     "nil error returns empty string",
+			err:      nil,
+			expected: "",
+		},
+		{
+			name:     "dry-run validation error is captured",
+			err:      fmt.Errorf("dry-run applying update: Deployment.apps \"kube-apiserver\" is invalid: spec.template.spec.initContainers[0].image: Required value"),
+			expected: "dry-run applying update: Deployment.apps \"kube-apiserver\" is invalid: spec.template.spec.initContainers[0].image: Required value",
+		},
+		{
+			name:     "dry-run webhook error is captured",
+			err:      fmt.Errorf("dry-run applying update: Internal error occurred: failed calling webhook \"validate.kyverno.svc-fail\": failed to call webhook"),
+			expected: "dry-run applying update: Internal error occurred: failed calling webhook \"validate.kyverno.svc-fail\": failed to call webhook",
+		},
+		{
+			name:     "non-status error returns empty string",
+			err:      fmt.Errorf("some random error"),
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := summarizeError(tt.err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }
 
 func TestRequeueDoesNotPanic(t *testing.T) {

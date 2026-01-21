@@ -488,8 +488,17 @@ func patchResourceError(err error) flowcontrol.StatusPatchFn {
 }
 
 func summarizeError(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	// Capture all dry-run failures - these are important to surface
+	if strings.Contains(err.Error(), "dry-run applying update") {
+		return err.Error()
+	}
+
 	statusErr := &errors.StatusError{}
-	if err == nil || !goerrors.As(err, &statusErr) {
+	if !goerrors.As(err, &statusErr) {
 		return ""
 	}
 	status := statusErr.Status()
