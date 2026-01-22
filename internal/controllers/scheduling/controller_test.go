@@ -10,6 +10,7 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/testutil"
+	prometheustestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -714,4 +715,55 @@ func TestRetryContention(t *testing.T) {
 		err := cli.Get(ctx, client.ObjectKeyFromObject(secondComp), secondComp)
 		return err == nil && secondComp.Status.InFlightSynthesis != nil
 	})
+}
+
+// TestCompositionHealthMetrics proves that the compositionHealth metric is set correctly during reconciliation.
+func TestCompositionHealthMetrics(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+
+	c := &controller{client: cli, concurrencyLimit: 10, watchdogThreshold: time.Millisecond * 100}
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	require.NoError(t, cli.Create(ctx, synth))
+
+	// Create a healthy composition (recently reconciled)
+	healthyComp := &apiv1.Composition{}
+	healthyComp.Name = "healthy-comp"
+	healthyComp.Namespace = "default"
+	healthyComp.Finalizers = []string{"eno.azure.io/cleanup"}
+	healthyComp.Spec.Synthesizer.Name = synth.Name
+	require.NoError(t, cli.Create(ctx, healthyComp))
+
+	healthyComp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		UUID:       "healthy-uuid",
+		Reconciled: ptr.To(metav1.Now()),
+	}
+	require.NoError(t, cli.Status().Update(ctx, healthyComp))
+
+	// Create a stuck composition (initialized long ago, not reconciled)
+	stuckComp := &apiv1.Composition{}
+	stuckComp.Name = "stuck-comp"
+	stuckComp.Namespace = "default"
+	stuckComp.Finalizers = []string{"eno.azure.io/cleanup"}
+	stuckComp.Spec.Synthesizer.Name = synth.Name
+	require.NoError(t, cli.Create(ctx, stuckComp))
+
+	stuckComp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		UUID:        "stuck-uuid",
+		Initialized: ptr.To(metav1.NewTime(time.Now().Add(-time.Hour))), // initialized long ago
+	}
+	require.NoError(t, cli.Status().Update(ctx, stuckComp))
+
+	// Run reconciliation
+	_, err := c.Reconcile(ctx, ctrl.Request{})
+	require.NoError(t, err)
+
+	// Verify metrics
+	healthyValue := prometheustestutil.ToFloat64(compositionHealth.WithLabelValues("healthy-comp", "default", "test-synth"))
+	assert.Equal(t, float64(0), healthyValue, "healthy composition should have health value 0")
+
+	stuckValue := prometheustestutil.ToFloat64(compositionHealth.WithLabelValues("stuck-comp", "default", "test-synth"))
+	assert.Equal(t, float64(1), stuckValue, "stuck composition should have health value 1")
 }
