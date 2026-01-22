@@ -30,10 +30,17 @@ var (
 			Help: "Number of compositions that have not been reconciled since a period after their current synthesis was initialized",
 		}, []string{"synthesizer", "owner"},
 	)
+
+	compositionHealth = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "eno_composition_health",
+			Help: "Health status of each composition (0 = healthy, 1 = stuck/unhealthy)",
+		}, []string{"composition_name", "composition_namespace", "synthesizer_name"},
+	)
 )
 
 func init() {
-	metrics.Registry.MustRegister(freeSynthesisSlots, schedulingLatency, stuckReconciling)
+	metrics.Registry.MustRegister(freeSynthesisSlots, schedulingLatency, stuckReconciling, compositionHealth)
 }
 
 func missedReconciliation(comp *apiv1.Composition, threshold time.Duration) bool {
