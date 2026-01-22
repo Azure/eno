@@ -13,7 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -132,18 +134,33 @@ func TestSummarizeError(t *testing.T) {
 			expected: "",
 		},
 		{
-			name:     "dry-run validation error is captured",
-			err:      fmt.Errorf("dry-run applying update: Deployment.apps \"kube-apiserver\" is invalid: spec.template.spec.initContainers[0].image: Required value"),
-			expected: "dry-run applying update: Deployment.apps \"kube-apiserver\" is invalid: spec.template.spec.initContainers[0].image: Required value",
-		},
-		{
-			name:     "dry-run webhook error is captured",
-			err:      fmt.Errorf("dry-run applying update: Internal error occurred: failed calling webhook \"validate.kyverno.svc-fail\": failed to call webhook"),
-			expected: "dry-run applying update: Internal error occurred: failed calling webhook \"validate.kyverno.svc-fail\": failed to call webhook",
-		},
-		{
 			name:     "non-status error returns empty string",
 			err:      fmt.Errorf("some random error"),
+			expected: "",
+		},
+		{
+			name:     "StatusReasonInvalid is captured",
+			err:      errors.NewInvalid(schema.GroupKind{Group: "apps", Kind: "Deployment"}, "kube-apiserver", nil),
+			expected: "Deployment.apps \"kube-apiserver\" is invalid",
+		},
+		{
+			name:     "StatusReasonInternalError is captured",
+			err:      errors.NewInternalError(fmt.Errorf("failed calling webhook")),
+			expected: "Internal error occurred: failed calling webhook",
+		},
+		{
+			name:     "StatusReasonBadRequest is captured",
+			err:      errors.NewBadRequest("bad request"),
+			expected: "bad request",
+		},
+		{
+			name:     "StatusReasonForbidden is captured",
+			err:      errors.NewForbidden(schema.GroupResource{Group: "apps", Resource: "deployments"}, "test", fmt.Errorf("not allowed")),
+			expected: "deployments.apps \"test\" is forbidden: not allowed",
+		},
+		{
+			name:     "StatusReasonNotFound is not captured",
+			err:      errors.NewNotFound(schema.GroupResource{Group: "apps", Resource: "deployments"}, "test"),
 			expected: "",
 		},
 	}
