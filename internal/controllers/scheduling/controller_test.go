@@ -722,7 +722,6 @@ func TestCompositionHealthMetrics(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
 
-	// Use a short watchdog threshold so we can test stuck detection
 	c := &controller{client: cli, concurrencyLimit: 10, watchdogThreshold: time.Millisecond * 100}
 
 	synth := &apiv1.Synthesizer{}
