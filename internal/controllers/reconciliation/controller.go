@@ -340,7 +340,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 			dryRunPrev := snap.Unstructured()
 			err = c.upstreamClient.Patch(ctx, dryRunPrev, client.Apply, client.ForceOwnership, client.FieldOwner("eno"), client.DryRunAll)
 			if err != nil {
-				logger.Error(err, "faile dto get managedFields values")
+				logger.Error(err, "failed to get managedFields values")
 				return false, fmt.Errorf("getting managed fields values for previous version: %w", err)
 			}
 
@@ -506,7 +506,9 @@ func summarizeError(err error) string {
 		metav1.StatusReasonMethodNotAllowed,
 		metav1.StatusReasonGone,
 		metav1.StatusReasonForbidden,
-		metav1.StatusReasonUnauthorized:
+		metav1.StatusReasonUnauthorized,
+		metav1.StatusReasonInvalid,
+		metav1.StatusReasonInternalError:
 		return status.Message
 
 	default:

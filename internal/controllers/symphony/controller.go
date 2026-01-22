@@ -143,7 +143,6 @@ func (c *symphonyController) reconcileReverse(ctx context.Context, symph *apiv1.
 		labelInSync := symph.DeletionTimestamp == nil || (comp.Labels != nil && comp.Labels[deletionLabelKey] == "true")
 		alreadyDeleted := comp.DeletionTimestamp != nil
 		if shouldExist || (alreadyDeleted && labelInSync) {
-			logger.Info("composition should exist or is already being deleted properly", "compositionName", comp.Name, "compositionNamespace", comp.Namespace)
 			continue
 		}
 
