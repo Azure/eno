@@ -298,27 +298,27 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 		// caused by multiple managers owning overlapping fields. When managers are renamed to "eno", the
 		// subsequent SSA Apply will treat eno as the sole owner and automatically merge the managedFields
 		// entries into a single consolidated entry for eno.
-		// if current != nil && len(c.migratingFieldManagers) > 0 {
-		// 	wasModified, err := resource.NormalizeConflictingManagers(ctx, current, c.migratingFieldManagers, c.migratingFields)
-		// 	if err != nil {
-		// 		return false, fmt.Errorf("normalize conflicting manager failed: %w", err)
-		// 	}
-		// 	if wasModified {
-		// 		logger.Info("Normalized conflicting managers to eno")
-		// 		err = c.upstreamClient.Update(ctx, current, client.FieldOwner("eno"))
-		// 		if err != nil {
-		// 			return false, fmt.Errorf("normalizing managedFields failed: %w", err)
-		// 		}
-		// 		// refetch the current before apply dry-run
-		// 		current, err = c.getCurrent(ctx, res.Resource)
-		// 		if err != nil {
-		// 			logger.Error(err, "failed to get current resource after eno ownership migration")
-		// 			return false, fmt.Errorf("re-fetching after normalizing manager failed: %w", err)
-		// 		}
+		if current != nil && len(c.migratingFieldManagers) > 0 {
+			wasModified, err := resource.NormalizeConflictingManagers(ctx, current, c.migratingFieldManagers, c.migratingFields)
+			if err != nil {
+				return false, fmt.Errorf("normalize conflicting manager failed: %w", err)
+			}
+			if wasModified {
+				logger.Info("Normalized conflicting managers to eno")
+				err = c.upstreamClient.Update(ctx, current, client.FieldOwner("eno"))
+				if err != nil {
+					return false, fmt.Errorf("normalizing managedFields failed: %w", err)
+				}
+				// refetch the current before apply dry-run
+				current, err = c.getCurrent(ctx, res.Resource)
+				if err != nil {
+					logger.Error(err, "failed to get current resource after eno ownership migration")
+					return false, fmt.Errorf("re-fetching after normalizing manager failed: %w", err)
+				}
 
-		// 		logger.Info("Successfully normalized field managers to eno")
-		// 	}
-		// }
+				logger.Info("Successfully normalized field managers to eno")
+			}
+		}
 		dryRun, err := c.update(ctx, comp, prev, res, current, true)
 		if err != nil {
 			logger.Error(err, "dry-run update failed.")
