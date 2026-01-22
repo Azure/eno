@@ -40,7 +40,6 @@ func (c *pruningController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	for i, ir := range comp.Status.InputRevisions {
 		if hasBindingKey(comp, synth, ir.Key) {
-			logger.Info("input revision still has binding, keeping", "key", ir.Key, "revision", ir.Revision)
 			continue
 		}
 		logger.Info("pruning input revision - no longer has binding", "key", ir.Key, "revision", ir.Revision, "index", i)

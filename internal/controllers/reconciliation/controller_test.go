@@ -1,6 +1,7 @@
 package reconciliation
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -12,7 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -117,6 +120,57 @@ func TestShouldFailOpen(t *testing.T) {
 	assert.False(t, c.shouldFailOpen(&resource.Resource{FailOpen: nil}))
 	assert.False(t, c.shouldFailOpen(&resource.Resource{FailOpen: ptr.To(false)}))
 	assert.True(t, c.shouldFailOpen(&resource.Resource{FailOpen: ptr.To(true)}))
+}
+
+func TestSummarizeError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected string
+	}{
+		{
+			name:     "nil error returns empty string",
+			err:      nil,
+			expected: "",
+		},
+		{
+			name:     "non-status error returns empty string",
+			err:      fmt.Errorf("some random error"),
+			expected: "",
+		},
+		{
+			name:     "StatusReasonInvalid is captured",
+			err:      errors.NewInvalid(schema.GroupKind{Group: "apps", Kind: "Deployment"}, "kube-apiserver", nil),
+			expected: "Deployment.apps \"kube-apiserver\" is invalid",
+		},
+		{
+			name:     "StatusReasonInternalError is captured",
+			err:      errors.NewInternalError(fmt.Errorf("failed calling webhook")),
+			expected: "Internal error occurred: failed calling webhook",
+		},
+		{
+			name:     "StatusReasonBadRequest is captured",
+			err:      errors.NewBadRequest("bad request"),
+			expected: "bad request",
+		},
+		{
+			name:     "StatusReasonForbidden is captured",
+			err:      errors.NewForbidden(schema.GroupResource{Group: "apps", Resource: "deployments"}, "test", fmt.Errorf("not allowed")),
+			expected: "deployments.apps \"test\" is forbidden: not allowed",
+		},
+		{
+			name:     "StatusReasonNotFound is not captured",
+			err:      errors.NewNotFound(schema.GroupResource{Group: "apps", Resource: "deployments"}, "test"),
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := summarizeError(tt.err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }
 
 func TestRequeueDoesNotPanic(t *testing.T) {
