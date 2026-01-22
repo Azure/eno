@@ -111,6 +111,9 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	nextSlot := c.getNextCooldownSlot(comps)
 	logger.Info("listed compositions", "compositionCount", len(comps.Items), "nextCooldownSlot", nextSlot)
 
+	// Reset the compositionStatus metric before iterating through compositions
+	compositionStatus.Reset()
+
 	var inFlight int
 	var op *op
 	for _, comp := range comps.Items {
@@ -122,7 +125,10 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		if missedReconciliation(&comp, c.watchdogThreshold) {
 			synth := synthsByName[comp.Spec.Synthesizer.Name]
 			stuckReconciling.WithLabelValues(comp.Spec.Synthesizer.Name, getSynthOwner(&synth)).Inc()
+			compositionStatus.WithLabelValues(comp.Name, comp.Namespace, comp.Spec.Synthesizer.Name).Set(1)
 			logger.Info("detected composition missed reconciliation", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", comp.Spec.Synthesizer.Name)
+		} else {
+			compositionStatus.WithLabelValues(comp.Name, comp.Namespace, comp.Spec.Synthesizer.Name).Set(0)
 		}
 
 		synth, ok := synthsByName[comp.Spec.Synthesizer.Name]
