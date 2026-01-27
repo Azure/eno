@@ -126,7 +126,10 @@ func (c *Cache) Fill(ctx context.Context, comp *apiv1.Composition, synUUID strin
 		}
 	}
 	tree := builder.Build()
-
+	if found, cycle := tree.cycles(); found {
+		logger.V(0).Info("cycles found", "path", cycle)
+		//be nice to error?
+	}
 	compNSN := types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
 	c.mut.Lock()
 	c.initUnlocked()
