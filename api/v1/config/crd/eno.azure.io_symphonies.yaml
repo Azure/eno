@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.18.0
+    controller-gen.kubebuilder.io/version: v0.20.0
   name: symphonies.eno.azure.io
 spec:
   group: eno.azure.io
@@ -71,6 +71,62 @@ spec:
                   - key
                   - resource
                   type: object
+                type: array
+              remoteResourceRefs:
+                description: |-
+                  RemoteResourceRefs specifies resources to sync from the remote cluster.
+                  Each ref results in an InputMirror being created that can be bound as an input.
+                  The remote cluster is accessed via the eno-reconciler's --remote-kubeconfig.
+                items:
+                  description: RemoteResourceRef defines a resource to sync from a
+                    remote cluster
+                  properties:
+                    key:
+                      description: |-
+                        Key that will be used to reference this input in Composition bindings.
+                        This key maps to an auto-created InputMirror resource.
+                      type: string
+                    optional:
+                      default: false
+                      description: Optional indicates that synthesis can proceed if
+                        this resource doesn't exist in the remote cluster.
+                      type: boolean
+                    resource:
+                      description: Resource specifies what to fetch from the remote
+                        cluster
+                      properties:
+                        group:
+                          description: API Group of the resource (empty string for
+                            core API group)
+                          type: string
+                        kind:
+                          description: Kind of the resource (e.g., ConfigMap, Secret)
+                          type: string
+                        name:
+                          description: Name of the resource
+                          type: string
+                        namespace:
+                          description: Namespace of the resource (empty for cluster-scoped
+                            resources)
+                          type: string
+                        version:
+                          description: API Version of the resource
+                          type: string
+                      required:
+                      - kind
+                      - name
+                      - version
+                      type: object
+                    syncInterval:
+                      default: 5m
+                      description: SyncInterval determines how often to re-sync the
+                        resource.
+                      type: string
+                  required:
+                  - key
+                  - resource
+                  type: object
+                maxItems: 20
                 type: array
               synthesisEnv:
                 description: |-
