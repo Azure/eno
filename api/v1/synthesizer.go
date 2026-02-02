@@ -70,6 +70,8 @@ type PodOverrides struct {
 type SynthesizerStatus struct {
 }
 
+// +kubebuilder:validation:XValidation:rule="has(self.name) || has(self.selector)",message="at least one of name or selector must be set"
 type SynthesizerRef struct {
-	Name string `json:"name,omitempty"`
+	Name     string                `json:"name,omitempty"`
+	Selector *metav1.LabelSelector `json:"selector,omitempty"`
 }
