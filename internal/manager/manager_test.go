@@ -200,6 +200,7 @@ func TestReconcilerLimitedScope(t *testing.T) {
 	comp1.Name = "in-namespace-with-labels"
 	comp1.Namespace = ns.Name
 	comp1.Labels = map[string]string{"testkey": "testval"}
+	comp1.Spec.Synthesizer = apiv1.SynthesizerRef{Name: "some-synthesizer"}
 	err = mgr.GetClient().Create(ctx, comp1)
 	require.NoError(t, err)
 
