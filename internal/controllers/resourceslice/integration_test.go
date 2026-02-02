@@ -27,6 +27,7 @@ func TestResourceSliceLifecycle(t *testing.T) {
 	comp := &apiv1.Composition{}
 	comp.Name = "test-1"
 	comp.Namespace = "default"
+	comp.Spec.Synthesizer = apiv1.SynthesizerRef{Name: "some-synthesizer"}
 	require.NoError(t, cli.Create(ctx, comp))
 
 	testutil.Eventually(t, func() bool {
