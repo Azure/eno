@@ -239,7 +239,15 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 		}
 
 		reconciliationActions.WithLabelValues("delete").Inc()
-		err := c.upstreamClient.Delete(ctx, current)
+
+		opts := []client.DeleteOption{}
+		if res.ForegroundDeletion {
+			deletionPropagation := metav1.DeletePropagationForeground
+			opts = append(opts, client.PropagationPolicy(deletionPropagation))
+			logger.Info("deleting resource with foreground deletion")
+		}
+
+		err := c.upstreamClient.Delete(ctx, current, opts...)
 		if err != nil {
 			return true, client.IgnoreNotFound(fmt.Errorf("deleting resource: %w", err))
 		}
