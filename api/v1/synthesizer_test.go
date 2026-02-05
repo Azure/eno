@@ -1,4 +1,4 @@
-package synthesizer
+package v1_test
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
-func TestResolveSynthesizer(t *testing.T) {
+func TestSynthesizerRefResolve(t *testing.T) {
 	tests := []struct {
 		name           string
 		ref            *apiv1.SynthesizerRef
@@ -28,14 +28,14 @@ func TestResolveSynthesizer(t *testing.T) {
 		{
 			name:        "nil ref returns ErrNilRef",
 			ref:         nil,
-			expectedErr: ErrNilRef,
+			expectedErr: apiv1.ErrNilRef,
 		},
 		{
 			name: "empty name returns ErrEmptyName",
 			ref: &apiv1.SynthesizerRef{
 				Name: "",
 			},
-			expectedErr: ErrEmptyName,
+			expectedErr: apiv1.ErrEmptyName,
 		},
 		{
 			name: "name-based resolution success",
@@ -124,7 +124,7 @@ func TestResolveSynthesizer(t *testing.T) {
 					},
 				},
 			},
-			expectedErr: ErrNoMatchingSelector,
+			expectedErr: apiv1.ErrNoMatchingSelector,
 		},
 		{
 			name: "label selector - multiple matches returns ErrMultipleMatches",
@@ -147,7 +147,7 @@ func TestResolveSynthesizer(t *testing.T) {
 					},
 				},
 			},
-			expectedErr: ErrMultipleMatches,
+			expectedErr: apiv1.ErrMultipleMatches,
 		},
 		{
 			name: "label selector - invalid selector returns error",
@@ -275,7 +275,7 @@ func TestResolveSynthesizer(t *testing.T) {
 					},
 				},
 			},
-			expectedErr: ErrMultipleMatches,
+			expectedErr: apiv1.ErrMultipleMatches,
 		},
 		{
 			name: "empty label selector with single synthesizer - success",
@@ -305,7 +305,7 @@ func TestResolveSynthesizer(t *testing.T) {
 
 			cli := testutil.NewClient(t, objs...)
 
-			synth, err := ResolveSynthesizer(ctx, cli, tt.ref)
+			synth, err := tt.ref.Resolve(ctx, cli)
 
 			if tt.expectedErr != nil {
 				require.Error(t, err)
@@ -328,7 +328,7 @@ func TestResolveSynthesizer(t *testing.T) {
 	}
 }
 
-func TestResolveByName(t *testing.T) {
+func TestSynthesizerRefResolveByName(t *testing.T) {
 	tests := []struct {
 		name          string
 		synthName     string
@@ -340,7 +340,7 @@ func TestResolveByName(t *testing.T) {
 		{
 			name:        "empty name returns ErrEmptyName",
 			synthName:   "",
-			expectedErr: ErrEmptyName,
+			expectedErr: apiv1.ErrEmptyName,
 		},
 		{
 			name:      "found synthesizer",
@@ -376,7 +376,8 @@ func TestResolveByName(t *testing.T) {
 
 			cli := testutil.NewClient(t, objs...)
 
-			synth, err := resolveByName(ctx, cli, tt.synthName)
+			ref := &apiv1.SynthesizerRef{Name: tt.synthName}
+			synth, err := ref.Resolve(ctx, cli)
 
 			if tt.expectedErr != nil {
 				require.Error(t, err)
@@ -400,7 +401,7 @@ func TestResolveByName(t *testing.T) {
 	}
 }
 
-func TestResolveByLabel(t *testing.T) {
+func TestSynthesizerRefResolveByLabel(t *testing.T) {
 	tests := []struct {
 		name          string
 		selector      *metav1.LabelSelector
@@ -443,7 +444,7 @@ func TestResolveByLabel(t *testing.T) {
 					},
 				},
 			},
-			expectedErr: ErrNoMatchingSelector,
+			expectedErr: apiv1.ErrNoMatchingSelector,
 		},
 		{
 			name: "multiple matches returns ErrMultipleMatches",
@@ -464,7 +465,7 @@ func TestResolveByLabel(t *testing.T) {
 					},
 				},
 			},
-			expectedErr: ErrMultipleMatches,
+			expectedErr: apiv1.ErrMultipleMatches,
 		},
 		{
 			name: "invalid selector - bad operator",
@@ -545,7 +546,8 @@ func TestResolveByLabel(t *testing.T) {
 
 			cli := testutil.NewClient(t, objs...)
 
-			synth, err := resolveByLabel(ctx, cli, tt.selector)
+			ref := &apiv1.SynthesizerRef{LabelSelector: tt.selector}
+			synth, err := ref.Resolve(ctx, cli)
 
 			if tt.expectedErr != nil {
 				require.Error(t, err)
@@ -568,7 +570,7 @@ func TestResolveByLabel(t *testing.T) {
 	}
 }
 
-func TestResolveSynthesizerClientErrors(t *testing.T) {
+func TestSynthesizerRefResolveClientErrors(t *testing.T) {
 	t.Run("Get error propagates for name-based resolution", func(t *testing.T) {
 		ctx := testutil.NewContext(t)
 		expectedErr := errors.New("simulated get error")
@@ -580,7 +582,7 @@ func TestResolveSynthesizerClientErrors(t *testing.T) {
 		})
 
 		ref := &apiv1.SynthesizerRef{Name: "test-synth"}
-		synth, err := ResolveSynthesizer(ctx, cli, ref)
+		synth, err := ref.Resolve(ctx, cli)
 
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, expectedErr))
@@ -602,7 +604,7 @@ func TestResolveSynthesizerClientErrors(t *testing.T) {
 				MatchLabels: map[string]string{"app": "test"},
 			},
 		}
-		synth, err := ResolveSynthesizer(ctx, cli, ref)
+		synth, err := ref.Resolve(ctx, cli)
 
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, expectedErr))
@@ -622,7 +624,7 @@ func TestResolveSynthesizerClientErrors(t *testing.T) {
 		})
 
 		ref := &apiv1.SynthesizerRef{Name: "missing-synth"}
-		synth, err := ResolveSynthesizer(ctx, cli, ref)
+		synth, err := ref.Resolve(ctx, cli)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "getting synthesizer by name")
@@ -633,23 +635,23 @@ func TestResolveSynthesizerClientErrors(t *testing.T) {
 
 func TestSentinelErrors(t *testing.T) {
 	t.Run("ErrNilRef has expected message", func(t *testing.T) {
-		assert.Equal(t, "synthesizer ref cannot be nil", ErrNilRef.Error())
+		assert.Equal(t, "synthesizer ref cannot be nil", apiv1.ErrNilRef.Error())
 	})
 
 	t.Run("ErrEmptyName has expected message", func(t *testing.T) {
-		assert.Equal(t, "synthesizer ref name is empty", ErrEmptyName.Error())
+		assert.Equal(t, "synthesizer ref name is empty", apiv1.ErrEmptyName.Error())
 	})
 
 	t.Run("ErrNoMatchingSelector has expected message", func(t *testing.T) {
-		assert.Equal(t, "no synthesizers match the label selector", ErrNoMatchingSelector.Error())
+		assert.Equal(t, "no synthesizers match the label selector", apiv1.ErrNoMatchingSelector.Error())
 	})
 
 	t.Run("ErrMultipleMatches has expected message", func(t *testing.T) {
-		assert.Equal(t, "multiple synthesizers match the label selector", ErrMultipleMatches.Error())
+		assert.Equal(t, "multiple synthesizers match the label selector", apiv1.ErrMultipleMatches.Error())
 	})
 
 	t.Run("sentinel errors are distinguishable", func(t *testing.T) {
-		errs := []error{ErrNilRef, ErrEmptyName, ErrNoMatchingSelector, ErrMultipleMatches}
+		errs := []error{apiv1.ErrNilRef, apiv1.ErrEmptyName, apiv1.ErrNoMatchingSelector, apiv1.ErrMultipleMatches}
 		for i, err1 := range errs {
 			for j, err2 := range errs {
 				if i == j {
@@ -662,7 +664,7 @@ func TestSentinelErrors(t *testing.T) {
 	})
 }
 
-func TestResolveSynthesizerEdgeCases(t *testing.T) {
+func TestSynthesizerRefResolveEdgeCases(t *testing.T) {
 	t.Run("synthesizer with empty labels can be found by name", func(t *testing.T) {
 		ctx := testutil.NewContext(t)
 
@@ -675,7 +677,7 @@ func TestResolveSynthesizerEdgeCases(t *testing.T) {
 		cli := testutil.NewClient(t, synth)
 
 		ref := &apiv1.SynthesizerRef{Name: "no-labels-synth"}
-		result, err := ResolveSynthesizer(ctx, cli, ref)
+		result, err := ref.Resolve(ctx, cli)
 
 		require.NoError(t, err)
 		assert.Equal(t, "no-labels-synth", result.Name)
@@ -697,7 +699,7 @@ func TestResolveSynthesizerEdgeCases(t *testing.T) {
 		cli := testutil.NewClient(t, synth)
 
 		ref := &apiv1.SynthesizerRef{Name: "full-spec-synth"}
-		result, err := ResolveSynthesizer(ctx, cli, ref)
+		result, err := ref.Resolve(ctx, cli)
 
 		require.NoError(t, err)
 		assert.Equal(t, "my-image:v1", result.Spec.Image)
@@ -721,7 +723,7 @@ func TestResolveSynthesizerEdgeCases(t *testing.T) {
 				MatchExpressions: nil,
 			},
 		}
-		result, err := ResolveSynthesizer(ctx, cli, ref)
+		result, err := ref.Resolve(ctx, cli)
 
 		require.NoError(t, err)
 		assert.Equal(t, "only-synth", result.Name)
@@ -740,7 +742,7 @@ func TestResolveSynthesizerEdgeCases(t *testing.T) {
 		cli := testutil.NewClient(t, synth)
 
 		ref := &apiv1.SynthesizerRef{Name: "my-synth-v1.2.3"}
-		result, err := ResolveSynthesizer(ctx, cli, ref)
+		result, err := ref.Resolve(ctx, cli)
 
 		require.NoError(t, err)
 		assert.Equal(t, "my-synth-v1.2.3", result.Name)
@@ -759,7 +761,7 @@ func TestResolveSynthesizerEdgeCases(t *testing.T) {
 		cli := testutil.NewClient(t, synth)
 
 		ref := &apiv1.SynthesizerRef{Name: "test-synth"}
-		_, err := ResolveSynthesizer(ctx, cli, ref)
+		_, err := ref.Resolve(ctx, cli)
 
 		// The fake client may or may not respect context cancellation,
 		// but we're testing that the context is passed through
