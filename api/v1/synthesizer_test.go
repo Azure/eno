@@ -24,18 +24,14 @@ func TestSynthesizerRefResolve(t *testing.T) {
 		expectedSynth  string // expected synthesizer name or empty if error expected
 		expectedErr    error
 		expectedErrMsg string // substring to check in error message
+		synthNonNil    bool   // if true, expect synth to be non-nil even on error
 	}{
 		{
-			name:        "nil ref returns ErrNilRef",
-			ref:         nil,
-			expectedErr: apiv1.ErrNilRef,
-		},
-		{
-			name: "empty name returns ErrEmptyName",
+			name: "empty name returns NotFound from client",
 			ref: &apiv1.SynthesizerRef{
 				Name: "",
 			},
-			expectedErr: apiv1.ErrEmptyName,
+			synthNonNil: true,
 		},
 		{
 			name: "name-based resolution success",
@@ -59,8 +55,8 @@ func TestSynthesizerRefResolve(t *testing.T) {
 			ref: &apiv1.SynthesizerRef{
 				Name: "non-existent-synth",
 			},
-			synthesizers:   []*apiv1.Synthesizer{},
-			expectedErrMsg: "getting synthesizer by name",
+			synthesizers: []*apiv1.Synthesizer{},
+			synthNonNil:  true,
 		},
 		{
 			name: "label selector takes precedence over name",
@@ -321,6 +317,14 @@ func TestSynthesizerRefResolve(t *testing.T) {
 				return
 			}
 
+			// For name-based cases that return NotFound, synth is non-nil
+			if tt.synthNonNil {
+				require.Error(t, err)
+				assert.True(t, apierrors.IsNotFound(err), "expected NotFound error, got %v", err)
+				assert.NotNil(t, synth)
+				return
+			}
+
 			require.NoError(t, err)
 			require.NotNil(t, synth)
 			assert.Equal(t, tt.expectedSynth, synth.Name)
@@ -334,13 +338,12 @@ func TestSynthesizerRefResolveByName(t *testing.T) {
 		synthName     string
 		synthesizers  []*apiv1.Synthesizer
 		expectedSynth string
-		expectedErr   error
 		expectedErrIs func(error) bool
 	}{
 		{
-			name:        "empty name returns ErrEmptyName",
-			synthName:   "",
-			expectedErr: apiv1.ErrEmptyName,
+			name:          "empty name returns NotFound",
+			synthName:     "",
+			expectedErrIs: apierrors.IsNotFound,
 		},
 		{
 			name:      "found synthesizer",
@@ -358,7 +361,7 @@ func TestSynthesizerRefResolveByName(t *testing.T) {
 			expectedSynth: "my-synth",
 		},
 		{
-			name:          "not found returns wrapped error",
+			name:          "not found returns NotFound error",
 			synthName:     "missing-synth",
 			synthesizers:  []*apiv1.Synthesizer{},
 			expectedErrIs: apierrors.IsNotFound,
@@ -379,18 +382,12 @@ func TestSynthesizerRefResolveByName(t *testing.T) {
 			ref := &apiv1.SynthesizerRef{Name: tt.synthName}
 			synth, err := ref.Resolve(ctx, cli)
 
-			if tt.expectedErr != nil {
-				require.Error(t, err)
-				assert.True(t, errors.Is(err, tt.expectedErr))
-				assert.Nil(t, synth)
-				return
-			}
-
 			if tt.expectedErrIs != nil {
 				require.Error(t, err)
-				// The error is wrapped, so we need to unwrap it
-				assert.True(t, tt.expectedErrIs(errors.Unwrap(err)), "error check failed for: %v", err)
-				assert.Nil(t, synth)
+				// Name-based resolution does not wrap the error, check directly
+				assert.True(t, tt.expectedErrIs(err), "error check failed for: %v", err)
+				// Name-based resolution always returns a non-nil synth
+				assert.NotNil(t, synth)
 				return
 			}
 
@@ -586,7 +583,8 @@ func TestSynthesizerRefResolveClientErrors(t *testing.T) {
 
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, expectedErr))
-		assert.Nil(t, synth)
+		// Name-based resolution always returns a non-nil synth
+		assert.NotNil(t, synth)
 	})
 
 	t.Run("List error propagates for label-based resolution", func(t *testing.T) {
@@ -627,21 +625,14 @@ func TestSynthesizerRefResolveClientErrors(t *testing.T) {
 		synth, err := ref.Resolve(ctx, cli)
 
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "getting synthesizer by name")
-		assert.True(t, apierrors.IsNotFound(errors.Unwrap(err)))
-		assert.Nil(t, synth)
+		// Error is NOT wrapped - check IsNotFound directly
+		assert.True(t, apierrors.IsNotFound(err))
+		// Name-based resolution always returns a non-nil synth
+		assert.NotNil(t, synth)
 	})
 }
 
 func TestSentinelErrors(t *testing.T) {
-	t.Run("ErrNilRef has expected message", func(t *testing.T) {
-		assert.Equal(t, "synthesizer ref cannot be nil", apiv1.ErrNilRef.Error())
-	})
-
-	t.Run("ErrEmptyName has expected message", func(t *testing.T) {
-		assert.Equal(t, "synthesizer ref name is empty", apiv1.ErrEmptyName.Error())
-	})
-
 	t.Run("ErrNoMatchingSelector has expected message", func(t *testing.T) {
 		assert.Equal(t, "no synthesizers match the label selector", apiv1.ErrNoMatchingSelector.Error())
 	})
@@ -651,7 +642,7 @@ func TestSentinelErrors(t *testing.T) {
 	})
 
 	t.Run("sentinel errors are distinguishable", func(t *testing.T) {
-		errs := []error{apiv1.ErrNilRef, apiv1.ErrEmptyName, apiv1.ErrNoMatchingSelector, apiv1.ErrMultipleMatches}
+		errs := []error{apiv1.ErrNoMatchingSelector, apiv1.ErrMultipleMatches}
 		for i, err1 := range errs {
 			for j, err2 := range errs {
 				if i == j {

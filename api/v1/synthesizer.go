@@ -83,12 +83,6 @@ type SynthesizerRef struct {
 
 // Sentinel errors for synthesizer resolution.
 var (
-	// ErrNilRef is returned when a nil SynthesizerRef is provided.
-	ErrNilRef = errors.New("synthesizer ref cannot be nil")
-
-	// ErrEmptyName is returned when the synthesizer ref name is empty.
-	ErrEmptyName = errors.New("synthesizer ref name is empty")
-
 	// ErrNoMatchingSelector is returned when no synthesizers match the label selector.
 	ErrNoMatchingSelector = errors.New("no synthesizers match the label selector")
 
@@ -114,18 +108,17 @@ var (
 //   - nil, ErrNoMatchingSelector if no synthesizers match the label selector
 //   - nil, ErrMultipleMatches if more than one synthesizer matches the label selector
 //   - nil, error if there was an error during resolution
-func (r *SynthesizerRef) Resolve(ctx context.Context, c client.Client) (*Synthesizer, error) {
-	if r == nil {
-		return nil, ErrNilRef
-	}
-
+func (r *SynthesizerRef) Resolve(ctx context.Context, c client.Reader) (*Synthesizer, error) {
 	// LabelSelector takes precedence over name
 	if r.LabelSelector != nil {
 		return r.resolveByLabel(ctx, c)
 	}
 
 	// Fallback to name-based resolution
-	return r.resolveByName(ctx, c)
+	synth := &Synthesizer{}
+	synth.Name = r.Name
+
+	return synth, c.Get(ctx, client.ObjectKeyFromObject(synth), synth)
 }
 
 // resolveByLabel resolves a Synthesizer using a label selector.
@@ -137,7 +130,7 @@ func (r *SynthesizerRef) Resolve(ctx context.Context, c client.Client) (*Synthes
 //   - nil, ErrNoMatchingSelector if no synthesizers match the selector
 //   - nil, ErrMultipleMatches if more than one synthesizer matches the selector
 //   - nil, error if there was an error during resolution
-func (r *SynthesizerRef) resolveByLabel(ctx context.Context, c client.Client) (*Synthesizer, error) {
+func (r *SynthesizerRef) resolveByLabel(ctx context.Context, c client.Reader) (*Synthesizer, error) {
 	// Convert metav1.LabelSelector to labels.Selector
 	selector, err := metav1.LabelSelectorAsSelector(r.LabelSelector)
 	if err != nil {
@@ -160,22 +153,4 @@ func (r *SynthesizerRef) resolveByLabel(ctx context.Context, c client.Client) (*
 	default:
 		return nil, ErrMultipleMatches
 	}
-}
-
-// resolveByName resolves a Synthesizer using its name.
-//
-// Returns:
-//   - The resolved Synthesizer if found
-//   - nil, error if there was an error during resolution
-func (r *SynthesizerRef) resolveByName(ctx context.Context, c client.Client) (*Synthesizer, error) {
-	if r.Name == "" {
-		return nil, ErrEmptyName
-	}
-	synth := &Synthesizer{}
-	synth.Name = r.Name
-
-	if err := c.Get(ctx, client.ObjectKeyFromObject(synth), synth); err != nil {
-		return nil, fmt.Errorf("getting synthesizer by name %q: %w", r.Name, err)
-	}
-	return synth, nil
 }
