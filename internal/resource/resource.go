@@ -263,6 +263,16 @@ func (r *Resource) group() (int, bool) {
 	return 0, false
 }
 
+// DeletionGroup returns the deletion group for this resource, if set.
+func (r *Resource) DeletionGroup() *int {
+	return r.deletionGroup
+}
+
+// CompositionDeleted returns true if the composition is being deleted.
+func (r *Resource) CompositionDeleted() bool {
+	return r.compositionDeleted
+}
+
 // Snapshot evaluates the resource against its current/actual state and returns the resulting "snapshot".
 //
 // The snapshot should only be used to progress the resource's state from the given resourceVersion.

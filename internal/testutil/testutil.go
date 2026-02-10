@@ -36,6 +36,7 @@ import (
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
 	"github.com/Azure/eno/internal/execution"
 	"github.com/Azure/eno/internal/manager"
+	"github.com/Azure/eno/internal/resource"
 )
 
 func NewClient(t testing.TB, objs ...client.Object) client.Client {
@@ -431,4 +432,10 @@ func WithFakeExecutor(t *testing.T, mgr *Manager, sh execution.SynthesizerHandle
 		For(&corev1.Pod{}).
 		Build(podCtrl)
 	require.NoError(t, err)
+}
+
+// ParseResource is a test helper that parses a resource from a ResourceSlice.
+// This is useful for testing functionality that works with parsed resources.
+func ParseResource(ctx context.Context, comp *apiv1.Composition, slice *apiv1.ResourceSlice, index int) (*resource.Resource, error) {
+	return resource.FromSlice(ctx, comp, slice, index)
 }

@@ -50,6 +50,7 @@ type Controller struct {
 	writeBuffer            *flowcontrol.ResourceSliceWriteBuffer
 	resourceClient         *resource.Cache
 	resourceFilter         cel.Program
+	crossReconcilerChecker *CrossReconcilerDependencyChecker
 	timeout                time.Duration
 	readinessPollInterval  time.Duration
 	upstreamClient         client.Client
@@ -78,6 +79,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 		writeBuffer:            opts.WriteBuffer,
 		resourceClient:         cache,
 		resourceFilter:         opts.ResourceFilter,
+		crossReconcilerChecker: NewCrossReconcilerDependencyChecker(opts.Manager.GetClient(), opts.Manager.GetAPIReader()),
 		timeout:                opts.Timeout,
 		readinessPollInterval:  opts.ReadinessPollInterval,
 		upstreamClient:         upstreamClient,
@@ -142,6 +144,17 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	logger = logger.WithValues("resourceKind", resource.Ref.Kind, "resourceName", resource.Ref.Name, "resourceNamespace", resource.Ref.Namespace)
 	ctx = logr.NewContext(ctx, logger)
 
+	// Check if this resource is blocked by resources in other reconcilers
+	blocked, reason, err := c.crossReconcilerChecker.IsBlockedByOtherReconcilers(ctx, comp, resource)
+	if err != nil {
+		logger.Error(err, "failed to check cross-reconciler dependencies")
+		return ctrl.Result{}, err
+	}
+	if blocked {
+		logger.Info("resource blocked by cross-reconciler dependencies", "reason", reason)
+		return ctrl.Result{RequeueAfter: c.readinessPollInterval}, nil
+	}
+
 	if syn := comp.Status.PreviousSynthesis; syn != nil {
 		prev, _, _ = c.resourceClient.Get(ctx, syn.UUID, req.Resource)
 		logger.Info("retrieved previous synthesis from cache", "previousSynthesisUUID", syn.UUID, "hasPrevious", prev != nil)
@@ -165,6 +178,16 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	// A resource is considered deleted when:
+	// 1. It no longer exists in the upstream cluster (current == nil)
+	// 2. It has a deletionTimestamp but is NOT using foreground deletion - for foreground deletion
+	//    we must wait until the resource is fully gone before marking it deleted
+	// 3. The composition is being deleted and the resource is orphaned, disabled, or failing open.
+	//    For failingOpen specifically, we exclude foreground deletion resources because marking them
+	//    as deleted prematurely would signal to cross-reconciler dependency checkers that dependent
+	//    resources in other reconcilers can proceed, even though the foreground deletion hasn't completed.
+	//    Orphaned and disabled resources are safe to mark deleted regardless of foreground deletion
+	//    because orphaned resources are never actually deleted, and disabled resources are never reconciled.
 	deleted := current == nil ||
 		(current.GetDeletionTimestamp() != nil && !snap.ForegroundDeletion) ||
 		(snap.Deleted() && (snap.Orphan || snap.Disable || failingOpen)) // orphaning should be reflected on the status.
