@@ -39,6 +39,13 @@ type SymphonySpec struct {
 	// Copied opaquely into the compositions managed by this symphony.
 	// +kubebuilder:validation:MaxItems:=50
 	SynthesisEnv []EnvVar `json:"synthesisEnv,omitempty"` // deprecated synthesis env should always be variation scoped.
+
+	// RemoteResourceRefs specifies resources to sync from the remote cluster.
+	// Each ref results in an InputMirror being created that can be bound as an input.
+	// The remote cluster is accessed via the eno-reconciler's --remote-kubeconfig.
+	// +optional
+	// +kubebuilder:validation:MaxItems:=20
+	RemoteResourceRefs []RemoteResourceRef `json:"remoteResourceRefs,omitempty"`
 }
 
 type SymphonyStatus struct {

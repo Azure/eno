@@ -17,6 +17,7 @@ import (
 	"github.com/Azure/eno/internal/cel"
 	"github.com/Azure/eno/internal/controllers/liveness"
 	"github.com/Azure/eno/internal/controllers/reconciliation"
+	"github.com/Azure/eno/internal/controllers/remotesync"
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/k8s"
 	"github.com/Azure/eno/internal/logging"
@@ -147,6 +148,13 @@ func run() error {
 	err = reconciliation.New(mgr, recOpts)
 	if err != nil {
 		return fmt.Errorf("constructing reconciliation controller: %w", err)
+	}
+
+	// RemoteSyncController uses remoteConfig to watch resources on the remote cluster
+	// and syncs them to InputMirrors on the local cluster (mgr's client)
+	err = remotesync.NewController(mgr, remoteConfig)
+	if err != nil {
+		return fmt.Errorf("constructing remote sync controller: %w", err)
 	}
 
 	return mgr.Start(ctx)
