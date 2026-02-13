@@ -19,7 +19,7 @@ import (
 func TestSynthesizerRefResolve(t *testing.T) {
 	tests := []struct {
 		name           string
-		ref            *apiv1.SynthesizerRef
+		comp           *apiv1.Composition
 		synthesizers   []*apiv1.Synthesizer
 		expectedSynth  string // expected synthesizer name or empty if error expected
 		expectedErr    error
@@ -28,16 +28,16 @@ func TestSynthesizerRefResolve(t *testing.T) {
 	}{
 		{
 			name: "empty name returns NotFound from client",
-			ref: &apiv1.SynthesizerRef{
+			comp: &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{
 				Name: "",
-			},
+			}}},
 			synthNonNil: true,
 		},
 		{
 			name: "name-based resolution success",
-			ref: &apiv1.SynthesizerRef{
+			comp: &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{
 				Name: "test-synth",
-			},
+			}}},
 			synthesizers: []*apiv1.Synthesizer{
 				{
 					ObjectMeta: metav1.ObjectMeta{
@@ -52,20 +52,20 @@ func TestSynthesizerRefResolve(t *testing.T) {
 		},
 		{
 			name: "name-based resolution - not found error",
-			ref: &apiv1.SynthesizerRef{
+			comp: &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{
 				Name: "non-existent-synth",
-			},
+			}}},
 			synthesizers: []*apiv1.Synthesizer{},
 			synthNonNil:  true,
 		},
 		{
 			name: "label selector takes precedence over name",
-			ref: &apiv1.SynthesizerRef{
+			comp: &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{
 				Name: "name-synth", // this should be ignored
 				LabelSelector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{"team": "platform"},
 				},
-			},
+			}}},
 			synthesizers: []*apiv1.Synthesizer{
 				{
 					ObjectMeta: metav1.ObjectMeta{
@@ -84,11 +84,11 @@ func TestSynthesizerRefResolve(t *testing.T) {
 		},
 		{
 			name: "label selector - exactly one match success",
-			ref: &apiv1.SynthesizerRef{
+			comp: &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{
 				LabelSelector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{"app": "my-app"},
 				},
-			},
+			}}},
 			synthesizers: []*apiv1.Synthesizer{
 				{
 					ObjectMeta: metav1.ObjectMeta{
@@ -107,11 +107,11 @@ func TestSynthesizerRefResolve(t *testing.T) {
 		},
 		{
 			name: "label selector - no matches returns ErrNoMatchingSelector",
-			ref: &apiv1.SynthesizerRef{
+			comp: &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{
 				LabelSelector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{"app": "non-existent"},
 				},
-			},
+			}}},
 			synthesizers: []*apiv1.Synthesizer{
 				{
 					ObjectMeta: metav1.ObjectMeta{
@@ -124,11 +124,11 @@ func TestSynthesizerRefResolve(t *testing.T) {
 		},
 		{
 			name: "label selector - multiple matches returns ErrMultipleMatches",
-			ref: &apiv1.SynthesizerRef{
+			comp: &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{
 				LabelSelector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{"team": "platform"},
 				},
-			},
+			}}},
 			synthesizers: []*apiv1.Synthesizer{
 				{
 					ObjectMeta: metav1.ObjectMeta{
@@ -147,7 +147,7 @@ func TestSynthesizerRefResolve(t *testing.T) {
 		},
 		{
 			name: "label selector - invalid selector returns error",
-			ref: &apiv1.SynthesizerRef{
+			comp: &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{
 				LabelSelector: &metav1.LabelSelector{
 					MatchExpressions: []metav1.LabelSelectorRequirement{
 						{
@@ -157,13 +157,13 @@ func TestSynthesizerRefResolve(t *testing.T) {
 						},
 					},
 				},
-			},
+			}}},
 			synthesizers:   []*apiv1.Synthesizer{},
 			expectedErrMsg: "converting label selector",
 		},
 		{
 			name: "label selector with MatchExpressions - In operator",
-			ref: &apiv1.SynthesizerRef{
+			comp: &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{
 				LabelSelector: &metav1.LabelSelector{
 					MatchExpressions: []metav1.LabelSelectorRequirement{
 						{
@@ -173,7 +173,7 @@ func TestSynthesizerRefResolve(t *testing.T) {
 						},
 					},
 				},
-			},
+			}}},
 			synthesizers: []*apiv1.Synthesizer{
 				{
 					ObjectMeta: metav1.ObjectMeta{
@@ -192,7 +192,7 @@ func TestSynthesizerRefResolve(t *testing.T) {
 		},
 		{
 			name: "label selector with MatchExpressions - Exists operator",
-			ref: &apiv1.SynthesizerRef{
+			comp: &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{
 				LabelSelector: &metav1.LabelSelector{
 					MatchExpressions: []metav1.LabelSelectorRequirement{
 						{
@@ -201,7 +201,7 @@ func TestSynthesizerRefResolve(t *testing.T) {
 						},
 					},
 				},
-			},
+			}}},
 			synthesizers: []*apiv1.Synthesizer{
 				{
 					ObjectMeta: metav1.ObjectMeta{
@@ -220,7 +220,7 @@ func TestSynthesizerRefResolve(t *testing.T) {
 		},
 		{
 			name: "label selector with combined MatchLabels and MatchExpressions",
-			ref: &apiv1.SynthesizerRef{
+			comp: &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{
 				LabelSelector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{"team": "platform"},
 					MatchExpressions: []metav1.LabelSelectorRequirement{
@@ -231,7 +231,7 @@ func TestSynthesizerRefResolve(t *testing.T) {
 						},
 					},
 				},
-			},
+			}}},
 			synthesizers: []*apiv1.Synthesizer{
 				{
 					ObjectMeta: metav1.ObjectMeta{
@@ -256,9 +256,9 @@ func TestSynthesizerRefResolve(t *testing.T) {
 		},
 		{
 			name: "empty label selector matches all - returns ErrMultipleMatches when multiple exist",
-			ref: &apiv1.SynthesizerRef{
+			comp: &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{
 				LabelSelector: &metav1.LabelSelector{},
-			},
+			}}},
 			synthesizers: []*apiv1.Synthesizer{
 				{
 					ObjectMeta: metav1.ObjectMeta{
@@ -275,9 +275,9 @@ func TestSynthesizerRefResolve(t *testing.T) {
 		},
 		{
 			name: "empty label selector with single synthesizer - success",
-			ref: &apiv1.SynthesizerRef{
+			comp: &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{
 				LabelSelector: &metav1.LabelSelector{},
-			},
+			}}},
 			synthesizers: []*apiv1.Synthesizer{
 				{
 					ObjectMeta: metav1.ObjectMeta{
@@ -301,7 +301,7 @@ func TestSynthesizerRefResolve(t *testing.T) {
 
 			cli := testutil.NewClient(t, objs...)
 
-			synth, err := tt.ref.Resolve(ctx, cli)
+			synth, err := tt.comp.ResolveSynthesizer(ctx, cli)
 
 			if tt.expectedErr != nil {
 				require.Error(t, err)
@@ -379,8 +379,8 @@ func TestSynthesizerRefResolveByName(t *testing.T) {
 
 			cli := testutil.NewClient(t, objs...)
 
-			ref := &apiv1.SynthesizerRef{Name: tt.synthName}
-			synth, err := ref.Resolve(ctx, cli)
+			comp := &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{Name: tt.synthName}}}
+			synth, err := comp.ResolveSynthesizer(ctx, cli)
 
 			if tt.expectedErrIs != nil {
 				require.Error(t, err)
@@ -543,8 +543,8 @@ func TestSynthesizerRefResolveByLabel(t *testing.T) {
 
 			cli := testutil.NewClient(t, objs...)
 
-			ref := &apiv1.SynthesizerRef{LabelSelector: tt.selector}
-			synth, err := ref.Resolve(ctx, cli)
+			comp := &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{LabelSelector: tt.selector}}}
+			synth, err := comp.ResolveSynthesizer(ctx, cli)
 
 			if tt.expectedErr != nil {
 				require.Error(t, err)
@@ -578,8 +578,8 @@ func TestSynthesizerRefResolveClientErrors(t *testing.T) {
 			},
 		})
 
-		ref := &apiv1.SynthesizerRef{Name: "test-synth"}
-		synth, err := ref.Resolve(ctx, cli)
+		comp := &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{Name: "test-synth"}}}
+		synth, err := comp.ResolveSynthesizer(ctx, cli)
 
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, expectedErr))
@@ -597,12 +597,12 @@ func TestSynthesizerRefResolveClientErrors(t *testing.T) {
 			},
 		})
 
-		ref := &apiv1.SynthesizerRef{
+		comp := &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{
 			LabelSelector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{"app": "test"},
 			},
-		}
-		synth, err := ref.Resolve(ctx, cli)
+		}}}
+		synth, err := comp.ResolveSynthesizer(ctx, cli)
 
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, expectedErr))
@@ -621,8 +621,8 @@ func TestSynthesizerRefResolveClientErrors(t *testing.T) {
 			},
 		})
 
-		ref := &apiv1.SynthesizerRef{Name: "missing-synth"}
-		synth, err := ref.Resolve(ctx, cli)
+		comp := &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{Name: "missing-synth"}}}
+		synth, err := comp.ResolveSynthesizer(ctx, cli)
 
 		require.Error(t, err)
 		// Error is NOT wrapped - check IsNotFound directly
@@ -667,8 +667,8 @@ func TestSynthesizerRefResolveEdgeCases(t *testing.T) {
 
 		cli := testutil.NewClient(t, synth)
 
-		ref := &apiv1.SynthesizerRef{Name: "no-labels-synth"}
-		result, err := ref.Resolve(ctx, cli)
+		comp := &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{Name: "no-labels-synth"}}}
+		result, err := comp.ResolveSynthesizer(ctx, cli)
 
 		require.NoError(t, err)
 		assert.Equal(t, "no-labels-synth", result.Name)
@@ -689,8 +689,8 @@ func TestSynthesizerRefResolveEdgeCases(t *testing.T) {
 
 		cli := testutil.NewClient(t, synth)
 
-		ref := &apiv1.SynthesizerRef{Name: "full-spec-synth"}
-		result, err := ref.Resolve(ctx, cli)
+		comp := &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{Name: "full-spec-synth"}}}
+		result, err := comp.ResolveSynthesizer(ctx, cli)
 
 		require.NoError(t, err)
 		assert.Equal(t, "my-image:v1", result.Spec.Image)
@@ -708,13 +708,13 @@ func TestSynthesizerRefResolveEdgeCases(t *testing.T) {
 
 		cli := testutil.NewClient(t, synth)
 
-		ref := &apiv1.SynthesizerRef{
+		comp := &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{
 			LabelSelector: &metav1.LabelSelector{
 				MatchLabels:      nil,
 				MatchExpressions: nil,
 			},
-		}
-		result, err := ref.Resolve(ctx, cli)
+		}}}
+		result, err := comp.ResolveSynthesizer(ctx, cli)
 
 		require.NoError(t, err)
 		assert.Equal(t, "only-synth", result.Name)
@@ -732,8 +732,8 @@ func TestSynthesizerRefResolveEdgeCases(t *testing.T) {
 
 		cli := testutil.NewClient(t, synth)
 
-		ref := &apiv1.SynthesizerRef{Name: "my-synth-v1.2.3"}
-		result, err := ref.Resolve(ctx, cli)
+		comp := &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{Name: "my-synth-v1.2.3"}}}
+		result, err := comp.ResolveSynthesizer(ctx, cli)
 
 		require.NoError(t, err)
 		assert.Equal(t, "my-synth-v1.2.3", result.Name)
@@ -751,8 +751,8 @@ func TestSynthesizerRefResolveEdgeCases(t *testing.T) {
 
 		cli := testutil.NewClient(t, synth)
 
-		ref := &apiv1.SynthesizerRef{Name: "test-synth"}
-		_, err := ref.Resolve(ctx, cli)
+		comp := &apiv1.Composition{Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{Name: "test-synth"}}}
+		_, err := comp.ResolveSynthesizer(ctx, cli)
 
 		// The fake client may or may not respect context cancellation,
 		// but we're testing that the context is passed through
