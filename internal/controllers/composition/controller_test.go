@@ -268,3 +268,153 @@ type simplifiedStatusState struct {
 	Synth *apiv1.Synthesizer
 	Comp  *apiv1.Composition
 }
+
+// TestResolvedSynthNameInSimplifiedStatus proves that buildSimplifiedStatus correctly populates
+// ResolvedSynthName from the synthesizer, and leaves it empty when the synthesizer is nil.
+func TestResolvedSynthNameInSimplifiedStatus(t *testing.T) {
+	t.Run("non-nil synth populates ResolvedSynthName", func(t *testing.T) {
+		synth := &apiv1.Synthesizer{}
+		synth.Name = "my-synth"
+		comp := &apiv1.Composition{}
+
+		status := buildSimplifiedStatus(synth, comp)
+		assert.Equal(t, "my-synth", status.ResolvedSynthName)
+	})
+
+	t.Run("nil synth leaves ResolvedSynthName empty", func(t *testing.T) {
+		comp := &apiv1.Composition{}
+
+		status := buildSimplifiedStatus(nil, comp)
+		assert.Equal(t, "", status.ResolvedSynthName)
+		assert.Equal(t, "MissingSynthesizer", status.Status)
+	})
+
+	t.Run("deleting composition with nil synth leaves ResolvedSynthName empty", func(t *testing.T) {
+		comp := &apiv1.Composition{}
+		comp.DeletionTimestamp = &metav1.Time{}
+
+		status := buildSimplifiedStatus(nil, comp)
+		assert.Equal(t, "", status.ResolvedSynthName)
+		assert.Equal(t, "Deleting", status.Status)
+	})
+}
+
+// TestLabelSelectorResolution proves that the composition controller correctly resolves
+// a synthesizer via label selector and populates the simplified status.
+func TestLabelSelectorResolution(t *testing.T) {
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "label-synth"
+	synth.Labels = map[string]string{"team": "platform"}
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.LabelSelector = &metav1.LabelSelector{
+		MatchLabels: map[string]string{"team": "platform"},
+	}
+	req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(comp)}
+
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t, comp, synth)
+	c := &compositionController{client: cli}
+
+	// First reconcile adds finalizer
+	_, err := c.Reconcile(ctx, req)
+	require.NoError(t, err)
+
+	// Second reconcile resolves synthesizer and updates status
+	_, err = c.Reconcile(ctx, req)
+	require.NoError(t, err)
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	require.NotNil(t, comp.Status.Simplified)
+	assert.Equal(t, "label-synth", comp.Status.Simplified.ResolvedSynthName)
+}
+
+// TestLabelSelectorNoMatch proves that the composition controller returns an error
+// when no synthesizer matches the label selector (since ErrNoMatchingSelector is not a NotFound error).
+func TestLabelSelectorNoMatch(t *testing.T) {
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Finalizers = []string{"eno.azure.io/cleanup"}
+	comp.Spec.Synthesizer.LabelSelector = &metav1.LabelSelector{
+		MatchLabels: map[string]string{"team": "nonexistent"},
+	}
+	req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(comp)}
+
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t, comp)
+	c := &compositionController{client: cli}
+
+	_, err := c.Reconcile(ctx, req)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apiv1.ErrNoMatchingSelector)
+}
+
+// TestLabelSelectorMultipleMatches proves that the composition controller returns an error
+// when multiple synthesizers match the label selector.
+func TestLabelSelectorMultipleMatches(t *testing.T) {
+	synth1 := &apiv1.Synthesizer{}
+	synth1.Name = "synth-1"
+	synth1.Labels = map[string]string{"team": "platform"}
+
+	synth2 := &apiv1.Synthesizer{}
+	synth2.Name = "synth-2"
+	synth2.Labels = map[string]string{"team": "platform"}
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Finalizers = []string{"eno.azure.io/cleanup"}
+	comp.Spec.Synthesizer.LabelSelector = &metav1.LabelSelector{
+		MatchLabels: map[string]string{"team": "platform"},
+	}
+	req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(comp)}
+
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t, comp, synth1, synth2)
+	c := &compositionController{client: cli}
+
+	_, err := c.Reconcile(ctx, req)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apiv1.ErrMultipleMatches)
+}
+
+// TestLabelSelectorPrecedence proves that when both name and labelSelector are set,
+// labelSelector takes precedence.
+func TestLabelSelectorPrecedence(t *testing.T) {
+	nameSynth := &apiv1.Synthesizer{}
+	nameSynth.Name = "name-synth"
+	nameSynth.Labels = map[string]string{"team": "other"}
+
+	labelSynth := &apiv1.Synthesizer{}
+	labelSynth.Name = "label-synth"
+	labelSynth.Labels = map[string]string{"team": "platform"}
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = "name-synth"
+	comp.Spec.Synthesizer.LabelSelector = &metav1.LabelSelector{
+		MatchLabels: map[string]string{"team": "platform"},
+	}
+	req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(comp)}
+
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t, comp, nameSynth, labelSynth)
+	c := &compositionController{client: cli}
+
+	// Add finalizer
+	_, err := c.Reconcile(ctx, req)
+	require.NoError(t, err)
+
+	// Resolve and update status
+	_, err = c.Reconcile(ctx, req)
+	require.NoError(t, err)
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	require.NotNil(t, comp.Status.Simplified)
+	// Should resolve to the label-matched synth, not the name-matched synth
+	assert.Equal(t, "label-synth", comp.Status.Simplified.ResolvedSynthName)
+}

@@ -67,8 +67,9 @@ type CompositionStatus struct {
 }
 
 type SimplifiedStatus struct {
-	Status string `json:"status,omitempty"`
-	Error  string `json:"error,omitempty"`
+	Status            string `json:"status,omitempty"`
+	Error             string `json:"error,omitempty"`
+	ResolvedSynthName string `json:"resolvedSynthName,omitempty"`
 }
 
 func (s *SimplifiedStatus) String() string {

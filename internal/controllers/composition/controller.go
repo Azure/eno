@@ -89,10 +89,7 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 		logger.Info("added cleanup finalizer to composition")
 		return ctrl.Result{}, nil
 	}
-
-	synth := &apiv1.Synthesizer{}
-	synth.Name = comp.Spec.Synthesizer.Name
-	err = c.client.Get(ctx, client.ObjectKeyFromObject(synth), synth)
+	synth, err := comp.Spec.Synthesizer.Resolve(ctx, c.client)
 	if errors.IsNotFound(err) {
 		logger.Info(fmt.Sprintf("synthesizer not found for composition[%s], namespace[%s], synthName[%s]", comp.GetName(), comp.GetNamespace(), comp.Spec.Synthesizer.Name))
 		synth = nil
@@ -191,7 +188,7 @@ func (c *compositionController) reconcileSimplifiedStatus(ctx context.Context, s
 	if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(comp)); err != nil {
 		return false, fmt.Errorf("patching simplified status: %w", err)
 	}
-	logger.Info("sucessfully updated status for composition")
+	logger.Info("successfully updated status for composition")
 	return true, nil
 }
 
@@ -207,6 +204,7 @@ func buildSimplifiedStatus(synth *apiv1.Synthesizer, comp *apiv1.Composition) *a
 		status.Status = "MissingSynthesizer"
 		return status
 	}
+	status.ResolvedSynthName = synth.Name
 
 	if syn := comp.Status.InFlightSynthesis; syn != nil {
 		for _, result := range syn.Results {

@@ -30,9 +30,7 @@ func (c *pruningController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		"operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	ctx = logr.NewContext(ctx, logger)
 
-	synth := &apiv1.Synthesizer{}
-	synth.Name = comp.Spec.Synthesizer.Name
-	err = c.client.Get(ctx, client.ObjectKeyFromObject(synth), synth)
+	synth, err := comp.Spec.Synthesizer.Resolve(ctx, c.client)
 	if client.IgnoreNotFound(err) != nil {
 		logger.Error(err, "failed to get synthesizer")
 		return ctrl.Result{}, err

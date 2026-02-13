@@ -105,9 +105,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		"operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	ctx = logr.NewContext(ctx, logger)
 
-	syn := &apiv1.Synthesizer{}
-	syn.Name = comp.Spec.Synthesizer.Name
-	err = c.client.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+	syn, err := comp.Spec.Synthesizer.Resolve(ctx, c.client)
 	if err != nil {
 		logger.Error(err, "failed to get synthesizer")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
