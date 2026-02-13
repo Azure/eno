@@ -1137,3 +1137,37 @@ func TestResourceSelector(t *testing.T) {
 	})
 	assert.True(t, errors.IsNotFound(mgr.DownstreamClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: "test-obj-1"}, &corev1.ConfigMap{})))
 }
+
+func TestForceDeletion(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":        "test-obj-1",
+					"namespace":   "default",
+					"annotations": map[string]any{"eno.azure.io/force-deletion": "true"},
+					"finalizers":  []any{"eno.azure.io/test", "eno.azure.io/another-one"},
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	registerControllers(t, mgr)
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+	waitForReadiness(t, mgr, comp, nil, nil)
+
+	require.NoError(t, upstream.Delete(ctx, comp))
+	testutil.Eventually(t, func() bool {
+		return errors.IsNotFound(upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	})
+}
