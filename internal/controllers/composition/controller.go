@@ -269,22 +269,7 @@ func isAddonComposition(comp *apiv1.Composition) bool {
 		return false
 	}
 
-	aksLabel, hasAKS := labels[AKSComponentLabel]
-	overlayLabel, hasOverlay := labels[OverlayComponentLabel]
-
-	if !hasAKS && !hasOverlay {
-		return false
-	}
-
-	// If a label is present, it must be "addon". Any non-addon value (e.g. "ccp") disqualifies.
-	if hasAKS && aksLabel != addOnLabelValue {
-		return false
-	}
-	if hasOverlay && overlayLabel != addOnLabelValue {
-		return false
-	}
-
-	return true
+	return labels[AKSComponentLabel] == addOnLabelValue || labels[OverlayComponentLabel] == addOnLabelValue
 }
 
 func buildSimplifiedStatus(synth *apiv1.Synthesizer, comp *apiv1.Composition) *apiv1.SimplifiedStatus {
