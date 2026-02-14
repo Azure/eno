@@ -109,7 +109,7 @@ func (c *Cache) Fill(ctx context.Context, comp *apiv1.Composition, synUUID strin
 				logger.Error(err, "invalid resource - cannot load into cache", "resourceSliceName", slice.Name, "resourceIndex", i)
 				return
 			}
-
+			isGhostResource := false
 			if c.ResourceFilter != nil {
 				matches, err := c.evaluateResourceFilter(ctx, comp, res)
 				if err != nil {
@@ -117,12 +117,10 @@ func (c *Cache) Fill(ctx context.Context, comp *apiv1.Composition, synUUID strin
 					resourceFilterErrors.Inc()
 					continue
 				}
-				if !matches {
-					continue
-				}
+				isGhostResource = !matches
 			}
 
-			builder.Add(res)
+			builder.Add(res, isGhostResource)
 		}
 	}
 	tree := builder.Build()

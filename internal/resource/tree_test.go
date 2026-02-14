@@ -165,7 +165,7 @@ func TestTreeBuilderSanity(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			var b treeBuilder
 			for _, r := range tc.Resources {
-				b.Add(r)
+				b.Add(r, false)
 			}
 
 			tree := b.Build()
@@ -199,22 +199,22 @@ func TestTreeVisibility(t *testing.T) {
 		Ref:            newTestRef("test-resource-4"),
 		readinessGroup: 4,
 		ManifestRef:    ManifestRef{Index: 4},
-	})
+	}, false)
 	b.Add(&Resource{
 		Ref:            newTestRef("test-resource-1"),
 		readinessGroup: 1,
 		ManifestRef:    ManifestRef{Index: 1},
-	})
+	}, false)
 	b.Add(&Resource{
 		Ref:            newTestRef("test-resource-3"),
 		readinessGroup: 3,
 		ManifestRef:    ManifestRef{Index: 3},
-	})
+	}, false)
 	b.Add(&Resource{
 		Ref:            newTestRef("test-resource-2"),
 		readinessGroup: 2,
 		ManifestRef:    ManifestRef{Index: 2},
-	})
+	}, false)
 	names := []string{"test-resource-1", "test-resource-2", "test-resource-3", "test-resource-4"}
 	tree := b.Build()
 
@@ -284,21 +284,21 @@ func TestTreeDeletion(t *testing.T) {
 		ManifestRef:        ManifestRef{Index: 1},
 		parsed:             &unstructured.Unstructured{},
 		compositionDeleted: true,
-	})
+	}, false)
 	b.Add(&Resource{
 		Ref:                newTestRef("test-resource-3"),
 		readinessGroup:     3,
 		ManifestRef:        ManifestRef{Index: 3},
 		parsed:             &unstructured.Unstructured{},
 		compositionDeleted: true,
-	})
+	}, false)
 	b.Add(&Resource{
 		Ref:                newTestRef("test-resource-2"),
 		readinessGroup:     2,
 		ManifestRef:        ManifestRef{Index: 2},
 		parsed:             &unstructured.Unstructured{},
 		compositionDeleted: true,
-	})
+	}, false)
 	tree := b.Build()
 
 	// All resources are seen, but only one is ready
@@ -331,11 +331,11 @@ func TestTreeRefConflicts(t *testing.T) {
 	b.Add(&Resource{
 		Ref:          newTestRef("test-resource"),
 		manifestHash: []byte("b"),
-	})
+	}, false)
 	b.Add(&Resource{
 		Ref:          newTestRef("test-resource"),
 		manifestHash: []byte("a"),
-	})
+	}, false)
 	tree := b.Build()
 
 	res, visible, found := tree.Get(newTestRef("test-resource"))

@@ -10,8 +10,11 @@ import (
 )
 
 type indexedResource struct {
-	Resource            *Resource
-	Seen                bool
+	Resource *Resource
+	Seen     bool
+	// If GhostResource true it means it is being managed by other eno-reconciler, but only participate in dependency graph to ensure
+	// that the ordering (readiness-group/deletion-group works as expected)
+	GhostResource       bool
 	PendingDependencies map[Ref]struct{}
 	Dependents          map[Ref]*indexedResource
 }
@@ -54,7 +57,7 @@ func (b *treeBuilder) init() {
 	}
 }
 
-func (b *treeBuilder) Add(resource *Resource) {
+func (b *treeBuilder) Add(resource *Resource, ghostResource bool) {
 	b.init()
 
 	// Handle conflicting refs deterministically
@@ -65,6 +68,7 @@ func (b *treeBuilder) Add(resource *Resource) {
 	// Index the resource into the builder
 	idx := &indexedResource{
 		Resource:            resource,
+		GhostResource:       ghostResource,
 		PendingDependencies: map[Ref]struct{}{},
 		Dependents:          map[Ref]*indexedResource{},
 	}
@@ -136,7 +140,7 @@ type tree struct {
 // Get returns the resource and determines if it's visible based on the state of its dependencies.
 func (t *tree) Get(key Ref) (res *Resource, visible bool, found bool) {
 	idx, ok := t.byRef[key]
-	if !ok {
+	if !ok || idx.GhostResource { // don't need to act on ghost resource as it is managed by other eno-reconciler
 		return nil, false, false
 	}
 	//TODO: debug logging on what we're blocked on might help future issues.
@@ -152,8 +156,10 @@ func (t *tree) UpdateState(ref ManifestRef, state *apiv1.ResourceState, enqueue 
 
 	// Requeue self when the state has changed
 	lastKnown := idx.Resource.latestKnownState.Swap(state)
-	if (!idx.Seen && lastKnown == nil) || !lastKnown.Equal(state) {
-		enqueue(idx.Resource.Ref)
+	if !idx.GhostResource {
+		if (!idx.Seen && lastKnown == nil) || !lastKnown.Equal(state) {
+			enqueue(idx.Resource.Ref)
+		}
 	}
 	idx.Seen = true
 

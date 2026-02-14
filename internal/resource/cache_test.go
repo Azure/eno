@@ -413,6 +413,114 @@ func TestCacheResourceFilterAlwaysTrue(t *testing.T) {
 	assert.True(t, found)
 }
 
+// TestCacheGhostResourceCrossReconcilerDeletionOrder simulates two eno-reconcilers (A and B)
+// sharing the same composition. Reconciler A manages a CRD-like resource (deletion-group -1)
+// and reconciler B manages a Deployment-like resource (deletion-group 0).
+// The test proves that B's resource is blocked until A's resource is confirmed deleted,
+// even though A's resource is a ghost (filtered out) in B's cache.
+func TestCacheGhostResourceCrossReconcilerDeletionOrder(t *testing.T) {
+	ctx := context.Background()
+
+	// Shared composition with DeletionTimestamp set to activate deletion-group logic
+	now := metav1.Now()
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "test-ns"
+	comp.DeletionTimestamp = &now
+
+	// Two resources in the same slice:
+	// - "crd-resource" with deletion-group -1, label role=crd (managed by reconciler A)
+	// - "deployment-resource" with deletion-group 0, label role=deployment (managed by reconciler B)
+	slices := []apiv1.ResourceSlice{{
+		ObjectMeta: metav1.ObjectMeta{Name: "slice-1", Namespace: "test-ns"},
+		Spec: apiv1.ResourceSliceSpec{
+			Resources: []apiv1.Manifest{
+				{Manifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "crd-resource", "namespace": "default", "labels": {"role": "crd"}, "annotations": {"eno.azure.io/deletion-group": "-1"}}}`},
+				{Manifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "deployment-resource", "namespace": "default", "labels": {"role": "deployment"}, "annotations": {"eno.azure.io/deletion-group": "0"}}}`},
+			},
+		},
+	}}
+
+	const synUUID = "test-syn"
+	crdRef := Ref{Name: "crd-resource", Namespace: "default", Kind: "ConfigMap"}
+	deployRef := Ref{Name: "deployment-resource", Namespace: "default", Kind: "ConfigMap"}
+
+	// --- Reconciler A: manages role=crd resources ---
+	filterA, err := enocel.Parse("self.metadata.labels.role == 'crd'")
+	require.NoError(t, err)
+	var cacheA Cache
+	queueA := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[Request]())
+	cacheA.SetQueue(queueA)
+	cacheA.ResourceFilter = filterA
+
+	cacheA.Fill(ctx, comp, synUUID, slices)
+	cacheA.Visit(ctx, comp, synUUID, slices)
+	dumpQueue(queueA) // drain
+
+	// Reconciler A can see the crd-resource (it's its own)
+	res, visible, found := cacheA.Get(ctx, synUUID, crdRef)
+	assert.NotNil(t, res, "reconciler A should find its own resource")
+	assert.True(t, found)
+	assert.True(t, visible, "crd-resource (deletion-group -1) has no dependencies, should be visible")
+
+	// Reconciler A cannot see deployment-resource (it's a ghost)
+	res, visible, found = cacheA.Get(ctx, synUUID, deployRef)
+	assert.Nil(t, res)
+	assert.False(t, found, "deployment-resource is a ghost in reconciler A's cache")
+	assert.False(t, visible)
+
+	// --- Reconciler B: manages role=deployment resources ---
+	filterB, err := enocel.Parse("self.metadata.labels.role == 'deployment'")
+	require.NoError(t, err)
+	var cacheB Cache
+	queueB := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[Request]())
+	cacheB.SetQueue(queueB)
+	cacheB.ResourceFilter = filterB
+
+	cacheB.Fill(ctx, comp, synUUID, slices)
+	cacheB.Visit(ctx, comp, synUUID, slices)
+	dumpQueue(queueB) // drain
+
+	// Reconciler B cannot see crd-resource (it's a ghost)
+	res, visible, found = cacheB.Get(ctx, synUUID, crdRef)
+	assert.Nil(t, res)
+	assert.False(t, found, "crd-resource is a ghost in reconciler B's cache")
+	assert.False(t, visible)
+
+	// Reconciler B can find deployment-resource but it should NOT be visible yet
+	// because it depends on crd-resource (deletion-group -1 < 0) which hasn't been deleted
+	res, visible, found = cacheB.Get(ctx, synUUID, deployRef)
+	assert.NotNil(t, res, "reconciler B should find its own resource")
+	assert.True(t, found)
+	assert.False(t, visible, "deployment-resource should be blocked by ghost crd-resource in deletion-group -1")
+
+	// --- Simulate reconciler A deleting the crd-resource ---
+	// Reconciler A writes Deleted: true to the resource slice status for the crd-resource (index 0)
+	slicesWithStatus := []apiv1.ResourceSlice{{
+		ObjectMeta: metav1.ObjectMeta{Name: "slice-1", Namespace: "test-ns"},
+		Spec:       slices[0].Spec,
+		Status: apiv1.ResourceSliceStatus{
+			Resources: []apiv1.ResourceState{
+				{Deleted: true}, // crd-resource at index 0 is deleted
+				{},              // deployment-resource at index 1 is not yet deleted
+			},
+		},
+	}}
+
+	// Reconciler B's informer picks up the status change and calls Visit
+	cacheB.Visit(ctx, comp, synUUID, slicesWithStatus)
+	enqueuedB := dumpQueue(queueB)
+
+	// The deployment-resource should have been enqueued because its dependency was cleared
+	assert.Contains(t, enqueuedB, deployRef.String(), "deployment-resource should be enqueued after ghost dependency is cleared")
+
+	// Now deployment-resource should be visible — the ghost crd-resource dependency is satisfied
+	res, visible, found = cacheB.Get(ctx, synUUID, deployRef)
+	assert.NotNil(t, res)
+	assert.True(t, found)
+	assert.True(t, visible, "deployment-resource should now be visible after crd-resource ghost is deleted")
+}
+
 func dumpQueue(q workqueue.TypedRateLimitingInterface[Request]) (slice []string) {
 	for {
 		if q.Len() == 0 {
