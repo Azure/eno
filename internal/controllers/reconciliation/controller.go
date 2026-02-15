@@ -165,16 +165,46 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	deleted := current == nil ||
-		(current.GetDeletionTimestamp() != nil && !snap.ForegroundDeletion) ||
-		(snap.Deleted() && (snap.Orphan || snap.Disable || failingOpen)) // orphaning should be reflected on the status.
-
+	deleted := shouldMarkResourceDeleted(snap, current, failingOpen)
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 	return c.requeue(logger, snap, ready)
 }
 
 func (c *Controller) shouldFailOpen(resource *resource.Resource) bool {
 	return (resource.FailOpen == nil && c.failOpen) || (resource.FailOpen != nil && *resource.FailOpen)
+}
+
+// shouldMarkResourceDeleted returns true when the resource should be treated
+// as deleted for status-reporting purposes.
+func shouldMarkResourceDeleted(snap *resource.Snapshot, current *unstructured.Unstructured, failingOpen bool) bool {
+	// Resource does not exist - marking as deleted for sure.
+	if current == nil {
+		return true
+	}
+
+	// Resource is being deleted by the kube-apiserver (deletionTimestamp set).
+	// For foreground deletion we must wait until the object is fully gone,
+	// so we only report deleted here for non-foreground cases.
+	if current.GetDeletionTimestamp() != nil && !snap.ForegroundDeletion {
+		return true
+	}
+
+	// Orphan & Disabled should always be reflected on the status.
+	// FailOpen should also be reflected — *unless* we are doing a foreground
+	// deletion that is still in progress, because marking a resource deleted
+	// prematurely would break the foreground ordering guarantee.
+	if snap.Deleted() {
+		if snap.Orphan || snap.Disable {
+			return true
+		}
+
+		if failingOpen {
+			// Do not prematurely report deleted during an active foreground deletion.
+			pendingForegroundDeletion := snap.ForegroundDeletion && current.GetDeletionTimestamp() != nil
+			return !pendingForegroundDeletion
+		}
+	}
+	return false
 }
 
 func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composition, prev *resource.Resource, resource *resource.Resource) (snap *resource.Snapshot, current *unstructured.Unstructured, ready *metav1.Time, modified bool, err error) {

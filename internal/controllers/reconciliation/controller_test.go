@@ -15,6 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -248,4 +249,84 @@ func TestRequeueDoesNotPanic(t *testing.T) {
 			return res
 		}).
 		Evaluate(t)
+}
+
+func TestShouldMarkResourceDeleted(t *testing.T) {
+	now := metav1.Now()
+	existing := &unstructured.Unstructured{}
+	deleting := &unstructured.Unstructured{}
+	deleting.SetDeletionTimestamp(&now)
+
+	tests := []struct {
+		name       string
+		snap       *resource.Snapshot
+		current    *unstructured.Unstructured
+		failOpen   bool
+		wantDelete bool
+	}{
+		{
+			name:       "current is nil — resource does not exist",
+			snap:       &resource.Snapshot{Resource: &resource.Resource{}},
+			current:    nil,
+			wantDelete: true,
+		},
+		{
+			name:       "deletionTimestamp set, non-foreground",
+			snap:       &resource.Snapshot{Resource: &resource.Resource{}},
+			current:    deleting,
+			wantDelete: true,
+		},
+		{
+			name:       "deletionTimestamp set, foreground — wait for full removal",
+			snap:       &resource.Snapshot{Resource: &resource.Resource{}, ForegroundDeletion: true},
+			current:    deleting,
+			wantDelete: false,
+		},
+		{
+			name:       "deleted + orphan — always report deleted",
+			snap:       &resource.Snapshot{Resource: &resource.Resource{}, Disable: true, Orphan: true},
+			current:    existing,
+			wantDelete: true,
+		},
+		{
+			name:       "deleted + disable — always report deleted",
+			snap:       &resource.Snapshot{Resource: &resource.Resource{}, Disable: true},
+			current:    existing,
+			wantDelete: true,
+		},
+		{
+			name:       "deleted + failOpen, no foreground — report deleted",
+			snap:       &resource.Snapshot{Resource: &resource.Resource{}, Disable: true},
+			current:    existing,
+			failOpen:   true,
+			wantDelete: true,
+		},
+		{
+			name:       "deleted + failOpen + foreground + deletionTimestamp — do NOT prematurely report deleted",
+			snap:       &resource.Snapshot{Resource: &resource.Resource{}, Disable: true, ForegroundDeletion: true},
+			current:    deleting,
+			failOpen:   true,
+			wantDelete: true, // Disable branch returns true before reaching failOpen
+		},
+		{
+			name:       "not deleted, resource exists — no deletion",
+			snap:       &resource.Snapshot{Resource: &resource.Resource{}},
+			current:    existing,
+			wantDelete: false,
+		},
+		{
+			name:       "not deleted, resource exists, failOpen — no deletion",
+			snap:       &resource.Snapshot{Resource: &resource.Resource{}},
+			current:    existing,
+			failOpen:   true,
+			wantDelete: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldMarkResourceDeleted(tt.snap, tt.current, tt.failOpen)
+			assert.Equal(t, tt.wantDelete, got)
+		})
+	}
 }
