@@ -273,11 +273,11 @@ func TestShouldForceRemoveFinalizer(t *testing.T) {
 	const symphonyName = "my-symphony"
 	const namespace = "default"
 
-	newComp := func(labels map[string]string, withOwnerRef bool) *apiv1.Composition {
+	newComp := func(annotations map[string]string, withOwnerRef bool) *apiv1.Composition {
 		comp := &apiv1.Composition{}
 		comp.Name = "comp-1"
 		comp.Namespace = namespace
-		comp.Labels = labels
+		comp.Annotations = annotations
 		comp.Finalizers = []string{"eno.azure.io/cleanup"}
 		if withOwnerRef {
 			comp.OwnerReferences = []metav1.OwnerReference{{
@@ -292,51 +292,39 @@ func TestShouldForceRemoveFinalizer(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		labels         map[string]string
+		annotations    map[string]string
 		withOwnerRef   bool
 		symphonyExists bool
 		expected       bool
 	}{
 		{
-			name:         "no labels",
-			labels:       nil,
+			name:         "no annotations",
+			annotations:  nil,
 			withOwnerRef: true,
 			expected:     false,
 		},
 		{
-			name:         "AKS label ccp - symphony gone",
-			labels:       map[string]string{AKSComponentLabel: "ccp"},
+			name:         "annotation set to false",
+			annotations:  map[string]string{enoCompositionForceDeleteAnnotation: "false"},
 			withOwnerRef: true,
 			expected:     false,
 		},
 		{
-			name:         "AKS label addon - symphony gone",
-			labels:       map[string]string{AKSComponentLabel: "addon"},
+			name:         "annotation set to true - symphony gone",
+			annotations:  map[string]string{enoCompositionForceDeleteAnnotation: "true"},
 			withOwnerRef: true,
 			expected:     true,
 		},
 		{
-			name:           "AKS label addon - symphony exists",
-			labels:         map[string]string{AKSComponentLabel: "addon"},
+			name:           "annotation set to true - symphony exists",
+			annotations:    map[string]string{enoCompositionForceDeleteAnnotation: "true"},
 			withOwnerRef:   true,
 			symphonyExists: true,
 			expected:       false,
 		},
 		{
-			name:         "overlay label addon - symphony gone",
-			labels:       map[string]string{OverlayComponentLabel: "addon"},
-			withOwnerRef: true,
-			expected:     true,
-		},
-		{
-			name:         "overlay label ccp - symphony gone",
-			labels:       map[string]string{OverlayComponentLabel: "ccp"},
-			withOwnerRef: true,
-			expected:     false,
-		},
-		{
-			name:         "addon label but no owner ref",
-			labels:       map[string]string{AKSComponentLabel: "addon"},
+			name:         "annotation set to true but no owner ref",
+			annotations:  map[string]string{enoCompositionForceDeleteAnnotation: "true"},
 			withOwnerRef: false,
 			expected:     false,
 		},
@@ -344,7 +332,7 @@ func TestShouldForceRemoveFinalizer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			comp := newComp(tt.labels, tt.withOwnerRef)
+			comp := newComp(tt.annotations, tt.withOwnerRef)
 			objs := []client.Object{comp}
 			if tt.symphonyExists {
 				symph := &apiv1.Symphony{}

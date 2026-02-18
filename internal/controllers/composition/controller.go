@@ -26,9 +26,7 @@ import (
 )
 
 const (
-	AKSComponentLabel     = "aks.azure.com/component-type"
-	OverlayComponentLabel = "eno.azure.io/overlaymgr-component-type"
-	addOnLabelValue       = "addon"
+	enoCompositionForceDeleteAnnotation = "eno.azure.io/forceDeleteWhenSymphonyGone"
 )
 
 type compositionController struct {
@@ -169,7 +167,7 @@ func (c *compositionController) reconcileDeletedComposition(ctx context.Context,
 			// If this is an addon composition whose owning Symphony is already gone,
 			// force-remove the finalizer so the composition doesn't get stuck forever.
 			if c.shouldForceRemoveFinalizer(ctx, comp) {
-				logger.Info("force removing finalizer for addon composition because owning symphony is gone",
+				logger.Info("force removing finalizer for composition because owning symphony is gone and composition is being marked force delete",
 					"compositionName", comp.Name, "compositionNamespace", comp.Namespace)
 			} else {
 				logger.Info("refusing to remove composition finalizer because it is still being reconciled")
@@ -208,14 +206,14 @@ func (c *compositionController) reconcileSimplifiedStatus(ctx context.Context, s
 	return true, nil
 }
 
-// shouldForceRemoveFinalizer returns true if and only if the composition is an addon
-// (has label aks.azure.com/component-type=addon or eno.azure.io/overlaymgr-component-type=addon)
-// AND the owning Symphony no longer exists. If the component type is anything other than "addon"
-// (e.g. "ccp"), or if the Symphony still exists, this returns false.
+// shouldForceRemoveFinalizer returns true if and only if the composition has the
+// annotation eno.azure.io/forceDeleteWhenSymphonyGone set to "true" AND the owning
+// Symphony no longer exists. If the annotation is absent, not "true", or the Symphony
+// still exists, this returns false.
 func (c *compositionController) shouldForceRemoveFinalizer(ctx context.Context, comp *apiv1.Composition) bool {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	if !isAddonComposition(comp) {
+	if !isCompositionMarkedForcedDelete(comp) {
 		return false
 	}
 
@@ -261,15 +259,13 @@ func (c *compositionController) shouldForceRemoveFinalizer(ctx context.Context, 
 	return false
 }
 
-// isAddonComposition returns true if the composition has at least one of the component-type labels
-// set to "addon", and neither label is set to a non-addon value.
-func isAddonComposition(comp *apiv1.Composition) bool {
-	labels := comp.GetLabels()
-	if labels == nil {
+// isCompositionMarkedForcedDelete checks if a composition has the force-delete annotation set to "true".
+func isCompositionMarkedForcedDelete(comp *apiv1.Composition) bool {
+	annotations := comp.GetAnnotations()
+	if annotations == nil {
 		return false
 	}
-
-	return labels[AKSComponentLabel] == addOnLabelValue || labels[OverlayComponentLabel] == addOnLabelValue
+	return annotations[enoCompositionForceDeleteAnnotation] == "true"
 }
 
 func buildSimplifiedStatus(synth *apiv1.Synthesizer, comp *apiv1.Composition) *apiv1.SimplifiedStatus {
