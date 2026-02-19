@@ -27,6 +27,9 @@ import (
 
 const (
 	enoCompositionForceDeleteAnnotation = "eno.azure.io/forceDeleteWhenSymphonyGone"
+	AKSComponentLabel                   = "aks.azure.com/component-type"           // TODO(ruinanliu): Temp workaround remove after 14802391 is released
+	OverlayComponentLabel               = "eno.azure.io/overlaymgr-component-type" // TODO(ruinanliu):  Temp workaround remove after 14802391 is released
+	addOnLabelValue                     = "addon"                                  // TODO(ruinanliu):  Temp workaround remove after 14802391 is released
 )
 
 type compositionController struct {
@@ -213,7 +216,8 @@ func (c *compositionController) reconcileSimplifiedStatus(ctx context.Context, s
 func (c *compositionController) shouldForceRemoveFinalizer(ctx context.Context, comp *apiv1.Composition) bool {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	if !isCompositionMarkedForcedDelete(comp) {
+	// TODO(ruinanliu): Temp workaround remove isAddonComposition method after PR 14802391 is released
+	if !isCompositionMarkedForcedDelete(comp) || !isAddonComposition(comp) {
 		return false
 	}
 
@@ -266,6 +270,16 @@ func isCompositionMarkedForcedDelete(comp *apiv1.Composition) bool {
 		return false
 	}
 	return annotations[enoCompositionForceDeleteAnnotation] == "true"
+}
+
+// isAddonComposition checks if the composition's label contains addon label.
+// TODO(ruinanliu): Temp workaround remove after PR 14802391 is released
+func isAddonComposition(comp *apiv1.Composition) bool {
+	labels := comp.GetLabels()
+	if labels == nil {
+		return false
+	}
+	return labels[AKSComponentLabel] == addOnLabelValue || labels[OverlayComponentLabel] == addOnLabelValue
 }
 
 func buildSimplifiedStatus(synth *apiv1.Synthesizer, comp *apiv1.Composition) *apiv1.SimplifiedStatus {
