@@ -26,3 +26,7 @@ docker-build-eno-reconciler:
 setup-testenv:
 	@echo "Installing controller-runtime testenv binaries..."
 	@go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path
+
+.PHONY: test-e2e
+test-e2e:
+	go test -v -timeout 10m -count=1 ./test/e2e/...
