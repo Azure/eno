@@ -268,3 +268,173 @@ type simplifiedStatusState struct {
 	Synth *apiv1.Synthesizer
 	Comp  *apiv1.Composition
 }
+
+func TestIsAddonComposition(t *testing.T) {
+	tests := []struct {
+		name     string
+		labels   map[string]string
+		expected bool
+	}{
+		{
+			name:     "nil labels",
+			labels:   nil,
+			expected: false,
+		},
+		{
+			name:     "empty labels",
+			labels:   map[string]string{},
+			expected: false,
+		},
+		{
+			name:     "unrelated labels",
+			labels:   map[string]string{"foo": "bar"},
+			expected: false,
+		},
+		{
+			name:     "AKS component label with wrong value",
+			labels:   map[string]string{AKSComponentLabel: "not-addon"},
+			expected: false,
+		},
+		{
+			name:     "AKS component label with addon value",
+			labels:   map[string]string{AKSComponentLabel: addOnLabelValue},
+			expected: true,
+		},
+
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			comp := &apiv1.Composition{}
+			comp.Labels = tt.labels
+			assert.Equal(t, tt.expected, isAddonComposition(comp))
+		})
+	}
+}
+
+func TestShouldForceRemoveFinalizer(t *testing.T) {
+	const symphonyName = "my-symphony"
+	const namespace = "default"
+
+	addonLabels := map[string]string{AKSComponentLabel: addOnLabelValue}
+
+	newComp := func(annotations map[string]string, labels map[string]string, withOwnerRef bool) *apiv1.Composition {
+		comp := &apiv1.Composition{}
+		comp.Name = "comp-1"
+		comp.Namespace = namespace
+		comp.Annotations = annotations
+		comp.Labels = labels
+		comp.Finalizers = []string{"eno.azure.io/cleanup"}
+		if withOwnerRef {
+			comp.OwnerReferences = []metav1.OwnerReference{{
+				APIVersion: apiv1.SchemeGroupVersion.String(),
+				Kind:       "Symphony",
+				Name:       symphonyName,
+				UID:        "test-uid",
+			}}
+		}
+		return comp
+	}
+
+	tests := []struct {
+		name           string
+		annotations    map[string]string
+		labels         map[string]string
+		withOwnerRef   bool
+		symphonyExists bool
+		expected       bool
+	}{
+		{
+			name:         "no annotations and no addon label",
+			annotations:  nil,
+			labels:       nil,
+			withOwnerRef: true,
+			expected:     false,
+		},
+		{
+			name:         "no annotations and wrong addon label value",
+			annotations:  nil,
+			labels:       map[string]string{AKSComponentLabel: "not-addon"},
+			withOwnerRef: true,
+			expected:     false,
+		},
+		{
+			name:         "annotation set to false and no addon label",
+			annotations:  map[string]string{enoCompositionForceDeleteAnnotation: "false"},
+			labels:       nil,
+			withOwnerRef: true,
+			expected:     false,
+		},
+		{
+			name:         "no annotation - addon label only - symphony gone",
+			annotations:  nil,
+			labels:       addonLabels,
+			withOwnerRef: true,
+			expected:     true,
+		},
+		{
+			name:           "no annotation - addon label only - symphony exists",
+			annotations:    nil,
+			labels:         addonLabels,
+			withOwnerRef:   true,
+			symphonyExists: true,
+			expected:       false,
+		},
+		{
+			name:         "annotation set to true - no addon label - symphony gone",
+			annotations:  map[string]string{enoCompositionForceDeleteAnnotation: "true"},
+			labels:       nil,
+			withOwnerRef: true,
+			expected:     true,
+		},
+		{
+			name:         "annotation set to true - addon label - symphony gone",
+			annotations:  map[string]string{enoCompositionForceDeleteAnnotation: "true"},
+			labels:       addonLabels,
+			withOwnerRef: true,
+			expected:     true,
+		},
+		{
+			name:           "annotation set to true - addon label - symphony exists",
+			annotations:    map[string]string{enoCompositionForceDeleteAnnotation: "true"},
+			labels:         addonLabels,
+			withOwnerRef:   true,
+			symphonyExists: true,
+			expected:       false,
+		},
+		{
+			name:         "annotation set to true - addon label - no owner ref",
+			annotations:  map[string]string{enoCompositionForceDeleteAnnotation: "true"},
+			labels:       addonLabels,
+			withOwnerRef: false,
+			expected:     false,
+		},
+		{
+			name:         "addon label only - no owner ref",
+			annotations:  nil,
+			labels:       addonLabels,
+			withOwnerRef: false,
+			expected:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			comp := newComp(tt.annotations, tt.labels, tt.withOwnerRef)
+			objs := []client.Object{comp}
+			if tt.symphonyExists {
+				symph := &apiv1.Symphony{}
+				symph.Name = symphonyName
+				symph.Namespace = namespace
+				objs = append(objs, symph)
+			}
+
+			ctx := testutil.NewContext(t)
+			cli := testutil.NewClient(t, objs...)
+			c := &compositionController{client: cli}
+
+			result := c.shouldForceRemoveFinalizer(ctx, comp)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
