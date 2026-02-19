@@ -95,12 +95,7 @@ func (k *KindWatchController) newResourceWatchController(parent *WatchController
 	// Watch inputs declared by refs/bindings in synthesizers/compositions
 	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), &apiv1.Composition{},
 		handler.TypedEnqueueRequestsFromMapFunc(handler.TypedMapFunc[*apiv1.Composition, reconcile.Request](func(ctx context.Context, comp *apiv1.Composition) []reconcile.Request {
-			if comp.Spec.Synthesizer.Name == "" {
-				return nil
-			}
-
-			synth := &apiv1.Synthesizer{}
-			err = parent.client.Get(ctx, types.NamespacedName{Name: comp.Spec.Synthesizer.Name}, synth)
+			synth, err := comp.Spec.Synthesizer.Resolve(ctx, parent.client)
 			if err != nil {
 				logr.FromContextOrDiscard(ctx).Error(err, "unable to get synthesizer for composition")
 				return nil

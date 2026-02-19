@@ -1,0 +1,44 @@
+apiVersion: eno.azure.io/v1
+kind: Synthesizer
+metadata:
+  name: selector-example-v1
+  labels:
+    app: example
+    tier: frontend
+    version: v1
+spec:
+  image: docker.io/ubuntu:latest
+  command:
+  - /bin/bash
+  - -c
+  - |
+    echo '
+      {
+        "apiVersion":"config.kubernetes.io/v1",
+        "kind":"ResourceList",
+        "items":[
+          {
+            "apiVersion":"v1",
+            "data":{"selectedBy":"labelSelector", "version":"v1"},
+            "kind":"ConfigMap",
+            "metadata":{
+              "name":"selector-config",
+              "namespace": "default"
+            }
+          }
+        ]
+      }'
+---
+
+# This composition selects the v1 synthesizer
+apiVersion: eno.azure.io/v1
+kind: Composition
+metadata:
+  name: selector-example
+  namespace: default
+spec:
+  synthesizer:
+    labelSelector:
+      matchLabels:
+        app: example
+        version: v1

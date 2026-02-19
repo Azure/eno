@@ -46,15 +46,13 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 		return fmt.Errorf("fetching composition: %w", err)
 	}
 
-	syn := &apiv1.Synthesizer{}
-	syn.Name = comp.Spec.Synthesizer.Name
-	logger = logger.WithValues("synthesizerName", syn.Name)
-	ctx = logr.NewContext(ctx, logger)
-	err = e.Reader.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+	syn, err := comp.Spec.Synthesizer.Resolve(ctx, e.Reader)
 	if err != nil {
 		logger.Error(err, "unable to fetch synthesizer")
 		return fmt.Errorf("fetching synthesizer: %w", err)
 	}
+	logger = logger.WithValues("synthesizerName", syn.Name)
+	ctx = logr.NewContext(ctx, logger)
 
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", syn.Name,
 		"operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())

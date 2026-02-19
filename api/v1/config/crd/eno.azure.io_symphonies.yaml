@@ -159,8 +159,6 @@ spec:
                     synthesizer:
                       description: Used to populate the composition's spec.synthesizer.
                       properties:
-                        name:
-                          type: string
                         labelSelector:
                           description: |-
                             A label selector is a label query over a set of resources. The result of matchLabels and
@@ -210,6 +208,8 @@ spec:
                               type: object
                           type: object
                           x-kubernetes-map-type: atomic
+                        name:
+                          type: string
                       type: object
                       x-kubernetes-validations:
                       - message: at least one of name or labelSelector must be set

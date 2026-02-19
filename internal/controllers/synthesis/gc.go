@@ -81,9 +81,7 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// GC pods from missing synthesizers
-	syn := &apiv1.Synthesizer{}
-	syn.Name = comp.Spec.Synthesizer.Name
-	err = p.client.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+	syn, err := comp.Spec.Synthesizer.Resolve(ctx, p.client)
 	logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
 	if errors.IsNotFound(err) {
 		logger = logger.WithValues("reason", "SynthesizerDeleted")

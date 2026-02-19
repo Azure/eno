@@ -117,22 +117,27 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	var inFlight int
 	var op *op
 	for _, comp := range comps.Items {
-		comp := comp
 		if comp.Synthesizing() {
 			inFlight++
 		}
 
-		if missedReconciliation(&comp, c.watchdogThreshold) {
-			synth := synthsByName[comp.Spec.Synthesizer.Name]
-			stuckReconciling.WithLabelValues(comp.Spec.Synthesizer.Name, getSynthOwner(&synth)).Inc()
-			compositionHealth.WithLabelValues(comp.Name, comp.Namespace, comp.Spec.Synthesizer.Name).Set(1)
-			logger.Info("detected composition missed reconciliation", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", comp.Spec.Synthesizer.Name)
-		} else {
-			compositionHealth.WithLabelValues(comp.Name, comp.Namespace, comp.Spec.Synthesizer.Name).Set(0)
+		var resolvedSynthName string
+		if comp.Status.Simplified != nil {
+			resolvedSynthName = comp.Status.Simplified.ResolvedSynthName
 		}
 
-		synth, ok := synthsByName[comp.Spec.Synthesizer.Name]
+		if missedReconciliation(&comp, c.watchdogThreshold) {
+			synth := synthsByName[resolvedSynthName]
+			stuckReconciling.WithLabelValues(resolvedSynthName, getSynthOwner(&synth)).Inc()
+			compositionHealth.WithLabelValues(comp.Name, comp.Namespace, resolvedSynthName).Set(1)
+			logger.Info("detected composition missed reconciliation", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", resolvedSynthName)
+		} else {
+			compositionHealth.WithLabelValues(comp.Name, comp.Namespace, resolvedSynthName).Set(0)
+		}
+
+		synth, ok := synthsByName[resolvedSynthName]
 		if !ok {
+			logger.Info(fmt.Sprintf("synthesizer not found for composition[%s], namespace[%s], synthName[%s]", comp.GetName(), comp.GetNamespace(), resolvedSynthName))
 			continue
 		}
 
