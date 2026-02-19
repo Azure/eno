@@ -1,4 +1,6 @@
 FROM mcr.microsoft.com/devcontainers/go:1.24 AS builder
+# Set GOTOOLCHAIN to ensure the specific version is used during build for fix CVE-2025-68121
+ENV GOTOOLCHAIN=go1.24.13
 WORKDIR /app
 
 ADD go.mod .
