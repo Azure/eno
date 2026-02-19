@@ -2,7 +2,7 @@ module github.com/Azure/eno
 
 go 1.24.0
 
-toolchain go1.24.3
+toolchain go1.24.13
 
 require (
 	github.com/alecthomas/participle/v2 v2.1.4
@@ -48,6 +48,7 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
+	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mailru/easyjson v0.9.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
