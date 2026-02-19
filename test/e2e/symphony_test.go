@@ -81,18 +81,27 @@ func TestSymphonyLifecycle(t *testing.T) {
 	})
 
 	verifyCleanup := flow.Func("verifyCleanup", func(ctx context.Context) error {
+		// Symphony deletion orphans managed resources (by design), so the
+		// ConfigMaps should still exist after the symphony and its
+		// compositions are removed.
+		waitForResourceGone(t, ctx, cli, symphony, 60*time.Second)
+		t.Log("symphony is gone")
+
 		cm1 := configMap(cmName1, "default")
 		cm2 := configMap(cmName2, "default")
-		waitForResourceGone(t, ctx, cli, cm1, 60*time.Second)
-		waitForResourceGone(t, ctx, cli, cm2, 60*time.Second)
-		t.Log("both ConfigMaps deleted")
+		waitForResourceExists(t, ctx, cli, cm1, 30*time.Second)
+		waitForResourceExists(t, ctx, cli, cm2, 30*time.Second)
+		t.Log("both ConfigMaps still exist (orphaned)")
 		return nil
 	})
 
 	cleanupSynthesizers := flow.Func("cleanupSynthesizers", func(ctx context.Context) error {
+		// Clean up orphaned ConfigMaps.
+		cleanup(t, ctx, cli, configMap(cmName1, "default"))
+		cleanup(t, ctx, cli, configMap(cmName2, "default"))
 		cleanup(t, ctx, cli, synth1)
 		cleanup(t, ctx, cli, synth2)
-		t.Log("synthesizers cleaned up")
+		t.Log("orphaned ConfigMaps and synthesizers cleaned up")
 		return nil
 	})
 
