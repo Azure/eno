@@ -3,6 +3,7 @@
     "dependencies": [],
     "dependents": [],
     "ready": false,
-    "reconciled": false
+    "reconciled": false,
+    "shadow": false
   }
 }

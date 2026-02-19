@@ -167,7 +167,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 
 	deleted := current == nil ||
 		(current.GetDeletionTimestamp() != nil && !snap.ForegroundDeletion) ||
-		(snap.Deleted() && (snap.Orphan || snap.Disable || failingOpen)) // orphaning should be reflected on the status.
+		(snap.Deleted() && (snap.Orphan || snap.Disable)) //|| failingOpen)) // orphaning should be reflected on the status.
 
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 	return c.requeue(logger, snap, ready)
