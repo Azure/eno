@@ -296,25 +296,11 @@ func TestIsAddonComposition(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "Overlay component label with wrong value",
-			labels:   map[string]string{OverlayComponentLabel: "not-addon"},
-			expected: false,
-		},
-		{
 			name:     "AKS component label with addon value",
 			labels:   map[string]string{AKSComponentLabel: addOnLabelValue},
 			expected: true,
 		},
-		{
-			name:     "Overlay component label with addon value",
-			labels:   map[string]string{OverlayComponentLabel: addOnLabelValue},
-			expected: true,
-		},
-		{
-			name:     "both labels with addon value",
-			labels:   map[string]string{AKSComponentLabel: addOnLabelValue, OverlayComponentLabel: addOnLabelValue},
-			expected: true,
-		},
+
 	}
 
 	for _, tt := range tests {
@@ -387,13 +373,6 @@ func TestShouldForceRemoveFinalizer(t *testing.T) {
 			expected:     true,
 		},
 		{
-			name:         "no annotation - overlay label only - symphony gone",
-			annotations:  nil,
-			labels:       map[string]string{OverlayComponentLabel: addOnLabelValue},
-			withOwnerRef: true,
-			expected:     true,
-		},
-		{
 			name:           "no annotation - addon label only - symphony exists",
 			annotations:    nil,
 			labels:         addonLabels,
@@ -412,13 +391,6 @@ func TestShouldForceRemoveFinalizer(t *testing.T) {
 			name:         "annotation set to true - addon label - symphony gone",
 			annotations:  map[string]string{enoCompositionForceDeleteAnnotation: "true"},
 			labels:       addonLabels,
-			withOwnerRef: true,
-			expected:     true,
-		},
-		{
-			name:         "annotation set to true - overlay label - symphony gone",
-			annotations:  map[string]string{enoCompositionForceDeleteAnnotation: "true"},
-			labels:       map[string]string{OverlayComponentLabel: addOnLabelValue},
 			withOwnerRef: true,
 			expected:     true,
 		},
