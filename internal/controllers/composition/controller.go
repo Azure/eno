@@ -217,7 +217,7 @@ func (c *compositionController) shouldForceRemoveFinalizer(ctx context.Context, 
 	logger := logr.FromContextOrDiscard(ctx)
 
 	// TODO(ruinanliu): Temp workaround remove isAddonComposition method after PR 14802391 is released
-	if !isCompositionMarkedForcedDelete(comp) || !isAddonComposition(comp) {
+	if !isCompositionMarkedForcedDelete(comp) && !isAddonComposition(comp) {
 		return false
 	}
 
