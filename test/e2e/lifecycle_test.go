@@ -13,6 +13,7 @@ import (
 )
 
 func TestMinimalLifecycle(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
