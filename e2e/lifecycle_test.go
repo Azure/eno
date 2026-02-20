@@ -13,7 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	fw "github.com/Azure/eno/test/e2e/framework"
+	fw "github.com/Azure/eno/e2e/framework"
 )
 
 func TestMinimalLifecycle(t *testing.T) {

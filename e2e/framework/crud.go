@@ -96,7 +96,7 @@ func ToCommand(objs ...client.Object) []string {
 		panic(fmt.Sprintf("ToCommand: marshalling ResourceList: %v", err))
 	}
 
-	return []string{"/bin/bash", "-c", "echo '" + string(data) + "'"}
+	return []string{"/bin/bash", "-c", fmt.Sprintf("echo %q", string(data))}
 }
 
 // NewSymphony builds a Symphony with one variation per synthesizer name.

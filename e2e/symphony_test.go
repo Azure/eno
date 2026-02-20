@@ -13,7 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	fw "github.com/Azure/eno/test/e2e/framework"
+	fw "github.com/Azure/eno/e2e/framework"
 )
 
 func TestSymphonyLifecycle(t *testing.T) {
