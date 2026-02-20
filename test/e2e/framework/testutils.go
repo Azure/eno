@@ -70,7 +70,6 @@ func WaitForSymphonyReady(t *testing.T, ctx context.Context, cli client.Client, 
 	require.NoError(t, err, "timed out waiting for symphony %s to become Ready", key.Name)
 }
 
-
 // WaitForResourceExists polls until the given object can be fetched.
 func WaitForResourceExists(t *testing.T, ctx context.Context, cli client.Client, obj client.Object, timeout time.Duration) {
 	t.Helper()
@@ -84,8 +83,8 @@ func WaitForResourceExists(t *testing.T, ctx context.Context, cli client.Client,
 	require.NoError(t, err, "timed out waiting for %s %s to exist", obj.GetObjectKind().GroupVersionKind().Kind, key)
 }
 
-// WaitForResourceGone polls until the given object returns NotFound.
-func WaitForResourceGone(t *testing.T, ctx context.Context, cli client.Client, obj client.Object, timeout time.Duration) {
+// WaitForResourceDeleted polls until the given object returns NotFound.
+func WaitForResourceDeleted(t *testing.T, ctx context.Context, cli client.Client, obj client.Object, timeout time.Duration) {
 	t.Helper()
 	key := client.ObjectKeyFromObject(obj)
 	err := wait.PollUntilContextTimeout(ctx, 2*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
@@ -97,4 +96,3 @@ func WaitForResourceGone(t *testing.T, ctx context.Context, cli client.Client, o
 	})
 	require.NoError(t, err, "timed out waiting for %s %s to be deleted", obj.GetObjectKind().GroupVersionKind().Kind, key)
 }
-

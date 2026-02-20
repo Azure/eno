@@ -7,6 +7,8 @@ import (
 
 	flow "github.com/Azure/go-workflow"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -27,11 +29,21 @@ func TestSymphonyLifecycle(t *testing.T) {
 	cmName1 := fw.UniqueName("sym-cm-1")
 	cmName2 := fw.UniqueName("sym-cm-2")
 
-	synth1 := fw.NewMinimalSynthesizer(synthName1, cmName1, "source", "synth1")
-	synth2 := fw.NewMinimalSynthesizer(synthName2, cmName2, "source", "synth2")
+	cm1 := &corev1.ConfigMap{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
+		ObjectMeta: metav1.ObjectMeta{Name: cmName1, Namespace: "default"},
+		Data:       map[string]string{"source": "synth1"},
+	}
+	cm2 := &corev1.ConfigMap{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
+		ObjectMeta: metav1.ObjectMeta{Name: cmName2, Namespace: "default"},
+		Data:       map[string]string{"source": "synth2"},
+	}
+
+	synth1 := fw.NewMinimalSynthesizer(synthName1, fw.WithCommand(fw.ToCommand(cm1)))
+	synth2 := fw.NewMinimalSynthesizer(synthName2, fw.WithCommand(fw.ToCommand(cm2)))
 
 	symphony := fw.NewSymphony(symphonyName, "default", synthName1, synthName2)
-
 	symphonyKey := types.NamespacedName{Name: symphonyName, Namespace: "default"}
 
 	// -- Steps --
@@ -92,10 +104,14 @@ func TestSymphonyLifecycle(t *testing.T) {
 	})
 
 	verifyConfigMapsExist := flow.Func("verifyConfigMapsExist", func(ctx context.Context) error {
-		cm1 := fw.ConfigMap(cmName1, "default")
-		cm2 := fw.ConfigMap(cmName2, "default")
-		fw.WaitForResourceExists(t, ctx, cli, cm1, 30*time.Second)
-		fw.WaitForResourceExists(t, ctx, cli, cm2, 30*time.Second)
+		cm1 := corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: cmName1, Namespace: "default"},
+		}
+		cm2 := corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: cmName2, Namespace: "default"},
+		}
+		fw.WaitForResourceExists(t, ctx, cli, &cm1, 30*time.Second)
+		fw.WaitForResourceExists(t, ctx, cli, &cm2, 30*time.Second)
 		t.Log("both ConfigMaps exist")
 		return nil
 	})
@@ -106,22 +122,22 @@ func TestSymphonyLifecycle(t *testing.T) {
 		// Symphony deletion orphans managed resources (by design), so the
 		// ConfigMaps should still exist after the symphony and its
 		// compositions are removed.
-		fw.WaitForResourceGone(t, ctx, cli, symphony, 60*time.Second)
+		fw.WaitForResourceDeleted(t, ctx, cli, symphony, 60*time.Second)
 		t.Log("symphony is gone")
 
-		cm1 := fw.ConfigMap(cmName1, "default")
-		cm2 := fw.ConfigMap(cmName2, "default")
-		fw.WaitForResourceExists(t, ctx, cli, cm1, 30*time.Second)
-		fw.WaitForResourceExists(t, ctx, cli, cm2, 30*time.Second)
+		cm1 := corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: cmName1, Namespace: "default"},
+		}
+		cm2 := corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: cmName2, Namespace: "default"},
+		}
+		fw.WaitForResourceExists(t, ctx, cli, &cm1, 30*time.Second)
+		fw.WaitForResourceExists(t, ctx, cli, &cm2, 30*time.Second)
 		t.Log("both ConfigMaps still exist (orphaned)")
 		return nil
 	})
 
-	cleanupSynthesizers := fw.CleanupStep(t, "cleanupAll", cli,
-		fw.ConfigMap(cmName1, "default"),
-		fw.ConfigMap(cmName2, "default"),
-		synth1, synth2,
-	)
+	cleanupSynthesizers := fw.CleanupStep(t, "cleanupAll", cli, cm1, cm2, synth1, synth2)
 
 	// -- Wire the DAG --
 	// createSynth1 and createSynth2 run in parallel (no mutual dependency).
