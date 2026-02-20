@@ -57,6 +57,20 @@ func WaitForCompositionResynthesized(t *testing.T, ctx context.Context, cli clie
 	require.NoError(t, err, "timed out waiting for composition %s to re-synthesize past gen %d", key.Name, minGen)
 }
 
+// WaitForSymphonyReady polls until the symphony's Status.Ready is non-nil.
+func WaitForSymphonyReady(t *testing.T, ctx context.Context, cli client.Client, key types.NamespacedName, timeout time.Duration) {
+	t.Helper()
+	err := wait.PollUntilContextTimeout(ctx, 2*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
+		sym := &apiv1.Symphony{}
+		if err := cli.Get(ctx, key, sym); err != nil {
+			return false, nil
+		}
+		return sym.Status.Ready != nil, nil
+	})
+	require.NoError(t, err, "timed out waiting for symphony %s to become Ready", key.Name)
+}
+
+
 // WaitForResourceExists polls until the given object can be fetched.
 func WaitForResourceExists(t *testing.T, ctx context.Context, cli client.Client, obj client.Object, timeout time.Duration) {
 	t.Helper()
@@ -84,15 +98,3 @@ func WaitForResourceGone(t *testing.T, ctx context.Context, cli client.Client, o
 	require.NoError(t, err, "timed out waiting for %s %s to be deleted", obj.GetObjectKind().GroupVersionKind().Kind, key)
 }
 
-// WaitForSymphonyReady polls until the symphony's Status.Ready is non-nil.
-func WaitForSymphonyReady(t *testing.T, ctx context.Context, cli client.Client, key types.NamespacedName, timeout time.Duration) {
-	t.Helper()
-	err := wait.PollUntilContextTimeout(ctx, 2*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
-		sym := &apiv1.Symphony{}
-		if err := cli.Get(ctx, key, sym); err != nil {
-			return false, nil
-		}
-		return sym.Status.Ready != nil, nil
-	})
-	require.NoError(t, err, "timed out waiting for symphony %s to become Ready", key.Name)
-}
