@@ -29,7 +29,7 @@ setup-testenv:
 
 .PHONY: test
 test:
-	go test -v $$(go list ./... | grep -v '/e2e/')
+	go test -v $$(go list ./... | grep -v '/e2e')
 
 .PHONY: test-e2e
 test-e2e:
