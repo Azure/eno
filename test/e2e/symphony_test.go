@@ -7,10 +7,11 @@ import (
 
 	flow "github.com/Azure/go-workflow"
 	"github.com/stretchr/testify/require"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	fw "github.com/Azure/eno/test/e2e/framework"
 )
 
 func TestSymphonyLifecycle(t *testing.T) {
@@ -18,93 +19,109 @@ func TestSymphonyLifecycle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	cli := newClient(t)
+	cli := fw.NewClient(t)
 
-	synthName1 := uniqueName("sym-synth-1")
-	synthName2 := uniqueName("sym-synth-2")
-	symphonyName := uniqueName("sym-test")
-	cmName1 := uniqueName("sym-cm-1")
-	cmName2 := uniqueName("sym-cm-2")
+	synthName1 := fw.UniqueName("sym-synth-1")
+	synthName2 := fw.UniqueName("sym-synth-2")
+	symphonyName := fw.UniqueName("sym-test")
+	cmName1 := fw.UniqueName("sym-cm-1")
+	cmName2 := fw.UniqueName("sym-cm-2")
 
-	synth1 := newMinimalSynthesizer(synthName1, cmName1, "source", "synth1")
-	synth2 := newMinimalSynthesizer(synthName2, cmName2, "source", "synth2")
+	synth1 := fw.NewMinimalSynthesizer(synthName1, cmName1, "source", "synth1")
+	synth2 := fw.NewMinimalSynthesizer(synthName2, cmName2, "source", "synth2")
 
-	symphony := &apiv1.Symphony{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      symphonyName,
-			Namespace: "default",
-		},
-		Spec: apiv1.SymphonySpec{
-			Variations: []apiv1.Variation{
-				{Synthesizer: apiv1.SynthesizerRef{Name: synthName1}},
-				{Synthesizer: apiv1.SynthesizerRef{Name: synthName2}},
-			},
-		},
-	}
+	symphony := fw.NewSymphony(symphonyName, "default", synthName1, synthName2)
 
 	symphonyKey := types.NamespacedName{Name: symphonyName, Namespace: "default"}
 
 	// -- Steps --
 
-	createSynth1 := flow.Func("createSynth1", func(ctx context.Context) error {
-		t.Log("creating synthesizer", synthName1)
-		return cli.Create(ctx, synth1)
-	})
+	createSynth1 := fw.CreateStep(t, "createSynth1", cli, synth1)
 
-	createSynth2 := flow.Func("createSynth2", func(ctx context.Context) error {
-		t.Log("creating synthesizer", synthName2)
-		return cli.Create(ctx, synth2)
-	})
+	createSynth2 := fw.CreateStep(t, "createSynth2", cli, synth2)
 
-	createSymphony := flow.Func("createSymphony", func(ctx context.Context) error {
-		t.Log("creating symphony", symphonyName)
-		return cli.Create(ctx, symphony)
-	})
+	createSymphony := fw.CreateStep(t, "createSymphony", cli, symphony)
 
 	waitSymphonyReady := flow.Func("waitSymphonyReady", func(ctx context.Context) error {
-		waitForSymphonyReady(t, ctx, cli, symphonyKey, 3*time.Minute)
+		fw.WaitForSymphonyReady(t, ctx, cli, symphonyKey, 3*time.Minute)
 		t.Log("symphony is ready")
 		return nil
 	})
 
-	verifyBothConfigMaps := flow.Func("verifyBothConfigMaps", func(ctx context.Context) error {
-		cm1 := configMap(cmName1, "default")
-		cm2 := configMap(cmName2, "default")
-		waitForResourceExists(t, ctx, cli, cm1, 30*time.Second)
-		waitForResourceExists(t, ctx, cli, cm2, 30*time.Second)
+	verifySymphonyExists := flow.Func("verifySymphonyExists", func(ctx context.Context) error {
+		sym := &apiv1.Symphony{}
+		err := cli.Get(ctx, symphonyKey, sym)
+		require.NoError(t, err, "symphony should exist")
+		t.Log("symphony exists")
+		return nil
+	})
+
+	verifyCompositionsExist := flow.Func("verifyCompositionsExist", func(ctx context.Context) error {
+		compList := &apiv1.CompositionList{}
+		err := cli.List(ctx, compList, client.InNamespace("default"))
+		require.NoError(t, err)
+		count := 0
+		for _, c := range compList.Items {
+			for _, ref := range c.OwnerReferences {
+				if ref.Name == symphonyName {
+					count++
+				}
+			}
+		}
+		require.Equal(t, 2, count, "expected 2 compositions owned by symphony")
+		t.Log("2 compositions exist")
+		return nil
+	})
+
+	verifyResourceSlicesExist := flow.Func("verifyResourceSlicesExist", func(ctx context.Context) error {
+		sliceList := &apiv1.ResourceSliceList{}
+		err := cli.List(ctx, sliceList, client.InNamespace("default"))
+		require.NoError(t, err)
+		require.NotEmpty(t, sliceList.Items, "expected at least one ResourceSlice")
+		t.Logf("%d ResourceSlice(s) exist", len(sliceList.Items))
+		return nil
+	})
+
+	verifySynthesizersExist := flow.Func("verifySynthesizersExist", func(ctx context.Context) error {
+		s1 := &apiv1.Synthesizer{}
+		require.NoError(t, cli.Get(ctx, types.NamespacedName{Name: synthName1}, s1), "synthesizer 1 should exist")
+		s2 := &apiv1.Synthesizer{}
+		require.NoError(t, cli.Get(ctx, types.NamespacedName{Name: synthName2}, s2), "synthesizer 2 should exist")
+		t.Log("both synthesizers exist")
+		return nil
+	})
+
+	verifyConfigMapsExist := flow.Func("verifyConfigMapsExist", func(ctx context.Context) error {
+		cm1 := fw.ConfigMap(cmName1, "default")
+		cm2 := fw.ConfigMap(cmName2, "default")
+		fw.WaitForResourceExists(t, ctx, cli, cm1, 30*time.Second)
+		fw.WaitForResourceExists(t, ctx, cli, cm2, 30*time.Second)
 		t.Log("both ConfigMaps exist")
 		return nil
 	})
 
-	deleteSymphony := flow.Func("deleteSymphony", func(ctx context.Context) error {
-		t.Log("deleting symphony", symphonyName)
-		return cli.Delete(ctx, symphony)
-	})
+	deleteSymphony := fw.DeleteStep(t, "deleteSymphony", cli, symphony)
 
 	verifyCleanup := flow.Func("verifyCleanup", func(ctx context.Context) error {
 		// Symphony deletion orphans managed resources (by design), so the
 		// ConfigMaps should still exist after the symphony and its
 		// compositions are removed.
-		waitForResourceGone(t, ctx, cli, symphony, 60*time.Second)
+		fw.WaitForResourceGone(t, ctx, cli, symphony, 60*time.Second)
 		t.Log("symphony is gone")
 
-		cm1 := configMap(cmName1, "default")
-		cm2 := configMap(cmName2, "default")
-		waitForResourceExists(t, ctx, cli, cm1, 30*time.Second)
-		waitForResourceExists(t, ctx, cli, cm2, 30*time.Second)
+		cm1 := fw.ConfigMap(cmName1, "default")
+		cm2 := fw.ConfigMap(cmName2, "default")
+		fw.WaitForResourceExists(t, ctx, cli, cm1, 30*time.Second)
+		fw.WaitForResourceExists(t, ctx, cli, cm2, 30*time.Second)
 		t.Log("both ConfigMaps still exist (orphaned)")
 		return nil
 	})
 
-	cleanupSynthesizers := flow.Func("cleanupSynthesizers", func(ctx context.Context) error {
-		// Clean up orphaned ConfigMaps.
-		cleanup(t, ctx, cli, configMap(cmName1, "default"))
-		cleanup(t, ctx, cli, configMap(cmName2, "default"))
-		cleanup(t, ctx, cli, synth1)
-		cleanup(t, ctx, cli, synth2)
-		t.Log("orphaned ConfigMaps and synthesizers cleaned up")
-		return nil
-	})
+	cleanupSynthesizers := fw.CleanupStep(t, "cleanupAll", cli,
+		fw.ConfigMap(cmName1, "default"),
+		fw.ConfigMap(cmName2, "default"),
+		synth1, synth2,
+	)
 
 	// -- Wire the DAG --
 	// createSynth1 and createSynth2 run in parallel (no mutual dependency).
@@ -113,8 +130,16 @@ func TestSymphonyLifecycle(t *testing.T) {
 	w.Add(
 		flow.Step(createSymphony).DependsOn(createSynth1, createSynth2),
 		flow.Step(waitSymphonyReady).DependsOn(createSymphony),
-		flow.Step(verifyBothConfigMaps).DependsOn(waitSymphonyReady),
-		flow.Step(deleteSymphony).DependsOn(verifyBothConfigMaps),
+
+		// Parallel verification — all depend on waitSymphonyReady
+		flow.Step(verifySymphonyExists).DependsOn(waitSymphonyReady),
+		flow.Step(verifyCompositionsExist).DependsOn(waitSymphonyReady),
+		flow.Step(verifyResourceSlicesExist).DependsOn(waitSymphonyReady),
+		flow.Step(verifySynthesizersExist).DependsOn(waitSymphonyReady),
+		flow.Step(verifyConfigMapsExist).DependsOn(waitSymphonyReady),
+
+		// deleteSymphony waits for all verifications
+		flow.Step(deleteSymphony).DependsOn(verifySymphonyExists, verifyCompositionsExist, verifyResourceSlicesExist, verifySynthesizersExist, verifyConfigMapsExist),
 		flow.Step(verifyCleanup).DependsOn(deleteSymphony),
 		flow.Step(cleanupSynthesizers).DependsOn(verifyCleanup),
 	)

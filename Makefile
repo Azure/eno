@@ -29,4 +29,4 @@ setup-testenv:
 
 .PHONY: test-e2e
 test-e2e:
-	go test -v -timeout 10m -count=1 ./test/e2e/...
+	go test -v -timeout 10m -count=1 ./test/e2e
