@@ -247,6 +247,8 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 
 func (r *Resource) State() *apiv1.ResourceState { return r.latestKnownState.Load() }
 
+func (r *Resource) HasDeletionGroup() bool { return r.deletionGroup != nil }
+
 // Less returns true when r < than.
 // Used to establish determinstic ordering for conflicting resources.
 func (r *Resource) Less(than *Resource) bool {

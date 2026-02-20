@@ -343,6 +343,293 @@ func TestTreeRefConflicts(t *testing.T) {
 	assert.True(t, visible)
 	assert.Equal(t, "b", string(res.manifestHash))
 }
+func TestShadowGetReturnsNotFound(t *testing.T) {
+	// Shadow resources should not be returned by Get
+	var b treeBuilder
+	b.AddShadow(&Resource{
+		Ref:         newTestRef("shadow-resource"),
+		ManifestRef: ManifestRef{Index: 0},
+	})
+	b.Add(&Resource{
+		Ref:         newTestRef("real-resource"),
+		ManifestRef: ManifestRef{Index: 1},
+	})
+	tree := b.Build()
+
+	// Shadow resource is not found
+	res, visible, found := tree.Get(newTestRef("shadow-resource"))
+	assert.Nil(t, res)
+	assert.False(t, visible)
+	assert.False(t, found)
+
+	// Real resource is found and visible
+	res, visible, found = tree.Get(newTestRef("real-resource"))
+	assert.NotNil(t, res)
+	assert.True(t, visible)
+	assert.True(t, found)
+}
+
+func TestShadowUpdateStateDoesNotEnqueueSelf(t *testing.T) {
+	// Shadow resources should NOT enqueue themselves on state change, but should still track state
+	var b treeBuilder
+	b.AddShadow(&Resource{
+		Ref:         newTestRef("shadow-resource"),
+		ManifestRef: ManifestRef{Index: 0},
+	})
+	tree := b.Build()
+
+	var enqueued []string
+	tree.UpdateState(ManifestRef{Index: 0}, &apiv1.ResourceState{Ready: &metav1.Time{}}, func(r Ref) {
+		enqueued = append(enqueued, r.Name)
+	})
+	assert.Empty(t, enqueued, "shadow resource should not enqueue itself")
+}
+
+func TestShadowDeletionGroupUnblocksDependents(t *testing.T) {
+	// Core cross-reconciler scenario:
+	// Shadow resource at deletion-group -1 (e.g. CRD managed by other reconciler)
+	// Real resource at deletion-group 0 (e.g. Deployment managed by this reconciler)
+	// When the shadow's Deleted status transitions, the real resource should be unblocked.
+	var b treeBuilder
+	b.AddShadow(&Resource{
+		Ref:                newTestRef("shadow-crd"),
+		deletionGroup:      ptr.To(-1),
+		compositionDeleted: true,
+		ManifestRef:        ManifestRef{Index: 0},
+	})
+	b.Add(&Resource{
+		Ref:                newTestRef("real-deployment"),
+		deletionGroup:      ptr.To(0),
+		compositionDeleted: true,
+		ManifestRef:        ManifestRef{Index: 1},
+	})
+	tree := b.Build()
+
+	// Real resource should be blocked (depends on shadow)
+	res, visible, found := tree.Get(newTestRef("real-deployment"))
+	assert.NotNil(t, res)
+	assert.False(t, visible, "real resource should be blocked by shadow dependency")
+	assert.True(t, found)
+
+	// Shadow resource should not be found via Get
+	res, visible, found = tree.Get(newTestRef("shadow-crd"))
+	assert.Nil(t, res)
+	assert.False(t, visible)
+	assert.False(t, found)
+
+	// Simulate the other reconciler deleting the shadow resource and marking state as Deleted
+	var enqueued []string
+	tree.UpdateState(ManifestRef{Index: 0}, &apiv1.ResourceState{Deleted: true}, func(r Ref) {
+		enqueued = append(enqueued, r.Name)
+	})
+	// Shadow should NOT enqueue itself, but SHOULD enqueue the dependent real resource
+	assert.ElementsMatch(t, []string{"real-deployment"}, enqueued)
+
+	// Now the real resource should be visible (unblocked)
+	res, visible, found = tree.Get(newTestRef("real-deployment"))
+	assert.NotNil(t, res)
+	assert.True(t, visible, "real resource should be unblocked after shadow deletion")
+	assert.True(t, found)
+}
+
+func TestShadowReadinessGroupUnblocksDependents(t *testing.T) {
+	// Readiness scenario (non-deletion):
+	// Shadow resource at readiness-group 0
+	// Real resource at readiness-group 1
+	// When the shadow becomes ready, the real resource should be unblocked.
+	var b treeBuilder
+	b.AddShadow(&Resource{
+		Ref:            newTestRef("shadow-infra"),
+		readinessGroup: 0,
+		ManifestRef:    ManifestRef{Index: 0},
+	})
+	b.Add(&Resource{
+		Ref:            newTestRef("real-app"),
+		readinessGroup: 1,
+		ManifestRef:    ManifestRef{Index: 1},
+	})
+	tree := b.Build()
+
+	// Real resource should be blocked
+	_, visible, found := tree.Get(newTestRef("real-app"))
+	assert.False(t, visible, "should be blocked by shadow dependency")
+	assert.True(t, found)
+
+	// Shadow becomes ready
+	var enqueued []string
+	tree.UpdateState(ManifestRef{Index: 0}, &apiv1.ResourceState{Ready: &metav1.Time{}}, func(r Ref) {
+		enqueued = append(enqueued, r.Name)
+	})
+	// Shadow should NOT enqueue itself, but SHOULD unblock and enqueue the real resource
+	assert.ElementsMatch(t, []string{"real-app"}, enqueued)
+
+	// Now the real resource should be visible
+	_, visible, found = tree.Get(newTestRef("real-app"))
+	assert.True(t, visible, "should be unblocked after shadow ready")
+	assert.True(t, found)
+}
+
+func TestShadowMultipleDeletionGroups(t *testing.T) {
+	// Multiple shadows at different deletion groups should chain correctly:
+	// shadow-a (group -2) -> shadow-b (group -1) -> real (group 0)
+	// real should only become visible after both shadows report Deleted.
+	var b treeBuilder
+	b.AddShadow(&Resource{
+		Ref:                newTestRef("shadow-a"),
+		deletionGroup:      ptr.To(-2),
+		compositionDeleted: true,
+		ManifestRef:        ManifestRef{Index: 0},
+	})
+	b.AddShadow(&Resource{
+		Ref:                newTestRef("shadow-b"),
+		deletionGroup:      ptr.To(-1),
+		compositionDeleted: true,
+		ManifestRef:        ManifestRef{Index: 1},
+	})
+	b.Add(&Resource{
+		Ref:                newTestRef("real-resource"),
+		deletionGroup:      ptr.To(0),
+		compositionDeleted: true,
+		ManifestRef:        ManifestRef{Index: 2},
+	})
+	tree := b.Build()
+
+	// Real resource blocked
+	_, visible, _ := tree.Get(newTestRef("real-resource"))
+	assert.False(t, visible)
+
+	// Delete shadow-a
+	var enqueued []string
+	tree.UpdateState(ManifestRef{Index: 0}, &apiv1.ResourceState{Deleted: true}, func(r Ref) {
+		enqueued = append(enqueued, r.Name)
+	})
+	assert.ElementsMatch(t, []string{"shadow-b"}, enqueued, "shadow-a deletion should unblock shadow-b")
+
+	// Real resource still blocked (shadow-b not yet deleted)
+	_, visible, _ = tree.Get(newTestRef("real-resource"))
+	assert.False(t, visible, "real should still be blocked by shadow-b")
+
+	// Delete shadow-b
+	enqueued = nil
+	tree.UpdateState(ManifestRef{Index: 1}, &apiv1.ResourceState{Deleted: true}, func(r Ref) {
+		enqueued = append(enqueued, r.Name)
+	})
+	assert.ElementsMatch(t, []string{"real-resource"}, enqueued, "shadow-b deletion should unblock real resource")
+
+	// Real resource now visible
+	_, visible, _ = tree.Get(newTestRef("real-resource"))
+	assert.True(t, visible)
+}
+
+func TestShadowAndRealMixedDeletionGroups(t *testing.T) {
+	// Mix of shadow and real resources in the same deletion group chain:
+	// real-a (group 0) -> shadow-b (group 1) -> real-c (group 2)
+	var b treeBuilder
+	b.Add(&Resource{
+		Ref:                newTestRef("real-a"),
+		deletionGroup:      ptr.To(0),
+		compositionDeleted: true,
+		ManifestRef:        ManifestRef{Index: 0},
+	})
+	b.AddShadow(&Resource{
+		Ref:                newTestRef("shadow-b"),
+		deletionGroup:      ptr.To(1),
+		compositionDeleted: true,
+		ManifestRef:        ManifestRef{Index: 1},
+	})
+	b.Add(&Resource{
+		Ref:                newTestRef("real-c"),
+		deletionGroup:      ptr.To(2),
+		compositionDeleted: true,
+		ManifestRef:        ManifestRef{Index: 2},
+	})
+	tree := b.Build()
+
+	// real-a is visible (no deps), shadow-b and real-c are blocked
+	_, visible, found := tree.Get(newTestRef("real-a"))
+	assert.True(t, visible)
+	assert.True(t, found)
+
+	_, visible, _ = tree.Get(newTestRef("real-c"))
+	assert.False(t, visible, "real-c should be blocked by shadow-b")
+
+	// Delete real-a -> unblocks shadow-b
+	var enqueued []string
+	tree.UpdateState(ManifestRef{Index: 0}, &apiv1.ResourceState{Deleted: true}, func(r Ref) {
+		enqueued = append(enqueued, r.Name)
+	})
+	assert.Contains(t, enqueued, "shadow-b")
+
+	// real-c still blocked (shadow-b not deleted yet)
+	_, visible, _ = tree.Get(newTestRef("real-c"))
+	assert.False(t, visible)
+
+	// Delete shadow-b -> unblocks real-c
+	enqueued = nil
+	tree.UpdateState(ManifestRef{Index: 1}, &apiv1.ResourceState{Deleted: true}, func(r Ref) {
+		enqueued = append(enqueued, r.Name)
+	})
+	assert.ElementsMatch(t, []string{"real-c"}, enqueued)
+
+	_, visible, _ = tree.Get(newTestRef("real-c"))
+	assert.True(t, visible, "real-c should be unblocked after shadow-b deletion")
+}
+
+func TestShadowNoDeletionGroupIsIndependent(t *testing.T) {
+	// A shadow without a deletion group should not block anything during deletion
+	var b treeBuilder
+	b.AddShadow(&Resource{
+		Ref:                newTestRef("shadow-no-group"),
+		compositionDeleted: true,
+		ManifestRef:        ManifestRef{Index: 0},
+	})
+	b.Add(&Resource{
+		Ref:                newTestRef("real-with-group"),
+		deletionGroup:      ptr.To(0),
+		compositionDeleted: true,
+		ManifestRef:        ManifestRef{Index: 1},
+	})
+	tree := b.Build()
+
+	// Real resource has no dependency on the shadow (shadow has no group)
+	_, visible, found := tree.Get(newTestRef("real-with-group"))
+	assert.True(t, visible, "real resource should not be blocked by groupless shadow")
+	assert.True(t, found)
+}
+
+func TestShadowRepeatedUpdateStateNoSelfEnqueue(t *testing.T) {
+	// Repeated state updates to a shadow should never enqueue the shadow itself
+	var b treeBuilder
+	b.AddShadow(&Resource{
+		Ref:                newTestRef("shadow-resource"),
+		deletionGroup:      ptr.To(0),
+		compositionDeleted: true,
+		ManifestRef:        ManifestRef{Index: 0},
+	})
+	tree := b.Build()
+
+	// First update
+	var enqueued []string
+	tree.UpdateState(ManifestRef{Index: 0}, &apiv1.ResourceState{}, func(r Ref) {
+		enqueued = append(enqueued, r.Name)
+	})
+	assert.Empty(t, enqueued, "shadow should never self-enqueue")
+
+	// Second update with change
+	enqueued = nil
+	tree.UpdateState(ManifestRef{Index: 0}, &apiv1.ResourceState{Reconciled: true}, func(r Ref) {
+		enqueued = append(enqueued, r.Name)
+	})
+	assert.Empty(t, enqueued, "shadow should never self-enqueue even on state change")
+
+	// Third update with Deleted
+	enqueued = nil
+	tree.UpdateState(ManifestRef{Index: 0}, &apiv1.ResourceState{Deleted: true}, func(r Ref) {
+		enqueued = append(enqueued, r.Name)
+	})
+	assert.Empty(t, enqueued, "shadow with no dependents should enqueue nothing")
+}
+
 func TestIndexedResourceBacktracks(t *testing.T) {
 	baseGVK := schema.GroupVersionKind{Group: "test.group", Version: "v1", Kind: "TestKind"}
 
