@@ -23,5 +23,5 @@ jobs:
         run: echo "KUBEBUILDER_ASSETS=$(./hack/download-k8s.sh)" >> $GITHUB_ENV
 
       - name: Run tests
-        run: go test -v ./...
+        run: make test
 
