@@ -75,3 +75,4 @@ type SynthesizerRef struct {
 	Name          string                `json:"name,omitempty"`
 	LabelSelector *metav1.LabelSelector `json:"labelSelector,omitempty"`
 }
+
