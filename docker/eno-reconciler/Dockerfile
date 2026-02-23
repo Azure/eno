@@ -1,6 +1,10 @@
 FROM mcr.microsoft.com/devcontainers/go:1.24 AS builder
-# Set GOTOOLCHAIN to ensure the specific version is used during build for fix CVE-2025-68121
-ENV GOTOOLCHAIN=go1.24.13
+
+ENV GOTOOLCHAIN=auto
+
+# Disable workspace mode so go build uses the toolchain from go.mod
+ENV GOWORK=off
+
 WORKDIR /app
 
 ADD go.mod .
