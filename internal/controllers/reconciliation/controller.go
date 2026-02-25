@@ -156,6 +156,11 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		if snap == nil || (!snap.ForegroundDeletion && !resource.HasDeletionGroup()) {
 			modified = false
 		}
+		// Don't fail open for resources with deletion ordering contraints -
+		// suppressing errors would break deletion group/ foreground deletion ordering
+		if snap != nil && (snap.ForegroundDeletion || resource.HasDeletionGroup()) {
+			failingOpen = false
+		}
 	}
 	if err != nil {
 		logger.Error(err, "resource reconciliation failed")
@@ -167,11 +172,6 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Don't fail open for resources with deletion ordering contraints -
-	// suppressing errors would break deletion group/ foreground deletion ordering
-	if failingOpen && snap != nil && (snap.ForegroundDeletion || resource.HasDeletionGroup()) {
-		failingOpen = false
-	}
 	deleted := current == nil ||
 		(current.GetDeletionTimestamp() != nil && !snap.ForegroundDeletion) ||
 		(snap.Deleted() && (snap.Orphan || snap.Disable || failingOpen)) // orphaning should be reflected on the status.
