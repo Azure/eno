@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/controllers/composition"
 	"github.com/Azure/eno/internal/controllers/scheduling"
 	"github.com/Azure/eno/internal/testutil"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
@@ -37,6 +38,7 @@ func TestControllerHappyPath(t *testing.T) {
 	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewPodGC(mgr.Manager, 0))
+	require.NoError(t, composition.NewController(mgr.Manager, time.Minute))
 
 	calls := atomic.Int64{}
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
@@ -118,6 +120,7 @@ func TestControllerFastCompositionUpdates(t *testing.T) {
 	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewPodGC(mgr.Manager, 0))
+	require.NoError(t, composition.NewController(mgr.Manager, time.Minute))
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
 		output := &krmv1.ResourceList{}
 		// simulate real pods taking some random amount of time to generation
@@ -198,6 +201,7 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewPodGC(mgr.Manager, 0))
+	require.NoError(t, composition.NewController(mgr.Manager, time.Minute))
 	mgr.Start(t)
 
 	syn1 := &apiv1.Synthesizer{}
@@ -255,6 +259,7 @@ func TestDeadKubelet(t *testing.T) {
 	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
 	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
 	require.NoError(t, NewPodGC(mgr.Manager, 0))
+	require.NoError(t, composition.NewController(mgr.Manager, time.Minute))
 	mgr.Start(t)
 
 	syn := &apiv1.Synthesizer{}
