@@ -9,6 +9,7 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/controllers/composition"
 	"github.com/Azure/eno/internal/testutil"
 	prometheustestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
@@ -28,6 +29,7 @@ func TestBasics(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	require.NoError(t, NewController(mgr.Manager, 100, 2*time.Second, 0))
+	require.NoError(t, composition.NewController(mgr.Manager, time.Minute))
 	mgr.Start(t)
 	cli := mgr.GetClient()
 
@@ -98,6 +100,7 @@ func TestSynthRolloutBasics(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	require.NoError(t, NewController(mgr.Manager, 100, 2*time.Second, 0))
+	require.NoError(t, composition.NewController(mgr.Manager, time.Minute))
 	mgr.Start(t)
 	cli := mgr.GetClient()
 
@@ -197,6 +200,7 @@ func TestDeferredInput(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	require.NoError(t, NewController(mgr.Manager, 100, 2*time.Second, 0))
+	require.NoError(t, composition.NewController(mgr.Manager, time.Minute))
 	mgr.Start(t)
 	cli := mgr.GetClient()
 
@@ -269,6 +273,7 @@ func TestForcedResynth(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	require.NoError(t, NewController(mgr.Manager, 100, 2*time.Second, 0))
+	require.NoError(t, composition.NewController(mgr.Manager, time.Minute))
 	mgr.Start(t)
 	cli := mgr.GetClient()
 
@@ -311,6 +316,7 @@ func TestChaos(t *testing.T) {
 	t.Run("one leader", func(t *testing.T) {
 		mgr := testutil.NewManager(t)
 		require.NoError(t, NewController(mgr.Manager, 5, time.Second, 0))
+		require.NoError(t, composition.NewController(mgr.Manager, time.Minute))
 		mgr.Start(t)
 
 		testChaos(t, mgr)
@@ -321,6 +327,7 @@ func TestChaos(t *testing.T) {
 		mgr := testutil.NewManager(t)
 		require.NoError(t, NewController(mgr.Manager, 5, time.Second, 0))
 		require.NoError(t, NewController(mgr.Manager, 5, time.Second, 0))
+		require.NoError(t, composition.NewController(mgr.Manager, time.Minute))
 		mgr.Start(t)
 
 		testChaos(t, mgr)
@@ -619,6 +626,7 @@ func TestRetries(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	require.NoError(t, NewController(mgr.Manager, 100, 2*time.Second, 0))
+	require.NoError(t, composition.NewController(mgr.Manager, time.Minute))
 	mgr.Start(t)
 	cli := mgr.GetClient()
 
@@ -676,6 +684,7 @@ func TestRetryContention(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	require.NoError(t, NewController(mgr.Manager, 1, 2*time.Second, 0))
+	require.NoError(t, composition.NewController(mgr.Manager, time.Minute))
 	mgr.Start(t)
 	cli := mgr.GetClient()
 
