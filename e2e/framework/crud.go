@@ -20,31 +20,36 @@ import (
 )
 
 // SynthesizerOption configures optional fields on a Synthesizer.
-type SynthesizerOption func(*apiv1.SynthesizerSpec)
+type SynthesizerOption func(*apiv1.Synthesizer)
 
 // WithCommand sets the Synthesizer's command.
 func WithCommand(cmd []string) SynthesizerOption {
-	return func(s *apiv1.SynthesizerSpec) { s.Command = cmd }
+	return func(s *apiv1.Synthesizer) { s.Spec.Command = cmd }
 }
 
 // WithImage sets the Synthesizer's container image.
 func WithImage(image string) SynthesizerOption {
-	return func(s *apiv1.SynthesizerSpec) { s.Image = image }
+	return func(s *apiv1.Synthesizer) { s.Spec.Image = image }
+}
+
+// WithLabels sets the Synthesizer's labels.
+func WithLabels(labels map[string]string) SynthesizerOption {
+	return func(s *apiv1.Synthesizer) { s.Labels = labels }
 }
 
 // NewMinimalSynthesizer builds a Synthesizer with sensible defaults.
-// Only the name is required; use WithImage and WithCommand to customise.
+// Only the name is required; use WithImage, WithCommand, and WithLabels to customise.
 func NewMinimalSynthesizer(name string, opts ...SynthesizerOption) *apiv1.Synthesizer {
-	spec := apiv1.SynthesizerSpec{
-		Image: "docker.io/ubuntu:latest",
+	synth := &apiv1.Synthesizer{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: apiv1.SynthesizerSpec{
+			Image: "docker.io/ubuntu:latest",
+		},
 	}
 	for _, o := range opts {
-		o(&spec)
+		o(synth)
 	}
-	return &apiv1.Synthesizer{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec:       spec,
-	}
+	return synth
 }
 
 // CompositionOption configures optional fields on a Composition.

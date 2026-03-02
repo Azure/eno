@@ -443,6 +443,7 @@ func TestSerializationGracePeriod(t *testing.T) {
 	comp.Finalizers = []string{"eno.azure.io/cleanup"}
 	comp.Generation = 2
 	comp.Spec.Synthesizer.Name = synth.Name
+	comp.Status.Simplified = &apiv1.SimplifiedStatus{ResolvedSynthName: synth.Name}
 	comp.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: "foo", ObservedCompositionGeneration: 1, Synthesized: ptr.To(metav1.Now())}
 
 	comp2 := comp.DeepCopy()
@@ -495,6 +496,7 @@ func TestDispatchOrder(t *testing.T) {
 	comp.Finalizers = []string{"eno.azure.io/cleanup"}
 	comp.Generation = 2
 	comp.Spec.Synthesizer.Name = synth.Name
+	comp.Status.Simplified = &apiv1.SimplifiedStatus{ResolvedSynthName: synth.Name}
 	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
 		UUID:                          "foo",
 		ObservedCompositionGeneration: comp.Generation,
@@ -568,6 +570,7 @@ func TestSynthOrdering(t *testing.T) {
 	comp.Spec.Synthesizer.Name = synth.Name
 	require.NoError(t, cli.Create(ctx, comp))
 
+	comp.Status.Simplified = &apiv1.SimplifiedStatus{ResolvedSynthName: synth.Name}
 	comp.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: "foo", ObservedCompositionGeneration: comp.Generation, ObservedSynthesizerGeneration: synth.Generation - 1, Synthesized: ptr.To(metav1.Now())}
 	require.NoError(t, cli.Status().Update(ctx, comp))
 
@@ -736,6 +739,7 @@ func TestCompositionHealthMetrics(t *testing.T) {
 	healthyComp.Spec.Synthesizer.Name = synth.Name
 	require.NoError(t, cli.Create(ctx, healthyComp))
 
+	healthyComp.Status.Simplified = &apiv1.SimplifiedStatus{ResolvedSynthName: synth.Name}
 	healthyComp.Status.CurrentSynthesis = &apiv1.Synthesis{
 		UUID:       "healthy-uuid",
 		Reconciled: ptr.To(metav1.Now()),
@@ -750,6 +754,7 @@ func TestCompositionHealthMetrics(t *testing.T) {
 	stuckComp.Spec.Synthesizer.Name = synth.Name
 	require.NoError(t, cli.Create(ctx, stuckComp))
 
+	stuckComp.Status.Simplified = &apiv1.SimplifiedStatus{ResolvedSynthName: synth.Name}
 	stuckComp.Status.CurrentSynthesis = &apiv1.Synthesis{
 		UUID:        "stuck-uuid",
 		Initialized: ptr.To(metav1.NewTime(time.Now().Add(-time.Hour))), // initialized long ago
@@ -766,4 +771,107 @@ func TestCompositionHealthMetrics(t *testing.T) {
 
 	stuckValue := prometheustestutil.ToFloat64(compositionHealth.WithLabelValues("stuck-comp", "default", "test-synth"))
 	assert.Equal(t, float64(1), stuckValue, "stuck composition should have health value 1")
+}
+
+// TestNilSimplifiedStatus proves that the controller handles compositions with nil Simplified status
+// gracefully, without panicking.
+func TestNilSimplifiedStatus(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+
+	c := &controller{client: cli, concurrencyLimit: 10, watchdogThreshold: time.Minute}
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	require.NoError(t, cli.Create(ctx, synth))
+
+	// Create a composition without Simplified status set (nil)
+	comp := &apiv1.Composition{}
+	comp.Name = "no-simplified-comp"
+	comp.Namespace = "default"
+	comp.Finalizers = []string{"eno.azure.io/cleanup"}
+	comp.Spec.Synthesizer.Name = synth.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	// This should not panic even though comp.Status.Simplified is nil
+	_, err := c.Reconcile(ctx, ctrl.Request{})
+	require.NoError(t, err)
+}
+
+// TestSchedulingUsesResolvedSynthName proves that the scheduling controller uses
+// Status.Simplified.ResolvedSynthName to look up synthesizers, not Spec.Synthesizer.Name.
+func TestSchedulingUsesResolvedSynthName(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+
+	c := &controller{client: cli, concurrencyLimit: 10}
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "actual-synth"
+	synth.Generation = 2
+	require.NoError(t, cli.Create(ctx, synth))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Finalizers = []string{"eno.azure.io/cleanup"}
+	comp.Generation = 2
+	// Spec.Synthesizer.Name differs from ResolvedSynthName
+	comp.Spec.Synthesizer.Name = "spec-synth-name"
+	require.NoError(t, cli.Create(ctx, comp))
+
+	// Set the resolved synth name to the actual synth
+	comp.Status.Simplified = &apiv1.SimplifiedStatus{ResolvedSynthName: "actual-synth"}
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		UUID:                          "test-uuid",
+		ObservedCompositionGeneration: 1, // outdated, triggers resynthesis
+		Synthesized:                   ptr.To(metav1.Now()),
+	}
+	require.NoError(t, cli.Status().Update(ctx, comp))
+
+	// Reconcile should find the synthesizer via ResolvedSynthName, not Spec.Synthesizer.Name
+	_, err := c.Reconcile(ctx, ctrl.Request{})
+	require.NoError(t, err)
+
+	// The composition should have an in-flight synthesis dispatched
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	assert.True(t, comp.Synthesizing(), "composition should be synthesizing since synth was found via ResolvedSynthName")
+}
+
+// TestSchedulingSkipsWhenResolvedSynthNameMissing proves that compositions with
+// an empty ResolvedSynthName are skipped by the scheduling controller.
+func TestSchedulingSkipsWhenResolvedSynthNameMissing(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+
+	c := &controller{client: cli, concurrencyLimit: 10}
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	require.NoError(t, cli.Create(ctx, synth))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Finalizers = []string{"eno.azure.io/cleanup"}
+	comp.Generation = 2
+	comp.Spec.Synthesizer.Name = synth.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	// Set Simplified but with empty ResolvedSynthName
+	comp.Status.Simplified = &apiv1.SimplifiedStatus{ResolvedSynthName: ""}
+	comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+		UUID:                          "test-uuid",
+		ObservedCompositionGeneration: 1,
+		Synthesized:                   ptr.To(metav1.Now()),
+	}
+	require.NoError(t, cli.Status().Update(ctx, comp))
+
+	_, err := c.Reconcile(ctx, ctrl.Request{})
+	require.NoError(t, err)
+
+	// The composition should NOT be synthesizing because the empty ResolvedSynthName
+	// won't match any synthesizer in the index
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	assert.False(t, comp.Synthesizing(), "composition should not be synthesizing when ResolvedSynthName is empty")
 }
