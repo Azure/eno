@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -30,7 +31,8 @@ func TestManagerBasics(t *testing.T) {
 			filepath.Join(root, "api", "v1", "config", "crd"),
 			testCrdDir,
 		},
-		ErrorIfCRDPathMissing: true,
+		ErrorIfCRDPathMissing:    true,
+		BinaryAssetsDirectory: os.Getenv("UPSTREAM_KUBEBUILDER_ASSETS"),
 	}
 	t.Cleanup(func() {
 		err := env.Stop()
@@ -155,7 +157,8 @@ func TestReconcilerLimitedScope(t *testing.T) {
 			filepath.Join(root, "api", "v1", "config", "crd"),
 			testCrdDir,
 		},
-		ErrorIfCRDPathMissing: true,
+		ErrorIfCRDPathMissing:    true,
+		BinaryAssetsDirectory: os.Getenv("UPSTREAM_KUBEBUILDER_ASSETS"),
 	}
 	t.Cleanup(func() {
 		err := env.Stop()
