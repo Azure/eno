@@ -12,6 +12,7 @@ import (
 type indexedResource struct {
 	Resource            *Resource
 	Seen                bool
+	Shadow              bool // tracked for cross reconciler ordering but not reconciled
 	PendingDependencies map[Ref]struct{}
 	Dependents          map[Ref]*indexedResource
 }
@@ -55,6 +56,14 @@ func (b *treeBuilder) init() {
 }
 
 func (b *treeBuilder) Add(resource *Resource) {
+	b.add(resource, false)
+}
+
+func (b *treeBuilder) AddShadow(resource *Resource) {
+	b.add(resource, true)
+}
+
+func (b *treeBuilder) add(resource *Resource, shadow bool) {
 	b.init()
 
 	// Handle conflicting refs deterministically
@@ -65,6 +74,7 @@ func (b *treeBuilder) Add(resource *Resource) {
 	// Index the resource into the builder
 	idx := &indexedResource{
 		Resource:            resource,
+		Shadow:              shadow,
 		PendingDependencies: map[Ref]struct{}{},
 		Dependents:          map[Ref]*indexedResource{},
 	}
@@ -139,6 +149,9 @@ func (t *tree) Get(key Ref) (res *Resource, visible bool, found bool) {
 	if !ok {
 		return nil, false, false
 	}
+	if idx.Shadow {
+		return nil, false, false
+	}
 	//TODO: debug logging on what we're blocked on might help future issues.
 	return idx.Resource, (!idx.Backtracks() && len(idx.PendingDependencies) == 0), true
 }
@@ -152,8 +165,10 @@ func (t *tree) UpdateState(ref ManifestRef, state *apiv1.ResourceState, enqueue 
 
 	// Requeue self when the state has changed
 	lastKnown := idx.Resource.latestKnownState.Swap(state)
-	if (!idx.Seen && lastKnown == nil) || !lastKnown.Equal(state) {
-		enqueue(idx.Resource.Ref)
+	if !idx.Shadow {
+		if (!idx.Seen && lastKnown == nil) || !lastKnown.Equal(state) {
+			enqueue(idx.Resource.Ref)
+		}
 	}
 	idx.Seen = true
 
@@ -189,6 +204,7 @@ func (t *tree) MarshalJSON() ([]byte, error) {
 		valMap := map[string]any{
 			"ready":        state != nil && state.Ready != nil,
 			"reconciled":   state != nil && state.Reconciled,
+			"shadow":       value.Shadow,
 			"dependencies": dependencies,
 			"dependents":   dependents,
 		}

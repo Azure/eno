@@ -151,9 +151,15 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	snap, current, ready, modified, err := c.reconcileResource(ctx, comp, prev, resource)
 	failingOpen := c.shouldFailOpen(resource)
 	if failingOpen {
-		logger.Info("FailOpen - suppressing errors")
-		err = nil
-		modified = false
+		// Don't fail open for resources with deletion ordering constraints -
+		// suppressing errors would break deletion group / foreground deletion ordering
+		if snap != nil && snap.Deleted() && (snap.ForegroundDeletion || resource.HasDeletionGroup()) {
+			failingOpen = false
+		} else {
+			logger.Info("FailOpen - suppressing errors")
+			err = nil
+			modified = false
+		}
 	}
 	if err != nil {
 		logger.Error(err, "resource reconciliation failed")

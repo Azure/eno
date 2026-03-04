@@ -5,7 +5,8 @@
     ],
     "dependents": [],
     "ready": false,
-    "reconciled": false
+    "reconciled": false,
+    "shadow": false
   },
   "(test.group.TestKind)/default/not-a-crd": {
     "dependencies": [],
@@ -13,7 +14,8 @@
       "(test.group.TestKind)/default/test-crd"
     ],
     "ready": false,
-    "reconciled": false
+    "reconciled": false,
+    "shadow": false
   },
   "(test.group.TestKind)/default/test-cr": {
     "dependencies": [
@@ -23,7 +25,8 @@
       "(test.group.TestKind)/default/also-not-a-crd"
     ],
     "ready": false,
-    "reconciled": false
+    "reconciled": false,
+    "shadow": false
   },
   "(test.group.TestKind)/default/test-crd": {
     "dependencies": [
@@ -33,6 +36,7 @@
       "(test.group.TestKind)/default/test-cr"
     ],
     "ready": false,
-    "reconciled": false
+    "reconciled": false,
+    "shadow": false
   }
 }

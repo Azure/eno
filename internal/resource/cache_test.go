@@ -424,3 +424,208 @@ func dumpQueue(q workqueue.TypedRateLimitingInterface[Request]) (slice []string)
 		q.Forget(req)
 	}
 }
+
+func TestCacheShadowResourceFilterAddsShadows(t *testing.T) {
+	// Filtered-out resources should be added as shadows (not found via Get, but present in tree for ordering)
+	ctx := context.Background()
+	var c Cache
+	queue := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[Request]())
+	c.SetQueue(queue)
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "test-ns"
+
+	slices := []apiv1.ResourceSlice{{
+		ObjectMeta: metav1.ObjectMeta{Name: "slice-1"},
+		Spec: apiv1.ResourceSliceSpec{
+			Resources: []apiv1.Manifest{
+				{Manifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "real-resource", "namespace": "default", "labels": {"env": "prod"}}}`},
+				{Manifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "shadow-resource", "namespace": "default", "labels": {"env": "dev"}}}`},
+			},
+		},
+	}}
+
+	filter, err := enocel.Parse("self.metadata.labels.env == 'prod'")
+	require.NoError(t, err)
+	c.ResourceFilter = filter
+
+	const synUUID = "test-syn"
+	c.Fill(ctx, comp, synUUID, slices)
+
+	// Real resource is found
+	res, visible, found := c.Get(ctx, synUUID, Ref{Name: "real-resource", Namespace: "default", Kind: "ConfigMap"})
+	assert.NotNil(t, res)
+	assert.True(t, visible)
+	assert.True(t, found)
+
+	// Shadow resource is NOT found via Get
+	res, visible, found = c.Get(ctx, synUUID, Ref{Name: "shadow-resource", Namespace: "default", Kind: "ConfigMap"})
+	assert.Nil(t, res)
+	assert.False(t, visible)
+	assert.False(t, found)
+
+	// Visit still processes shadow resources (no panic, returns true)
+	assert.True(t, c.Visit(ctx, comp, synUUID, slices))
+
+	// Only the real resource should be enqueued on first Visit
+	requests := dumpQueue(queue)
+	assert.ElementsMatch(t, []string{"(.ConfigMap)/default/real-resource"}, requests)
+}
+
+func TestCacheShadowDeletionGroupOrdering(t *testing.T) {
+	// End-to-end cross-reconciler deletion ordering via cache:
+	// Shadow CRD at deletion-group -1, real Deployment at deletion-group 0
+	// Deployment should only become visible after CRD's Deleted status is written by Visit.
+	ctx := context.Background()
+	var c Cache
+	queue := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[Request]())
+	c.SetQueue(queue)
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "test-ns"
+	now := metav1.Now()
+	comp.DeletionTimestamp = &now
+
+	slices := []apiv1.ResourceSlice{{
+		ObjectMeta: metav1.ObjectMeta{Name: "slice-1"},
+		Spec: apiv1.ResourceSliceSpec{
+			Resources: []apiv1.Manifest{
+				// index 0: CRD with deletion-group -1 and addon label (will be filtered out -> shadow)
+				{Manifest: `{"apiVersion": "apiextensions.k8s.io/v1", "kind": "CustomResourceDefinition", "metadata": {"name": "test-crd", "namespace": "default", "annotations": {"eno.azure.io/deletion-group": "-1"}, "labels": {"eno.azure.io/overlaymgr-component-type": "addon"}}}`},
+				// index 1: Deployment with deletion-group 0 and ccp label (will be kept -> real)
+				{Manifest: `{"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "test-deploy", "namespace": "default", "annotations": {"eno.azure.io/deletion-group": "0"}, "labels": {"eno.azure.io/overlaymgr-component-type": "ccp"}}}`},
+			},
+		},
+	}}
+
+	// Filter: only resources with ccp label (Deployment passes, CRD is shadow)
+	filter, err := enocel.Parse("has(self.metadata.labels) && 'eno.azure.io/overlaymgr-component-type' in self.metadata.labels && self.metadata.labels['eno.azure.io/overlaymgr-component-type'] == 'ccp'")
+	require.NoError(t, err)
+	c.ResourceFilter = filter
+
+	const synUUID = "test-syn"
+	c.Fill(ctx, comp, synUUID, slices)
+
+	// Deployment should be found but NOT visible (blocked by shadow CRD)
+	res, visible, found := c.Get(ctx, synUUID, Ref{Name: "test-deploy", Namespace: "default", Kind: "Deployment", Group: "apps"})
+	assert.NotNil(t, res)
+	assert.False(t, visible, "Deployment should be blocked behind shadow CRD")
+	assert.True(t, found)
+
+	// CRD is a shadow, not found via Get
+	res, visible, found = c.Get(ctx, synUUID, Ref{Name: "test-crd", Namespace: "default", Kind: "CustomResourceDefinition", Group: "apiextensions.k8s.io"})
+	assert.Nil(t, res)
+	assert.False(t, visible)
+	assert.False(t, found)
+
+	// Visit with no status changes
+	c.Visit(ctx, comp, synUUID, slices)
+	dumpQueue(queue) // drain first-visit enqueue
+
+	// Simulate the other reconciler marking the CRD as deleted in the slice status
+	slices[0].Status.Resources = []apiv1.ResourceState{
+		{Deleted: true}, // CRD status
+		{},              // Deployment status
+	}
+	c.Visit(ctx, comp, synUUID, slices)
+
+	// The Deployment should be enqueued (unblocked by shadow CRD deletion)
+	requests := dumpQueue(queue)
+	assert.Contains(t, requests, "(apps.Deployment)/default/test-deploy", "Deployment should be enqueued after shadow CRD deletion")
+
+	// Deployment should now be visible
+	res, visible, found = c.Get(ctx, synUUID, Ref{Name: "test-deploy", Namespace: "default", Kind: "Deployment", Group: "apps"})
+	assert.NotNil(t, res)
+	assert.True(t, visible, "Deployment should be visible after shadow CRD is deleted")
+	assert.True(t, found)
+}
+
+func TestCacheShadowVisitUpdatesState(t *testing.T) {
+	// Verify that Visit processes shadow resources and updates their state in the tree
+	ctx := context.Background()
+	var c Cache
+	queue := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[Request]())
+	c.SetQueue(queue)
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "test-ns"
+
+	slices := []apiv1.ResourceSlice{{
+		ObjectMeta: metav1.ObjectMeta{Name: "slice-1"},
+		Spec: apiv1.ResourceSliceSpec{
+			Resources: []apiv1.Manifest{
+				{Manifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "shadow-cm", "namespace": "default", "labels": {"env": "dev"}}}`},
+				{Manifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "real-cm", "namespace": "default", "labels": {"env": "prod"}}}`},
+			},
+		},
+	}}
+
+	filter, err := enocel.Parse("self.metadata.labels.env == 'prod'")
+	require.NoError(t, err)
+	c.ResourceFilter = filter
+
+	const synUUID = "test-syn"
+	c.Fill(ctx, comp, synUUID, slices)
+
+	// First visit to establish baseline
+	c.Visit(ctx, comp, synUUID, slices)
+	dumpQueue(queue)
+
+	// Visit with updated status for shadow — should not panic and should not enqueue shadow
+	slices[0].Status.Resources = []apiv1.ResourceState{
+		{Ready: &metav1.Time{}, Reconciled: true}, // shadow
+		{Ready: &metav1.Time{}, Reconciled: true}, // real
+	}
+	c.Visit(ctx, comp, synUUID, slices)
+	requests := dumpQueue(queue)
+
+	// Only the real resource should be enqueued (due to its status change)
+	assert.Contains(t, requests, "(.ConfigMap)/default/real-cm")
+	// Shadow should NOT appear (not self-enqueued)
+	for _, r := range requests {
+		assert.NotEqual(t, "(.ConfigMap)/default/shadow-cm", r, "shadow should not self-enqueue")
+	}
+}
+
+func TestCacheShadowPurge(t *testing.T) {
+	// Shadows should be purged alongside real resources
+	ctx := context.Background()
+	var c Cache
+	queue := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[Request]())
+	c.SetQueue(queue)
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "test-ns"
+	compNSN := types.NamespacedName{Name: comp.Name, Namespace: comp.Namespace}
+
+	slices := []apiv1.ResourceSlice{{
+		ObjectMeta: metav1.ObjectMeta{Name: "slice-1"},
+		Spec: apiv1.ResourceSliceSpec{
+			Resources: []apiv1.Manifest{
+				{Manifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "shadow-cm", "namespace": "default", "labels": {"env": "dev"}}}`},
+				{Manifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "real-cm", "namespace": "default", "labels": {"env": "prod"}}}`},
+			},
+		},
+	}}
+
+	filter, err := enocel.Parse("self.metadata.labels.env == 'prod'")
+	require.NoError(t, err)
+	c.ResourceFilter = filter
+
+	const synUUID = "test-syn"
+	c.Fill(ctx, comp, synUUID, slices)
+
+	// Verify cache is populated
+	assert.True(t, c.Visit(ctx, comp, synUUID, slices))
+	dumpQueue(queue)
+
+	// Purge everything
+	c.Purge(ctx, compNSN, nil)
+
+	// Cache should be empty now (Visit returns false)
+	assert.False(t, c.Visit(ctx, comp, synUUID, slices))
+}
