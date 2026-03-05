@@ -29,7 +29,7 @@ setup-testenv:
 
 .PHONY: test
 test:
-	go test -v $$(go list ./... | grep -v '/e2e')
+	UPSTREAM_KUBEBUILDER_ASSETS=$$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path) go test -v $$(go list ./... | grep -v '/e2e')
 
 .PHONY: test-e2e
 test-e2e:

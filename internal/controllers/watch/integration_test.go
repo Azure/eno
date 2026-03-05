@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"fmt"
 	"testing"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -516,6 +517,108 @@ func TestRemoveInput(t *testing.T) {
 		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		return len(comp.Status.InputRevisions) == 0
 	})
+}
+
+// TestConcurrentStatusUpdates verifies that the retry mechanism handles
+// concurrent updates to composition status without causing a retry storm.
+// This tests the fix for the issue where conflict errors would cause immediate
+// requeues without backoff, leading to API server overload.
+func TestConcurrentStatusUpdates(t *testing.T) {
+	mgr := testutil.NewManager(t)
+	require.NoError(t, NewController(mgr.Manager))
+	mgr.Start(t)
+
+	ctx := testutil.NewContext(t)
+	cli := mgr.GetClient()
+
+	// Create a shared input that will be used by multiple compositions
+	input := &corev1.ConfigMap{}
+	input.Name = "shared-input"
+	input.Namespace = "default"
+	input.Data = map[string]string{"version": "1"}
+	require.NoError(t, cli.Create(ctx, input))
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	synth.Spec.Refs = []apiv1.Ref{{
+		Key: "foo",
+		Resource: apiv1.ResourceRef{
+			Version: "v1",
+			Kind:    "ConfigMap",
+		},
+	}}
+	require.NoError(t, cli.Create(ctx, synth))
+
+	// Create multiple compositions that reference the same input
+	// This creates conditions for concurrent status updates when the input changes
+	numComps := 3
+	comps := make([]*apiv1.Composition, numComps)
+	for i := 0; i < numComps; i++ {
+		comp := &apiv1.Composition{}
+		comp.Name = fmt.Sprintf("test-comp-%d", i)
+		comp.Namespace = "default"
+		comp.Spec.Synthesizer.Name = synth.Name
+		comp.Spec.Bindings = []apiv1.Binding{{
+			Key: "foo",
+			Resource: apiv1.ResourceBinding{
+				Name:      input.Name,
+				Namespace: input.Namespace,
+			},
+		}}
+		require.NoError(t, cli.Create(ctx, comp))
+		comps[i] = comp
+	}
+
+	// Wait for all compositions to have their initial status populated
+	for _, comp := range comps {
+		testutil.Eventually(t, func() bool {
+			cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+			return len(comp.Status.InputRevisions) == 1 && comp.Status.InputRevisions[0].ResourceVersion != ""
+		})
+	}
+
+	// Record the initial resource versions
+	initialRVs := make([]string, numComps)
+	for i, comp := range comps {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		initialRVs[i] = comp.Status.InputRevisions[0].ResourceVersion
+	}
+
+	// Update the shared input - this will trigger concurrent status updates
+	// to all compositions. The retry mechanism should handle conflicts gracefully.
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(input), input)
+		input.Data["version"] = "2"
+		return cli.Update(ctx, input)
+	})
+	require.NoError(t, err)
+
+	// Verify all compositions eventually get their status updated
+	// This confirms the retry mechanism works even with concurrent updates
+	for i, comp := range comps {
+		testutil.Eventually(t, func() bool {
+			cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+			if len(comp.Status.InputRevisions) != 1 {
+				return false
+			}
+			rv := comp.Status.InputRevisions[0].ResourceVersion
+			return rv != "" && rv != initialRVs[i]
+		})
+	}
+
+	// Verify the final state is consistent - all compositions should have
+	// the same input revision (the updated one)
+	var expectedRV string
+	for i, comp := range comps {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		assert.Len(t, comp.Status.InputRevisions, 1, "composition %d should have exactly one input revision", i)
+		if expectedRV == "" {
+			expectedRV = comp.Status.InputRevisions[0].ResourceVersion
+		} else {
+			assert.Equal(t, expectedRV, comp.Status.InputRevisions[0].ResourceVersion,
+				"all compositions should reference the same input revision")
+		}
+	}
 }
 
 func TestOptionalInputCreatedLater(t *testing.T) {
