@@ -17,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -249,33 +250,41 @@ func (k *KindWatchController) updateCompositions(ctx context.Context, logger log
 			continue
 		}
 
+		compKey := client.ObjectKeyFromObject(&comp)
 		var modified bool
-		if isDeleted {
-			// Only remove InputRevisions for optional refs
-			// Required refs should trigger MissingInputs status instead
-			if isOptionalRef(synth, key) {
-				modified = removeInputRevision(&comp, key)
+
+		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			// Re-fetch composition to get the latest version
+			if err := k.client.Get(ctx, compKey, &comp); err != nil {
+				return err
 			}
-			// For required refs, do nothing - the composition controller will handle MissingInputs
-		} else {
-			revs := apiv1.NewInputRevisions(meta, key)
-			modified = setInputRevisions(&comp, revs)
-		}
 
-		if !modified {
-			continue
-		}
+			if isDeleted {
+				// Only remove InputRevisions for optional refs
+				// Required refs should trigger MissingInputs status instead
+				if isOptionalRef(synth, key) {
+					modified = removeInputRevision(&comp, key)
+				}
+				// For required refs, do nothing - the composition controller will handle MissingInputs
+			} else {
+				revs := apiv1.NewInputRevisions(meta, key)
+				modified = setInputRevisions(&comp, revs)
+			}
 
-		// TODO: Reduce risk of conflict errors here
-		err := k.client.Status().Update(ctx, &comp)
-		if errors.IsConflict(err) {
-			return false, fmt.Errorf("composition was modified during input reconciliation - will retry")
-		}
+			if !modified {
+				return nil
+			}
+
+			return k.client.Status().Update(ctx, &comp)
+		})
 		if err != nil {
 			return false, fmt.Errorf("updating input revisions: %w", err)
 		}
-		logger.V(1).Info("noticed input resource change", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key)
-		return true, nil // wait for requeue
+
+		if modified {
+			logger.V(1).Info("noticed input resource change", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key)
+			return true, nil // wait for requeue
+		}
 	}
 
 	return false, nil
