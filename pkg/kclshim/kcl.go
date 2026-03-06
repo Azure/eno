@@ -11,7 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kcl "kcl-lang.io/kcl-go"
 	"kcl-lang.io/kcl-go/pkg/spec/gpyrpc"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -57,13 +57,13 @@ func Synthesize(workingDir string, input any) ([]client.Object, error) {
 		return nil, fmt.Errorf("error marshaling output to JSON: %w", err)
 	}
 
-	var rl krmv1.ResourceList
-	if err := json.Unmarshal(outputJSON, &rl); err != nil {
-		return nil, fmt.Errorf("error unmarshaling output to ResourceList: %w", err)
+	var items []*unstructured.Unstructured
+	if err := json.Unmarshal(outputJSON, &items); err != nil {
+		return nil, fmt.Errorf("error unmarshaling output to object list: %w", err)
 	}
 
 	var objects []client.Object
-	for _, item := range rl.Items {
+	for _, item := range items {
 		objects = append(objects, item)
 	}
 	return objects, nil
