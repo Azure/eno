@@ -4,57 +4,33 @@
 //
 // 1. Create a folder and write your KCLs. Take "./fixtures/example_synthesizer/main.k" as an example.
 //
-// 2. Write a main.go and call "Synthesize()", defined below.
+// 2. Write a main.go and call "Synthesize(workingDir, input)", defined below.
 package kclshim
 
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 
-	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kcl "kcl-lang.io/kcl-go"
 	"kcl-lang.io/kcl-go/pkg/spec/gpyrpc"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func printErr(err error) {
-	rl := krmv1.ResourceList{
-		APIVersion: krmv1.SchemeGroupVersion.String(),
-		Kind:       krmv1.ResourceListKind,
-		Items:      []*unstructured.Unstructured{},
-		Results: []*krmv1.Result{
-			{
-				Message:  err.Error(),
-				Severity: krmv1.ResultSeverityError,
-			},
-		},
-	}
-	bytes, err := json.Marshal(rl)
+// Synthesize runs a KCL program in the given directory with JSON-serializable structured input.
+// It returns the synthesized Kubernetes objects or an error.
+func Synthesize(workingDir string, input any) ([]client.Object, error) {
+	inputJSON, err := json.Marshal(input)
 	if err != nil {
-		rl.Results = append(rl.Results, &krmv1.Result{
-			Message:  fmt.Sprintf("error marshaling error response: %v", err),
-			Severity: krmv1.ResultSeverityError,
-		})
+		return nil, fmt.Errorf("error marshaling input to JSON: %w", err)
 	}
-	fmt.Print(string(bytes))
-}
-
-func Synthesize(workingDir string) {
-	buffer, err := io.ReadAll(os.Stdin)
-	if err != nil {
-		printErr(fmt.Errorf("error reading from stdin: %w", err))
-		return
-	}
-	input := string(buffer)
+	inputStr := string(inputJSON)
 
 	depResult, err := kcl.UpdateDependencies(&gpyrpc.UpdateDependencies_Args{
 		ManifestPath: workingDir,
 	})
 	if err != nil {
-		printErr(fmt.Errorf("error updating dependencies: %w", err))
-		return
+		return nil, fmt.Errorf("error updating dependencies: %w", err)
 	}
 
 	depOpt := kcl.NewOption()
@@ -64,24 +40,31 @@ func Synthesize(workingDir string) {
 		"main.k",
 		kcl.WithWorkDir(workingDir),
 		*depOpt,
-		kcl.WithOptions(fmt.Sprintf("input=%s", input)),
+		kcl.WithOptions(fmt.Sprintf("input=%s", inputStr)),
 	)
 	if err != nil {
-		printErr(fmt.Errorf("error running KCL: %w", err))
-		return
+		return nil, fmt.Errorf("error running KCL: %w", err)
 	}
 
 	result, err := results.First().ToMap()
+	if err != nil {
+		return nil, fmt.Errorf("error converting KCL result to map: %w", err)
+	}
+
 	output := result["output"]
 	outputJSON, err := json.Marshal(output)
 	if err != nil {
-		printErr(fmt.Errorf("error marshaling output to JSON: %w", err))
-		return
+		return nil, fmt.Errorf("error marshaling output to JSON: %w", err)
 	}
 
-	_, err = fmt.Println(string(outputJSON))
-	if err != nil {
-		printErr(fmt.Errorf("error printing output: %w", err))
-		return
+	var items []*unstructured.Unstructured
+	if err := json.Unmarshal(outputJSON, &items); err != nil {
+		return nil, fmt.Errorf("error unmarshaling output to object list: %w", err)
 	}
+
+	var objects []client.Object
+	for _, item := range items {
+		objects = append(objects, item)
+	}
+	return objects, nil
 }
