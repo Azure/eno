@@ -6,8 +6,7 @@
       "(test.group.TestKind)/default/test-2-b"
     ],
     "ready": false,
-    "reconciled": false,
-    "shadow": false
+    "reconciled": false
   },
   "(test.group.TestKind)/default/test-2-a": {
     "dependencies": [
@@ -15,8 +14,7 @@
     ],
     "dependents": [],
     "ready": false,
-    "reconciled": false,
-    "shadow": false
+    "reconciled": false
   },
   "(test.group.TestKind)/default/test-2-b": {
     "dependencies": [
@@ -24,7 +22,6 @@
     ],
     "dependents": [],
     "ready": false,
-    "reconciled": false,
-    "shadow": false
+    "reconciled": false
   }
 }
