@@ -118,12 +118,6 @@ func (c *Cache) Fill(ctx context.Context, comp *apiv1.Composition, synUUID strin
 					continue
 				}
 				if !matches {
-					logger.Info("adding shadow resource to cache",
-						"resourceKind", res.Ref.Kind,
-						"resourceName", res.Ref.Name,
-						"resourceNamespace", res.Ref.Namespace,
-						"compositionDeleted", res.compositionDeleted)
-					builder.AddShadow(res)
 					continue
 				}
 			}
@@ -139,13 +133,7 @@ func (c *Cache) Fill(ctx context.Context, comp *apiv1.Composition, synUUID strin
 	c.syntheses[synUUID] = tree
 	c.synByComp[compNSN] = append(c.synByComp[compNSN], synUUID)
 	c.mut.Unlock()
-	shadowCount := 0
-	for _, idx := range tree.byRef {
-		if idx.Shadow {
-			shadowCount++
-		}
-	}
-	logger.Info("resource cache filled", "synthesisUUID", synUUID, "totalResources", len(tree.byRef), "shadowResources", shadowCount, "realResources", len(tree.byRef)-shadowCount)
+	logger.Info("resource cache filled", "synthesisUUID", synUUID)
 }
 
 // Purge removes all syntheses from the cache that are not part of the given composition.

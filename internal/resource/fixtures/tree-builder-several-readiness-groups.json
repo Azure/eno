@@ -7,8 +7,7 @@
       "(test.group.TestKind)/default/test-1"
     ],
     "ready": false,
-    "reconciled": false,
-    "shadow": false
+    "reconciled": false
   },
   "(test.group.TestKind)/default/test-1": {
     "dependencies": [
@@ -18,8 +17,7 @@
       "(test.group.TestKind)/default/test-4"
     ],
     "ready": false,
-    "reconciled": false,
-    "shadow": false
+    "reconciled": false
   },
   "(test.group.TestKind)/default/test-4": {
     "dependencies": [
@@ -27,8 +25,7 @@
     ],
     "dependents": [],
     "ready": false,
-    "reconciled": false,
-    "shadow": false
+    "reconciled": false
   },
   "(test.group.TestKind)/default/test-negative-2": {
     "dependencies": [],
@@ -36,7 +33,6 @@
       "(test.group.TestKind)/default/test-0"
     ],
     "ready": false,
-    "reconciled": false,
-    "shadow": false
+    "reconciled": false
   }
 }

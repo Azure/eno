@@ -7,8 +7,7 @@
       "(test.group.TestKind)/default/test-crd"
     ],
     "ready": false,
-    "reconciled": false,
-    "shadow": false
+    "reconciled": false
   },
   "(test.group.TestKind)/default/test-crd": {
     "dependencies": [
@@ -18,7 +17,6 @@
       "(test.group.TestKind)/default/test-cr"
     ],
     "ready": false,
-    "reconciled": false,
-    "shadow": false
+    "reconciled": false
   }
 }
