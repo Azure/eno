@@ -175,6 +175,11 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 		if err != nil {
 			return nil, err
 		}
+
+		err = mgr.GetFieldIndexer().IndexField(context.Background(), &apiv1.Composition{}, IdxCompositionsByDependency, indexCompositionsByDependency())
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	mgr.AddHealthzCheck("ping", healthz.Ping)

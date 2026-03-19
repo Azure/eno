@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	goruntime "runtime"
 	"strconv"
@@ -50,7 +51,19 @@ func NewClientWithInterceptors(t testing.TB, ict *interceptor.Funcs, objs ...cli
 	builder := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(objs...).
-		WithStatusSubresource(&apiv1.ResourceSlice{}, &apiv1.Composition{}, &apiv1.Symphony{})
+		WithStatusSubresource(&apiv1.ResourceSlice{}, &apiv1.Composition{}, &apiv1.Symphony{}).
+		WithIndex(&apiv1.Composition{}, manager.IdxCompositionsByDependency, func(o client.Object) []string {
+			comp := o.(*apiv1.Composition)
+			var keys []string
+			for _, dep := range comp.Spec.DependsOn {
+				ns := dep.Namespace
+				if ns == "" {
+					ns = comp.Namespace
+				}
+				keys = append(keys, path.Join(ns, dep.Name))
+			}
+			return keys
+		})
 
 	if ict != nil {
 		builder.WithInterceptorFuncs(*ict)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"path"
 	"sort"
 	"time"
 
@@ -114,6 +115,10 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// Reset the compositionHealth metric before iterating through compositions
 	compositionHealth.Reset()
 
+	// Build readiness index and composition map for dependency checking
+	readySet := buildReadySet(comps)
+	compsByKey := buildCompsByKey(comps)
+
 	var inFlight int
 	var op *op
 	for _, comp := range comps.Items {
@@ -129,6 +134,29 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			logger.Info("detected composition missed reconciliation", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", comp.Spec.Synthesizer.Name)
 		} else {
 			compositionHealth.WithLabelValues(comp.Name, comp.Namespace, comp.Spec.Synthesizer.Name).Set(0)
+		}
+
+		if comp.DeletionTimestamp == nil && len(comp.Spec.DependsOn) > 0 {
+			if detectCycle(&comp, compsByKey) {
+				logger.Info("circular dependency detected, skipping composition synthesis", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace())
+				continue
+			}
+			if !areDependenciesReady(&comp, readySet) {
+
+				for _, dep := range comp.Spec.DependsOn {
+					ns := dep.Namespace
+					if ns == "" {
+						ns = comp.GetNamespace()
+					}
+					key := path.Join(ns, dep.Name)
+					if _, exists := compsByKey[key]; !exists && !dep.Optional {
+						logger.Info("required dependency does not exist",
+							"compositionName", comp.GetName(), "dependencyName", dep.Name, "dependencyNamespace", ns)
+					}
+				}
+				logger.Info("not all dependent compositions are ready, skipping composition synthesis", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace())
+				continue
+			}
 		}
 
 		synth, ok := synthsByName[comp.Spec.Synthesizer.Name]

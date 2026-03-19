@@ -56,6 +56,28 @@ type CompositionSpec struct {
 	// A set of environment variables that will be made available inside the synthesis Pod.
 	// +kubebuilder:validation:MaxItems:=500
 	SynthesisEnv []EnvVar `json:"synthesisEnv,omitempty"`
+
+	// Declare dependencies on other compositions by name. A composition can have at most 50 dependencies
+	// Compositions will not be scheduled for synthesis until all required
+	// dependencies have CurrentSynthesis.Ready != nil.
+	// Deletion is blocked until all non-optional dependents are fully removed.
+	// +kubebuilder:validation:MaxItems:=50
+	DependsOn []CompositionDependency `json:"dependsOn,omitempty"`
+}
+
+type CompositionDependency struct {
+	// Name of the dependency composition
+	Name string `json:"name,omitempty"`
+
+	// Namespace of the dependent resource
+	Namespace string `json:"namespace,omitempty"`
+
+	// Optional: If true, the composition proceeds even if this dependency
+	// is not found or not ready.
+	// Creation: proceeds when dependency is not present or not ready
+	// Deletion: optional dependents don't block their dependency's deletion
+	// Defaults: false (required)
+	Optional bool `json:"optional,omitempty"`
 }
 
 type CompositionStatus struct {
@@ -64,6 +86,26 @@ type CompositionStatus struct {
 	CurrentSynthesis  *Synthesis        `json:"currentSynthesis,omitempty"`
 	PreviousSynthesis *Synthesis        `json:"previousSynthesis,omitempty"`
 	InputRevisions    []InputRevisions  `json:"inputRevisions,omitempty"`
+
+	// Set when composition is blocked by dependency constraints. Cleared when unblocked
+	DependencyStatus *DependencyStatus `json:"dependencyStatus,omitempty"`
+}
+
+type DependencyStatus struct {
+	// Blocked is true when the composition cannot proceed due to dependencies/dependents
+	Blocked bool `json:"blocked,omitempty"`
+
+	// Reason: "WaitingOnDependencies", "WaitingOnDependents", "CircularDependency"
+	Reason string `json:"reason,omitempty"`
+
+	// BlockedBy: References to the compositions causing the block
+	BlockedBy []BlockedByRef `json:"blockedby,omitempty"`
+}
+
+type BlockedByRef struct {
+	Name      string `json:"name,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	Reason    string `json:"reason,omitempty"` // "NotFound", "NotReady", "NotDeleted"
 }
 
 type SimplifiedStatus struct {

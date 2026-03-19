@@ -3,6 +3,7 @@ package composition
 import (
 	"context"
 	"fmt"
+	"path"
 	"time"
 
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
@@ -29,6 +30,7 @@ const (
 	enoCompositionForceDeleteAnnotation = "eno.azure.io/forceDeleteWhenSymphonyGone"
 	AKSComponentLabel                   = "aks.azure.com/component-type" // TODO(ruinanliu): Temp workaround remove after 14802391 is released
 	addOnLabelValue                     = "addon"                        // TODO(ruinanliu):  Temp workaround remove after 14802391 is released
+	EnoCleanupFinalizer                 = "eno.azure.io/cleanup"
 )
 
 type compositionController struct {
@@ -44,6 +46,7 @@ func NewController(mgr ctrl.Manager, podTimeout time.Duration) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
 		WatchesRawSource(source.Kind(mgr.GetCache(), &apiv1.Synthesizer{}, c.newSynthEventHandler())).
+		WatchesRawSource(source.Kind(mgr.GetCache(), &apiv1.Composition{}, c.newDependencyEventHandler())).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "compositionController")).
 		Complete(c)
 }
@@ -62,6 +65,41 @@ func (c *compositionController) newSynthEventHandler() handler.TypedEventHandler
 		}
 		for _, comp := range list.Items {
 			reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&comp)})
+		}
+		return reqs
+	}
+	return handler.TypedEnqueueRequestsFromMapFunc(fn)
+}
+
+func (c *compositionController) newDependencyEventHandler() handler.TypedEventHandler[*apiv1.Composition, reconcile.Request] {
+	fn := func(ctx context.Context, comp *apiv1.Composition) (reqs []reconcile.Request) {
+		logger := logr.FromContextOrDiscard(ctx)
+
+		// Find compositions that lists this composition as a dependency
+		key := path.Join(comp.GetNamespace(), comp.GetName())
+		var dependents apiv1.CompositionList
+		if err := c.client.List(ctx, &dependents,
+			client.MatchingFields{manager.IdxCompositionsByDependency: key}); err != nil {
+			logger.Error(err, "failed to list dependents for composition")
+			return nil
+		}
+
+		for _, dep := range dependents.Items {
+			reqs = append(reqs, reconcile.Request{
+				NamespacedName: client.ObjectKeyFromObject(&dep),
+			})
+		}
+
+		// When a dependent changes (e.g. deleted), notify its dependencies
+		// so they can re-check hasActiveDependents during deletion ordering
+		for _, dep := range comp.Spec.DependsOn {
+			ns := dep.Namespace
+			if ns == "" {
+				ns = comp.GetNamespace()
+			}
+			reqs = append(reqs, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: dep.Name, Namespace: ns},
+			})
 		}
 		return reqs
 	}
@@ -87,7 +125,7 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 		return c.reconcileDeletedComposition(ctx, comp)
 	}
 
-	if controllerutil.AddFinalizer(comp, "eno.azure.io/cleanup") {
+	if controllerutil.AddFinalizer(comp, EnoCleanupFinalizer) {
 		err = c.client.Update(ctx, comp)
 		if err != nil {
 			logger.Error(err, "failed to update composition")
@@ -144,6 +182,30 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 
 func (c *compositionController) reconcileDeletedComposition(ctx context.Context, comp *apiv1.Composition) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx)
+
+	// Check for active non-optional dependents BEFORE starting deletion work
+	// We need to do this before adding UUID to because updating the UUID triggers the deletion from
+	// the reconstituation controller
+	blocked, blockedBy, err := c.hasActiveDependents(ctx, comp)
+	if err != nil {
+		logger.Error(err, "failed to get the composition's dependency")
+		return ctrl.Result{}, err
+	}
+
+	if blocked {
+		logger.Info("waiting for dependents to be deleted", "dependentCount", len(blockedBy))
+		return c.updateDependencyStatus(ctx, comp, "WaitingOnDependents", blockedBy)
+	}
+
+	// Once the given's composition's dependents are deleted then we can clear the dependenc status
+	// Note that once we clear the hasActiveDependents step we will proceed to deletion. This clearing step
+	// is just for the corretness step during this brief window
+	if comp.Status.DependencyStatus != nil {
+		if _, err = c.clearDependencyStatus(ctx, comp); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	syn := comp.Status.CurrentSynthesis
 	if syn != nil {
 		// Deletion increments the composition's generation, but the reconstitution cache is only invalidated
@@ -178,7 +240,7 @@ func (c *compositionController) reconcileDeletedComposition(ctx context.Context,
 		}
 	}
 
-	if controllerutil.RemoveFinalizer(comp, "eno.azure.io/cleanup") {
+	if controllerutil.RemoveFinalizer(comp, EnoCleanupFinalizer) {
 		err := c.client.Update(ctx, comp)
 		if err != nil {
 			logger.Error(err, "failed to remove finalizer")
@@ -286,6 +348,11 @@ func buildSimplifiedStatus(synth *apiv1.Synthesizer, comp *apiv1.Composition) *a
 	current := comp.Status.Simplified
 
 	if comp.DeletionTimestamp != nil {
+		// Show dependency-blocked deletion status when blocked by dependents
+		if comp.Status.DependencyStatus != nil && comp.Status.DependencyStatus.Blocked {
+			status.Status = comp.Status.DependencyStatus.Reason
+			return status
+		}
 		status.Status = "Deleting"
 		return status
 	}
@@ -323,6 +390,11 @@ func buildSimplifiedStatus(synth *apiv1.Synthesizer, comp *apiv1.Composition) *a
 	}
 
 	if comp.Status.CurrentSynthesis == nil && comp.Status.InFlightSynthesis == nil {
+		// This means that dependencies exists and no synthesis started showing WaitingOnDependencies
+		if len(comp.Spec.DependsOn) > 0 {
+			status.Status = "WaitingOnDependencies"
+			return status
+		}
 		status.Status = "PendingSynthesis"
 		return status
 	}
@@ -345,4 +417,78 @@ func buildSimplifiedStatus(synth *apiv1.Synthesizer, comp *apiv1.Composition) *a
 
 	status.Status = "Unknown"
 	return status
+}
+
+func (c *compositionController) hasActiveDependents(ctx context.Context, comp *apiv1.Composition) (bool, []apiv1.BlockedByRef, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+	logger.Info(fmt.Sprintf("Checking dependents status for composition name: [%s] namespace[%s]", comp.GetName(), comp.GetNamespace()))
+
+	key := path.Join(comp.GetNamespace(), comp.GetName())
+	var dependants apiv1.CompositionList
+	err := c.client.List(ctx, &dependants, client.MatchingFields{manager.IdxCompositionsByDependency: key})
+	if err != nil {
+		logger.Error(err, "failed to list active dependatns for composition")
+		return false, nil, fmt.Errorf("listing dependents: %w", err)
+	}
+
+	var blockedBy []apiv1.BlockedByRef
+	for _, dep := range dependants.Items {
+		// skip dependants that does not have the finalizer
+		if dep.DeletionTimestamp != nil && !controllerutil.ContainsFinalizer(&dep, EnoCleanupFinalizer) {
+			continue
+		}
+
+		// Check if this dependant is optional
+		if isDependencyOptional(&dep, comp) {
+			continue
+		}
+
+		blockedBy = append(blockedBy, apiv1.BlockedByRef{
+			Name:      dep.Name,
+			Namespace: dep.Namespace,
+			Reason:    "DependentNotDeleted",
+		})
+	}
+	return len(blockedBy) > 0, blockedBy, nil
+}
+
+// isDependencyOptional returns true if `dependents` lists `dependency` as an optional dependency
+func isDependencyOptional(dependents *apiv1.Composition, dependency *apiv1.Composition) bool {
+	for _, dep := range dependents.Spec.DependsOn {
+		ns := dep.Namespace
+		if ns == "" {
+			ns = dependents.GetNamespace()
+		}
+		if dep.Name == dependency.GetName() && ns == dependency.GetNamespace() {
+			return dep.Optional
+		}
+	}
+	return false
+}
+
+func (c *compositionController) updateDependencyStatus(ctx context.Context, comp *apiv1.Composition, reason string, blockedBy []apiv1.BlockedByRef) (ctrl.Result, error) {
+	newStatus := &apiv1.DependencyStatus{
+		Blocked:   true,
+		Reason:    reason,
+		BlockedBy: blockedBy,
+	}
+	if equality.Semantic.DeepEqual(comp.Status.DependencyStatus, newStatus) {
+		return ctrl.Result{}, nil // The dependency is already up to date, no need to do anything
+	}
+
+	copy := comp.DeepCopy()
+	copy.Status.DependencyStatus = newStatus
+	if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(comp)); err != nil {
+		return ctrl.Result{}, fmt.Errorf("updating dependency status: %w", err)
+	}
+	return ctrl.Result{}, nil
+}
+
+func (c *compositionController) clearDependencyStatus(ctx context.Context, comp *apiv1.Composition) (ctrl.Result, error) {
+	copy := comp.DeepCopy()
+	copy.Status.DependencyStatus = nil
+	if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(comp)); err != nil {
+		return ctrl.Result{}, fmt.Errorf("clearing dependency failed: %w", err)
+	}
+	return ctrl.Result{}, nil
 }

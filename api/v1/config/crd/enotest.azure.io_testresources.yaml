@@ -4,14 +4,14 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.2
-  name: resourceslices.eno.azure.io
+  name: testresources.enotest.azure.io
 spec:
-  group: eno.azure.io
+  group: enotest.azure.io
   names:
-    kind: ResourceSlice
-    listKind: ResourceSliceList
-    plural: resourceslices
-    singular: resourceslice
+    kind: TestResource
+    listKind: TestResourceList
+    plural: testresources
+    singular: testresource
   scope: Namespaced
   versions:
   - name: v1
@@ -37,38 +37,15 @@ spec:
             type: object
           spec:
             properties:
-              resources:
+              values:
                 items:
                   properties:
-                    deleted:
-                      description: Deleted is true when this manifest represents a
-                        "tombstone" - a resource that should no longer exist.
-                      type: boolean
-                    manifest:
-                      type: string
+                    int:
+                      type: integer
                   type: object
                 type: array
-              synthesisUUID:
-                type: string
             type: object
           status:
-            properties:
-              resources:
-                description: Elements of resources correspond in index to those in
-                  spec.resources at the observed generation.
-                items:
-                  properties:
-                    deleted:
-                      type: boolean
-                    ready:
-                      format: date-time
-                      type: string
-                    reconciled:
-                      type: boolean
-                    reconciliationError:
-                      type: string
-                  type: object
-                type: array
             type: object
         type: object
     served: true

@@ -71,6 +71,23 @@ type Variation struct {
 	// Optional indicates that this variation should not block the symphony status
 	// when it fails to synthesize, reconcile, or become ready.
 	Optional bool `json:"optional,omitempty"`
+
+	// Dependencies for the composition created from this variation
+	// References use synthesizer name - the symphony controller resolves them
+	// to actual composition name when creating/updating compositions.
+	// Max dependencies is 50
+	DependsOn []VariationDependency `json:"dependsOn,omitempty"`
+}
+
+type VariationDependency struct {
+	// Synthesizer name of the dependency variation (within the same symphony).
+	// Resolved to the actual composition name by the symphony controller
+	Synthesizer string `json:"synthesizer,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Namespace   string `json:"namespace,omitempty"`
+
+	// Optional: whether this dependency is optional. Default will be false
+	Optional bool `json:"optional,omitempty"`
 }
 
 func (c *Symphony) GetAzureOperationID() string {

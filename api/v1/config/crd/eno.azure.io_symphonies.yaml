@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.18.0
+    controller-gen.kubebuilder.io/version: v0.17.2
   name: symphonies.eno.azure.io
 spec:
   group: eno.azure.io
@@ -129,6 +129,29 @@ spec:
                         - resource
                         type: object
                       type: array
+                    dependsOn:
+                      description: |-
+                        Dependencies for the composition created from this variation
+                        References use synthesizer name - the symphony controller resolves them
+                        to actual composition name when creating/updating compositions.
+                        Max dependencies is 50
+                      items:
+                        properties:
+                          name:
+                            type: string
+                          namespace:
+                            type: string
+                          optional:
+                            description: 'Optional: whether this dependency is optional.
+                              Default will be false'
+                            type: boolean
+                          synthesizer:
+                            description: |-
+                              Synthesizer name of the dependency variation (within the same symphony).
+                              Resolved to the actual composition name by the symphony controller
+                            type: string
+                        type: object
+                      type: array
                     labels:
                       additionalProperties:
                         type: string
@@ -159,8 +182,6 @@ spec:
                     synthesizer:
                       description: Used to populate the composition's spec.synthesizer.
                       properties:
-                        name:
-                          type: string
                         labelSelector:
                           description: |-
                             A label selector is a label query over a set of resources. The result of matchLabels and
@@ -210,6 +231,8 @@ spec:
                               type: object
                           type: object
                           x-kubernetes-map-type: atomic
+                        name:
+                          type: string
                       type: object
                       x-kubernetes-validations:
                       - message: at least one of name or labelSelector must be set

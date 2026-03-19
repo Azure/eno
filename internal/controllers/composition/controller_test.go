@@ -214,6 +214,10 @@ func TestSimplifiedStatus(t *testing.T) {
 			state.Comp.Status.Simplified = &apiv1.SimplifiedStatus{Error: "Previous reconciliation error"}
 			return state
 		}).
+		WithMutation("with dependencies", func(state *simplifiedStatusState) *simplifiedStatusState {
+			state.Comp.Spec.DependsOn = []apiv1.CompositionDependency{{Name: "dep-a", Namespace: "default"}}
+			return state
+		}).
 		WithInvariant("missing synth", func(state *simplifiedStatusState, result *apiv1.SimplifiedStatus) bool {
 			return state.Comp.DeletionTimestamp != nil || state.Synth != nil || result.Status == "MissingSynthesizer"
 		}).
@@ -261,6 +265,13 @@ func TestSimplifiedStatus(t *testing.T) {
 				state.Comp.Status.Simplified.Error == "" ||
 				result.Error == state.Comp.Status.Simplified.Error
 		}).
+		WithInvariant("waiting on dependencies", func(state *simplifiedStatusState, result *apiv1.SimplifiedStatus) bool {
+			hasDeps := len(state.Comp.Spec.DependsOn) > 0
+			noSynthesis := state.Comp.Status.CurrentSynthesis == nil && state.Comp.Status.InFlightSynthesis == nil
+			notDeleting := state.Comp.DeletionTimestamp == nil
+			hasSynth := state.Synth != nil
+			return !(hasDeps && noSynthesis && notDeleting && hasSynth) || result.Status == "WaitingOnDependencies"
+		}).
 		Evaluate(t)
 }
 
@@ -300,7 +311,6 @@ func TestIsAddonComposition(t *testing.T) {
 			labels:   map[string]string{AKSComponentLabel: addOnLabelValue},
 			expected: true,
 		},
-
 	}
 
 	for _, tt := range tests {
@@ -435,6 +445,298 @@ func TestShouldForceRemoveFinalizer(t *testing.T) {
 
 			result := c.shouldForceRemoveFinalizer(ctx, comp)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestIsDependencyOptional(t *testing.T) {
+	tests := []struct {
+		name     string
+		deps     []apiv1.CompositionDependency
+		depName  string
+		depNS    string
+		compNS   string
+		expected bool
+	}{
+		{
+			name:     "listed as optional",
+			deps:     []apiv1.CompositionDependency{{Name: "dep-a", Namespace: "ns1", Optional: true}},
+			depName:  "dep-a",
+			depNS:    "ns1",
+			compNS:   "ns1",
+			expected: true,
+		},
+		{
+			name:     "listed as required",
+			deps:     []apiv1.CompositionDependency{{Name: "dep-a", Namespace: "ns1", Optional: false}},
+			depName:  "dep-a",
+			depNS:    "ns1",
+			compNS:   "ns1",
+			expected: false,
+		},
+		{
+			name:     "no dependencies at all",
+			deps:     nil,
+			depName:  "dep-a",
+			depNS:    "ns1",
+			compNS:   "ns1",
+			expected: false,
+		},
+		{
+			name:     "empty namespace defaults to dependent namespace",
+			deps:     []apiv1.CompositionDependency{{Name: "dep-a", Namespace: "", Optional: true}},
+			depName:  "dep-a",
+			depNS:    "ns1",
+			compNS:   "ns1",
+			expected: true,
+		},
+		{
+			name:     "different composition not matched",
+			deps:     []apiv1.CompositionDependency{{Name: "dep-b", Namespace: "ns1", Optional: true}},
+			depName:  "dep-a",
+			depNS:    "ns1",
+			compNS:   "ns1",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dependent := &apiv1.Composition{}
+			dependent.Name = "dependent"
+			dependent.Namespace = tt.compNS
+			dependent.Spec.DependsOn = tt.deps
+
+			dependency := &apiv1.Composition{}
+			dependency.Name = tt.depName
+			dependency.Namespace = tt.depNS
+
+			assert.Equal(t, tt.expected, isDependencyOptional(dependent, dependency))
+		})
+	}
+}
+
+func TestHasActiveDependents(t *testing.T) {
+	tests := []struct {
+		name            string
+		comp            *apiv1.Composition // the composition being deleted (the dependency)
+		existingObjects []client.Object    // pre-existing objects in the fake client
+		expectBlocked   bool
+		expectCount     int
+	}{
+		{
+			name: "no dependents at all",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{Name: "dep-a", Namespace: "ns1"},
+			},
+			existingObjects: nil,
+			expectBlocked:   false,
+			expectCount:     0,
+		},
+		{
+			name: "one active required dependent blocks deletion",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{Name: "dep-a", Namespace: "ns1"},
+			},
+			existingObjects: []client.Object{
+				&apiv1.Composition{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       "child-1",
+						Namespace:  "ns1",
+						Finalizers: []string{EnoCleanupFinalizer},
+					},
+					Spec: apiv1.CompositionSpec{
+						DependsOn: []apiv1.CompositionDependency{
+							{Name: "dep-a", Namespace: "ns1"},
+						},
+					},
+				},
+			},
+			expectBlocked: true,
+			expectCount:   1,
+		},
+		{
+			name: "dependent already deleting with finalizer still blocks",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{Name: "dep-a", Namespace: "ns1"},
+			},
+			existingObjects: []client.Object{
+				&apiv1.Composition{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "child-1",
+						Namespace:         "ns1",
+						Finalizers:        []string{EnoCleanupFinalizer},
+						DeletionTimestamp: ptr.To(metav1.Now()),
+					},
+					Spec: apiv1.CompositionSpec{
+						DependsOn: []apiv1.CompositionDependency{
+							{Name: "dep-a", Namespace: "ns1"},
+						},
+					},
+				},
+			},
+			expectBlocked: true,
+			expectCount:   1,
+		},
+		{
+			// When a dependent is fully deleted (no finalizer, GC'd), it won't appear
+			// in the client listing at all. This test confirms that having zero
+			// dependents in the index returns not-blocked.
+			name: "dependent fully deleted (not in API) does not block",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{Name: "dep-a", Namespace: "ns1"},
+			},
+			existingObjects: nil, // dependent has been GC'd completely
+			expectBlocked:   false,
+			expectCount:     0,
+		},
+		{
+			name: "optional dependent does not block deletion",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{Name: "dep-a", Namespace: "ns1"},
+			},
+			existingObjects: []client.Object{
+				&apiv1.Composition{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       "child-optional",
+						Namespace:  "ns1",
+						Finalizers: []string{EnoCleanupFinalizer},
+					},
+					Spec: apiv1.CompositionSpec{
+						DependsOn: []apiv1.CompositionDependency{
+							{Name: "dep-a", Namespace: "ns1", Optional: true},
+						},
+					},
+				},
+			},
+			expectBlocked: false,
+			expectCount:   0,
+		},
+		{
+			name: "mix of optional and required dependents - blocked by required",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{Name: "dep-a", Namespace: "ns1"},
+			},
+			existingObjects: []client.Object{
+				&apiv1.Composition{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       "child-optional",
+						Namespace:  "ns1",
+						Finalizers: []string{EnoCleanupFinalizer},
+					},
+					Spec: apiv1.CompositionSpec{
+						DependsOn: []apiv1.CompositionDependency{
+							{Name: "dep-a", Namespace: "ns1", Optional: true},
+						},
+					},
+				},
+				&apiv1.Composition{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       "child-required",
+						Namespace:  "ns1",
+						Finalizers: []string{EnoCleanupFinalizer},
+					},
+					Spec: apiv1.CompositionSpec{
+						DependsOn: []apiv1.CompositionDependency{
+							{Name: "dep-a", Namespace: "ns1", Optional: false},
+						},
+					},
+				},
+			},
+			expectBlocked: true,
+			expectCount:   1, // only the required one
+		},
+		{
+			name: "cross-namespace dependent blocks deletion",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{Name: "dep-a", Namespace: "ns1"},
+			},
+			existingObjects: []client.Object{
+				&apiv1.Composition{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       "child-cross-ns",
+						Namespace:  "ns2",
+						Finalizers: []string{EnoCleanupFinalizer},
+					},
+					Spec: apiv1.CompositionSpec{
+						DependsOn: []apiv1.CompositionDependency{
+							{Name: "dep-a", Namespace: "ns1"},
+						},
+					},
+				},
+			},
+			expectBlocked: true,
+			expectCount:   1,
+		},
+		{
+			name: "multiple required dependents all listed",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{Name: "dep-a", Namespace: "ns1"},
+			},
+			existingObjects: []client.Object{
+				&apiv1.Composition{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       "child-1",
+						Namespace:  "ns1",
+						Finalizers: []string{EnoCleanupFinalizer},
+					},
+					Spec: apiv1.CompositionSpec{
+						DependsOn: []apiv1.CompositionDependency{
+							{Name: "dep-a", Namespace: "ns1"},
+						},
+					},
+				},
+				&apiv1.Composition{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       "child-2",
+						Namespace:  "ns1",
+						Finalizers: []string{EnoCleanupFinalizer},
+					},
+					Spec: apiv1.CompositionSpec{
+						DependsOn: []apiv1.CompositionDependency{
+							{Name: "dep-a", Namespace: "ns1"},
+						},
+					},
+				},
+			},
+			expectBlocked: true,
+			expectCount:   2,
+		},
+		{
+			name: "namespace defaults correctly in dependent spec",
+			comp: &apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{Name: "dep-a", Namespace: "ns1"},
+			},
+			existingObjects: []client.Object{
+				&apiv1.Composition{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       "child-default-ns",
+						Namespace:  "ns1",
+						Finalizers: []string{EnoCleanupFinalizer},
+					},
+					Spec: apiv1.CompositionSpec{
+						DependsOn: []apiv1.CompositionDependency{
+							{Name: "dep-a"}, // no namespace - should default to ns1
+						},
+					},
+				},
+			},
+			expectBlocked: true,
+			expectCount:   1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := testutil.NewContext(t)
+			objs := append([]client.Object{tt.comp}, tt.existingObjects...)
+			cli := testutil.NewClient(t, objs...)
+			c := &compositionController{client: cli}
+
+			blocked, blockedBy, err := c.hasActiveDependents(ctx, tt.comp)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectBlocked, blocked)
+			assert.Len(t, blockedBy, tt.expectCount)
 		})
 	}
 }
