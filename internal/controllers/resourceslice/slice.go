@@ -67,7 +67,7 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 
 		// All active slices should be orphaned if composition deletion was caused by symphony deletion
-		if comp.Labels != nil && comp.Labels["eno.azure.io/symphony-deleting"] == "true" {
+		if comp.Labels != nil && comp.Labels["eno.azure.io/symphony-deleting"] == "true" && len(comp.Spec.DependsOn) == 0 {
 			continue
 		}
 

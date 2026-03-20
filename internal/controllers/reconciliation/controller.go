@@ -168,6 +168,13 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	deleted := current == nil ||
 		(current.GetDeletionTimestamp() != nil && !snap.ForegroundDeletion) ||
 		(snap.Deleted() && (snap.Orphan || snap.Disable || failingOpen)) // orphaning should be reflected on the status.
+	// deleted := current == nil
+	logger.Info("DEBUG: Setting deleted flag", "deleted", deleted, "currentExists", current != nil, "resourceName", resource.Ref.Name)
+	// Resource should be deleted but still exists (e.g. held by external finalizer) — keep polling
+	if !deleted && snap.Deleted() && !snap.Disable {
+		c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(false, ready))
+		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
+	}
 
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 	return c.requeue(logger, snap, ready)
@@ -234,7 +241,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 	}()
 
 	if res.Deleted() {
-		if current == nil || current.GetDeletionTimestamp() != nil || (res.Orphan && comp.DeletionTimestamp != nil) || (comp.Labels != nil && comp.Labels["eno.azure.io/symphony-deleting"] == "true") {
+		if current == nil || current.GetDeletionTimestamp() != nil || (res.Orphan && comp.DeletionTimestamp != nil) || (comp.Labels != nil && comp.Labels["eno.azure.io/symphony-deleting"] == "true" && len(comp.Spec.DependsOn) == 0) {
 			return false, nil // already deleted - nothing to do
 		}
 
