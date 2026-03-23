@@ -227,20 +227,6 @@ func (c *compositionController) reconcileDeletedComposition(ctx context.Context,
 			return ctrl.Result{}, nil
 		}
 
-		if len(comp.Spec.DependsOn) > 0 && syn.Reconciled != nil && !syn.Reconciled.Time.After(comp.DeletionTimestamp.Time) {
-			comp.Status.CurrentSynthesis.UUID = uuid.NewString()
-			comp.Status.CurrentSynthesis.Synthesized = ptr.To(metav1.Now())
-			comp.Status.CurrentSynthesis.Reconciled = nil
-			comp.Status.CurrentSynthesis.Ready = nil
-			err := c.client.Status().Update(ctx, comp)
-			if err != nil {
-				logger.Error(err, "failed to update synthesis for deletion ordering")
-				return ctrl.Result{}, err
-			}
-			logger.Info("triggered re-reconciliation for deletion ordering", "synthesisUUID", comp.Status.CurrentSynthesis.UUID)
-			return ctrl.Result{}, nil
-		}
-
 		if syn.Reconciled == nil {
 			// If this is an addon composition whose owning Symphony is already gone,
 			// force-remove the finalizer so the composition doesn't get stuck forever.

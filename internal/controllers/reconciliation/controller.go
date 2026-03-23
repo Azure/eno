@@ -165,16 +165,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	deleted := current == nil ||
-		(current.GetDeletionTimestamp() != nil && !snap.ForegroundDeletion) ||
-		(snap.Deleted() && (snap.Orphan || snap.Disable || failingOpen)) // orphaning should be reflected on the status.
-	// deleted := current == nil
-	logger.Info("DEBUG: Setting deleted flag", "deleted", deleted, "currentExists", current != nil, "resourceName", resource.Ref.Name)
-	// Resource should be deleted but still exists (e.g. held by external finalizer) — keep polling
-	if !deleted && snap.Deleted() && !snap.Disable {
-		c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(false, ready))
-		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
-	}
+	deleted := markResourceAsDeleted(current, snap, failingOpen)
 
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 	return c.requeue(logger, snap, ready)
@@ -539,4 +530,28 @@ func isErrNoKindMatch(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "no matches for kind")
+}
+
+func markResourceAsDeleted(current *unstructured.Unstructured, snap *resource.Snapshot, failingOpen bool) bool {
+	// Resource does not exist at all
+	if current == nil {
+		return true
+	}
+
+	// Resource has a deletion timestamp and is using background deletion
+	if current.GetDeletionTimestamp() != nil && !snap.ForegroundDeletion {
+		return true
+	}
+
+	// Orphaned or disabled resources should be reflected as deleted
+	if snap.Deleted() && (snap.Orphan || snap.Disable) {
+		return true
+	}
+
+	// When failingOpen, treat as deleted only if foreground deletion is NOT requested
+	// Foreground deletion requires the resoruce to be fully removed before reporting deleted
+	if snap.Deleted() && failingOpen && !snap.ForegroundDeletion {
+		return true
+	}
+	return false
 }
