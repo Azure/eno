@@ -13,7 +13,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kcl "kcl-lang.io/kcl-go"
-	"kcl-lang.io/kcl-go/pkg/spec/gpyrpc"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -26,7 +25,7 @@ func Synthesize(workingDir string, input any) ([]client.Object, error) {
 	}
 	inputStr := string(inputJSON)
 
-	depResult, err := kcl.UpdateDependencies(&gpyrpc.UpdateDependencies_Args{
+	depResult, err := kcl.UpdateDependencies(&kcl.UpdateDependenciesArgs{
 		ManifestPath: workingDir,
 	})
 	if err != nil {
