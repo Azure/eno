@@ -46,8 +46,12 @@ func areDependenciesReady(comp *apiv1.Composition, readySet map[string]bool) boo
 	return true
 }
 
-// detectAllCycles returns a set of compositions keys that are part of any cycle.
-// Runs a single DFS pass over the entire graph: O(N + E) run time
+// detectAllCycles returns a set of composition keys that are part of or depend on any cycle.
+// This is a conservative over-approximation: nodes that transitively depend on a cyclic node
+// are also marked cyclic. This is intentional — such compositions can never make progress
+// (their dependency will never become Ready), and surfacing "CircularDependency" communicates
+// that the dependency chain is fundamentally broken.
+// Runs a single DFS pass over the entire graph: O(N + E) run time.
 func detectAllCycles(allComps map[string]*apiv1.Composition) map[string]bool {
 	cyclic := map[string]bool{}
 	visited := map[string]bool{}

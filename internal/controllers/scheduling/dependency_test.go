@@ -341,6 +341,35 @@ func TestDetectCycle(t *testing.T) {
 			},
 			expected: false,
 		},
+		{
+			name:   "node depending on cyclic node is marked cyclic (conservative over-approximation)",
+			target: "ns/d",
+			comps: map[string]*apiv1.Composition{
+				"ns/a": {
+					ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
+					Spec: apiv1.CompositionSpec{
+						DependsOn: []apiv1.CompositionDependency{{Name: "b"}},
+					},
+				},
+				"ns/b": {
+					ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "ns"},
+					Spec: apiv1.CompositionSpec{
+						DependsOn: []apiv1.CompositionDependency{{Name: "a"}},
+					},
+				},
+				"ns/d": {
+					ObjectMeta: metav1.ObjectMeta{Name: "d", Namespace: "ns"},
+					Spec: apiv1.CompositionSpec{
+						// D depends on A, which is part of the A<->B cycle.
+						// D is not itself on the cycle, but is marked cyclic as a
+						// conservative over-approximation since its dependency chain
+						// is fundamentally broken.
+						DependsOn: []apiv1.CompositionDependency{{Name: "a"}},
+					},
+				},
+			},
+			expected: true,
+		},
 	}
 
 	for _, tt := range tests {
