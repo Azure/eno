@@ -948,7 +948,7 @@ func TestResolveVariationDeps(t *testing.T) {
 			compBySynth:     compBySynth,
 			defaultNS:       "default",
 			expectedDeps:    nil,
-			expectedAllResv: false,
+			expectedAllResv: true,
 		},
 		{
 			name: "optional preserved on synth resolution",

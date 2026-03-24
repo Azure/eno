@@ -17,7 +17,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
@@ -43,10 +45,22 @@ func NewController(mgr ctrl.Manager, podTimeout time.Duration) error {
 		client:     mgr.GetClient(),
 		podTimeout: podTimeout,
 	}
+	depPredicate := predicate.TypedFuncs[*apiv1.Composition]{
+		CreateFunc: func(e event.TypedCreateEvent[*apiv1.Composition]) bool { return true },
+		DeleteFunc: func(e event.TypedDeleteEvent[*apiv1.Composition]) bool { return true },
+		UpdateFunc: func(e event.TypedUpdateEvent[*apiv1.Composition]) bool {
+			comp := e.ObjectNew
+
+			// only requeue and process updates for compositions that have deps or are being deleted
+			// Creates.deletes always pass through since any comp could be a dependency target
+			return len(comp.Spec.DependsOn) > 0 || comp.DeletionTimestamp != nil
+		},
+		GenericFunc: func(e event.TypedGenericEvent[*apiv1.Composition]) bool { return true },
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
 		WatchesRawSource(source.Kind(mgr.GetCache(), &apiv1.Synthesizer{}, c.newSynthEventHandler())).
-		WatchesRawSource(source.Kind(mgr.GetCache(), &apiv1.Composition{}, c.newDependencyEventHandler())).
+		WatchesRawSource(source.Kind(mgr.GetCache(), &apiv1.Composition{}, c.newDependencyEventHandler(), depPredicate)).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "compositionController")).
 		Complete(c)
 }
@@ -194,7 +208,7 @@ func (c *compositionController) reconcileDeletedComposition(ctx context.Context,
 
 	if blocked {
 		logger.Info("waiting for dependents to be deleted", "dependentCount", len(blockedBy))
-		return c.updateDependencyStatus(ctx, comp, "WaitingOnDependents", blockedBy)
+		return c.updateDependencyStatus(ctx, comp, apiv1.WaitingOnDependentsReason, blockedBy)
 	}
 
 	// Once the given's composition's dependents are deleted then we can clear the dependenc status
@@ -204,6 +218,7 @@ func (c *compositionController) reconcileDeletedComposition(ctx context.Context,
 		if _, err = c.clearDependencyStatus(ctx, comp); err != nil {
 			return ctrl.Result{}, err
 		}
+		return ctrl.Result{Requeue: true}, nil // requeue to work with fresh state
 	}
 
 	syn := comp.Status.CurrentSynthesis
@@ -392,7 +407,7 @@ func buildSimplifiedStatus(synth *apiv1.Synthesizer, comp *apiv1.Composition) *a
 	if comp.Status.CurrentSynthesis == nil && comp.Status.InFlightSynthesis == nil {
 		// This means that dependencies exists and no synthesis started showing WaitingOnDependencies
 		if len(comp.Spec.DependsOn) > 0 {
-			status.Status = "WaitingOnDependencies"
+			status.Status = apiv1.WaitingOnDependenciesReason
 			return status
 		}
 		status.Status = "PendingSynthesis"

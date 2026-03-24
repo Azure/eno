@@ -46,35 +46,44 @@ func areDependenciesReady(comp *apiv1.Composition, readySet map[string]bool) boo
 	return true
 }
 
-// detectCycle returns true if the composition is part of a dependency cycle.
-func detectCycle(comp *apiv1.Composition, allComps map[string]*apiv1.Composition) bool {
+// detectAllCycles returns a set of compositions keys that are part of any cycle.
+// Runs a single DFS pass over the entire graph: O(N + E) run time
+func detectAllCycles(allComps map[string]*apiv1.Composition) map[string]bool {
+	cyclic := map[string]bool{}
 	visited := map[string]bool{}
 	stack := map[string]bool{}
-	return hasCycle(path.Join(comp.GetNamespace(), comp.GetName()), allComps, visited, stack)
-}
 
-func hasCycle(key string, allComps map[string]*apiv1.Composition, visited, stack map[string]bool) bool {
-	if stack[key] {
-		return true
-	}
-	if visited[key] {
-		return false
-	}
-	visited[key] = true
-	stack[key] = true
+	var dfs func(key string)
+	dfs = func(key string) {
+		if visited[key] {
+			return
+		}
 
-	if comp, ok := allComps[key]; ok {
-		for _, dep := range comp.Spec.DependsOn {
-			ns := dep.Namespace
-			if ns == "" {
-				ns = comp.GetNamespace()
-			}
-			depKey := path.Join(ns, dep.Name)
-			if hasCycle(depKey, allComps, visited, stack) {
-				return true
+		visited[key] = true
+		stack[key] = true
+
+		if comp, ok := allComps[key]; ok {
+			for _, dep := range comp.Spec.DependsOn {
+				ns := dep.Namespace
+				if ns == "" {
+					ns = comp.GetNamespace()
+				}
+				depKey := path.Join(ns, dep.Name)
+				if stack[depKey] {
+					cyclic[depKey] = true
+					cyclic[key] = true
+					continue
+				}
+				dfs(depKey)
+				if cyclic[depKey] {
+					cyclic[key] = true
+				}
 			}
 		}
+		delete(stack, key)
 	}
-	delete(stack, key)
-	return false
+	for key := range allComps {
+		dfs(key)
+	}
+	return cyclic
 }

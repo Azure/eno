@@ -118,6 +118,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// Build readiness index and composition map for dependency checking
 	readySet := buildReadySet(comps)
 	compsByKey := buildCompsByKey(comps)
+	cyclicSet := detectAllCycles(compsByKey)
 
 	var inFlight int
 	var op *op
@@ -137,8 +138,20 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 
 		if comp.DeletionTimestamp == nil && len(comp.Spec.DependsOn) > 0 {
-			if detectCycle(&comp, compsByKey) {
+			compKey := path.Join(comp.GetNamespace(), comp.GetName())
+			if cyclicSet[compKey] {
 				logger.Info("circular dependency detected, skipping composition synthesis", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace())
+				if comp.Status.DependencyStatus == nil || comp.Status.DependencyStatus.Reason != apiv1.CircularDependencyReason {
+					copy := comp.DeepCopy()
+					copy.Status.DependencyStatus = &apiv1.DependencyStatus{
+						Blocked: true,
+						Reason:  apiv1.CircularDependencyReason,
+					}
+					if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(&comp)); err != nil {
+						logger.Error(err, "failed to update circular dependency status")
+					}
+				}
+
 				continue
 			}
 			if !areDependenciesReady(&comp, readySet) {

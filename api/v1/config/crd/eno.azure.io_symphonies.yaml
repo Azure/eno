@@ -151,6 +151,7 @@ spec:
                               Resolved to the actual composition name by the symphony controller
                             type: string
                         type: object
+                      maxItems: 50
                       type: array
                     labels:
                       additionalProperties:

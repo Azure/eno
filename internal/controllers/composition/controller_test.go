@@ -270,7 +270,7 @@ func TestSimplifiedStatus(t *testing.T) {
 			noSynthesis := state.Comp.Status.CurrentSynthesis == nil && state.Comp.Status.InFlightSynthesis == nil
 			notDeleting := state.Comp.DeletionTimestamp == nil
 			hasSynth := state.Synth != nil
-			return !(hasDeps && noSynthesis && notDeleting && hasSynth) || result.Status == "WaitingOnDependencies"
+			return !(hasDeps && noSynthesis && notDeleting && hasSynth) || result.Status == apiv1.WaitingOnDependenciesReason
 		}).
 		Evaluate(t)
 }

@@ -246,6 +246,12 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		// DO NOT CREATE the current composition as it might lead to race condition and ordering not being respected
 
 		deps, allresolved := resolveVariationDeps(variation.DependsOn, compBySynth, symph.GetNamespace())
+		for _, dep := range variation.DependsOn {
+			if dep.Synthesizer == "" && dep.Name == "" {
+				logger.Info("WARNING: variation dependency has neither synthesizer nor name set, dependency will be ignored",
+					"synthesizerName", variation.Synthesizer.Name, "optional", dep.Optional)
+			}
+		}
 		comp.Spec.DependsOn = deps
 		idx := slices.IndexFunc(comps.Items, func(existing apiv1.Composition) bool {
 			return existing.Spec.Synthesizer.Name == variation.Synthesizer.Name
@@ -497,7 +503,9 @@ func resolveVariationDeps(varDeps []apiv1.VariationDependency, compBySynth map[s
 		if dep.Synthesizer != "" {
 			target, ok := compBySynth[dep.Synthesizer]
 			if !ok {
-				allResolved = false
+				if !dep.Optional {
+					allResolved = false
+				}
 				continue // composition does not exist yet - will resolve on next reconcile
 			}
 			resolved = append(resolved, apiv1.CompositionDependency{

@@ -76,6 +76,7 @@ type Variation struct {
 	// References use synthesizer name - the symphony controller resolves them
 	// to actual composition name when creating/updating compositions.
 	// Max dependencies is 50
+	// +kubebuilder:validation:MaxItems:=50
 	DependsOn []VariationDependency `json:"dependsOn,omitempty"`
 }
 

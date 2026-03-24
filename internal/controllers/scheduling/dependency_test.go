@@ -345,8 +345,8 @@ func TestDetectCycle(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			comp := tt.comps[tt.target]
-			result := detectCycle(comp, tt.comps)
+			cyclicSet := detectAllCycles(tt.comps)
+			result := cyclicSet[tt.target]
 			assert.Equal(t, tt.expected, result)
 		})
 	}

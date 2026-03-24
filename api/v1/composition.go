@@ -9,10 +9,13 @@ import (
 )
 
 const (
-	enoAzureOperationIDKey         = "eno.azure.io/operationID"
-	enoAzureOperationOrigin        = "eno.azure.io/operationOrigin"
-	OperationIdKey          string = "operationID"
-	OperationOrigionKey     string = "operationOrigin"
+	enoAzureOperationIDKey             = "eno.azure.io/operationID"
+	enoAzureOperationOrigin            = "eno.azure.io/operationOrigin"
+	OperationIdKey              string = "operationID"
+	OperationOrigionKey         string = "operationOrigin"
+	CircularDependencyReason    string = "CircularDependency"
+	WaitingOnDependentsReason   string = "WaitingOnDependents"
+	WaitingOnDependenciesReason string = "WaitingOnDependencies"
 )
 
 // +kubebuilder:object:root=true
