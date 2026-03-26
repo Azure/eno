@@ -141,10 +141,6 @@ spec:
                             type: string
                           namespace:
                             type: string
-                          optional:
-                            description: 'Optional: whether this dependency is optional.
-                              Default will be false'
-                            type: boolean
                           synthesizer:
                             description: |-
                               Synthesizer name of the dependency variation (within the same symphony).

@@ -86,9 +86,6 @@ type VariationDependency struct {
 	Synthesizer string `json:"synthesizer,omitempty"`
 	Name        string `json:"name,omitempty"`
 	Namespace   string `json:"namespace,omitempty"`
-
-	// Optional: whether this dependency is optional. Default will be false
-	Optional bool `json:"optional,omitempty"`
 }
 
 func (c *Symphony) GetAzureOperationID() string {

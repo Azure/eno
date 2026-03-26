@@ -37,9 +37,6 @@ func areDependenciesReady(comp *apiv1.Composition, readySet map[string]bool) boo
 		}
 		key := path.Join(ns, dep.Name)
 		if !readySet[key] { // dependency is not ready
-			if dep.Optional {
-				continue
-			}
 			return false
 		}
 	}

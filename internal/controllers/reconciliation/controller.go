@@ -232,7 +232,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 	}()
 
 	if res.Deleted() {
-		if current == nil || current.GetDeletionTimestamp() != nil || (res.Orphan && comp.DeletionTimestamp != nil) || (comp.Labels != nil && comp.Labels["eno.azure.io/symphony-deleting"] == "true" && len(comp.Spec.DependsOn) == 0) {
+		if current == nil || current.GetDeletionTimestamp() != nil || (res.Orphan && comp.DeletionTimestamp != nil) || (comp.Labels != nil && comp.Labels["eno.azure.io/symphony-deleting"] == "true") {
 			return false, nil // already deleted - nothing to do
 		}
 

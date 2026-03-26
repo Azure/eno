@@ -74,13 +74,6 @@ type CompositionDependency struct {
 
 	// Namespace of the dependent resource
 	Namespace string `json:"namespace,omitempty"`
-
-	// Optional: If true, the composition proceeds even if this dependency
-	// is not found or not ready.
-	// Creation: proceeds when dependency is not present or not ready
-	// Deletion: optional dependents don't block their dependency's deletion
-	// Defaults: false (required)
-	Optional bool `json:"optional,omitempty"`
 }
 
 type CompositionStatus struct {

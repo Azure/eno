@@ -101,14 +101,6 @@ spec:
                     namespace:
                       description: Namespace of the dependent resource
                       type: string
-                    optional:
-                      description: |-
-                        Optional: If true, the composition proceeds even if this dependency
-                        is not found or not ready.
-                        Creation: proceeds when dependency is not present or not ready
-                        Deletion: optional dependents don't block their dependency's deletion
-                        Defaults: false (required)
-                      type: boolean
                   type: object
                 maxItems: 50
                 type: array

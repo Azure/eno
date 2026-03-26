@@ -844,35 +844,6 @@ func TestDependencyAllowsSynthesisWhenReady(t *testing.T) {
 	assert.Error(t, err, "expected dispatch error — proves comp-b passed dep check")
 }
 
-// TestOptionalDependencyDoesNotBlock proves that a composition with an optional
-// dependency that is not ready still proceeds with synthesis.
-func TestOptionalDependencyDoesNotBlock(t *testing.T) {
-	ctx := testutil.NewContext(t)
-	cli := testutil.NewClient(t)
-
-	c := &controller{client: cli, concurrencyLimit: 10, watchdogThreshold: time.Hour}
-
-	synth := &apiv1.Synthesizer{}
-	synth.Name = "test-synth"
-	require.NoError(t, cli.Create(ctx, synth))
-
-	// comp-b depends on non-existent comp-a but the dep is optional
-	compB := &apiv1.Composition{}
-	compB.Name = "comp-b"
-	compB.Namespace = "default"
-	compB.Finalizers = []string{"eno.azure.io/cleanup"}
-	compB.Spec.Synthesizer.Name = synth.Name
-	compB.Spec.DependsOn = []apiv1.CompositionDependency{
-		{Name: "comp-a", Namespace: "default", Optional: true},
-	}
-	require.NoError(t, cli.Create(ctx, compB))
-
-	// Reconcile returns an error from dispatchOp (fake client JSON patch limitation).
-	// This proves comp-b PASSED the dependency check because the dep is optional.
-	_, err := c.Reconcile(ctx, ctrl.Request{})
-	assert.Error(t, err, "expected dispatch error — proves comp-b passed dep check with optional dep")
-}
-
 // TestCyclicDependencyBlocksSynthesis proves that compositions involved in a dependency
 // cycle are skipped and not dispatched for synthesis.
 func TestCyclicDependencyBlocksSynthesis(t *testing.T) {

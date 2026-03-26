@@ -100,17 +100,17 @@ func TestAreDependenciesReady(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "optional dep not ready",
+			name: "all deps required - one missing blocks",
 			comp: &apiv1.Composition{
 				ObjectMeta: metav1.ObjectMeta{Name: "comp", Namespace: "ns1"},
 				Spec: apiv1.CompositionSpec{
 					DependsOn: []apiv1.CompositionDependency{
 						{Name: "dep-a"},
-						{Name: "dep-missing", Optional: true},
+						{Name: "dep-missing"},
 					},
 				},
 			},
-			expected: true,
+			expected: false,
 		},
 		{
 			name: "cross-namespace dep ready",
@@ -137,17 +137,17 @@ func TestAreDependenciesReady(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "all deps optional and missing",
+			name: "all deps missing blocks",
 			comp: &apiv1.Composition{
 				ObjectMeta: metav1.ObjectMeta{Name: "comp", Namespace: "ns1"},
 				Spec: apiv1.CompositionSpec{
 					DependsOn: []apiv1.CompositionDependency{
-						{Name: "nonexistent-1", Optional: true},
-						{Name: "nonexistent-2", Optional: true},
+						{Name: "nonexistent-1"},
+						{Name: "nonexistent-2"},
 					},
 				},
 			},
-			expected: true,
+			expected: false,
 		},
 	}
 

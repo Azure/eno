@@ -453,11 +453,6 @@ func (c *compositionController) hasActiveDependents(ctx context.Context, comp *a
 			continue
 		}
 
-		// Check if this dependant is optional
-		if isDependencyOptional(&dep, comp) {
-			continue
-		}
-
 		blockedBy = append(blockedBy, apiv1.BlockedByRef{
 			Name:      dep.Name,
 			Namespace: dep.Namespace,
@@ -467,20 +462,6 @@ func (c *compositionController) hasActiveDependents(ctx context.Context, comp *a
 
 	logger.Info(fmt.Sprintf("Composition with Key [%s] Namespace [%s] Name [%s] has dependencyOn %s", key, comp.GetNamespace(), comp.GetName(), blockedBy))
 	return len(blockedBy) > 0, blockedBy, nil
-}
-
-// isDependencyOptional returns true if `dependents` lists `dependency` as an optional dependency
-func isDependencyOptional(dependents *apiv1.Composition, dependency *apiv1.Composition) bool {
-	for _, dep := range dependents.Spec.DependsOn {
-		ns := dep.Namespace
-		if ns == "" {
-			ns = dependents.GetNamespace()
-		}
-		if dep.Name == dependency.GetName() && ns == dependency.GetNamespace() {
-			return dep.Optional
-		}
-	}
-	return false
 }
 
 func (c *compositionController) updateDependencyStatus(ctx context.Context, comp *apiv1.Composition, reason string, blockedBy []apiv1.BlockedByRef) (ctrl.Result, error) {

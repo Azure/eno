@@ -941,43 +941,19 @@ func TestResolveVariationDeps(t *testing.T) {
 			expectedAllResv: false,
 		},
 		{
-			name: "optional unresolved synth",
+			name: "unresolved synth blocks",
 			varDeps: []apiv1.VariationDependency{
-				{Synthesizer: "synth-missing", Optional: true},
+				{Synthesizer: "synth-missing"},
 			},
 			compBySynth:     compBySynth,
 			defaultNS:       "default",
 			expectedDeps:    nil,
-			expectedAllResv: true,
-		},
-		{
-			name: "optional preserved on synth resolution",
-			varDeps: []apiv1.VariationDependency{
-				{Synthesizer: "synth-a", Optional: true},
-			},
-			compBySynth: compBySynth,
-			defaultNS:   "default",
-			expectedDeps: []apiv1.CompositionDependency{
-				{Name: "comp-a", Namespace: "default", Optional: true},
-			},
-			expectedAllResv: true,
-		},
-		{
-			name: "optional preserved on name-based",
-			varDeps: []apiv1.VariationDependency{
-				{Name: "ext-comp", Optional: true},
-			},
-			compBySynth: compBySynth,
-			defaultNS:   "default",
-			expectedDeps: []apiv1.CompositionDependency{
-				{Name: "ext-comp", Namespace: "default", Optional: true},
-			},
-			expectedAllResv: true,
+			expectedAllResv: false,
 		},
 		{
 			name: "dep with neither synthesizer nor name is skipped",
 			varDeps: []apiv1.VariationDependency{
-				{Optional: true},
+				{},
 			},
 			compBySynth:     compBySynth,
 			defaultNS:       "default",

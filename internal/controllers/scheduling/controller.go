@@ -162,7 +162,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 						ns = comp.GetNamespace()
 					}
 					key := path.Join(ns, dep.Name)
-					if _, exists := compsByKey[key]; !exists && !dep.Optional {
+					if _, exists := compsByKey[key]; !exists {
 						logger.Info("required dependency does not exist",
 							"compositionName", comp.GetName(), "dependencyName", dep.Name, "dependencyNamespace", ns)
 					}
