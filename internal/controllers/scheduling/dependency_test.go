@@ -79,8 +79,8 @@ func TestAreDependenciesReady(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "comp", Namespace: "ns1"},
 				Spec: apiv1.CompositionSpec{
 					DependsOn: []apiv1.CompositionDependency{
-						{Name: "dep-a"},
-						{Name: "dep-b"},
+						{Name: "dep-a", Namespace: "ns1"},
+						{Name: "dep-b", Namespace: "ns1"},
 					},
 				},
 			},
@@ -92,8 +92,8 @@ func TestAreDependenciesReady(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "comp", Namespace: "ns1"},
 				Spec: apiv1.CompositionSpec{
 					DependsOn: []apiv1.CompositionDependency{
-						{Name: "dep-a"},
-						{Name: "dep-missing"},
+						{Name: "dep-a", Namespace: "ns1"},
+						{Name: "dep-missing", Namespace: "ns1"},
 					},
 				},
 			},
@@ -105,8 +105,8 @@ func TestAreDependenciesReady(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "comp", Namespace: "ns1"},
 				Spec: apiv1.CompositionSpec{
 					DependsOn: []apiv1.CompositionDependency{
-						{Name: "dep-a"},
-						{Name: "dep-missing"},
+						{Name: "dep-a", Namespace: "ns1"},
+						{Name: "dep-missing", Namespace: "ns1"},
 					},
 				},
 			},
@@ -130,7 +130,7 @@ func TestAreDependenciesReady(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "comp", Namespace: "other-ns"},
 				Spec: apiv1.CompositionSpec{
 					DependsOn: []apiv1.CompositionDependency{
-						{Name: "dep-a"}, // defaults to other-ns, which isn't in readySet
+						{Name: "dep-a", Namespace: "other-ns"}, // explicit other-ns, which isn't in readySet
 					},
 				},
 			},
@@ -142,8 +142,8 @@ func TestAreDependenciesReady(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "comp", Namespace: "ns1"},
 				Spec: apiv1.CompositionSpec{
 					DependsOn: []apiv1.CompositionDependency{
-						{Name: "nonexistent-1"},
-						{Name: "nonexistent-2"},
+						{Name: "nonexistent-1", Namespace: "ns1"},
+						{Name: "nonexistent-2", Namespace: "ns1"},
 					},
 				},
 			},
@@ -186,13 +186,13 @@ func TestDetectCycle(t *testing.T) {
 				"ns/b": {
 					ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "a"}},
+						DependsOn: []apiv1.CompositionDependency{{Name: "a", Namespace: "ns"}},
 					},
 				},
 				"ns/c": {
 					ObjectMeta: metav1.ObjectMeta{Name: "c", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "b"}},
+						DependsOn: []apiv1.CompositionDependency{{Name: "b", Namespace: "ns"}},
 					},
 				},
 			},
@@ -205,13 +205,13 @@ func TestDetectCycle(t *testing.T) {
 				"ns/a": {
 					ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "b"}},
+						DependsOn: []apiv1.CompositionDependency{{Name: "b", Namespace: "ns"}},
 					},
 				},
 				"ns/b": {
 					ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "a"}},
+						DependsOn: []apiv1.CompositionDependency{{Name: "a", Namespace: "ns"}},
 					},
 				},
 			},
@@ -224,19 +224,19 @@ func TestDetectCycle(t *testing.T) {
 				"ns/a": {
 					ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "b"}},
+						DependsOn: []apiv1.CompositionDependency{{Name: "b", Namespace: "ns"}},
 					},
 				},
 				"ns/b": {
 					ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "c"}},
+						DependsOn: []apiv1.CompositionDependency{{Name: "c", Namespace: "ns"}},
 					},
 				},
 				"ns/c": {
 					ObjectMeta: metav1.ObjectMeta{Name: "c", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "a"}},
+						DependsOn: []apiv1.CompositionDependency{{Name: "a", Namespace: "ns"}},
 					},
 				},
 			},
@@ -252,21 +252,21 @@ func TestDetectCycle(t *testing.T) {
 				"ns/b": {
 					ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "a"}},
+						DependsOn: []apiv1.CompositionDependency{{Name: "a", Namespace: "ns"}},
 					},
 				},
 				"ns/c": {
 					ObjectMeta: metav1.ObjectMeta{Name: "c", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "a"}},
+						DependsOn: []apiv1.CompositionDependency{{Name: "a", Namespace: "ns"}},
 					},
 				},
 				"ns/d": {
 					ObjectMeta: metav1.ObjectMeta{Name: "d", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
 						DependsOn: []apiv1.CompositionDependency{
-							{Name: "b"},
-							{Name: "c"},
+							{Name: "b", Namespace: "ns"},
+							{Name: "c", Namespace: "ns"},
 						},
 					},
 				},
@@ -280,7 +280,7 @@ func TestDetectCycle(t *testing.T) {
 				"ns/a": {
 					ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "a"}},
+						DependsOn: []apiv1.CompositionDependency{{Name: "a", Namespace: "ns"}},
 					},
 				},
 			},
@@ -293,7 +293,7 @@ func TestDetectCycle(t *testing.T) {
 				"ns/a": {
 					ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "nonexistent"}},
+						DependsOn: []apiv1.CompositionDependency{{Name: "nonexistent", Namespace: "ns"}},
 					},
 				},
 			},
@@ -325,13 +325,13 @@ func TestDetectCycle(t *testing.T) {
 				"ns/a": {
 					ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "b"}},
+						DependsOn: []apiv1.CompositionDependency{{Name: "b", Namespace: "ns"}},
 					},
 				},
 				"ns/b": {
 					ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "a"}},
+						DependsOn: []apiv1.CompositionDependency{{Name: "a", Namespace: "ns"}},
 					},
 				},
 				"ns/d": {
@@ -348,13 +348,13 @@ func TestDetectCycle(t *testing.T) {
 				"ns/a": {
 					ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "b"}},
+						DependsOn: []apiv1.CompositionDependency{{Name: "b", Namespace: "ns"}},
 					},
 				},
 				"ns/b": {
 					ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "a"}},
+						DependsOn: []apiv1.CompositionDependency{{Name: "a", Namespace: "ns"}},
 					},
 				},
 				"ns/d": {
@@ -364,7 +364,7 @@ func TestDetectCycle(t *testing.T) {
 						// D is not itself on the cycle, but is marked cyclic as a
 						// conservative over-approximation since its dependency chain
 						// is fundamentally broken.
-						DependsOn: []apiv1.CompositionDependency{{Name: "a"}},
+						DependsOn: []apiv1.CompositionDependency{{Name: "a", Namespace: "ns"}},
 					},
 				},
 			},

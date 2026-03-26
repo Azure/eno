@@ -48,7 +48,7 @@ func TestIndexCompositionsByDependency(t *testing.T) {
 			expected: []string{"ns2/comp-a"},
 		},
 		{
-			name: "empty namespace defaults to composition namespace",
+			name: "empty namespace uses empty namespace in key",
 			comp: &apiv1.Composition{
 				ObjectMeta: metav1.ObjectMeta{Name: "comp-b", Namespace: "ns1"},
 				Spec: apiv1.CompositionSpec{
@@ -57,7 +57,7 @@ func TestIndexCompositionsByDependency(t *testing.T) {
 					},
 				},
 			},
-			expected: []string{"ns1/comp-a"},
+			expected: []string{"comp-a"},
 		},
 	}
 

@@ -627,7 +627,7 @@ func TestHasActiveDependents(t *testing.T) {
 					},
 					Spec: apiv1.CompositionSpec{
 						DependsOn: []apiv1.CompositionDependency{
-							{Name: "dep-a"}, // no namespace - should default to ns1
+							{Name: "dep-a", Namespace: "ns1"},
 						},
 					},
 				},

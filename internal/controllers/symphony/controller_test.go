@@ -892,7 +892,7 @@ func TestResolveVariationDeps(t *testing.T) {
 		{
 			name: "name-based uses default namespace",
 			varDeps: []apiv1.VariationDependency{
-				{Name: "external-comp"},
+				{Name: "external-comp", Namespace: "my-ns"},
 			},
 			compBySynth: compBySynth,
 			defaultNS:   "my-ns",
@@ -931,7 +931,7 @@ func TestResolveVariationDeps(t *testing.T) {
 			name: "mixed unresolved synth and name-based",
 			varDeps: []apiv1.VariationDependency{
 				{Synthesizer: "synth-missing"},
-				{Name: "ext-comp"},
+				{Name: "ext-comp", Namespace: "default"},
 			},
 			compBySynth: compBySynth,
 			defaultNS:   "default",
