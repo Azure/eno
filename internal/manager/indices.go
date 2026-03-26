@@ -58,14 +58,13 @@ func indexSynthRefs() client.IndexerFunc {
 
 func indexCompositionsByDependency() client.IndexerFunc {
 	return func(o client.Object) []string {
-		comp := o.(*apiv1.Composition)
+		comp, ok := o.(*apiv1.Composition)
+		if !ok {
+			return nil
+		}
 		var keys []string
 		for _, dep := range comp.Spec.DependsOn {
-			ns := dep.Namespace
-			if ns == "" {
-				ns = comp.Namespace
-			}
-			keys = append(keys, path.Join(ns, dep.Name))
+			keys = append(keys, path.Join(dep.Namespace, dep.Name))
 		}
 		return keys
 	}

@@ -157,14 +157,10 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			if !areDependenciesReady(&comp, readySet) {
 
 				for _, dep := range comp.Spec.DependsOn {
-					ns := dep.Namespace
-					if ns == "" {
-						ns = comp.GetNamespace()
-					}
-					key := path.Join(ns, dep.Name)
+					key := path.Join(dep.Namespace, dep.Name)
 					if _, exists := compsByKey[key]; !exists {
-						logger.Info("required dependency does not exist",
-							"compositionName", comp.GetName(), "dependencyName", dep.Name, "dependencyNamespace", ns)
+						logger.Error(fmt.Errorf("dependency %s/%s not found", dep.Namespace, dep.Name), "required dependency does not exist",
+							"compositionName", comp.GetName(), "dependencyName", dep.Name, "dependencyNamespace", dep.Namespace)
 					}
 				}
 				logger.Info("not all dependent compositions are ready, skipping composition synthesis", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace())

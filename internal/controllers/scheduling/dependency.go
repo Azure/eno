@@ -31,11 +31,7 @@ func buildCompsByKey(comps *apiv1.CompositionList) map[string]*apiv1.Composition
 // areDependenciesReady checks if all required dependencies are ready.
 func areDependenciesReady(comp *apiv1.Composition, readySet map[string]bool) bool {
 	for _, dep := range comp.Spec.DependsOn {
-		ns := dep.Namespace
-		if ns == "" {
-			ns = comp.GetNamespace()
-		}
-		key := path.Join(ns, dep.Name)
+		key := path.Join(dep.Namespace, dep.Name)
 		if !readySet[key] { // dependency is not ready
 			return false
 		}
@@ -51,40 +47,48 @@ func areDependenciesReady(comp *apiv1.Composition, readySet map[string]bool) boo
 // Runs a single DFS pass over the entire graph: O(N + E) run time.
 func detectAllCycles(allComps map[string]*apiv1.Composition) map[string]bool {
 	cyclic := map[string]bool{}
-	visited := map[string]bool{}
-	stack := map[string]bool{}
+	color := map[string]int{} // 0=unvisited, 1=inProcess, 2=done
 
-	var dfs func(key string)
-	dfs = func(key string) {
-		if visited[key] {
-			return
+	for startKey := range allComps {
+		if color[startKey] == 2 {
+			continue
 		}
 
-		visited[key] = true
-		stack[key] = true
-
-		if comp, ok := allComps[key]; ok {
-			for _, dep := range comp.Spec.DependsOn {
-				ns := dep.Namespace
-				if ns == "" {
-					ns = comp.GetNamespace()
+		stack := []string{startKey}
+		for len(stack) > 0 {
+			key := stack[len(stack)-1]
+			if color[key] == 0 {
+				// first visit: mark in-progress, push unvisited children
+				color[key] = 1
+				if comp, ok := allComps[key]; ok {
+					for _, dep := range comp.Spec.DependsOn {
+						depKey := path.Join(dep.Namespace, dep.Name)
+						if color[depKey] == 1 {
+							cyclic[depKey] = true
+							cyclic[key] = true
+						} else if color[depKey] == 0 {
+							stack = append(stack, depKey)
+						} else if cyclic[depKey] {
+							cyclic[key] = true
+						}
+					}
 				}
-				depKey := path.Join(ns, dep.Name)
-				if stack[depKey] {
-					cyclic[depKey] = true
-					cyclic[key] = true
-					continue
-				}
-				dfs(depKey)
-				if cyclic[depKey] {
-					cyclic[key] = true
+			} else {
+				// Second visit: pop, propagate cyclic from children, mark done
+				stack = stack[:len(stack)-1]
+				if color[key] == 1 {
+					if comp, ok := allComps[key]; ok {
+						for _, dep := range comp.Spec.DependsOn {
+							depKey := path.Join(dep.Namespace, dep.Name)
+							if cyclic[depKey] {
+								cyclic[key] = true
+							}
+						}
+					}
+					color[key] = 2
 				}
 			}
 		}
-		delete(stack, key)
-	}
-	for key := range allComps {
-		dfs(key)
 	}
 	return cyclic
 }

@@ -107,12 +107,8 @@ func (c *compositionController) newDependencyEventHandler() handler.TypedEventHa
 		// When a dependent changes (e.g. deleted), notify its dependencies
 		// so they can re-check hasActiveDependents during deletion ordering
 		for _, dep := range comp.Spec.DependsOn {
-			ns := dep.Namespace
-			if ns == "" {
-				ns = comp.GetNamespace()
-			}
 			reqs = append(reqs, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: dep.Name, Namespace: ns},
+				NamespacedName: types.NamespacedName{Name: dep.Name, Namespace: dep.Namespace},
 			})
 		}
 		return reqs

@@ -248,7 +248,8 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		deps, allresolved := resolveVariationDeps(variation.DependsOn, compBySynth, symph.GetNamespace())
 		for _, dep := range variation.DependsOn {
 			if dep.Synthesizer == "" && dep.Name == "" {
-				logger.Info("WARNING: variation dependency has neither synthesizer nor name set, dependency will be ignored",
+				logger.Error(fmt.Errorf("No Variation Dependency Synthesizer or Name"),
+					"WARNING: variation dependency has neither synthesizer nor name set, dependency will be ignored",
 					"synthesizerName", variation.Synthesizer.Name)
 			}
 		}
@@ -511,13 +512,9 @@ func resolveVariationDeps(varDeps []apiv1.VariationDependency, compBySynth map[s
 				Namespace: target.Namespace,
 			})
 		} else if dep.Name != "" {
-			ns := dep.Namespace
-			if ns == "" {
-				ns = defaultNS
-			}
 			resolved = append(resolved, apiv1.CompositionDependency{
 				Name:      dep.Name,
-				Namespace: ns,
+				Namespace: dep.Namespace,
 			})
 		}
 	}
