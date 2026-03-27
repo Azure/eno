@@ -21,6 +21,20 @@ docker-build-eno-reconciler:
 		--tag $(REGISTRY)/$(ENO_RECONCILER_IMAGE_NAME):$(ENO_RECONCILER_IMAGE_VERSION) .
 	docker push $(REGISTRY)/$(ENO_RECONCILER_IMAGE_NAME):$(ENO_RECONCILER_IMAGE_VERSION)
 
+.PHONY: podman-build-push-eno-controller
+podman-build-push-eno-controller:
+	podman build \
+		--file docker/$(ENO_CONTROLLER_IMAGE_NAME)/Dockerfile \
+		--tag $(REGISTRY)/$(ENO_CONTROLLER_IMAGE_NAME):$(ENO_CONTROLLER_IMAGE_VERSION) .
+	podman push $(REGISTRY)/$(ENO_CONTROLLER_IMAGE_NAME):$(ENO_CONTROLLER_IMAGE_VERSION)
+
+.PHONY: podman-build-push-eno-reconciler
+podman-build-push-eno-reconciler:
+	podman build \
+		--file docker/$(ENO_RECONCILER_IMAGE_NAME)/Dockerfile \
+		--tag $(REGISTRY)/$(ENO_RECONCILER_IMAGE_NAME):$(ENO_RECONCILER_IMAGE_VERSION) .
+	podman push $(REGISTRY)/$(ENO_RECONCILER_IMAGE_NAME):$(ENO_RECONCILER_IMAGE_VERSION)
+
 # Setup controller-runtime test environment binaries
 .PHONY: setup-testenv
 setup-testenv:
