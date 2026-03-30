@@ -241,6 +241,18 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		res.ReadinessChecks = append(res.ReadinessChecks, check)
 	}
 	sort.Slice(res.ReadinessChecks, func(i, j int) bool { return res.ReadinessChecks[i].Name < res.ReadinessChecks[j].Name })
+	if createGrp, ok := managedCreateOrder[res.GVK.Kind]; ok {
+		if res.readinessGroup != 0 && res.readinessGroup != createGrp {
+			logger.Info("overriding user-specified readiness-group for managed kind",
+				"userDefineReadinessGroup", res.readinessGroup, "managedReadinessGroup", createGrp)
+		}
+		if res.deletionGroup != nil && *res.deletionGroup != -createGrp {
+			logger.Info("overriding user-specified deletion-group for managed kind",
+				"userDefineDeletionGroup", res.deletionGroup, "managedDeletionGroup", -createGrp)
+		}
+	}
+	applyManagedOrdering(res)
+
 	logger.Info("resource created successfully")
 	return res, nil
 }
