@@ -113,14 +113,25 @@ func TestBuildNonStrategicPatch_NilPrevious(t *testing.T) {
 
 func TestShouldFailOpen(t *testing.T) {
 	c := &Controller{failOpen: true}
-	assert.True(t, c.shouldFailOpen(&resource.Resource{FailOpen: nil}))
-	assert.False(t, c.shouldFailOpen(&resource.Resource{FailOpen: ptr.To(false)}))
-	assert.True(t, c.shouldFailOpen(&resource.Resource{FailOpen: ptr.To(true)}))
+	assert.True(t, c.shouldFailOpen(nil, &resource.Resource{FailOpen: nil}))
+	assert.False(t, c.shouldFailOpen(nil, &resource.Resource{FailOpen: ptr.To(false)}))
+	assert.True(t, c.shouldFailOpen(nil, &resource.Resource{FailOpen: ptr.To(true)}))
 
 	c.failOpen = false
-	assert.False(t, c.shouldFailOpen(&resource.Resource{FailOpen: nil}))
-	assert.False(t, c.shouldFailOpen(&resource.Resource{FailOpen: ptr.To(false)}))
-	assert.True(t, c.shouldFailOpen(&resource.Resource{FailOpen: ptr.To(true)}))
+	assert.False(t, c.shouldFailOpen(nil, &resource.Resource{FailOpen: nil}))
+	assert.False(t, c.shouldFailOpen(nil, &resource.Resource{FailOpen: ptr.To(false)}))
+	assert.True(t, c.shouldFailOpen(nil, &resource.Resource{FailOpen: ptr.To(true)}))
+
+	// Foreground deletion during active deletion should never fail open
+	c.failOpen = true
+	deletingSnap := &resource.Snapshot{Resource: &resource.Resource{}, ForegroundDeletion: true, Disable: true}
+	assert.False(t, c.shouldFailOpen(deletingSnap, &resource.Resource{FailOpen: nil}))
+	assert.False(t, c.shouldFailOpen(deletingSnap, &resource.Resource{FailOpen: ptr.To(true)}))
+
+	// Non-foreground deletion snap should still respect fail-open settings
+	nonFgSnap := &resource.Snapshot{Resource: &resource.Resource{}, ForegroundDeletion: false}
+	assert.True(t, c.shouldFailOpen(nonFgSnap, &resource.Resource{FailOpen: nil}))
+	assert.True(t, c.shouldFailOpen(nonFgSnap, &resource.Resource{FailOpen: ptr.To(true)}))
 }
 
 func TestSummarizeError(t *testing.T) {
