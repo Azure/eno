@@ -245,11 +245,11 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		// Resolve variation dependencies to composition dependencies. If the dependent composition does not exist yet
 		// DO NOT CREATE the current composition as it might lead to race condition and ordering not being respected
 
-		deps, allresolved := resolveVariationDeps(variation.DependsOn, compBySynth, symph.GetNamespace())
+		deps, allresolved := resolveVariationDeps(variation.DependsOn, compBySynth)
 		for _, dep := range variation.DependsOn {
-			if dep.Synthesizer == "" && dep.Name == "" {
-				logger.Error(fmt.Errorf("No Variation Dependency Synthesizer or Name"),
-					"WARNING: variation dependency has neither synthesizer nor name set, dependency will be ignored",
+			if dep.Synthesizer == "" {
+				logger.Error(fmt.Errorf("No Variation Dependency Synthesizer"),
+					"Error: variation dependency has no synthesizer set, dependency will be ignored",
 					"synthesizerName", variation.Synthesizer.Name)
 			}
 		}
@@ -493,7 +493,7 @@ func pruneAnnotations(variation *apiv1.Variation, existing *apiv1.Composition) b
 	return changed
 }
 
-func resolveVariationDeps(varDeps []apiv1.VariationDependency, compBySynth map[string]*apiv1.Composition, defaultNS string) ([]apiv1.CompositionDependency, bool) {
+func resolveVariationDeps(varDeps []apiv1.VariationDependency, compBySynth map[string]*apiv1.Composition) ([]apiv1.CompositionDependency, bool) {
 	if len(varDeps) == 0 {
 		return nil, true
 	}
@@ -501,22 +501,16 @@ func resolveVariationDeps(varDeps []apiv1.VariationDependency, compBySynth map[s
 	allResolved := true
 	var resolved []apiv1.CompositionDependency
 	for _, dep := range varDeps {
-		if dep.Synthesizer != "" {
-			target, ok := compBySynth[dep.Synthesizer]
-			if !ok {
-				allResolved = false
-				continue // composition does not exist yet - will resolve on next reconcile
-			}
-			resolved = append(resolved, apiv1.CompositionDependency{
-				Name:      target.Name,
-				Namespace: target.Namespace,
-			})
-		} else if dep.Name != "" {
-			resolved = append(resolved, apiv1.CompositionDependency{
-				Name:      dep.Name,
-				Namespace: dep.Namespace,
-			})
+		target, ok := compBySynth[dep.Synthesizer]
+		if !ok {
+			allResolved = false
+			continue // composition does not exist yet - will resolve on next reconcile
 		}
+		resolved = append(resolved, apiv1.CompositionDependency{
+			Name:      target.Name,
+			Namespace: target.Namespace,
+		})
+
 	}
 	return resolved, allResolved
 }

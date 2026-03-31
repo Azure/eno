@@ -106,10 +106,13 @@ func (c *compositionController) newDependencyEventHandler() handler.TypedEventHa
 
 		// When a dependent changes (e.g. deleted), notify its dependencies
 		// so they can re-check hasActiveDependents during deletion ordering
-		for _, dep := range comp.Spec.DependsOn {
-			reqs = append(reqs, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: dep.Name, Namespace: dep.Namespace},
-			})
+		// To avoid unnecessary noises, we only requeue when this is a deletion call
+		if comp.DeletionTimestamp != nil {
+			for _, dep := range comp.Spec.DependsOn {
+				reqs = append(reqs, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: dep.Name, Namespace: dep.Namespace},
+				})
+			}
 		}
 		return reqs
 	}
@@ -193,7 +196,6 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 func (c *compositionController) reconcileDeletedComposition(ctx context.Context, comp *apiv1.Composition) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	// Check for active non-optional dependents BEFORE starting deletion work
 	// We need to do this before adding UUID to because updating the UUID triggers the deletion from
 	// the reconstituation controller
 	blocked, blockedBy, err := c.hasActiveDependents(ctx, comp)
@@ -207,7 +209,7 @@ func (c *compositionController) reconcileDeletedComposition(ctx context.Context,
 		return c.updateDependencyStatus(ctx, comp, apiv1.WaitingOnDependentsReason, blockedBy)
 	}
 
-	// Once the given's composition's dependents are deleted then we can clear the dependenc status
+	// Once the given's composition's dependents are deleted then we can clear the dependency status
 	// Note that once we clear the hasActiveDependents step we will proceed to deletion. This clearing step
 	// is just for the corretness step during this brief window
 	if comp.Status.DependencyStatus != nil {
@@ -438,7 +440,7 @@ func (c *compositionController) hasActiveDependents(ctx context.Context, comp *a
 	var dependants apiv1.CompositionList
 	err := c.client.List(ctx, &dependants, client.MatchingFields{manager.IdxCompositionsByDependency: key})
 	if err != nil {
-		logger.Error(err, "failed to list active dependatns for composition")
+		logger.Error(err, "failed to list active dependants for composition")
 		return false, nil, fmt.Errorf("listing dependents: %w", err)
 	}
 

@@ -84,8 +84,6 @@ type VariationDependency struct {
 	// Synthesizer name of the dependency variation (within the same symphony).
 	// Resolved to the actual composition name by the symphony controller
 	Synthesizer string `json:"synthesizer,omitempty"`
-	Name        string `json:"name,omitempty"`
-	Namespace   string `json:"namespace,omitempty"`
 }
 
 func (c *Symphony) GetAzureOperationID() string {

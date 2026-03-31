@@ -137,10 +137,6 @@ spec:
                         Max dependencies is 50
                       items:
                         properties:
-                          name:
-                            type: string
-                          namespace:
-                            type: string
                           synthesizer:
                             description: |-
                               Synthesizer name of the dependency variation (within the same symphony).

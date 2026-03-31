@@ -855,7 +855,6 @@ func TestResolveVariationDeps(t *testing.T) {
 		name            string
 		varDeps         []apiv1.VariationDependency
 		compBySynth     map[string]*apiv1.Composition
-		defaultNS       string
 		expectedDeps    []apiv1.CompositionDependency
 		expectedAllResv bool
 	}{
@@ -863,7 +862,6 @@ func TestResolveVariationDeps(t *testing.T) {
 			name:            "empty deps",
 			varDeps:         nil,
 			compBySynth:     compBySynth,
-			defaultNS:       "default",
 			expectedDeps:    nil,
 			expectedAllResv: true,
 		},
@@ -873,7 +871,6 @@ func TestResolveVariationDeps(t *testing.T) {
 				{Synthesizer: "synth-a"},
 			},
 			compBySynth: compBySynth,
-			defaultNS:   "default",
 			expectedDeps: []apiv1.CompositionDependency{
 				{Name: "comp-a", Namespace: "default"},
 			},
@@ -885,59 +882,7 @@ func TestResolveVariationDeps(t *testing.T) {
 				{Synthesizer: "synth-missing"},
 			},
 			compBySynth:     compBySynth,
-			defaultNS:       "default",
 			expectedDeps:    nil,
-			expectedAllResv: false,
-		},
-		{
-			name: "name-based uses default namespace",
-			varDeps: []apiv1.VariationDependency{
-				{Name: "external-comp", Namespace: "my-ns"},
-			},
-			compBySynth: compBySynth,
-			defaultNS:   "my-ns",
-			expectedDeps: []apiv1.CompositionDependency{
-				{Name: "external-comp", Namespace: "my-ns"},
-			},
-			expectedAllResv: true,
-		},
-		{
-			name: "name-based with explicit namespace",
-			varDeps: []apiv1.VariationDependency{
-				{Name: "external-comp", Namespace: "explicit-ns"},
-			},
-			compBySynth: compBySynth,
-			defaultNS:   "my-ns",
-			expectedDeps: []apiv1.CompositionDependency{
-				{Name: "external-comp", Namespace: "explicit-ns"},
-			},
-			expectedAllResv: true,
-		},
-		{
-			name: "mixed resolved synth and name-based",
-			varDeps: []apiv1.VariationDependency{
-				{Synthesizer: "synth-b"},
-				{Name: "ext-comp", Namespace: "ext-ns"},
-			},
-			compBySynth: compBySynth,
-			defaultNS:   "default",
-			expectedDeps: []apiv1.CompositionDependency{
-				{Name: "comp-b", Namespace: "ns-other"},
-				{Name: "ext-comp", Namespace: "ext-ns"},
-			},
-			expectedAllResv: true,
-		},
-		{
-			name: "mixed unresolved synth and name-based",
-			varDeps: []apiv1.VariationDependency{
-				{Synthesizer: "synth-missing"},
-				{Name: "ext-comp", Namespace: "default"},
-			},
-			compBySynth: compBySynth,
-			defaultNS:   "default",
-			expectedDeps: []apiv1.CompositionDependency{
-				{Name: "ext-comp", Namespace: "default"},
-			},
 			expectedAllResv: false,
 		},
 		{
@@ -946,19 +891,17 @@ func TestResolveVariationDeps(t *testing.T) {
 				{Synthesizer: "synth-missing"},
 			},
 			compBySynth:     compBySynth,
-			defaultNS:       "default",
 			expectedDeps:    nil,
 			expectedAllResv: false,
 		},
 		{
-			name: "dep with neither synthesizer nor name is skipped",
+			name: "dep with empty synthesizer is unresolved",
 			varDeps: []apiv1.VariationDependency{
 				{},
 			},
 			compBySynth:     compBySynth,
-			defaultNS:       "default",
 			expectedDeps:    nil,
-			expectedAllResv: true,
+			expectedAllResv: false,
 		},
 		{
 			name: "partial synth resolution",
@@ -968,7 +911,6 @@ func TestResolveVariationDeps(t *testing.T) {
 				{Synthesizer: "synth-b"},
 			},
 			compBySynth: compBySynth,
-			defaultNS:   "default",
 			expectedDeps: []apiv1.CompositionDependency{
 				{Name: "comp-a", Namespace: "default"},
 				{Name: "comp-b", Namespace: "ns-other"},
@@ -979,7 +921,7 @@ func TestResolveVariationDeps(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			deps, allResolved := resolveVariationDeps(tc.varDeps, tc.compBySynth, tc.defaultNS)
+			deps, allResolved := resolveVariationDeps(tc.varDeps, tc.compBySynth)
 			assert.Equal(t, tc.expectedAllResv, allResolved)
 			assert.Equal(t, tc.expectedDeps, deps)
 		})

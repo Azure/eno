@@ -153,7 +153,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	if failingOpen {
 		logger.Info("FailOpen - suppressing errors")
 		err = nil
-		//modified = false
+		modified = false
 	}
 	if err != nil {
 		logger.Error(err, "resource reconciliation failed")
