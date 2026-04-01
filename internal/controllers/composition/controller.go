@@ -87,23 +87,6 @@ func (c *compositionController) newSynthEventHandler() handler.TypedEventHandler
 
 func (c *compositionController) newDependencyEventHandler() handler.TypedEventHandler[*apiv1.Composition, reconcile.Request] {
 	fn := func(ctx context.Context, comp *apiv1.Composition) (reqs []reconcile.Request) {
-		logger := logr.FromContextOrDiscard(ctx)
-
-		// Find compositions that lists this composition as a dependency
-		key := path.Join(comp.GetNamespace(), comp.GetName())
-		var dependents apiv1.CompositionList
-		if err := c.client.List(ctx, &dependents,
-			client.MatchingFields{manager.IdxCompositionsByDependency: key}); err != nil {
-			logger.Error(err, "failed to list dependents for composition")
-			return nil
-		}
-
-		for _, dep := range dependents.Items {
-			reqs = append(reqs, reconcile.Request{
-				NamespacedName: client.ObjectKeyFromObject(&dep),
-			})
-		}
-
 		// When a dependent changes (e.g. deleted), notify its dependencies
 		// so they can re-check hasActiveDependents during deletion ordering
 		// To avoid unnecessary noises, we only requeue when this is a deletion call
