@@ -241,17 +241,26 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		res.ReadinessChecks = append(res.ReadinessChecks, check)
 	}
 	sort.Slice(res.ReadinessChecks, func(i, j int) bool { return res.ReadinessChecks[i].Name < res.ReadinessChecks[j].Name })
-	if createGrp, ok := managedCreateOrder[res.GVK.Kind]; ok {
-		if res.readinessGroup != 0 && res.readinessGroup != createGrp {
-			logger.Info("overriding user-specified readiness-group for managed kind",
-				"userDefineReadinessGroup", res.readinessGroup, "managedReadinessGroup", createGrp)
+	// This indicates that this is an infrastructure Kind
+	if defaultGrp, ok := managedCreateOrder[res.GVK.Kind]; ok {
+		if _, ok := anno[readinessGroupKey]; !ok {
+			logger.Info("User did not specify a readiness-group for managed kind, assigning default readiness group to infrastructure kind",
+				"kind", res.GVK.Kind, "defaultGroup", defaultGrp)
+			res.applyDefaultReadinessGroupOrdering(defaultGrp)
+		} else {
+			logger.Info("User provided default readiness group. Skip setting default infrastructure kind",
+				"kind", res.GVK.Kind, "readinessGroup", res.readinessGroup)
 		}
-		if res.deletionGroup != nil && *res.deletionGroup != -createGrp {
-			logger.Info("overriding user-specified deletion-group for managed kind",
-				"userDefineDeletionGroup", res.deletionGroup, "managedDeletionGroup", -createGrp)
+
+		if _, ok := anno[deletionGroupKey]; !ok {
+			logger.Info("User did not specify a deletion group for managed kind, assigning default deletion group to infrastructure kind",
+				"kind", res.GVK.Kind, "defaultGroup", defaultGrp)
+			res.applyDefaultDeletionGroupOrdering(-defaultGrp)
+		} else {
+			logger.Info("User provided default deletion group. Skip setting default infrastructure kind",
+				"kind", res.GVK.Kind, "deletionGroup", res.deletionGroup)
 		}
 	}
-	applyManagedOrdering(res)
 
 	logger.Info("resource created successfully")
 	return res, nil

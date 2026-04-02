@@ -212,8 +212,8 @@ func TestCacheResourceFilter(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "slice-1"},
 		Spec: apiv1.ResourceSliceSpec{
 			Resources: []apiv1.Manifest{
-				{Manifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "allowed", "namespace": "default", "labels": {"env": "prod"}}}`},
-				{Manifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "filtered", "namespace": "default", "labels": {"env": "dev"}}}`},
+				{Manifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "allowed", "namespace": "default", "labels": {"env": "prod"}, "annotations": {"eno.azure.io/readiness-group": "0"}}}`},
+				{Manifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "filtered", "namespace": "default", "labels": {"env": "dev"}, "annotations": {"eno.azure.io/readiness-group": "0"}}}`},
 				{Manifest: `{"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "pod-prod", "namespace": "default", "labels": {"env": "prod"}}}`},
 			},
 		},
@@ -385,7 +385,7 @@ func TestCacheResourceFilterAlwaysTrue(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "slice-1"},
 		Spec: apiv1.ResourceSliceSpec{
 			Resources: []apiv1.Manifest{
-				{Manifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "resource-1", "namespace": "default"}}`},
+				{Manifest: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "resource-1", "namespace": "default", "annotations": {"eno.azure.io/readiness-group": "0"}}}`},
 				{Manifest: `{"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "resource-2", "namespace": "default"}}`},
 			},
 		},

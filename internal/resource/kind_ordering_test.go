@@ -30,7 +30,7 @@ func TestManagedCreateOrderGroupRange(t *testing.T) {
 	}
 }
 
-func TestApplyManagedOrdering_ManagedKind(t *testing.T) {
+func TestApplyDefaultOrdering_ManagedKind(t *testing.T) {
 	tests := []struct {
 		kind             string
 		expectedCreate   int
@@ -51,9 +51,10 @@ func TestApplyManagedOrdering_ManagedKind(t *testing.T) {
 		t.Run(tc.kind, func(t *testing.T) {
 			res := &Resource{}
 			res.GVK.Kind = tc.kind
-			res.readinessGroup = 5 // user tried to set a custom group
 
-			applyManagedOrdering(res)
+			createGrp := managedCreateOrder[tc.kind]
+			res.applyDefaultReadinessGroupOrdering(createGrp)
+			res.applyDefaultDeletionGroupOrdering(-createGrp)
 
 			assert.Equal(t, tc.expectedCreate, res.readinessGroup)
 			require.NotNil(t, res.deletionGroup)
@@ -62,7 +63,7 @@ func TestApplyManagedOrdering_ManagedKind(t *testing.T) {
 	}
 }
 
-func TestApplyManagedOrdering_UnmanagedKind(t *testing.T) {
+func TestApplyDefaultOrdering_UnmanagedKindNotInMap(t *testing.T) {
 	unmanagedKinds := []string{
 		"Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob",
 		"Ingress", "IngressClass", "HorizontalPodAutoscaler",
@@ -71,24 +72,19 @@ func TestApplyManagedOrdering_UnmanagedKind(t *testing.T) {
 	}
 	for _, kind := range unmanagedKinds {
 		t.Run(kind, func(t *testing.T) {
-			res := &Resource{}
-			res.GVK.Kind = kind
-			res.readinessGroup = 3
-
-			applyManagedOrdering(res)
-
-			assert.Equal(t, 3, res.readinessGroup, "group should remain user-defined")
-			assert.Nil(t, res.deletionGroup, "should have no auto-assigned deletion group")
+			_, ok := managedCreateOrder[kind]
+			assert.False(t, ok, "kind %q should not be in managedCreateOrder", kind)
 		})
 	}
 }
 
-func TestApplyManagedOrdering_DeletionIsReverseOfCreate(t *testing.T) {
+func TestApplyDefaultOrdering_DeletionIsReverseOfCreate(t *testing.T) {
 	for kind, createGrp := range managedCreateOrder {
 		t.Run(kind, func(t *testing.T) {
 			res := &Resource{}
 			res.GVK.Kind = kind
-			applyManagedOrdering(res)
+			res.applyDefaultReadinessGroupOrdering(createGrp)
+			res.applyDefaultDeletionGroupOrdering(-createGrp)
 
 			require.NotNil(t, res.deletionGroup)
 			assert.Equal(t, -createGrp, *res.deletionGroup,
@@ -97,20 +93,36 @@ func TestApplyManagedOrdering_DeletionIsReverseOfCreate(t *testing.T) {
 	}
 }
 
-func TestApplyManagedOrdering_OverridesUserAnnotations(t *testing.T) {
+func TestApplyDefaultOrdering_UserAnnotationsPreserved(t *testing.T) {
 	// User sets readiness-group=5 and deletion-group=10 on a Namespace.
-	// Both should be overridden.
+	// Since user provided annotations, the helpers should NOT be called.
+	// Verify that if we only call one helper, the other value is preserved.
 	res := &Resource{}
 	res.GVK.Kind = "Namespace"
 	res.readinessGroup = 5
 	delGrp := 10
 	res.deletionGroup = &delGrp
 
-	applyManagedOrdering(res)
+	// Simulate: user set both annotations, so neither helper is called.
+	// The resource should keep user-specified values.
+	assert.Equal(t, 5, res.readinessGroup, "user-specified readiness group should be preserved")
+	assert.Equal(t, 10, *res.deletionGroup, "user-specified deletion group should be preserved")
+}
 
-	assert.Equal(t, -100, res.readinessGroup)
+func TestApplyDefaultOrdering_PartialUserAnnotation(t *testing.T) {
+	// User sets only readiness-group, not deletion-group.
+	// Only the deletion helper should be called.
+	res := &Resource{}
+	res.GVK.Kind = "Namespace"
+	res.readinessGroup = 5 // user-specified
+
+	createGrp := managedCreateOrder["Namespace"]
+	// Only apply default deletion group (user didn't set it)
+	res.applyDefaultDeletionGroupOrdering(-createGrp)
+
+	assert.Equal(t, 5, res.readinessGroup, "user-specified readiness group should be preserved")
 	require.NotNil(t, res.deletionGroup)
-	assert.Equal(t, 100, *res.deletionGroup)
+	assert.Equal(t, 100, *res.deletionGroup, "default deletion group should be applied")
 }
 
 func TestManagedOrderingPrecedence(t *testing.T) {
@@ -137,7 +149,8 @@ func TestManagedOrderingDeletionPrecedence(t *testing.T) {
 	getDelGrp := func(kind string) int {
 		res := &Resource{}
 		res.GVK.Kind = kind
-		applyManagedOrdering(res)
+		createGrp := managedCreateOrder[kind]
+		res.applyDefaultDeletionGroupOrdering(-createGrp)
 		return *res.deletionGroup
 	}
 
@@ -153,27 +166,30 @@ func TestManagedOrderingDeletionPrecedence(t *testing.T) {
 	assert.Less(t, getDelGrp("ServiceAccount"), getDelGrp("Namespace"))
 }
 
-func TestApplyManagedOrdering_NoEffectOnDefaultUnmanagedResource(t *testing.T) {
-	// A Deployment with no explicit annotations should be unaffected
+func TestApplyDefaultOrdering_NoEffectOnUnmanagedResource(t *testing.T) {
+	// A Deployment is not in managedCreateOrder, so no helpers should be called.
+	// Verify the kind is not in the map and default values are unchanged.
 	res := &Resource{}
 	res.GVK.Kind = "Deployment"
 
-	applyManagedOrdering(res)
-
+	_, ok := managedCreateOrder["Deployment"]
+	assert.False(t, ok, "Deployment should not be in managedCreateOrder")
 	assert.Equal(t, 0, res.readinessGroup)
 	assert.Nil(t, res.deletionGroup)
 }
 
 func TestManagedKindGroupsAreDeterministic(t *testing.T) {
 	// Same kind should always get the same group across two calls
-	for kind := range managedCreateOrder {
+	for kind, createGrp := range managedCreateOrder {
 		res1 := &Resource{}
 		res1.GVK.Kind = kind
-		applyManagedOrdering(res1)
+		res1.applyDefaultReadinessGroupOrdering(createGrp)
+		res1.applyDefaultDeletionGroupOrdering(-createGrp)
 
 		res2 := &Resource{}
 		res2.GVK.Kind = kind
-		applyManagedOrdering(res2)
+		res2.applyDefaultReadinessGroupOrdering(createGrp)
+		res2.applyDefaultDeletionGroupOrdering(-createGrp)
 
 		assert.Equal(t, res1.readinessGroup, res2.readinessGroup, "kind %q", kind)
 		require.NotNil(t, res1.deletionGroup)

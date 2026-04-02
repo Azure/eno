@@ -161,6 +161,10 @@ func TestLargeNamespaceDeletion(t *testing.T) {
 			"kind":       "Namespace",
 			"metadata": map[string]any{
 				"name": "test",
+				"annotations": map[string]any{
+					"eno.azure.io/readiness-group": "0",
+					"eno.azure.io/deletion-group":  "0",
+				},
 			},
 		},
 	}
@@ -176,6 +180,10 @@ func TestLargeNamespaceDeletion(t *testing.T) {
 					"metadata": map[string]any{
 						"name":      fmt.Sprintf("test-%d", i),
 						"namespace": ns.GetName(),
+						"annotations": map[string]any{
+							"eno.azure.io/readiness-group": "0",
+							"eno.azure.io/deletion-group":  "0",
+						},
 					},
 				},
 			}

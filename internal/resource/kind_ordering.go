@@ -35,13 +35,12 @@ var managedCreateOrder = map[string]int{
 	"Service":                  -89,
 }
 
-// applyManagedOrdering overrides the readiness and deletion group for managed infrastructure kinds
-func applyManagedOrdering(res *Resource) {
-	createGrp, ok := managedCreateOrder[res.GVK.Kind]
-	if !ok {
-		return
-	}
-	res.readinessGroup = createGrp
-	delGroup := -createGrp
-	res.deletionGroup = &delGroup
+// applyDefaultCreateOrdering overrides the readiness group for managed infrastructure kinds
+func (r *Resource) applyDefaultReadinessGroupOrdering(readinessGroup int) {
+	r.readinessGroup = readinessGroup
+}
+
+// applyDefaultDeletionGroupOrdering overrides the deletion group for managed infrastructure kinds
+func (r *Resource) applyDefaultDeletionGroupOrdering(deletionGroup int) {
+	r.deletionGroup = &deletionGroup
 }

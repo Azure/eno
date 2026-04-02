@@ -58,6 +58,9 @@ func TestReadinessGroups(t *testing.T) {
 					"metadata": map[string]any{
 						"name":      "test-obj-1",
 						"namespace": "default",
+						"annotations": map[string]string{
+							"eno.azure.io/readiness-group": "0",
+						},
 					},
 					"data": map[string]any{"image": s.Spec.Image},
 				},
