@@ -550,11 +550,5 @@ func markResourceAsDeleted(current *unstructured.Unstructured, snap *resource.Sn
 	if snap.Deleted() && (snap.Orphan || snap.Disable || failingOpen) {
 		return true
 	}
-
-	// When failingOpen, treat as deleted only if foreground deletion is NOT requested
-	// Foreground deletion requires the resoruce to be fully removed before reporting deleted
-	// if snap.Deleted() && failingOpen && !snap.ForegroundDeletion {
-	// 	return true
-	// }
 	return false
 }

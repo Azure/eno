@@ -292,7 +292,7 @@ spec:
                     description: Blocked is true when the composition cannot proceed
                       due to dependencies/dependents
                     type: boolean
-                  blockedby:
+                  blockedBy:
                     description: 'BlockedBy: References to the compositions causing
                       the block'
                     items:

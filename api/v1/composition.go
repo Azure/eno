@@ -95,7 +95,7 @@ type DependencyStatus struct {
 	Reason string `json:"reason,omitempty"`
 
 	// BlockedBy: References to the compositions causing the block
-	BlockedBy []BlockedByRef `json:"blockedby,omitempty"`
+	BlockedBy []BlockedByRef `json:"blockedBy,omitempty"`
 }
 
 type BlockedByRef struct {
