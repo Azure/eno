@@ -441,7 +441,7 @@ func (c *compositionController) hasActiveDependents(ctx context.Context, comp *a
 		})
 	}
 
-	logger.Info(fmt.Sprintf("Composition with Key [%s] Namespace [%s] Name [%s] has dependents %s", key, comp.GetNamespace(), comp.GetName(), blockedBy))
+	logger.Info("composition dependents check complete", "key", key, "namespace", comp.GetNamespace(), "name", comp.GetName(), "blockedBy", blockedBy)
 	return len(blockedBy) > 0, blockedBy, nil
 }
 
