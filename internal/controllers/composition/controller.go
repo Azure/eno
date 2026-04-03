@@ -194,7 +194,7 @@ func (c *compositionController) reconcileDeletedComposition(ctx context.Context,
 
 	// Once the given's composition's dependents are deleted then we can clear the dependency status
 	// Note that once we clear the hasActiveDependents step we will proceed to deletion. This clearing step
-	// is just for the corretness step during this brief window
+	// is just for the correctness step during this brief window
 	if comp.Status.DependencyStatus != nil {
 		if _, err = c.clearDependencyStatus(ctx, comp); err != nil {
 			return ctrl.Result{}, err
@@ -417,19 +417,19 @@ func buildSimplifiedStatus(synth *apiv1.Synthesizer, comp *apiv1.Composition) *a
 
 func (c *compositionController) hasActiveDependents(ctx context.Context, comp *apiv1.Composition) (bool, []apiv1.BlockedByRef, error) {
 	logger := logr.FromContextOrDiscard(ctx)
-	logger.Info(fmt.Sprintf("Checking dependents status for composition name: [%s] namespace[%s]", comp.GetName(), comp.GetNamespace()))
+	logger.Info("Checking dependents status", "CompositionName", comp.GetName(), "CompositionNamespace", comp.GetNamespace())
 
 	key := path.Join(comp.GetNamespace(), comp.GetName())
-	var dependants apiv1.CompositionList
-	err := c.client.List(ctx, &dependants, client.MatchingFields{manager.IdxCompositionsByDependency: key})
+	var dependents apiv1.CompositionList
+	err := c.client.List(ctx, &dependents, client.MatchingFields{manager.IdxCompositionsByDependency: key})
 	if err != nil {
-		logger.Error(err, "failed to list active dependants for composition")
+		logger.Error(err, "failed to list active dependents for composition")
 		return false, nil, fmt.Errorf("listing dependents: %w", err)
 	}
 
 	var blockedBy []apiv1.BlockedByRef
-	for _, dep := range dependants.Items {
-		// skip dependants that does not have the finalizer
+	for _, dep := range dependents.Items {
+		// skip dependents  that does not have the finalizer
 		if dep.DeletionTimestamp != nil && !controllerutil.ContainsFinalizer(&dep, EnoCleanupFinalizer) {
 			continue
 		}
@@ -441,7 +441,7 @@ func (c *compositionController) hasActiveDependents(ctx context.Context, comp *a
 		})
 	}
 
-	logger.Info(fmt.Sprintf("Composition with Key [%s] Namespace [%s] Name [%s] has dependants %s", key, comp.GetNamespace(), comp.GetName(), blockedBy))
+	logger.Info(fmt.Sprintf("Composition with Key [%s] Namespace [%s] Name [%s] has dependents %s", key, comp.GetNamespace(), comp.GetName(), blockedBy))
 	return len(blockedBy) > 0, blockedBy, nil
 }
 
