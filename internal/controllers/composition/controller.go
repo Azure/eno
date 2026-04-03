@@ -46,14 +46,14 @@ func NewController(mgr ctrl.Manager, podTimeout time.Duration) error {
 		podTimeout: podTimeout,
 	}
 	depPredicate := predicate.TypedFuncs[*apiv1.Composition]{
-		CreateFunc: func(e event.TypedCreateEvent[*apiv1.Composition]) bool { return true },
+		CreateFunc: func(e event.TypedCreateEvent[*apiv1.Composition]) bool { return false },
 		DeleteFunc: func(e event.TypedDeleteEvent[*apiv1.Composition]) bool { return true },
 		UpdateFunc: func(e event.TypedUpdateEvent[*apiv1.Composition]) bool {
-			comp := e.ObjectNew
-
-			// only requeue and process updates for compositions that have deps or are being deleted
-			// Creates.deletes always pass through since any comp could be a dependency target
-			return len(comp.Spec.DependsOn) > 0 || comp.DeletionTimestamp != nil
+			// Only pass through updates where the composition is being deleted.
+			// This is the only case where newDependencyEventHandler produces
+			// reconcile requests — it notifies dependency targets so they can
+			// re-evaluate hasActiveDependents and unblock their own deletion.
+			return e.ObjectNew.DeletionTimestamp != nil
 		},
 		GenericFunc: func(e event.TypedGenericEvent[*apiv1.Composition]) bool { return true },
 	}

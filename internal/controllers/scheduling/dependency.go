@@ -18,7 +18,7 @@ func buildReadySet(comps *apiv1.CompositionList) map[string]bool {
 	return m
 }
 
-// buildComsByKey creates a map of namespace/name -> *composition for cycle detection
+// buildCompsByKey creates a map of namespace/name -> *composition for cycle detection
 func buildCompsByKey(comps *apiv1.CompositionList) map[string]*apiv1.Composition {
 	m := make(map[string]*apiv1.Composition, len(comps.Items))
 	for i := range comps.Items {

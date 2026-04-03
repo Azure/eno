@@ -72,7 +72,7 @@ type CompositionDependency struct {
 	// Name of the dependency composition
 	Name string `json:"name,omitempty"`
 
-	// Namespace of the dependent resource
+	// Namespace of the dependency composition
 	Namespace string `json:"namespace,omitempty"`
 }
 

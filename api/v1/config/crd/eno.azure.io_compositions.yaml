@@ -99,7 +99,7 @@ spec:
                       description: Name of the dependency composition
                       type: string
                     namespace:
-                      description: Namespace of the dependent resource
+                      description: Namespace of the dependency composition
                       type: string
                   type: object
                 maxItems: 50

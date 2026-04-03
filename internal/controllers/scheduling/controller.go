@@ -149,10 +149,22 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 					}
 					if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(&comp)); err != nil {
 						logger.Error(err, "failed to update circular dependency status")
+						return ctrl.Result{}, err
 					}
 				}
 
 				continue
+			}
+			// clear the CircularDependency status
+			if !cyclicSet[compKey] && comp.Status.DependencyStatus != nil && comp.Status.DependencyStatus.Reason == apiv1.CircularDependencyReason {
+				copy := comp.DeepCopy()
+				copy.Status.DependencyStatus = nil
+				if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(&comp)); err != nil {
+					logger.Error(err, "failed to clear dependency status")
+					return ctrl.Result{}, err
+				}
+				logger.Info("cleared stale circular dependency status", "compositionName", comp.GetName())
+				continue //
 			}
 			if !areDependenciesReady(&comp, readySet) {
 
