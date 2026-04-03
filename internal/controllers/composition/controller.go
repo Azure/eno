@@ -199,7 +199,7 @@ func (c *compositionController) reconcileDeletedComposition(ctx context.Context,
 		if _, err = c.clearDependencyStatus(ctx, comp); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil // requeue to work with fresh state
+		return ctrl.Result{}, nil // watch event from status patch will re-enqueue
 	}
 
 	syn := comp.Status.CurrentSynthesis
@@ -441,7 +441,7 @@ func (c *compositionController) hasActiveDependents(ctx context.Context, comp *a
 		})
 	}
 
-	logger.Info(fmt.Sprintf("Composition with Key [%s] Namespace [%s] Name [%s] has dependencyOn %s", key, comp.GetNamespace(), comp.GetName(), blockedBy))
+	logger.Info(fmt.Sprintf("Composition with Key [%s] Namespace [%s] Name [%s] has dependants %s", key, comp.GetNamespace(), comp.GetName(), blockedBy))
 	return len(blockedBy) > 0, blockedBy, nil
 }
 
