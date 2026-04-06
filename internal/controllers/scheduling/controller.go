@@ -190,7 +190,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 					copy.Status.DependencyStatus = newStatus
 					if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(&comp)); err != nil {
 						logger.Error(err, "failed to update dependency status")
-						return ctrl.Result{}, nil
+						return ctrl.Result{}, err
 					}
 				}
 				logger.Info("not all dependent compositions are ready, skipping composition synthesis", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace())

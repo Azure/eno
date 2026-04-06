@@ -19,16 +19,6 @@ func buildReadySet(comps *apiv1.CompositionList) map[string]bool {
 	return m
 }
 
-// buildCompsByKey creates a map of namespace/name -> *composition for cycle detection
-func buildCompsByKey(comps *apiv1.CompositionList) map[string]*apiv1.Composition {
-	m := make(map[string]*apiv1.Composition, len(comps.Items))
-	for i := range comps.Items {
-		comp := &comps.Items[i]
-		m[path.Join(comp.GetNamespace(), comp.GetName())] = comp
-	}
-	return m
-}
-
 // areDependenciesReady checks if all required dependencies are ready.
 func areDependenciesReady(comp *apiv1.Composition, readySet map[string]bool) bool {
 	for _, dep := range comp.Spec.DependsOn {

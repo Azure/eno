@@ -6,7 +6,7 @@ import (
 )
 
 // topoSortVariations returns variations in topological order (dependency first)
-// and a set of syntheiszer names that are part of dependency cycle
+// and a set of synthesizer names that are part of dependency cycle
 // Uses the generic Kahn's algorithm O(V+E)
 func topoSortVariations(variations []apiv1.Variation) (sorted []apiv1.Variation, cyclicSynths map[string]bool) {
 	return toposort.TopologySort(variations,
