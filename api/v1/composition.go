@@ -60,11 +60,11 @@ type CompositionSpec struct {
 	// +kubebuilder:validation:MaxItems:=500
 	SynthesisEnv []EnvVar `json:"synthesisEnv,omitempty"`
 
-	// Declare depdendencies on other compositiosn by name and namespace. A composition can have at most 50 dependencies
+	// Declare dependencies on other compositions by name and namespace. A composition can have at most 50 dependencies
 	// Compositions will not be scheduled for synthesis until all required
 	// dependencies have CurrentSynthesis.Ready != nil
 	// Deletion is blocked until all non-optional dependents are fully removed.
-	// +kubebuilder:validation:MaxItems:=500
+	// +kubebuilder:validation:MaxItems:=50
 	DependsOn []CompositionDependency `json:"dependsOn,omitempty"`
 }
 
@@ -83,7 +83,8 @@ type CompositionStatus struct {
 	PreviousSynthesis *Synthesis        `json:"previousSynthesis,omitempty"`
 	InputRevisions    []InputRevisions  `json:"inputRevisions,omitempty"`
 
-	// Set
+	// Set when composition is blocked by dependency constraints. Cleared when unblock
+	DependencyStatus *DependencyStatus `json:"dependencyStatus,omitempty"`
 }
 
 // DependencyStatus holds the information regarding the composition's dependencies.
@@ -95,7 +96,7 @@ type DependencyStatus struct {
 	Reason string `json:"reason,omitempty"`
 
 	//BlockedBy: References to the compositions causing the block
-	BlockedBy []BlockedByRef `json:"blockedByRef,omitempty"`
+	BlockedBy []BlockedByRef `json:"blockedBy,omitempty"`
 }
 
 type BlockedByRef struct {
