@@ -214,6 +214,10 @@ func TestSimplifiedStatus(t *testing.T) {
 			state.Comp.Status.Simplified = &apiv1.SimplifiedStatus{Error: "Previous reconciliation error"}
 			return state
 		}).
+		WithMutation("with dependencies", func(state *simplifiedStatusState) *simplifiedStatusState {
+			state.Comp.Spec.DependsOn = []apiv1.CompositionDependency{{Name: "dep-a", Namespace: "default"}}
+			return state
+		}).
 		WithInvariant("missing synth", func(state *simplifiedStatusState, result *apiv1.SimplifiedStatus) bool {
 			return state.Comp.DeletionTimestamp != nil || state.Synth != nil || result.Status == "MissingSynthesizer"
 		}).
@@ -261,6 +265,13 @@ func TestSimplifiedStatus(t *testing.T) {
 				state.Comp.Status.Simplified.Error == "" ||
 				result.Error == state.Comp.Status.Simplified.Error
 		}).
+		WithInvariant("waiting on dependencies", func(state *simplifiedStatusState, result *apiv1.SimplifiedStatus) bool {
+			hasDeps := len(state.Comp.Spec.DependsOn) > 0
+			noSynthesis := state.Comp.Status.CurrentSynthesis == nil && state.Comp.Status.InFlightSynthesis == nil
+			notDeleting := state.Comp.DeletionTimestamp == nil
+			hasSynth := state.Synth != nil
+			return !(hasDeps && noSynthesis && notDeleting && hasSynth) || result.Status == apiv1.WaitingOnDependenciesReason
+		}).
 		Evaluate(t)
 }
 
@@ -300,7 +311,6 @@ func TestIsAddonComposition(t *testing.T) {
 			labels:   map[string]string{AKSComponentLabel: addOnLabelValue},
 			expected: true,
 		},
-
 	}
 
 	for _, tt := range tests {

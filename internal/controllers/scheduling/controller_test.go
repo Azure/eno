@@ -767,3 +767,244 @@ func TestCompositionHealthMetrics(t *testing.T) {
 	stuckValue := prometheustestutil.ToFloat64(compositionHealth.WithLabelValues("stuck-comp", "default", "test-synth"))
 	assert.Equal(t, float64(1), stuckValue, "stuck composition should have health value 1")
 }
+
+// TestDependencyBlocksSynthesis proves that a composition with an unmet required dependency
+// is not dispatched for synthesis. The composition is the only one eligible, so if it's
+// blocked, no op is created and Reconcile returns nil.
+func TestDependencyBlocksSynthesis(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+
+	c := &controller{client: cli, concurrencyLimit: 10, watchdogThreshold: time.Hour}
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	require.NoError(t, cli.Create(ctx, synth))
+
+	// comp-b depends on "comp-a" which doesn't exist — dependency not in readySet
+	compB := &apiv1.Composition{}
+	compB.Name = "comp-b"
+	compB.Namespace = "default"
+	compB.Finalizers = []string{"eno.azure.io/cleanup"}
+	compB.Spec.Synthesizer.Name = synth.Name
+	compB.Spec.DependsOn = []apiv1.CompositionDependency{
+		{Name: "comp-a", Namespace: "default"},
+	}
+	require.NoError(t, cli.Create(ctx, compB))
+
+	// Reconcile returns nil — comp-b was blocked, no dispatch attempted
+	_, err := c.Reconcile(ctx, ctrl.Request{})
+	require.NoError(t, err)
+}
+
+// TestDependencyAllowsSynthesisWhenReady proves that a composition with all required
+// dependencies ready passes the dependency check and is selected for dispatch.
+func TestDependencyAllowsSynthesisWhenReady(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+
+	c := &controller{client: cli, concurrencyLimit: 10, watchdogThreshold: time.Hour}
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	require.NoError(t, cli.Create(ctx, synth))
+
+	// comp-a is fully synthesized and ready — in readySet but produces no new op
+	compA := &apiv1.Composition{}
+	compA.Name = "comp-a"
+	compA.Namespace = "default"
+	compA.Finalizers = []string{"eno.azure.io/cleanup"}
+	compA.Spec.Synthesizer.Name = synth.Name
+	require.NoError(t, cli.Create(ctx, compA))
+
+	compA.Status.CurrentSynthesis = &apiv1.Synthesis{
+		UUID:                          "uuid-a",
+		ObservedCompositionGeneration: compA.Generation,
+		ObservedSynthesizerGeneration: synth.Generation,
+		Synthesized:                   ptr.To(metav1.Now()),
+		Reconciled:                    ptr.To(metav1.Now()),
+		Ready:                         ptr.To(metav1.Now()),
+	}
+	require.NoError(t, cli.Status().Update(ctx, compA))
+
+	// comp-b depends on comp-a (ready), needs initial synthesis
+	compB := &apiv1.Composition{}
+	compB.Name = "comp-b"
+	compB.Namespace = "default"
+	compB.Finalizers = []string{"eno.azure.io/cleanup"}
+	compB.Spec.Synthesizer.Name = synth.Name
+	compB.Spec.DependsOn = []apiv1.CompositionDependency{
+		{Name: "comp-a", Namespace: "default"},
+	}
+	require.NoError(t, cli.Create(ctx, compB))
+
+	// Reconcile returns an error from dispatchOp (fake client JSON patch limitation).
+	// This proves comp-b PASSED the dependency check and was selected for dispatch.
+	_, err := c.Reconcile(ctx, ctrl.Request{})
+	assert.Error(t, err, "expected dispatch error — proves comp-b passed dep check")
+}
+
+// TestCyclicDependencyBlocksSynthesis proves that compositions involved in a dependency
+// cycle are skipped and not dispatched for synthesis.
+func TestCyclicDependencyBlocksSynthesis(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+
+	c := &controller{client: cli, concurrencyLimit: 10, watchdogThreshold: time.Hour}
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	require.NoError(t, cli.Create(ctx, synth))
+
+	// A depends on B, B depends on A — mutual cycle
+	compA := &apiv1.Composition{}
+	compA.Name = "comp-a"
+	compA.Namespace = "default"
+	compA.Finalizers = []string{"eno.azure.io/cleanup"}
+	compA.Spec.Synthesizer.Name = synth.Name
+	compA.Spec.DependsOn = []apiv1.CompositionDependency{
+		{Name: "comp-b", Namespace: "default"},
+	}
+	require.NoError(t, cli.Create(ctx, compA))
+
+	compB := &apiv1.Composition{}
+	compB.Name = "comp-b"
+	compB.Namespace = "default"
+	compB.Finalizers = []string{"eno.azure.io/cleanup"}
+	compB.Spec.Synthesizer.Name = synth.Name
+	compB.Spec.DependsOn = []apiv1.CompositionDependency{
+		{Name: "comp-a", Namespace: "default"},
+	}
+	require.NoError(t, cli.Create(ctx, compB))
+
+	// Both compositions are blocked by cycle detection — no op, nil error
+	_, err := c.Reconcile(ctx, ctrl.Request{})
+	require.NoError(t, err)
+}
+
+// TestDependencyCheckSkippedForDeletingComposition proves that dependency checks are
+// bypassed for compositions that are being deleted (DeletionTimestamp is set).
+func TestDependencyCheckSkippedForDeletingComposition(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+
+	c := &controller{client: cli, concurrencyLimit: 10, watchdogThreshold: time.Hour}
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	require.NoError(t, cli.Create(ctx, synth))
+
+	// comp-a has deps on a non-existent composition but is being deleted
+	compA := &apiv1.Composition{}
+	compA.Name = "comp-a"
+	compA.Namespace = "default"
+	compA.Finalizers = []string{"eno.azure.io/cleanup"}
+	compA.Spec.Synthesizer.Name = synth.Name
+	compA.Spec.DependsOn = []apiv1.CompositionDependency{
+		{Name: "nonexistent", Namespace: "default"},
+	}
+	require.NoError(t, cli.Create(ctx, compA))
+
+	// Mark as deleting
+	require.NoError(t, cli.Delete(ctx, compA))
+
+	// Reconcile completes without error — the deleted composition bypasses the
+	// dependency guard (DeletionTimestamp != nil check) and is also excluded from
+	// synthesis by classifyOp, so no dispatch is attempted.
+	_, err := c.Reconcile(ctx, ctrl.Request{})
+	require.NoError(t, err)
+}
+
+// TestNoDependenciesCompositionUnaffected proves that compositions without any dependsOn
+// field are completely unaffected by the dependency checking logic and proceed to dispatch.
+func TestNoDependenciesCompositionUnaffected(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+
+	c := &controller{client: cli, concurrencyLimit: 10, watchdogThreshold: time.Hour}
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	require.NoError(t, cli.Create(ctx, synth))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "comp-no-deps"
+	comp.Namespace = "default"
+	comp.Finalizers = []string{"eno.azure.io/cleanup"}
+	comp.Spec.Synthesizer.Name = synth.Name
+	require.NoError(t, cli.Create(ctx, comp))
+
+	// Reconcile returns an error from dispatchOp (fake client JSON patch limitation).
+	// This proves the composition was not blocked by any dependency check.
+	_, err := c.Reconcile(ctx, ctrl.Request{})
+	assert.Error(t, err, "expected dispatch error — proves comp without deps is eligible")
+}
+
+// TestChainedDependencyBlocking proves that in a chain A → B → C, C is blocked
+// when B is not ready, even though A is ready.
+func TestChainedDependencyBlocking(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+
+	c := &controller{client: cli, concurrencyLimit: 10, watchdogThreshold: time.Hour}
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	require.NoError(t, cli.Create(ctx, synth))
+
+	// A is ready and fully synthesized (no new op)
+	compA := &apiv1.Composition{}
+	compA.Name = "comp-a"
+	compA.Namespace = "default"
+	compA.Finalizers = []string{"eno.azure.io/cleanup"}
+	compA.Spec.Synthesizer.Name = synth.Name
+	require.NoError(t, cli.Create(ctx, compA))
+
+	compA.Status.CurrentSynthesis = &apiv1.Synthesis{
+		UUID:                          "uuid-a",
+		ObservedCompositionGeneration: compA.Generation,
+		ObservedSynthesizerGeneration: synth.Generation,
+		Synthesized:                   ptr.To(metav1.Now()),
+		Reconciled:                    ptr.To(metav1.Now()),
+		Ready:                         ptr.To(metav1.Now()),
+	}
+	require.NoError(t, cli.Status().Update(ctx, compA))
+
+	// B depends on A (ready) — passes dep check but NOT ready itself
+	// B is fully synthesized and has matching generation, so no new op is produced.
+	compB := &apiv1.Composition{}
+	compB.Name = "comp-b"
+	compB.Namespace = "default"
+	compB.Finalizers = []string{"eno.azure.io/cleanup"}
+	compB.Spec.Synthesizer.Name = synth.Name
+	compB.Spec.DependsOn = []apiv1.CompositionDependency{
+		{Name: "comp-a", Namespace: "default"},
+	}
+	require.NoError(t, cli.Create(ctx, compB))
+
+	compB.Status.CurrentSynthesis = &apiv1.Synthesis{
+		UUID:                          "uuid-b",
+		ObservedCompositionGeneration: compB.Generation,
+		ObservedSynthesizerGeneration: synth.Generation,
+		Synthesized:                   ptr.To(metav1.Now()),
+		Reconciled:                    ptr.To(metav1.Now()),
+		// Ready is NOT set — B is synthesized but not ready
+	}
+	require.NoError(t, cli.Status().Update(ctx, compB))
+
+	// C depends on B (not ready) — should be blocked
+	compC := &apiv1.Composition{}
+	compC.Name = "comp-c"
+	compC.Namespace = "default"
+	compC.Finalizers = []string{"eno.azure.io/cleanup"}
+	compC.Spec.Synthesizer.Name = synth.Name
+	compC.Spec.DependsOn = []apiv1.CompositionDependency{
+		{Name: "comp-b", Namespace: "default"},
+	}
+	require.NoError(t, cli.Create(ctx, compC))
+
+	// No eligible ops: A and B produce no ops (fully synthesized), C is blocked.
+	// Reconcile returns nil.
+	_, err := c.Reconcile(ctx, ctrl.Request{})
+	require.NoError(t, err)
+}

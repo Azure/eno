@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"path"
 	"sort"
 	"time"
 
@@ -114,6 +115,11 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// Reset the compositionHealth metric before iterating through compositions
 	compositionHealth.Reset()
 
+	// Build readiness index and composition map for dependency checking
+	readySet := buildReadySet(comps)
+	compsByKey := buildCompsByKey(comps)
+	cyclicSet := detectAllCycles(compsByKey)
+
 	var inFlight int
 	var op *op
 	for _, comp := range comps.Items {
@@ -129,6 +135,50 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			logger.Info("detected composition missed reconciliation", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", comp.Spec.Synthesizer.Name)
 		} else {
 			compositionHealth.WithLabelValues(comp.Name, comp.Namespace, comp.Spec.Synthesizer.Name).Set(0)
+		}
+
+		if comp.DeletionTimestamp == nil && len(comp.Spec.DependsOn) > 0 {
+			compKey := path.Join(comp.GetNamespace(), comp.GetName())
+			if cyclicSet[compKey] {
+				logger.Info("circular dependency detected, skipping composition synthesis", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace())
+				if comp.Status.DependencyStatus == nil || comp.Status.DependencyStatus.Reason != apiv1.CircularDependencyReason {
+					copy := comp.DeepCopy()
+					copy.Status.DependencyStatus = &apiv1.DependencyStatus{
+						Blocked: true,
+						Reason:  apiv1.CircularDependencyReason,
+					}
+					if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(&comp)); err != nil {
+						logger.Error(err, "failed to update circular dependency status")
+						return ctrl.Result{}, err
+					}
+				}
+
+				continue
+			}
+			// clear the CircularDependency status
+			if !cyclicSet[compKey] && comp.Status.DependencyStatus != nil && comp.Status.DependencyStatus.Reason == apiv1.CircularDependencyReason {
+				copy := comp.DeepCopy()
+				copy.Status.DependencyStatus = nil
+				if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(&comp)); err != nil {
+					logger.Error(err, "failed to clear dependency status")
+					return ctrl.Result{}, err
+				}
+				logger.Info("cleared stale circular dependency status", "compositionName", comp.GetName())
+				continue
+			}
+
+			if !areDependenciesReady(&comp, readySet) {
+
+				for _, dep := range comp.Spec.DependsOn {
+					key := path.Join(dep.Namespace, dep.Name)
+					if _, exists := compsByKey[key]; !exists {
+						logger.Error(fmt.Errorf("dependency %s/%s not found", dep.Namespace, dep.Name), "required dependency does not exist",
+							"compositionName", comp.GetName(), "dependencyName", dep.Name, "dependencyNamespace", dep.Namespace)
+					}
+				}
+				logger.Info("not all dependent compositions are ready, skipping composition synthesis", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace())
+				continue
+			}
 		}
 
 		synth, ok := synthsByName[comp.Spec.Synthesizer.Name]
