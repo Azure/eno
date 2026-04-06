@@ -164,20 +164,58 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 					return ctrl.Result{}, err
 				}
 				logger.Info("cleared stale circular dependency status", "compositionName", comp.GetName())
-				continue
 			}
 
 			if !areDependenciesReady(&comp, readySet) {
-
+				// Build BlockedBy list
+				var blockedBy []apiv1.BlockedByRef
 				for _, dep := range comp.Spec.DependsOn {
 					key := path.Join(dep.Namespace, dep.Name)
-					if _, exists := compsByKey[key]; !exists {
+					if _, exists := compsByKey[key]; !exists { // Dependency Not found - This should not happen as we have already guarded when creating
+						// composition in symphony
+						blockedBy = append(blockedBy, apiv1.BlockedByRef{
+							Name:      dep.Name,
+							Namespace: dep.Namespace,
+							Reason:    apiv1.WaintingOnDependencyNotFoundReason,
+						})
 						logger.Error(fmt.Errorf("dependency %s/%s not found", dep.Namespace, dep.Name), "required dependency does not exist",
 							"compositionName", comp.GetName(), "dependencyName", dep.Name, "dependencyNamespace", dep.Namespace)
+					} else if !readySet[key] {
+						logger.Info("Current Dependency not ready for composition", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace(),
+							"dependencyName", dep.Name, "dependencyNamespace", dep.Namespace)
+						blockedBy = append(blockedBy, apiv1.BlockedByRef{
+							Name:      dep.Name,
+							Namespace: dep.Namespace,
+							Reason:    apiv1.WaitingOnDependencyNotReadyReason,
+						})
+					}
+				}
+				newStatus := &apiv1.DependencyStatus{
+					Blocked:   true,
+					Reason:    apiv1.WaitingOnDependenciesReason,
+					BlockedBy: blockedBy,
+				}
+				if comp.Status.DependencyStatus == nil || comp.Status.DependencyStatus.Reason != newStatus.Reason {
+					copy := comp.DeepCopy()
+					copy.Status.DependencyStatus = newStatus
+					if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(&comp)); err != nil {
+						logger.Error(err, "failed to update dependency status")
+						return ctrl.Result{}, nil
 					}
 				}
 				logger.Info("not all dependent compositions are ready, skipping composition synthesis", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace())
 				continue
+			}
+
+			// clear the waitingonDependencies status
+			if comp.Status.DependencyStatus != nil && comp.Status.DependencyStatus.Reason == apiv1.WaitingOnDependenciesReason {
+				copy := comp.DeepCopy()
+				copy.Status.DependencyStatus = nil
+				if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(&comp)); err != nil {
+					logger.Error(err, "failed to clear dependency status")
+					return ctrl.Result{}, err
+				}
+				logger.Info("cleared stale waiting on dependencies status", "compositionName", comp.GetName())
 			}
 		}
 

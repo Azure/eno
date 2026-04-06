@@ -1008,3 +1008,168 @@ func TestChainedDependencyBlocking(t *testing.T) {
 	_, err := c.Reconcile(ctx, ctrl.Request{})
 	require.NoError(t, err)
 }
+
+// TestCircularDependencyStatusSet proves that when a circular dependency is detected,
+// the DependencyStatus is set with CircularDependencyReason on the involved compositions.
+func TestCircularDependencyStatusSet(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+
+	c := &controller{client: cli, concurrencyLimit: 10, watchdogThreshold: time.Hour}
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	require.NoError(t, cli.Create(ctx, synth))
+
+	// A depends on B, B depends on A — mutual cycle
+	compA := &apiv1.Composition{}
+	compA.Name = "comp-a"
+	compA.Namespace = "default"
+	compA.Finalizers = []string{"eno.azure.io/cleanup"}
+	compA.Spec.Synthesizer.Name = synth.Name
+	compA.Spec.DependsOn = []apiv1.CompositionDependency{
+		{Name: "comp-b", Namespace: "default"},
+	}
+	require.NoError(t, cli.Create(ctx, compA))
+
+	compB := &apiv1.Composition{}
+	compB.Name = "comp-b"
+	compB.Namespace = "default"
+	compB.Finalizers = []string{"eno.azure.io/cleanup"}
+	compB.Spec.Synthesizer.Name = synth.Name
+	compB.Spec.DependsOn = []apiv1.CompositionDependency{
+		{Name: "comp-a", Namespace: "default"},
+	}
+	require.NoError(t, cli.Create(ctx, compB))
+
+	_, err := c.Reconcile(ctx, ctrl.Request{})
+	require.NoError(t, err)
+
+	// Verify both compositions have circular dependency status set
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(compA), compA))
+	require.NotNil(t, compA.Status.DependencyStatus)
+	assert.True(t, compA.Status.DependencyStatus.Blocked)
+	assert.Equal(t, apiv1.CircularDependencyReason, compA.Status.DependencyStatus.Reason)
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(compB), compB))
+	require.NotNil(t, compB.Status.DependencyStatus)
+	assert.True(t, compB.Status.DependencyStatus.Blocked)
+	assert.Equal(t, apiv1.CircularDependencyReason, compB.Status.DependencyStatus.Reason)
+}
+
+// TestWaitingOnDependenciesStatusSet proves that when a composition has unmet dependencies,
+// the DependencyStatus is set with WaitingOnDependenciesReason and proper BlockedBy entries.
+func TestWaitingOnDependenciesStatusSet(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+
+	c := &controller{client: cli, concurrencyLimit: 10, watchdogThreshold: time.Hour}
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	require.NoError(t, cli.Create(ctx, synth))
+
+	// comp-a exists but is NOT ready (no Ready timestamp)
+	compA := &apiv1.Composition{}
+	compA.Name = "comp-a"
+	compA.Namespace = "default"
+	compA.Finalizers = []string{"eno.azure.io/cleanup"}
+	compA.Spec.Synthesizer.Name = synth.Name
+	require.NoError(t, cli.Create(ctx, compA))
+
+	compA.Status.CurrentSynthesis = &apiv1.Synthesis{
+		UUID:                          "uuid-a",
+		ObservedCompositionGeneration: compA.Generation,
+		ObservedSynthesizerGeneration: synth.Generation,
+		Synthesized:                   ptr.To(metav1.Now()),
+		Reconciled:                    ptr.To(metav1.Now()),
+		// Ready is NOT set
+	}
+	require.NoError(t, cli.Status().Update(ctx, compA))
+
+	// comp-b depends on comp-a (not ready)
+	compB := &apiv1.Composition{}
+	compB.Name = "comp-b"
+	compB.Namespace = "default"
+	compB.Finalizers = []string{"eno.azure.io/cleanup"}
+	compB.Spec.Synthesizer.Name = synth.Name
+	compB.Spec.DependsOn = []apiv1.CompositionDependency{
+		{Name: "comp-a", Namespace: "default"},
+	}
+	require.NoError(t, cli.Create(ctx, compB))
+
+	_, err := c.Reconcile(ctx, ctrl.Request{})
+	require.NoError(t, err)
+
+	// Verify comp-b has WaitingOnDependencies status with BlockedBy
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(compB), compB))
+	require.NotNil(t, compB.Status.DependencyStatus)
+	assert.True(t, compB.Status.DependencyStatus.Blocked)
+	assert.Equal(t, apiv1.WaitingOnDependenciesReason, compB.Status.DependencyStatus.Reason)
+	require.Len(t, compB.Status.DependencyStatus.BlockedBy, 1)
+	assert.Equal(t, "comp-a", compB.Status.DependencyStatus.BlockedBy[0].Name)
+	assert.Equal(t, "default", compB.Status.DependencyStatus.BlockedBy[0].Namespace)
+	assert.Equal(t, apiv1.WaitingOnDependencyNotReadyReason, compB.Status.DependencyStatus.BlockedBy[0].Reason)
+}
+
+// TestWaitingOnDependenciesStatusCleared proves that when dependencies become ready,
+// the WaitingOnDependencies status is cleared from the composition.
+func TestWaitingOnDependenciesStatusCleared(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+
+	c := &controller{client: cli, concurrencyLimit: 10, watchdogThreshold: time.Hour}
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	require.NoError(t, cli.Create(ctx, synth))
+
+	// comp-a exists but is NOT ready initially
+	compA := &apiv1.Composition{}
+	compA.Name = "comp-a"
+	compA.Namespace = "default"
+	compA.Finalizers = []string{"eno.azure.io/cleanup"}
+	compA.Spec.Synthesizer.Name = synth.Name
+	require.NoError(t, cli.Create(ctx, compA))
+
+	compA.Status.CurrentSynthesis = &apiv1.Synthesis{
+		UUID:                          "uuid-a",
+		ObservedCompositionGeneration: compA.Generation,
+		ObservedSynthesizerGeneration: synth.Generation,
+		Synthesized:                   ptr.To(metav1.Now()),
+		Reconciled:                    ptr.To(metav1.Now()),
+		// Ready is NOT set
+	}
+	require.NoError(t, cli.Status().Update(ctx, compA))
+
+	// comp-b depends on comp-a
+	compB := &apiv1.Composition{}
+	compB.Name = "comp-b"
+	compB.Namespace = "default"
+	compB.Finalizers = []string{"eno.azure.io/cleanup"}
+	compB.Spec.Synthesizer.Name = synth.Name
+	compB.Spec.DependsOn = []apiv1.CompositionDependency{
+		{Name: "comp-a", Namespace: "default"},
+	}
+	require.NoError(t, cli.Create(ctx, compB))
+
+	// First reconcile: comp-b gets WaitingOnDependencies status
+	_, err := c.Reconcile(ctx, ctrl.Request{})
+	require.NoError(t, err)
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(compB), compB))
+	require.NotNil(t, compB.Status.DependencyStatus)
+	assert.Equal(t, apiv1.WaitingOnDependenciesReason, compB.Status.DependencyStatus.Reason)
+
+	// Now make comp-a ready
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(compA), compA))
+	compA.Status.CurrentSynthesis.Ready = ptr.To(metav1.Now())
+	require.NoError(t, cli.Status().Update(ctx, compA))
+
+	// Reconcile again — comp-b's dependency is now satisfied, status should be cleared
+	_, err = c.Reconcile(ctx, ctrl.Request{})
+	require.NoError(t, err)
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(compB), compB))
+	assert.Nil(t, compB.Status.DependencyStatus, "waiting on dependencies status should be cleared when deps become ready")
+}
