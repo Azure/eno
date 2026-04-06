@@ -159,110 +159,58 @@ func TestAreDependenciesReady(t *testing.T) {
 	}
 }
 
-func TestDetectCycle(t *testing.T) {
+func TestTopoSortCompositions(t *testing.T) {
 	tests := []struct {
-		name     string
-		target   string // namespace/name of the composition to check
-		comps    map[string]*apiv1.Composition
-		expected bool
+		name           string
+		compositions   []apiv1.Composition
+		expectedOrder  []string // namespace/name keys in expected order
+		expectedCyclic []string
 	}{
 		{
-			name:   "no dependencies, no cycle",
-			target: "ns/a",
-			comps: map[string]*apiv1.Composition{
-				"ns/a": {
-					ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
-				},
-			},
-			expected: false,
+			name:           "empty",
+			compositions:   nil,
+			expectedOrder:  []string{},
+			expectedCyclic: nil,
 		},
 		{
-			name:   "linear chain, no cycle",
-			target: "ns/c",
-			comps: map[string]*apiv1.Composition{
-				"ns/a": {
-					ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
-				},
-				"ns/b": {
-					ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "ns"},
-					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "a", Namespace: "ns"}},
-					},
-				},
-				"ns/c": {
+			name: "single no deps",
+			compositions: []apiv1.Composition{
+				{ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"}},
+			},
+			expectedOrder:  []string{"ns/a"},
+			expectedCyclic: nil,
+		},
+		{
+			name: "linear chain A->B->C",
+			compositions: []apiv1.Composition{
+				{
 					ObjectMeta: metav1.ObjectMeta{Name: "c", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
 						DependsOn: []apiv1.CompositionDependency{{Name: "b", Namespace: "ns"}},
 					},
 				},
-			},
-			expected: false,
-		},
-		{
-			name:   "simple A->B->A cycle",
-			target: "ns/a",
-			comps: map[string]*apiv1.Composition{
-				"ns/a": {
-					ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
-					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "b", Namespace: "ns"}},
-					},
-				},
-				"ns/b": {
+				{
 					ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
 						DependsOn: []apiv1.CompositionDependency{{Name: "a", Namespace: "ns"}},
 					},
 				},
+				{ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"}},
 			},
-			expected: true,
+			expectedOrder:  []string{"ns/a", "ns/b", "ns/c"},
+			expectedCyclic: nil,
 		},
 		{
-			name:   "A->B->C->A cycle",
-			target: "ns/a",
-			comps: map[string]*apiv1.Composition{
-				"ns/a": {
-					ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
-					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "b", Namespace: "ns"}},
-					},
-				},
-				"ns/b": {
+			name: "diamond A->B,A->C,B->D,C->D",
+			compositions: []apiv1.Composition{
+				{
 					ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "c", Namespace: "ns"}},
+						DependsOn: []apiv1.CompositionDependency{{Name: "d", Namespace: "ns"}},
 					},
 				},
-				"ns/c": {
-					ObjectMeta: metav1.ObjectMeta{Name: "c", Namespace: "ns"},
-					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "a", Namespace: "ns"}},
-					},
-				},
-			},
-			expected: true,
-		},
-		{
-			name:   "diamond shape, no cycle",
-			target: "ns/d",
-			comps: map[string]*apiv1.Composition{
-				"ns/a": {
+				{
 					ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
-				},
-				"ns/b": {
-					ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "ns"},
-					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "a", Namespace: "ns"}},
-					},
-				},
-				"ns/c": {
-					ObjectMeta: metav1.ObjectMeta{Name: "c", Namespace: "ns"},
-					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "a", Namespace: "ns"}},
-					},
-				},
-				"ns/d": {
-					ObjectMeta: metav1.ObjectMeta{Name: "d", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
 						DependsOn: []apiv1.CompositionDependency{
 							{Name: "b", Namespace: "ns"},
@@ -270,113 +218,107 @@ func TestDetectCycle(t *testing.T) {
 						},
 					},
 				},
-			},
-			expected: false,
-		},
-		{
-			name:   "self-loop",
-			target: "ns/a",
-			comps: map[string]*apiv1.Composition{
-				"ns/a": {
-					ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "c", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "a", Namespace: "ns"}},
+						DependsOn: []apiv1.CompositionDependency{{Name: "d", Namespace: "ns"}},
 					},
 				},
+				{ObjectMeta: metav1.ObjectMeta{Name: "d", Namespace: "ns"}},
 			},
-			expected: true,
+			expectedOrder:  []string{"ns/d", "ns/b", "ns/c", "ns/a"},
+			expectedCyclic: nil,
 		},
 		{
-			name:   "dependency not in map (missing composition)",
-			target: "ns/a",
-			comps: map[string]*apiv1.Composition{
-				"ns/a": {
-					ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
-					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "nonexistent", Namespace: "ns"}},
-					},
-				},
-			},
-			expected: false,
-		},
-		{
-			name:   "cross-namespace cycle",
-			target: "ns1/a",
-			comps: map[string]*apiv1.Composition{
-				"ns1/a": {
-					ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns1"},
-					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "b", Namespace: "ns2"}},
-					},
-				},
-				"ns2/b": {
-					ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "ns2"},
-					Spec: apiv1.CompositionSpec{
-						DependsOn: []apiv1.CompositionDependency{{Name: "a", Namespace: "ns1"}},
-					},
-				},
-			},
-			expected: true,
-		},
-		{
-			name:   "node not in cycle is not detected as cyclic",
-			target: "ns/d",
-			comps: map[string]*apiv1.Composition{
-				"ns/a": {
+			name: "simple cycle A<->B",
+			compositions: []apiv1.Composition{
+				{
 					ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
 						DependsOn: []apiv1.CompositionDependency{{Name: "b", Namespace: "ns"}},
 					},
 				},
-				"ns/b": {
+				{
 					ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
 						DependsOn: []apiv1.CompositionDependency{{Name: "a", Namespace: "ns"}},
 					},
 				},
-				"ns/d": {
-					ObjectMeta: metav1.ObjectMeta{Name: "d", Namespace: "ns"},
-					// d has no deps — it's not part of the A<->B cycle
-				},
 			},
-			expected: false,
+			expectedOrder:  []string{},
+			expectedCyclic: []string{"ns/a", "ns/b"},
 		},
 		{
-			name:   "node depending on cyclic node is marked cyclic (conservative over-approximation)",
-			target: "ns/d",
-			comps: map[string]*apiv1.Composition{
-				"ns/a": {
+			name: "cycle with independent node",
+			compositions: []apiv1.Composition{
+				{
 					ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
 						DependsOn: []apiv1.CompositionDependency{{Name: "b", Namespace: "ns"}},
 					},
 				},
-				"ns/b": {
+				{
 					ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "ns"},
 					Spec: apiv1.CompositionSpec{
 						DependsOn: []apiv1.CompositionDependency{{Name: "a", Namespace: "ns"}},
 					},
 				},
-				"ns/d": {
-					ObjectMeta: metav1.ObjectMeta{Name: "d", Namespace: "ns"},
+				{ObjectMeta: metav1.ObjectMeta{Name: "c", Namespace: "ns"}},
+			},
+			expectedOrder:  []string{"ns/c"},
+			expectedCyclic: []string{"ns/a", "ns/b"},
+		},
+		{
+			name: "cross-namespace dependencies",
+			compositions: []apiv1.Composition{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "prod"},
 					Spec: apiv1.CompositionSpec{
-						// D depends on A, which is part of the A<->B cycle.
-						// D is not itself on the cycle, but is marked cyclic as a
-						// conservative over-approximation since its dependency chain
-						// is fundamentally broken.
+						DependsOn: []apiv1.CompositionDependency{{Name: "db", Namespace: "infra"}},
+					},
+				},
+				{ObjectMeta: metav1.ObjectMeta{Name: "db", Namespace: "infra"}},
+			},
+			expectedOrder:  []string{"infra/db", "prod/app"},
+			expectedCyclic: nil,
+		},
+		{
+			name: "self loop",
+			compositions: []apiv1.Composition{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
+					Spec: apiv1.CompositionSpec{
 						DependsOn: []apiv1.CompositionDependency{{Name: "a", Namespace: "ns"}},
 					},
 				},
 			},
-			expected: true,
+			expectedOrder:  []string{},
+			expectedCyclic: []string{"ns/a"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cyclicSet := detectAllCycles(tt.comps)
-			result := cyclicSet[tt.target]
-			assert.Equal(t, tt.expected, result)
+			sorted, cyclicSet := topoSortCompositions(tt.compositions)
+
+			var sortedKeys []string
+			for _, comp := range sorted {
+				sortedKeys = append(sortedKeys, comp.Namespace+"/"+comp.Name)
+			}
+			if len(tt.expectedOrder) == 0 {
+				assert.Empty(t, sortedKeys)
+			} else {
+				assert.Equal(t, tt.expectedOrder, sortedKeys)
+			}
+
+			if tt.expectedCyclic == nil {
+				assert.Empty(t, cyclicSet)
+			} else {
+				assert.Len(t, cyclicSet, len(tt.expectedCyclic))
+				for _, key := range tt.expectedCyclic {
+					assert.True(t, cyclicSet[key], "expected %s in cyclic set", key)
+				}
+			}
 		})
 	}
 }

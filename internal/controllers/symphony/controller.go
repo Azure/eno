@@ -231,8 +231,16 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		compBySynth[comps.Items[i].Spec.Synthesizer.Name] = &comps.Items[i]
 	}
 
-	// Sync forward (create/update)
-	for _, variation := range symph.Spec.Variations {
+	// Sort variations so dependencies come first; detect cycles as a byproduct
+	sortedVariations, cyclicSynths := topoSortVariations(symph.Spec.Variations)
+	for synthName := range cyclicSynths {
+		logger.Info("circular dependency detected in variation, skipping",
+			"synthesizerName", synthName)
+	}
+
+	// Sync forward (create/update) — process ALL variations in dependency order
+	for _, variation := range sortedVariations {
+
 		comp := &apiv1.Composition{}
 		comp.Namespace = symph.Namespace
 		comp.GenerateName = variation.Synthesizer.Name + "-"
@@ -258,6 +266,9 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 			return existing.Spec.Synthesizer.Name == variation.Synthesizer.Name
 		})
 
+		// Safety fallback: with topological sort this should not trigger since
+		// dependencies are processed first, but guards against edge cases like
+		// a failed Create earlier in the loop.
 		if !allresolved {
 			if idx == -1 {
 				logger.Info("skipping composition creation: not all synthesizer-based dependencies resolved yet",
@@ -302,7 +313,10 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 				return false, fmt.Errorf("creating composition: %w", err)
 			}
 			logger.Info("created composition for symphony", "compositionName", comp.Name, "synthesizerName", variation.Synthesizer.Name)
-			return true, nil
+			// Add to compBySynth so later iterations can resolve deps on this composition
+			compBySynth[variation.Synthesizer.Name] = comp
+			modified = true
+			continue
 		}
 
 		// Diff and update if needed
@@ -318,11 +332,11 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 			return false, fmt.Errorf("updating existing composition: %w", err)
 		}
 		logger.Info("updated composition because its variation changed")
-		return true, nil
+		modified = true
 	}
 
 	logger.Info("reconcile forward complete")
-	return false, nil
+	return modified, nil
 }
 
 func (c *symphonyController) syncStatus(ctx context.Context, symph *apiv1.Symphony, comps *apiv1.CompositionList) error {

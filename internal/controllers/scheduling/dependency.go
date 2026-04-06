@@ -4,6 +4,7 @@ import (
 	"path"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/toposort"
 )
 
 // buildReadySet creates a set of namespace/name keys for compositions that
@@ -39,56 +40,18 @@ func areDependenciesReady(comp *apiv1.Composition, readySet map[string]bool) boo
 	return true
 }
 
-// detectAllCycles returns a set of composition keys that are part of or depend on any cycle.
-// This is a conservative over-approximation: nodes that transitively depend on a cyclic node
-// are also marked cyclic. This is intentional — such compositions can never make progress
-// (their dependency will never become Ready), and surfacing "CircularDependency" communicates
-// that the dependency chain is fundamentally broken.
-// Uses an iterative, stack-based DFS over the entire graph: O(N + E) run time.
-func detectAllCycles(allComps map[string]*apiv1.Composition) map[string]bool {
-	cyclic := map[string]bool{}
-	color := map[string]int{} // 0=unvisited, 1=inProcess, 2=done
-
-	for startKey := range allComps {
-		if color[startKey] == 2 {
-			continue
-		}
-
-		stack := []string{startKey}
-		for len(stack) > 0 {
-			key := stack[len(stack)-1]
-			if color[key] == 0 {
-				// first visit: mark in-progress, push unvisited children
-				color[key] = 1
-				if comp, ok := allComps[key]; ok {
-					for _, dep := range comp.Spec.DependsOn {
-						depKey := path.Join(dep.Namespace, dep.Name)
-						if color[depKey] == 1 {
-							cyclic[depKey] = true
-							cyclic[key] = true
-						} else if color[depKey] == 0 {
-							stack = append(stack, depKey)
-						} else if cyclic[depKey] {
-							cyclic[key] = true
-						}
-					}
-				}
-			} else {
-				// Second visit: pop, propagate cyclic from children, mark done
-				stack = stack[:len(stack)-1]
-				if color[key] == 1 {
-					if comp, ok := allComps[key]; ok {
-						for _, dep := range comp.Spec.DependsOn {
-							depKey := path.Join(dep.Namespace, dep.Name)
-							if cyclic[depKey] {
-								cyclic[key] = true
-							}
-						}
-					}
-					color[key] = 2
-				}
+// // topoSortVariations returns compositions in topological order (dependency first)
+// and a set of syntheiszer names that are part of dependency cycle
+// Uses the generic Kahn's algorithm O(V+E)
+func topoSortCompositions(compositions []apiv1.Composition) (sortedComposition []apiv1.Composition, cyclicSet map[string]bool) {
+	return toposort.TopologySort(compositions,
+		func(comp *apiv1.Composition) string { return path.Join(comp.GetNamespace(), comp.GetName()) },
+		func(comp *apiv1.Composition) []string {
+			var deps []string
+			for _, dep := range comp.Spec.DependsOn {
+				deps = append(deps, path.Join(dep.Namespace, dep.Name))
 			}
-		}
-	}
-	return cyclic
+			return deps
+		},
+	)
 }

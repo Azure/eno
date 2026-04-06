@@ -117,12 +117,11 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	// Build readiness index and composition map for dependency checking
 	readySet := buildReadySet(comps)
-	compsByKey := buildCompsByKey(comps)
-	cyclicSet := detectAllCycles(compsByKey)
+	sortedComps, cyclicSet := topoSortCompositions(comps.Items)
 
 	var inFlight int
 	var op *op
-	for _, comp := range comps.Items {
+	for _, comp := range sortedComps {
 		comp := comp
 		if comp.Synthesizing() {
 			inFlight++
@@ -171,16 +170,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 				var blockedBy []apiv1.BlockedByRef
 				for _, dep := range comp.Spec.DependsOn {
 					key := path.Join(dep.Namespace, dep.Name)
-					if _, exists := compsByKey[key]; !exists { // Dependency Not found - This should not happen as we have already guarded when creating
-						// composition in symphony
-						blockedBy = append(blockedBy, apiv1.BlockedByRef{
-							Name:      dep.Name,
-							Namespace: dep.Namespace,
-							Reason:    apiv1.WaintingOnDependencyNotFoundReason,
-						})
-						logger.Error(fmt.Errorf("dependency %s/%s not found", dep.Namespace, dep.Name), "required dependency does not exist",
-							"compositionName", comp.GetName(), "dependencyName", dep.Name, "dependencyNamespace", dep.Namespace)
-					} else if !readySet[key] {
+					if !readySet[key] {
 						logger.Info("Current Dependency not ready for composition", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace(),
 							"dependencyName", dep.Name, "dependencyNamespace", dep.Namespace)
 						blockedBy = append(blockedBy, apiv1.BlockedByRef{
