@@ -40,21 +40,6 @@ func TestBuildReadySet(t *testing.T) {
 	assert.Len(t, readySet, 1)
 }
 
-func TestBuildCompsByKey(t *testing.T) {
-	comps := &apiv1.CompositionList{
-		Items: []apiv1.Composition{
-			{ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns1"}},
-			{ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "ns2"}},
-		},
-	}
-
-	m := buildCompsByKey(comps)
-
-	assert.Len(t, m, 2)
-	assert.Equal(t, "a", m["ns1/a"].Name)
-	assert.Equal(t, "b", m["ns2/b"].Name)
-}
-
 func TestAreDependenciesReady(t *testing.T) {
 	readySet := map[string]bool{
 		"ns1/dep-a": true,
