@@ -119,6 +119,41 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	readySet := buildReadySet(comps)
 	sortedComps, cyclicSet := topoSortCompositions(comps.Items)
 
+	// Pre-loop: set/clear circular dependency status on all compositions.
+	// Cyclic compositions are excluded from sortedComps by Kahn's algorithm,
+	// so we must handle them here before the main loop.
+	for _, comp := range comps.Items {
+		comp := comp
+		if comp.DeletionTimestamp != nil || len(comp.Spec.DependsOn) == 0 {
+			continue
+		}
+		compKey := path.Join(comp.GetNamespace(), comp.GetName())
+		if cyclicSet[compKey] {
+			logger.Info("circular dependency detected, skipping composition synthesis",
+				"compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace())
+			if comp.Status.DependencyStatus == nil || comp.Status.DependencyStatus.Reason != apiv1.CircularDependencyReason {
+				copy := comp.DeepCopy()
+				copy.Status.DependencyStatus = &apiv1.DependencyStatus{
+					Blocked: true,
+					Reason:  apiv1.CircularDependencyReason,
+				}
+				if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(&comp)); err != nil {
+					logger.Error(err, "failed to update circular dependency status")
+					return ctrl.Result{}, err
+				}
+			}
+		} else if comp.Status.DependencyStatus != nil && comp.Status.DependencyStatus.Reason == apiv1.CircularDependencyReason {
+			// Clear stale circular dependency status for compositions no longer in a cycle
+			copy := comp.DeepCopy()
+			copy.Status.DependencyStatus = nil
+			if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(&comp)); err != nil {
+				logger.Error(err, "failed to clear circular dependency status")
+				return ctrl.Result{}, err
+			}
+			logger.Info("cleared stale circular dependency status", "compositionName", comp.GetName())
+		}
+	}
+
 	var inFlight int
 	var op *op
 	for _, comp := range sortedComps {
@@ -137,34 +172,6 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 
 		if comp.DeletionTimestamp == nil && len(comp.Spec.DependsOn) > 0 {
-			compKey := path.Join(comp.GetNamespace(), comp.GetName())
-			if cyclicSet[compKey] {
-				logger.Info("circular dependency detected, skipping composition synthesis", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace())
-				if comp.Status.DependencyStatus == nil || comp.Status.DependencyStatus.Reason != apiv1.CircularDependencyReason {
-					copy := comp.DeepCopy()
-					copy.Status.DependencyStatus = &apiv1.DependencyStatus{
-						Blocked: true,
-						Reason:  apiv1.CircularDependencyReason,
-					}
-					if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(&comp)); err != nil {
-						logger.Error(err, "failed to update circular dependency status")
-						return ctrl.Result{}, err
-					}
-				}
-
-				continue
-			}
-			// clear the CircularDependency status
-			if !cyclicSet[compKey] && comp.Status.DependencyStatus != nil && comp.Status.DependencyStatus.Reason == apiv1.CircularDependencyReason {
-				copy := comp.DeepCopy()
-				copy.Status.DependencyStatus = nil
-				if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(&comp)); err != nil {
-					logger.Error(err, "failed to clear dependency status")
-					return ctrl.Result{}, err
-				}
-				logger.Info("cleared stale circular dependency status", "compositionName", comp.GetName())
-			}
-
 			if !areDependenciesReady(&comp, readySet) {
 				// Build BlockedBy list
 				var blockedBy []apiv1.BlockedByRef
