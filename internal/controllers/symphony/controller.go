@@ -252,15 +252,18 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 
 		// Resolve variation dependencies to composition dependencies. If the dependent composition does not exist yet
 		// DO NOT CREATE the current composition as it might lead to race condition and ordering not being respected
-
-		deps, allresolved := resolveVariationDeps(variation.DependsOn, compBySynth)
+		var validDeps []apiv1.VariationDependency
 		for _, dep := range variation.DependsOn {
 			if dep.Synthesizer == "" {
 				logger.Error(fmt.Errorf("No Variation Dependency Synthesizer"),
 					"Error: variation dependency has no synthesizer set, dependency will be ignored",
 					"synthesizerName", variation.Synthesizer.Name)
+				continue
 			}
+			validDeps = append(validDeps, dep)
 		}
+		deps, allresolved := resolveVariationDeps(validDeps, compBySynth)
+
 		comp.Spec.DependsOn = deps
 		idx := slices.IndexFunc(comps.Items, func(existing apiv1.Composition) bool {
 			return existing.Spec.Synthesizer.Name == variation.Synthesizer.Name
