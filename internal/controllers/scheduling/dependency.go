@@ -39,7 +39,7 @@ func areDependenciesReady(comp *apiv1.Composition, readySet map[string]bool) boo
 	return true
 }
 
-// topoSortVariations returns compositions in topological order (dependency first)
+// topoSortCompositions returns compositions in topological order (dependency first)
 // and a set of synthesizer names that are part of dependency cycle
 // Uses the generic Kahn's algorithm O(V+E)
 func topoSortCompositions(compositions []apiv1.Composition) (sortedComposition []apiv1.Composition, cyclicSet map[string]bool) {
