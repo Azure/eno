@@ -295,6 +295,12 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 			"operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 
 		if idx == -1 {
+			// Assumption to ensure idx == -1 works correctly.
+			// noCacheClient.List returns all compositions in the namespace, which under the below assumptions is correct.
+			// Need to revisit if any of the below assumptions change.
+			// 1. One symphony per namespace
+			// 2. No standalone compositions in the namespace
+			// 3. No cross-symphony dependency references
 			err := c.noCacheClient.List(ctx, comps, client.InNamespace(symph.Namespace))
 			if err != nil {
 				logger.Error(err, "failed to list compositions without cache", "synthesizerName", variation.Synthesizer.Name)
