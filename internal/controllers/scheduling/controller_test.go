@@ -1350,3 +1350,39 @@ func TestClearDependencyStatus(t *testing.T) {
 		assert.False(t, cleared)
 	})
 }
+
+// TestDependencyNotFoundReasonSet proves that when a composition depends on a non-existent
+// composition, the BlockedBy entry uses DependencyNotFound rather than DependencyNotReady.
+func TestDependencyNotFoundReasonSet(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+
+	c := &controller{client: cli, concurrencyLimit: 10, watchdogThreshold: time.Hour}
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	require.NoError(t, cli.Create(ctx, synth))
+
+	// comp-b depends on comp-a, but comp-a does NOT exist
+	compB := &apiv1.Composition{}
+	compB.Name = "comp-b"
+	compB.Namespace = "default"
+	compB.Finalizers = []string{"eno.azure.io/cleanup"}
+	compB.Spec.Synthesizer.Name = synth.Name
+	compB.Spec.DependsOn = []apiv1.CompositionDependency{
+		{Name: "comp-a", Namespace: "default"},
+	}
+	require.NoError(t, cli.Create(ctx, compB))
+
+	_, err := c.Reconcile(ctx, ctrl.Request{})
+	require.NoError(t, err)
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(compB), compB))
+	require.NotNil(t, compB.Status.DependencyStatus)
+	assert.True(t, compB.Status.DependencyStatus.Blocked)
+	assert.Equal(t, apiv1.WaitingOnDependenciesReason, compB.Status.DependencyStatus.Reason)
+	require.Len(t, compB.Status.DependencyStatus.BlockedBy, 1)
+	assert.Equal(t, "comp-a", compB.Status.DependencyStatus.BlockedBy[0].Name)
+	assert.Equal(t, "default", compB.Status.DependencyStatus.BlockedBy[0].Namespace)
+	assert.Equal(t, apiv1.WaitingOnDependencyNotFoundReason, compB.Status.DependencyStatus.BlockedBy[0].Reason)
+}
