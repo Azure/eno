@@ -234,7 +234,8 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 	// Sort variations so dependencies come first; detect cycles as a byproduct
 	sortedVariations, cyclicSynths := topoSortVariations(symph.Spec.Variations)
 	for synthName := range cyclicSynths {
-		logger.Info("circular dependency detected in variation, skipping",
+		logger.Error(fmt.Errorf("circular dependency detected in variation"),
+			"skipping variation",
 			"synthesizerName", synthName)
 	}
 
@@ -274,10 +275,12 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		// a failed Create earlier in the loop.
 		if !allresolved {
 			if idx == -1 {
-				logger.Info("skipping composition creation: not all synthesizer-based dependencies resolved yet",
+				logger.Error(fmt.Errorf("not all synthesizer-based dependencies resolved yet"),
+					"skipping composition creation",
 					"synthesizerName", variation.Synthesizer.Name)
 			} else {
-				logger.Info("skipping composition update: not all synthesizer-based dependencies resolved yet",
+				logger.Error(fmt.Errorf("not all synthesizer-based dependencies resolved yet"),
+					"skipping composition update",
 					"synthesizerName", variation.Synthesizer.Name, "compositionName", comps.Items[idx].Name)
 			}
 			continue

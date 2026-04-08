@@ -10,13 +10,22 @@ import (
 // buildReadySet creates a set of namespace/name keys for compositions that
 // have CurrentSynthesis.Ready != nil
 func buildReadySet(comps *apiv1.CompositionList) map[string]bool {
-	m := make(map[string]bool, len(comps.Items))
+	readyMap := make(map[string]bool, len(comps.Items))
 	for _, comp := range comps.Items {
 		if comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil {
-			m[path.Join(comp.GetNamespace(), comp.GetName())] = true
+			readyMap[path.Join(comp.GetNamespace(), comp.GetName())] = true
 		}
 	}
-	return m
+	return readyMap
+}
+
+// buildExistsSet creates a set of namespace/name keys for all compositions
+func buildExistsSet(comps *apiv1.CompositionList) map[string]bool {
+	existMap := make(map[string]bool, len(comps.Items))
+	for _, comp := range comps.Items {
+		existMap[path.Join(comp.GetNamespace(), comp.GetName())] = true
+	}
+	return existMap
 }
 
 // areDependenciesReady checks if all required dependencies are ready.

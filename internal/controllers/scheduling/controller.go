@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -117,6 +118,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	// Build readiness index and composition map for dependency checking
 	readySet := buildReadySet(comps)
+	existSet := buildExistsSet(comps)
 	sortedComps, cyclicSet := topoSortCompositions(comps.Items)
 
 	// Pre-loop: set/clear circular dependency status on all compositions.
@@ -129,27 +131,20 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 		compKey := path.Join(comp.GetNamespace(), comp.GetName())
 		if cyclicSet[compKey] {
-			logger.Info("circular dependency detected, skipping composition synthesis",
+			logger.Error(fmt.Errorf("circular dependency detected"),
+				"skipping composition synthesis",
 				"compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace())
-			if comp.Status.DependencyStatus == nil || comp.Status.DependencyStatus.Reason != apiv1.CircularDependencyReason {
-				copy := comp.DeepCopy()
-				copy.Status.DependencyStatus = &apiv1.DependencyStatus{
-					Blocked: true,
-					Reason:  apiv1.CircularDependencyReason,
-				}
-				if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(&comp)); err != nil {
-					logger.Error(err, "failed to update circular dependency status")
-					return ctrl.Result{}, err
-				}
-			}
-		} else if comp.Status.DependencyStatus != nil && comp.Status.DependencyStatus.Reason == apiv1.CircularDependencyReason {
-			// Clear stale circular dependency status for compositions no longer in a cycle
-			copy := comp.DeepCopy()
-			copy.Status.DependencyStatus = nil
-			if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(&comp)); err != nil {
-				logger.Error(err, "failed to clear circular dependency status")
+			if _, err := c.setDependencyStatus(ctx, &comp, &apiv1.DependencyStatus{
+				Blocked: true,
+				Reason:  apiv1.CircularDependencyReason,
+			}); err != nil {
+				logger.Error(err, "failed to update circular dependency status")
 				return ctrl.Result{}, err
 			}
+		} else if cleared, err := c.clearDependencyStatus(ctx, &comp, apiv1.CircularDependencyReason); err != nil {
+			logger.Error(err, "failed to clear circular dependency status")
+			return ctrl.Result{}, err
+		} else if cleared {
 			logger.Info("cleared stale circular dependency status", "compositionName", comp.GetName())
 		}
 	}
@@ -178,41 +173,36 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 				for _, dep := range comp.Spec.DependsOn {
 					key := path.Join(dep.Namespace, dep.Name)
 					if !readySet[key] {
-						logger.Info("Current Dependency not ready for composition", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace(),
-							"dependencyName", dep.Name, "dependencyNamespace", dep.Namespace)
+						reason := apiv1.WaitingOnDependencyNotReadyReason
+						if !existSet[key] {
+							reason = apiv1.WaitingOnDependencyNotFoundReason
+						}
+						logger.Info("dependency not satisfied for composition", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace(),
+							"dependencyName", dep.Name, "dependencyNamespace", dep.Namespace, "reason", reason)
 						blockedBy = append(blockedBy, apiv1.BlockedByRef{
 							Name:      dep.Name,
 							Namespace: dep.Namespace,
-							Reason:    apiv1.WaitingOnDependencyNotReadyReason,
+							Reason:    reason,
 						})
 					}
 				}
-				newStatus := &apiv1.DependencyStatus{
+				if _, err := c.setDependencyStatus(ctx, &comp, &apiv1.DependencyStatus{
 					Blocked:   true,
 					Reason:    apiv1.WaitingOnDependenciesReason,
 					BlockedBy: blockedBy,
-				}
-				if comp.Status.DependencyStatus == nil || comp.Status.DependencyStatus.Reason != newStatus.Reason {
-					copy := comp.DeepCopy()
-					copy.Status.DependencyStatus = newStatus
-					if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(&comp)); err != nil {
-						logger.Error(err, "failed to update dependency status")
-						return ctrl.Result{}, err
-					}
+				}); err != nil {
+					return ctrl.Result{}, err
 				}
 				logger.Info("not all dependent compositions are ready, skipping composition synthesis", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace())
 				continue
 			}
 
 			// clear the waitingonDependencies status
-			if comp.Status.DependencyStatus != nil && comp.Status.DependencyStatus.Reason == apiv1.WaitingOnDependenciesReason {
-				copy := comp.DeepCopy()
-				copy.Status.DependencyStatus = nil
-				if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(&comp)); err != nil {
-					logger.Error(err, "failed to clear dependency status")
-					return ctrl.Result{}, err
-				}
-				logger.Info("cleared stale waiting on dependencies status", "compositionName", comp.GetName())
+			if cleared, err := c.clearDependencyStatus(ctx, &comp, apiv1.WaitingOnDependenciesReason); err != nil {
+				logger.Error(err, "failed to clear dependency status")
+				return ctrl.Result{}, err
+			} else if cleared {
+				logger.Info("cleared stale waiting on dependency status", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace())
 			}
 		}
 
@@ -326,4 +316,40 @@ func getSynthOwner(synth *apiv1.Synthesizer) string {
 		return ""
 	}
 	return synth.GetAnnotations()["eno.azure.io/owner"]
+}
+
+// setDependencyStatus patches the composition's DependencyStatus if it doesn't already
+// match the given reason. Returns true if a patch was applied
+func (c *controller) setDependencyStatus(ctx context.Context, comp *apiv1.Composition, newStatus *apiv1.DependencyStatus) (bool, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+	// same status, we can ignore
+	if comp.Status.DependencyStatus != nil && equality.Semantic.DeepEqual(*comp.Status.DependencyStatus, *newStatus) {
+		return false, nil // modified=false, err = nil
+	}
+
+	copy := comp.DeepCopy()
+	copy.Status.DependencyStatus = newStatus
+	logger.Info("Setting DependencyStatus for composition", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace(),
+		"DependencyStatusReason", newStatus.Reason, "BlockedBy", newStatus.BlockedBy)
+	if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(comp)); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// clearDependencyStatus clears the composition's DependencyStatus if it currently has the given reason.
+// Returns true if a patch was applied
+func (c *controller) clearDependencyStatus(ctx context.Context, comp *apiv1.Composition, reason string) (bool, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+	if comp.Status.DependencyStatus == nil || comp.Status.DependencyStatus.Reason != reason {
+		return false, nil
+	}
+	copy := comp.DeepCopy()
+	copy.Status.DependencyStatus = nil
+	logger.Info("clearing dependency status", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace(),
+		"prevDependencyReason", comp.Status.DependencyStatus.Reason)
+	if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(comp)); err != nil {
+		return false, err
+	}
+	return true, nil
 }

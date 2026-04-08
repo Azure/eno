@@ -102,8 +102,8 @@ func TestTopologySort(t *testing.T) {
 			items: []node{
 				{name: "a", deps: []string{"phantom"}},
 			},
-			expectedOrder:  []string{},
-			expectedCyclic: []string{"a"},
+			expectedOrder:  []string{"a"},
+			expectedCyclic: nil,
 		},
 		{
 			name: "complex mixed graph",

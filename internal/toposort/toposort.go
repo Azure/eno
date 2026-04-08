@@ -12,13 +12,22 @@ func TopologySort[T any](items []T, keyFn func(*T) string, depsFn func(*T) []str
 	inDegree := make(map[string]int, len(items))
 	dependents := make(map[string][]string)
 
+	// First pass: index all items by key
 	for i := range items {
 		key := keyFn(&items[i])
 		byKey[key] = &items[i]
-		if _, exists := inDegree[key]; !exists {
-			inDegree[key] = 0
-		}
+		inDegree[key] = 0
+	}
+
+	// Second pass: compute in-degrees only for deps that exist in the item set.
+	// Dependencies referencing non-existent keys are skipped so they don't
+	// artificially inflate in-degree and get misclassified as cycles.
+	for i := range items {
+		key := keyFn(&items[i])
 		for _, dep := range depsFn(&items[i]) {
+			if _, exists := byKey[dep]; !exists {
+				continue
+			}
 			dependents[dep] = append(dependents[dep], key)
 			inDegree[key]++
 		}

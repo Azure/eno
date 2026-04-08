@@ -40,6 +40,30 @@ func TestBuildReadySet(t *testing.T) {
 	assert.Len(t, readySet, 1)
 }
 
+func TestBuildExistsSet(t *testing.T) {
+	comps := &apiv1.CompositionList{
+		Items: []apiv1.Composition{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "comp-a", Namespace: "ns1"},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "comp-b", Namespace: "ns1"},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "comp-c", Namespace: "ns2"},
+			},
+		},
+	}
+
+	existsSet := buildExistsSet(comps)
+
+	assert.True(t, existsSet["ns1/comp-a"])
+	assert.True(t, existsSet["ns1/comp-b"])
+	assert.True(t, existsSet["ns2/comp-c"])
+	assert.False(t, existsSet["ns1/nonexistent"])
+	assert.Len(t, existsSet, 3)
+}
+
 func TestAreDependenciesReady(t *testing.T) {
 	readySet := map[string]bool{
 		"ns1/dep-a": true,

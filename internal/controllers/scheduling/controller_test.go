@@ -1173,3 +1173,180 @@ func TestWaitingOnDependenciesStatusCleared(t *testing.T) {
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(compB), compB))
 	assert.Nil(t, compB.Status.DependencyStatus, "waiting on dependencies status should be cleared when deps become ready")
 }
+
+func TestSetDependencyStatus(t *testing.T) {
+	ctx := testutil.NewContext(t)
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+
+	comp := &apiv1.Composition{}
+	comp.Name = "comp-a"
+	comp.Namespace = "default"
+	comp.Finalizers = []string{"eno.azure.io/cleanup"}
+	comp.Spec.Synthesizer.Name = synth.Name
+
+	t.Run("sets status when none exists", func(t *testing.T) {
+		cli := testutil.NewClient(t, comp.DeepCopy(), synth.DeepCopy())
+		c := &controller{client: cli}
+
+		fresh := comp.DeepCopy()
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(fresh), fresh))
+
+		patched, err := c.setDependencyStatus(ctx, fresh, &apiv1.DependencyStatus{
+			Blocked: true,
+			Reason:  apiv1.CircularDependencyReason,
+		})
+		require.NoError(t, err)
+		assert.True(t, patched)
+
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(fresh), fresh))
+		require.NotNil(t, fresh.Status.DependencyStatus)
+		assert.Equal(t, apiv1.CircularDependencyReason, fresh.Status.DependencyStatus.Reason)
+		assert.True(t, fresh.Status.DependencyStatus.Blocked)
+	})
+
+	t.Run("skips patch when status already matches", func(t *testing.T) {
+		existing := comp.DeepCopy()
+		cli := testutil.NewClient(t, existing, synth.DeepCopy())
+		c := &controller{client: cli}
+
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(existing), existing))
+		existing.Status.DependencyStatus = &apiv1.DependencyStatus{
+			Blocked: true,
+			Reason:  apiv1.CircularDependencyReason,
+		}
+		require.NoError(t, cli.Status().Update(ctx, existing))
+
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(existing), existing))
+		patched, err := c.setDependencyStatus(ctx, existing, &apiv1.DependencyStatus{
+			Blocked: true,
+			Reason:  apiv1.CircularDependencyReason,
+		})
+		require.NoError(t, err)
+		assert.False(t, patched)
+	})
+
+	t.Run("updates when reason differs", func(t *testing.T) {
+		existing := comp.DeepCopy()
+		cli := testutil.NewClient(t, existing, synth.DeepCopy())
+		c := &controller{client: cli}
+
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(existing), existing))
+		existing.Status.DependencyStatus = &apiv1.DependencyStatus{
+			Blocked: true,
+			Reason:  apiv1.CircularDependencyReason,
+		}
+		require.NoError(t, cli.Status().Update(ctx, existing))
+
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(existing), existing))
+		patched, err := c.setDependencyStatus(ctx, existing, &apiv1.DependencyStatus{
+			Blocked: true,
+			Reason:  apiv1.WaitingOnDependenciesReason,
+		})
+		require.NoError(t, err)
+		assert.True(t, patched)
+
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(existing), existing))
+		assert.Equal(t, apiv1.WaitingOnDependenciesReason, existing.Status.DependencyStatus.Reason)
+	})
+
+	t.Run("updates when blockedBy changes", func(t *testing.T) {
+		existing := comp.DeepCopy()
+		cli := testutil.NewClient(t, existing, synth.DeepCopy())
+		c := &controller{client: cli}
+
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(existing), existing))
+		existing.Status.DependencyStatus = &apiv1.DependencyStatus{
+			Blocked: true,
+			Reason:  apiv1.WaitingOnDependenciesReason,
+			BlockedBy: []apiv1.BlockedByRef{
+				{Name: "dep-a", Namespace: "default", Reason: apiv1.WaitingOnDependencyNotReadyReason},
+			},
+		}
+		require.NoError(t, cli.Status().Update(ctx, existing))
+
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(existing), existing))
+		patched, err := c.setDependencyStatus(ctx, existing, &apiv1.DependencyStatus{
+			Blocked: true,
+			Reason:  apiv1.WaitingOnDependenciesReason,
+			BlockedBy: []apiv1.BlockedByRef{
+				{Name: "dep-b", Namespace: "default", Reason: apiv1.WaitingOnDependencyNotFoundReason},
+			},
+		})
+		require.NoError(t, err)
+		assert.True(t, patched)
+
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(existing), existing))
+		require.Len(t, existing.Status.DependencyStatus.BlockedBy, 1)
+		assert.Equal(t, "dep-b", existing.Status.DependencyStatus.BlockedBy[0].Name)
+		assert.Equal(t, apiv1.WaitingOnDependencyNotFoundReason, existing.Status.DependencyStatus.BlockedBy[0].Reason)
+	})
+}
+
+func TestClearDependencyStatus(t *testing.T) {
+	ctx := testutil.NewContext(t)
+
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+
+	comp := &apiv1.Composition{}
+	comp.Name = "comp-a"
+	comp.Namespace = "default"
+	comp.Finalizers = []string{"eno.azure.io/cleanup"}
+	comp.Spec.Synthesizer.Name = synth.Name
+
+	t.Run("clears matching reason", func(t *testing.T) {
+		existing := comp.DeepCopy()
+		cli := testutil.NewClient(t, existing, synth.DeepCopy())
+		c := &controller{client: cli}
+
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(existing), existing))
+		existing.Status.DependencyStatus = &apiv1.DependencyStatus{
+			Blocked: true,
+			Reason:  apiv1.WaitingOnDependenciesReason,
+		}
+		require.NoError(t, cli.Status().Update(ctx, existing))
+
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(existing), existing))
+		cleared, err := c.clearDependencyStatus(ctx, existing, apiv1.WaitingOnDependenciesReason)
+		require.NoError(t, err)
+		assert.True(t, cleared)
+
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(existing), existing))
+		assert.Nil(t, existing.Status.DependencyStatus)
+	})
+
+	t.Run("skips when reason does not match", func(t *testing.T) {
+		existing := comp.DeepCopy()
+		cli := testutil.NewClient(t, existing, synth.DeepCopy())
+		c := &controller{client: cli}
+
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(existing), existing))
+		existing.Status.DependencyStatus = &apiv1.DependencyStatus{
+			Blocked: true,
+			Reason:  apiv1.CircularDependencyReason,
+		}
+		require.NoError(t, cli.Status().Update(ctx, existing))
+
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(existing), existing))
+		cleared, err := c.clearDependencyStatus(ctx, existing, apiv1.WaitingOnDependenciesReason)
+		require.NoError(t, err)
+		assert.False(t, cleared)
+
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(existing), existing))
+		require.NotNil(t, existing.Status.DependencyStatus)
+		assert.Equal(t, apiv1.CircularDependencyReason, existing.Status.DependencyStatus.Reason)
+	})
+
+	t.Run("skips when status is nil", func(t *testing.T) {
+		existing := comp.DeepCopy()
+		cli := testutil.NewClient(t, existing, synth.DeepCopy())
+		c := &controller{client: cli}
+
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(existing), existing))
+		cleared, err := c.clearDependencyStatus(ctx, existing, apiv1.WaitingOnDependenciesReason)
+		require.NoError(t, err)
+		assert.False(t, cleared)
+	})
+}
