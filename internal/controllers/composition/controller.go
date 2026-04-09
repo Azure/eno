@@ -323,6 +323,11 @@ func buildSimplifiedStatus(synth *apiv1.Synthesizer, comp *apiv1.Composition) *a
 	}
 
 	if comp.Status.CurrentSynthesis == nil && comp.Status.InFlightSynthesis == nil {
+		// This means that dependencies exists and no synthesis started showing WaitingOnDependencies
+		if len(comp.Spec.DependsOn) > 0 {
+			status.Status = apiv1.WaitingOnDependenciesReason
+			return status
+		}
 		status.Status = "PendingSynthesis"
 		return status
 	}
