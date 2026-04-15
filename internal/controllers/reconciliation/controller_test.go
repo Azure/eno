@@ -15,6 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -112,14 +113,14 @@ func TestBuildNonStrategicPatch_NilPrevious(t *testing.T) {
 
 func TestShouldFailOpen(t *testing.T) {
 	c := &Controller{failOpen: true}
-	assert.True(t, c.shouldFailOpen(&resource.Resource{FailOpen: nil}))
-	assert.False(t, c.shouldFailOpen(&resource.Resource{FailOpen: ptr.To(false)}))
-	assert.True(t, c.shouldFailOpen(&resource.Resource{FailOpen: ptr.To(true)}))
+	assert.True(t, c.shouldFailOpen(nil, &resource.Resource{FailOpen: nil}))
+	assert.False(t, c.shouldFailOpen(nil, &resource.Resource{FailOpen: ptr.To(false)}))
+	assert.True(t, c.shouldFailOpen(nil, &resource.Resource{FailOpen: ptr.To(true)}))
 
 	c.failOpen = false
-	assert.False(t, c.shouldFailOpen(&resource.Resource{FailOpen: nil}))
-	assert.False(t, c.shouldFailOpen(&resource.Resource{FailOpen: ptr.To(false)}))
-	assert.True(t, c.shouldFailOpen(&resource.Resource{FailOpen: ptr.To(true)}))
+	assert.False(t, c.shouldFailOpen(nil, &resource.Resource{FailOpen: nil}))
+	assert.False(t, c.shouldFailOpen(nil, &resource.Resource{FailOpen: ptr.To(false)}))
+	assert.True(t, c.shouldFailOpen(nil, &resource.Resource{FailOpen: ptr.To(true)}))
 }
 
 func TestSummarizeError(t *testing.T) {
@@ -248,4 +249,94 @@ func TestRequeueDoesNotPanic(t *testing.T) {
 			return res
 		}).
 		Evaluate(t)
+}
+
+func TestMarkResourceAsDeleted(t *testing.T) {
+	now := metav1.Now()
+
+	newCurrentWithDeletionTimestamp := func() *unstructured.Unstructured {
+		u := &unstructured.Unstructured{Object: map[string]any{}}
+		u.SetDeletionTimestamp(&now)
+		return u
+	}
+
+	tests := []struct {
+		name        string
+		current     *unstructured.Unstructured
+		snap        *resource.Snapshot
+		failingOpen bool
+		expected    bool
+	}{
+		{
+			name:     "current is nil - resource does not exist",
+			current:  nil,
+			snap:     &resource.Snapshot{Resource: &resource.Resource{}},
+			expected: true,
+		},
+		{
+			name:     "current has deletion timestamp with background deletion",
+			current:  newCurrentWithDeletionTimestamp(),
+			snap:     &resource.Snapshot{Resource: &resource.Resource{}, ForegroundDeletion: false},
+			expected: true,
+		},
+		{
+			name:     "current has deletion timestamp with foreground deletion",
+			current:  newCurrentWithDeletionTimestamp(),
+			snap:     &resource.Snapshot{Resource: &resource.Resource{}, ForegroundDeletion: true},
+			expected: false,
+		},
+		{
+			name:     "resource is disabled - treated as deleted",
+			current:  &unstructured.Unstructured{Object: map[string]any{}},
+			snap:     &resource.Snapshot{Resource: &resource.Resource{}, Disable: true},
+			expected: true,
+		},
+		{
+			name:     "resource is disabled and orphaned - treated as deleted",
+			current:  &unstructured.Unstructured{Object: map[string]any{}},
+			snap:     &resource.Snapshot{Resource: &resource.Resource{}, Disable: true, Orphan: true},
+			expected: true,
+		},
+		{
+			name:     "resource exists and is not deleting",
+			current:  &unstructured.Unstructured{Object: map[string]any{}},
+			snap:     &resource.Snapshot{Resource: &resource.Resource{}},
+			expected: false,
+		},
+		{
+			name:        "failingOpen but resource not deleted",
+			current:     &unstructured.Unstructured{Object: map[string]any{}},
+			snap:        &resource.Snapshot{Resource: &resource.Resource{}},
+			failingOpen: true,
+			expected:    false,
+		},
+		{
+			name:        "disabled resource with failingOpen and no foreground deletion",
+			current:     &unstructured.Unstructured{Object: map[string]any{}},
+			snap:        &resource.Snapshot{Resource: &resource.Resource{}, Disable: true},
+			failingOpen: true,
+			expected:    true,
+		},
+		{
+			name:        "disabled resource with failingOpen and foreground deletion - disable takes precedence",
+			current:     &unstructured.Unstructured{Object: map[string]any{}},
+			snap:        &resource.Snapshot{Resource: &resource.Resource{}, Disable: true, ForegroundDeletion: true},
+			failingOpen: true,
+			expected:    true,
+		},
+		{
+			name:        "failingOpen with foreground deletion - should not mark as deleted",
+			current:     newCurrentWithDeletionTimestamp(),
+			snap:        &resource.Snapshot{Resource: &resource.Resource{}, ForegroundDeletion: true},
+			failingOpen: true,
+			expected:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := markResourceAsDeleted(tt.current, tt.snap, tt.failingOpen)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }
