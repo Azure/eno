@@ -121,6 +121,48 @@ func TestShouldFailOpen(t *testing.T) {
 	assert.False(t, c.shouldFailOpen(nil, &resource.Resource{FailOpen: nil}))
 	assert.False(t, c.shouldFailOpen(nil, &resource.Resource{FailOpen: ptr.To(false)}))
 	assert.True(t, c.shouldFailOpen(nil, &resource.Resource{FailOpen: ptr.To(true)}))
+
+	// Foreground deletion: snap.Deleted() && snap.ForegroundDeletion always returns false
+	deletedForeground := &resource.Snapshot{
+		Resource:           &resource.Resource{},
+		Disable:            true, // makes Deleted() return true
+		ForegroundDeletion: true,
+	}
+	c.failOpen = true
+	assert.False(t, c.shouldFailOpen(deletedForeground, &resource.Resource{FailOpen: nil}))
+	assert.False(t, c.shouldFailOpen(deletedForeground, &resource.Resource{FailOpen: ptr.To(true)}))
+	assert.False(t, c.shouldFailOpen(deletedForeground, &resource.Resource{FailOpen: ptr.To(false)}))
+
+	c.failOpen = false
+	assert.False(t, c.shouldFailOpen(deletedForeground, &resource.Resource{FailOpen: nil}))
+	assert.False(t, c.shouldFailOpen(deletedForeground, &resource.Resource{FailOpen: ptr.To(true)}))
+	assert.False(t, c.shouldFailOpen(deletedForeground, &resource.Resource{FailOpen: ptr.To(false)}))
+
+	// Deleted but NOT foreground deletion: normal fail-open logic applies
+	deletedBackground := &resource.Snapshot{
+		Resource:           &resource.Resource{},
+		Disable:            true, // makes Deleted() return true
+		ForegroundDeletion: false,
+	}
+	c.failOpen = true
+	assert.True(t, c.shouldFailOpen(deletedBackground, &resource.Resource{FailOpen: nil}))
+	assert.True(t, c.shouldFailOpen(deletedBackground, &resource.Resource{FailOpen: ptr.To(true)}))
+	assert.False(t, c.shouldFailOpen(deletedBackground, &resource.Resource{FailOpen: ptr.To(false)}))
+
+	c.failOpen = false
+	assert.False(t, c.shouldFailOpen(deletedBackground, &resource.Resource{FailOpen: nil}))
+	assert.True(t, c.shouldFailOpen(deletedBackground, &resource.Resource{FailOpen: ptr.To(true)}))
+	assert.False(t, c.shouldFailOpen(deletedBackground, &resource.Resource{FailOpen: ptr.To(false)}))
+
+	// Not deleted with foreground deletion set: normal fail-open logic applies
+	notDeletedForeground := &resource.Snapshot{
+		Resource:           &resource.Resource{},
+		ForegroundDeletion: true,
+	}
+	c.failOpen = true
+	assert.True(t, c.shouldFailOpen(notDeletedForeground, &resource.Resource{FailOpen: nil}))
+	assert.True(t, c.shouldFailOpen(notDeletedForeground, &resource.Resource{FailOpen: ptr.To(true)}))
+	assert.False(t, c.shouldFailOpen(notDeletedForeground, &resource.Resource{FailOpen: ptr.To(false)}))
 }
 
 func TestSummarizeError(t *testing.T) {
