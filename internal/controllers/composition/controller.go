@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -201,7 +202,7 @@ func (c *compositionController) reconcileDeletedComposition(ctx context.Context,
 		if _, err = c.clearDependencyStatus(ctx, comp); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{}, nil // watch event from status patch will re-enqueue.
+		return ctrl.Result{RequeueAfter: wait.Jitter(time.Second*5, 0.1)}, nil // Explicit requeue to continue deletion after clearing dependency status.
 	}
 
 	syn := comp.Status.CurrentSynthesis

@@ -2,17 +2,10 @@ FROM mcr.microsoft.com/devcontainers/go:1.24 AS builder
 
 ENV GOTOOLCHAIN=auto
 
-# Disable workspace mode so go build uses the toolchain from go.mod
-ENV GOWORK=off
-
 WORKDIR /app
 
-ADD go.mod .
-ADD go.sum .
-RUN --mount=type=cache,target=/root/.cache/go-build go mod download
-
 COPY . .
-RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 go build -o helm-shim ./examples/03-helm-shim
+RUN --mount=type=cache,target=/root/.cache/go-build cd examples/03-helm-shim && CGO_ENABLED=0 go build -o /app/helm-shim .
 
 FROM gcr.io/distroless/static
 
