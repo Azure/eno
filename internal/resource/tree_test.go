@@ -141,6 +141,24 @@ func TestTreeBuilderSanity(t *testing.T) {
 				},
 			},
 		},
+		{
+			//should show during deletion we don't take circular dependencies.
+			Name: "crd-and-cr-during-deletion",
+			Resources: []*Resource{
+				{
+					Ref:                newTestRef("test-cr"),
+					GVK:                schema.GroupVersionKind{Group: "test.group", Version: "v1", Kind: "TestCRDKind"},
+					deletionGroup:      ptr.To(1),
+					compositionDeleted: true,
+				},
+				{
+					Ref:                newTestRef("test-crd"),
+					DefinedGroupKind:   &schema.GroupKind{Group: "test.group", Kind: "TestCRDKind"},
+					deletionGroup:      ptr.To(2),
+					compositionDeleted: true,
+				},
+			},
+		},
 	}
 
 	for _, tc := range tests {

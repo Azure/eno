@@ -2,12 +2,41 @@ package resource
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"slices"
+	"strings"
 
+	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
 )
+
+const (
+	enoManager = "eno"
+)
+
+// parseFieldPaths converts a slice of dot-separated field path strings into fieldpath.Path objects.
+// For example: "metadata.labels" -> fieldpath.MakePathOrDie("metadata", "labels")
+func parseFieldPaths(fields []string) []fieldpath.Path {
+	paths := make([]fieldpath.Path, 0, len(fields))
+	for _, field := range fields {
+		if field == "" {
+			continue
+		}
+		// Split on dots to handle nested paths like "metadata.labels"
+		parts := strings.Split(field, ".")
+		// Convert string parts to interface{} for MakePathOrDie
+		pathParts := make([]interface{}, len(parts))
+		for i, part := range parts {
+			pathParts[i] = part
+		}
+		paths = append(paths, fieldpath.MakePathOrDie(pathParts...))
+	}
+	return paths
+}
 
 // MergeEnoManagedFields corrects managed fields drift to ensure Eno can remove fields
 // that are no longer set by the synthesizer, even when another client corrupts the
@@ -125,4 +154,246 @@ func compareEnoManagedFields(a, b []metav1.ManagedFieldsEntry) bool {
 		return false
 	}
 	return equality.Semantic.DeepEqual(a[ai].FieldsV1, b[ab].FieldsV1)
+}
+
+func NormalizeConflictingManagers(ctx context.Context, current *unstructured.Unstructured, migratingManagers []string, migratingFields []string) (modified bool, err error) {
+	managedFields := current.GetManagedFields()
+	logger := logr.FromContextOrDiscard(ctx)
+	logger.Info("NormalizingConflictingManager", "Name", current.GetName(), "Namespace", current.GetNamespace())
+	if len(managedFields) == 0 {
+		return false, nil
+	}
+
+	// Parse the allowed field paths from the configuration
+	allowedPrefixes := parseFieldPaths(migratingFields)
+
+	// Build the unique list of managers to migrate from user-provided migratingManagers
+	uniqueMigratingManagers := buildUniqueManagersList(migratingManagers)
+
+	// Check if normalization is needed
+	hasLegacyManager, enoEntryCount, err := analyzeManagerConflicts(managedFields, uniqueMigratingManagers, allowedPrefixes)
+	if err != nil {
+		return false, err
+	}
+	// Skip normalization if there are no legacy managers and at most one eno entry
+	if !hasLegacyManager && enoEntryCount <= 1 {
+		return false, nil
+	}
+
+	// Merge all eno entries first to get the combined fieldset
+	mergedEnoSet, mergedEnoTime := mergeEnoEntries(managedFields, allowedPrefixes)
+
+	// Build new managedFields list, merging legacy managers into eno and excluding original eno entries
+	newManagedFields := make([]metav1.ManagedFieldsEntry, 0, len(managedFields))
+	modified = false
+
+	for i := range managedFields {
+		entry := &managedFields[i]
+
+		// Skip eno Apply entries - they will be merged into one entry later
+		if entry.Manager == enoManager && entry.Operation == metav1.ManagedFieldsOperationApply {
+			modified = true
+			continue
+		}
+
+		// Keep entries without fieldsV1 as-is
+		if entry.FieldsV1 == nil {
+			newManagedFields = append(newManagedFields, *entry)
+			continue
+		}
+
+		// keep non-eno, non-legacy managers as is
+		if !uniqueMigratingManagers[entry.Manager] {
+			logger.Info("NormalizeConflictingManagers non-eno and non-legacy manager found, skipping normalizing", "manager", entry.Manager,
+				"resourceName", current.GetName(), "resourceNamespace", current.GetNamespace())
+			newManagedFields = append(newManagedFields, *entry)
+			continue
+		}
+
+		logger.Info("NormalizeConflictingManagers found migrating managers", "manager", entry.Manager,
+			"resoruceName", current.GetName(), "resourceNamespace", current.GetNamespace())
+		// Check if this is a legacy manager that should be migrated to eno
+		// Separate allowed fields (to migrate) from excluded fields (to keep with legacy manager)
+		if mergedEnoSet == nil {
+			mergedEnoSet = &fieldpath.Set{}
+		}
+		if set := parseFieldsEntry(*entry); set != nil {
+			// Filter to only include allowed field paths for migration
+			allowedFields := filterAllowedFieldPaths(set, allowedPrefixes)
+			if !allowedFields.Empty() {
+				mergedEnoSet = mergedEnoSet.Union(allowedFields)
+			}
+
+			// Keep the legacy manager entry if it has excluded fields
+			excludedFields := set.Difference(allowedFields)
+			if !excludedFields.Empty() {
+				// Create a new entry with only the excluded fields
+				js, err := excludedFields.ToJSON()
+				if err == nil {
+					entryCopy := *entry
+					entryCopy.FieldsV1 = &metav1.FieldsV1{Raw: js}
+					newManagedFields = append(newManagedFields, entryCopy)
+				}
+			}
+		}
+		// Update the timestamp to the most recent
+		if mergedEnoTime == nil || (entry.Time != nil && entry.Time.After(mergedEnoTime.Time)) {
+			mergedEnoTime = entry.Time
+		}
+		modified = true
+	}
+
+	// Add the merged eno entry if we found any eno entries OR migrated any legacy manager fields
+	if mergedEnoSet != nil && !mergedEnoSet.Empty() {
+		mergedEntry, err := createMergedEnoEntry(mergedEnoSet, mergedEnoTime, managedFields)
+		if err != nil {
+			return false, err
+		}
+		newManagedFields = append(newManagedFields, mergedEntry)
+		modified = true // Ensure modified is true when we create/update the eno entry
+	}
+
+	if modified {
+		current.SetManagedFields(newManagedFields)
+	}
+
+	return modified, nil
+}
+
+// buildUniqueManagersList creates a deduplicated map from the migratingManagers slice.
+// Returns a map of all managers that should be migrated to eno.
+func buildUniqueManagersList(migratingManagers []string) map[string]bool {
+	unique := make(map[string]bool)
+
+	// Add user-provided managers (duplicates are automatically handled by map)
+	for _, manager := range migratingManagers {
+		if manager != "" {
+			unique[manager] = true
+		}
+	}
+
+	return unique
+}
+
+// analyzeManagerConflicts checks if there are legacy managers present that own allowed fields
+// and counts the number of eno entries. Only returns hasLegacyManager=true if a legacy manager
+// owns at least one field from the allowed list (spec, data, etc.), preventing infinite loops
+// when legacy managers only own excluded fields (status, finalizers, etc.).
+func analyzeManagerConflicts(managedFields []metav1.ManagedFieldsEntry, uniqueMigratingManagers map[string]bool, allowedPrefixes []fieldpath.Path) (hasLegacyManager bool, enoEntryCount int, err error) {
+	for i := range managedFields {
+		entry := &managedFields[i]
+
+		if entry.Manager == enoManager {
+			enoEntryCount++
+			continue
+		}
+
+		// Check if this is a legacy manager we need to normalize
+		if uniqueMigratingManagers[entry.Manager] {
+			// Only consider it a legacy manager needing migration if it owns at least one allowed field
+			if set := parseFieldsEntry(*entry); set != nil {
+				allowedFields := filterAllowedFieldPaths(set, allowedPrefixes)
+				if !allowedFields.Empty() {
+					hasLegacyManager = true
+				}
+			}
+		}
+	}
+
+	return hasLegacyManager, enoEntryCount, nil
+}
+
+// mergeEnoEntries merges all eno Apply entries into a single fieldpath.Set
+// and tracks the most recent timestamp. Filters the result to only include allowed field paths.
+func mergeEnoEntries(managedFields []metav1.ManagedFieldsEntry, allowedPrefixes []fieldpath.Path) (*fieldpath.Set, *metav1.Time) {
+	var mergedSet *fieldpath.Set
+	var latestTime *metav1.Time
+
+	for i := range managedFields {
+		entry := &managedFields[i]
+
+		if entry.Manager == enoManager && entry.Operation == metav1.ManagedFieldsOperationApply {
+			if mergedSet == nil {
+				mergedSet = &fieldpath.Set{}
+			}
+			if set := parseFieldsEntry(*entry); set != nil {
+				// Filter to only include allowed field paths
+				filteredSet := filterAllowedFieldPaths(set, allowedPrefixes)
+				if !filteredSet.Empty() {
+					mergedSet = mergedSet.Union(filteredSet)
+				}
+			}
+			if latestTime == nil || (entry.Time != nil && entry.Time.After(latestTime.Time)) {
+				latestTime = entry.Time
+			}
+		}
+	}
+
+	return mergedSet, latestTime
+}
+
+// createMergedEnoEntry creates a single managedFields entry from the merged eno fieldpath.Set
+func createMergedEnoEntry(mergedSet *fieldpath.Set, timestamp *metav1.Time, managedFields []metav1.ManagedFieldsEntry) (metav1.ManagedFieldsEntry, error) {
+	js, err := mergedSet.ToJSON()
+	if err != nil {
+		return metav1.ManagedFieldsEntry{}, fmt.Errorf("failed to serialize merged eno fields: %w", err)
+	}
+
+	// Find an existing eno entry to use as a template for apiVersion and fieldsType
+	var apiVersion string
+	var fieldsType string
+	for i := range managedFields {
+		if managedFields[i].Manager == enoManager {
+			apiVersion = managedFields[i].APIVersion
+			fieldsType = managedFields[i].FieldsType
+			break
+		}
+	}
+	if fieldsType == "" {
+		fieldsType = "FieldsV1"
+	}
+
+	return metav1.ManagedFieldsEntry{
+		Manager:    enoManager,
+		Operation:  metav1.ManagedFieldsOperationApply,
+		APIVersion: apiVersion,
+		Time:       timestamp,
+		FieldsType: fieldsType,
+		FieldsV1:   &metav1.FieldsV1{Raw: js},
+	}, nil
+}
+
+// filterAllowedFieldPaths filters a fieldpath.Set to only include paths that are safe to migrate.
+// The allowedPrefixes parameter specifies which field paths should be migrated.
+// Common examples: spec.*, data.*, stringData.*, binaryData.*, metadata.labels.*, metadata.annotations.*
+// Excluded paths: metadata.finalizers, metadata.deletionTimestamp, metadata.ownerReferences, status.*, and other metadata fields
+func filterAllowedFieldPaths(set *fieldpath.Set, allowedPrefixes []fieldpath.Path) *fieldpath.Set {
+	if set == nil || set.Empty() {
+		return &fieldpath.Set{}
+	}
+
+	filtered := &fieldpath.Set{}
+	set.Iterate(func(path fieldpath.Path) {
+		for _, prefix := range allowedPrefixes {
+			if hasPrefix(path, prefix) {
+				filtered.Insert(path)
+				break
+			}
+		}
+	})
+
+	return filtered
+}
+
+// hasPrefix checks if a path starts with the given prefix
+func hasPrefix(path, prefix fieldpath.Path) bool {
+	if len(path) < len(prefix) {
+		return false
+	}
+	for i, elem := range prefix {
+		if !path[i].Equals(elem) {
+			return false
+		}
+	}
+	return true
 }

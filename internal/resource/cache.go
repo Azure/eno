@@ -97,6 +97,7 @@ func (c *Cache) Visit(ctx context.Context, comp *apiv1.Composition, synUUID stri
 // Get the resource slices from the API - not the informers, which prune out the manifests to save memory.
 func (c *Cache) Fill(ctx context.Context, comp *apiv1.Composition, synUUID string, items []apiv1.ResourceSlice) {
 	logger := logr.FromContextOrDiscard(ctx)
+	logger.Info("filling resource cache", "synthesisUUID", synUUID, "sliceCount", len(items), "compositionName", comp.Name, "compositionNamespace", comp.Namespace)
 
 	var builder treeBuilder
 	for _, slice := range items {
@@ -132,7 +133,7 @@ func (c *Cache) Fill(ctx context.Context, comp *apiv1.Composition, synUUID strin
 	c.syntheses[synUUID] = tree
 	c.synByComp[compNSN] = append(c.synByComp[compNSN], synUUID)
 	c.mut.Unlock()
-	logger.V(1).Info("resource cache filled", "synthesisUUID", synUUID)
+	logger.Info("resource cache filled", "synthesisUUID", synUUID)
 }
 
 // Purge removes all syntheses from the cache that are not part of the given composition.
@@ -142,6 +143,7 @@ func (c *Cache) Purge(ctx context.Context, compNSN types.NamespacedName, comp *a
 	c.mut.Lock()
 	defer c.mut.Unlock()
 	c.initUnlocked()
+	logger.Info("purging resource cache", "compositionName", compNSN.Name, "compositionNamespace", compNSN.Namespace, "candidateSyntheses", len(c.synByComp[compNSN]))
 
 	remainingSyns := []string{}
 	for _, uuid := range c.synByComp[compNSN] {
@@ -150,7 +152,7 @@ func (c *Cache) Purge(ctx context.Context, compNSN types.NamespacedName, comp *a
 			continue // still referenced
 		}
 
-		logger.V(1).Info("resource cache purged", "synthesisUUID", uuid)
+		logger.Info("resource cache purged", "synthesisUUID", uuid)
 		delete(c.syntheses, uuid)
 	}
 

@@ -77,6 +77,7 @@ func (c *cleanupController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	slice := &apiv1.ResourceSlice{}
 	err := c.client.Get(ctx, req.NamespacedName, slice)
 	if errors.IsNotFound(err) {
+		logger.Info("resource slice not found, skipping reconciliation")
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
@@ -97,6 +98,7 @@ func (c *cleanupController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// Don't bother checking on brand new resource slices
 	if delta := time.Since(slice.CreationTimestamp.Time); delta < 5*time.Second {
+		logger.Info(fmt.Sprintf("Resource slice is newly created, retyring after %d", delta))
 		return ctrl.Result{RequeueAfter: delta}, nil
 	}
 
@@ -122,7 +124,7 @@ func (c *cleanupController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		logger.Error(err, "failed to delete resource slice")
 		return ctrl.Result{}, err
 	}
-	logger.V(0).Info("deleted unused resource slice", "age", time.Since(slice.CreationTimestamp.Time).Milliseconds())
+	logger.Info("deleted unused resource slice", "age", time.Since(slice.CreationTimestamp.Time).Milliseconds())
 
 	return ctrl.Result{}, nil
 }

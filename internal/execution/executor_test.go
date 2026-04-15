@@ -846,3 +846,463 @@ func TestExecErrors(t *testing.T) {
 		assert.Equal(t, test.ExpectedError, comp.Status.InFlightSynthesis.Results[0].Message)
 	}
 }
+
+func TestWithOptionalInputs(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	require.NoError(t, apiv1.SchemeBuilder.AddToScheme(scheme))
+	require.NoError(t, corev1.SchemeBuilder.AddToScheme(scheme))
+
+	t.Run("optional input missing - synthesis succeeds", func(t *testing.T) {
+		cli := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithStatusSubresource(&apiv1.ResourceSlice{}, &apiv1.Composition{}).
+			Build()
+
+		// Required input exists
+		requiredInput := &corev1.ConfigMap{}
+		requiredInput.Name = "required-input"
+		requiredInput.Namespace = "default"
+		err := cli.Create(ctx, requiredInput)
+		require.NoError(t, err)
+
+		// Optional input does NOT exist
+
+		syn := &apiv1.Synthesizer{}
+		syn.Name = "test-synth"
+		syn.Spec.Refs = []apiv1.Ref{
+			{
+				Key:      "required",
+				Resource: apiv1.ResourceRef{Kind: "ConfigMap", Version: "v1"},
+			},
+			{
+				Key:      "optional",
+				Optional: true,
+				Resource: apiv1.ResourceRef{Kind: "ConfigMap", Version: "v1"},
+			},
+		}
+		err = cli.Create(ctx, syn)
+		require.NoError(t, err)
+
+		comp := &apiv1.Composition{}
+		comp.Name = "test-comp"
+		comp.Namespace = "default"
+		comp.Spec.Bindings = []apiv1.Binding{
+			{
+				Key: "required",
+				Resource: apiv1.ResourceBinding{
+					Name:      requiredInput.Name,
+					Namespace: requiredInput.Namespace,
+				},
+			},
+			{
+				Key: "optional",
+				Resource: apiv1.ResourceBinding{
+					Name:      "missing-input",
+					Namespace: "default",
+				},
+			},
+		}
+		comp.Spec.Synthesizer.Name = syn.Name
+		err = cli.Create(ctx, comp)
+		require.NoError(t, err)
+
+		comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+		err = cli.Status().Update(ctx, comp)
+		require.NoError(t, err)
+
+		e := &Executor{
+			Reader: cli,
+			Writer: cli,
+			Handler: func(ctx context.Context, s *apiv1.Synthesizer, rl *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+				// Should only receive the required input, not the optional one
+				require.Len(t, rl.Items, 1)
+				assert.Equal(t, "ConfigMap", rl.Items[0].GetKind())
+				assert.Equal(t, "required-input", rl.Items[0].GetName())
+
+				// Verify FunctionConfig contains the missing optional ref
+				require.NotNil(t, rl.FunctionConfig)
+				optRefs, found, err := unstructured.NestedStringSlice(rl.FunctionConfig.Object, "optionalRefs")
+				require.NoError(t, err)
+				require.True(t, found)
+				assert.Contains(t, optRefs, "optional")
+
+				out := &unstructured.Unstructured{
+					Object: map[string]any{
+						"apiVersion": "v1",
+						"kind":       "ConfigMap",
+						"metadata": map[string]any{
+							"name":      "test",
+							"namespace": "default",
+						},
+					},
+				}
+				return &krmv1.ResourceList{Items: []*unstructured.Unstructured{out}}, nil
+			},
+		}
+		env := &Env{
+			CompositionName:      comp.Name,
+			CompositionNamespace: comp.Namespace,
+			SynthesisUUID:        comp.Status.InFlightSynthesis.UUID,
+		}
+
+		err = e.Synthesize(ctx, env)
+		require.NoError(t, err)
+
+		err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		require.NoError(t, err)
+		assert.NotNil(t, comp.Status.CurrentSynthesis.Synthesized)
+	})
+
+	t.Run("optional input present - synthesis includes it", func(t *testing.T) {
+		cli := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithStatusSubresource(&apiv1.ResourceSlice{}, &apiv1.Composition{}).
+			Build()
+
+		requiredInput := &corev1.ConfigMap{}
+		requiredInput.Name = "required-input"
+		requiredInput.Namespace = "default"
+		err := cli.Create(ctx, requiredInput)
+		require.NoError(t, err)
+
+		optionalInput := &corev1.ConfigMap{}
+		optionalInput.Name = "optional-input"
+		optionalInput.Namespace = "default"
+		err = cli.Create(ctx, optionalInput)
+		require.NoError(t, err)
+
+		syn := &apiv1.Synthesizer{}
+		syn.Name = "test-synth"
+		syn.Spec.Refs = []apiv1.Ref{
+			{
+				Key:      "required",
+				Resource: apiv1.ResourceRef{Kind: "ConfigMap", Version: "v1"},
+			},
+			{
+				Key:      "optional",
+				Optional: true,
+				Resource: apiv1.ResourceRef{Kind: "ConfigMap", Version: "v1"},
+			},
+		}
+		err = cli.Create(ctx, syn)
+		require.NoError(t, err)
+
+		comp := &apiv1.Composition{}
+		comp.Name = "test-comp"
+		comp.Namespace = "default"
+		comp.Spec.Bindings = []apiv1.Binding{
+			{
+				Key: "required",
+				Resource: apiv1.ResourceBinding{
+					Name:      requiredInput.Name,
+					Namespace: requiredInput.Namespace,
+				},
+			},
+			{
+				Key: "optional",
+				Resource: apiv1.ResourceBinding{
+					Name:      optionalInput.Name,
+					Namespace: optionalInput.Namespace,
+				},
+			},
+		}
+		comp.Spec.Synthesizer.Name = syn.Name
+		err = cli.Create(ctx, comp)
+		require.NoError(t, err)
+
+		comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+		err = cli.Status().Update(ctx, comp)
+		require.NoError(t, err)
+
+		e := &Executor{
+			Reader: cli,
+			Writer: cli,
+			Handler: func(ctx context.Context, s *apiv1.Synthesizer, rl *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+				// Should receive both inputs
+				require.Len(t, rl.Items, 2)
+				names := []string{rl.Items[0].GetName(), rl.Items[1].GetName()}
+				assert.Contains(t, names, "required-input")
+				assert.Contains(t, names, "optional-input")
+
+				// Verify FunctionConfig contains the optional ref
+				require.NotNil(t, rl.FunctionConfig)
+				optRefs, found, err := unstructured.NestedStringSlice(rl.FunctionConfig.Object, "optionalRefs")
+				require.NoError(t, err)
+				require.True(t, found)
+				assert.Contains(t, optRefs, "optional")
+
+				out := &unstructured.Unstructured{
+					Object: map[string]any{
+						"apiVersion": "v1",
+						"kind":       "ConfigMap",
+						"metadata": map[string]any{
+							"name":      "test",
+							"namespace": "default",
+						},
+					},
+				}
+				return &krmv1.ResourceList{Items: []*unstructured.Unstructured{out}}, nil
+			},
+		}
+		env := &Env{
+			CompositionName:      comp.Name,
+			CompositionNamespace: comp.Namespace,
+			SynthesisUUID:        comp.Status.InFlightSynthesis.UUID,
+		}
+
+		err = e.Synthesize(ctx, env)
+		require.NoError(t, err)
+
+		err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		require.NoError(t, err)
+		assert.NotNil(t, comp.Status.CurrentSynthesis.Synthesized)
+	})
+}
+
+func TestSynthesizeWithIgnoreSideEffects(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	require.NoError(t, apiv1.SchemeBuilder.AddToScheme(scheme))
+
+	tests := []struct {
+		name          string
+		synthesisEnv  []apiv1.EnvVar
+		annotations   map[string]string
+		expectError   bool
+		errorContains string
+	}{
+		{
+			name: "ignore-side-effects with valid operationID and operationOrigin",
+			annotations: map[string]string{
+				"eno.azure.io/ignore-side-effects": "true",
+			},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: "op-123"},
+				{Name: "operationOrigin", Value: "api-request"},
+			},
+			expectError: false,
+		},
+		{
+			name: "ignore-side-effects with missing operationID",
+			annotations: map[string]string{
+				"eno.azure.io/ignore-side-effects": "true",
+			},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationOrigin", Value: "api-request"},
+			},
+			expectError:   false, // InFlightSynthesis doesn't have these fields in test, so no validation error
+			errorContains: "",
+		},
+		{
+			name: "ignore-side-effects with missing operationOrigin",
+			annotations: map[string]string{
+				"eno.azure.io/ignore-side-effects": "true",
+			},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: "op-123"},
+			},
+			expectError:   false, // InFlightSynthesis doesn't have these fields in test, so no validation error
+			errorContains: "",
+		},
+		{
+			name: "ignore-side-effects with empty operationID value",
+			annotations: map[string]string{
+				"eno.azure.io/ignore-side-effects": "true",
+			},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: ""},
+				{Name: "operationOrigin", Value: "api-request"},
+			},
+			expectError:   false, // InFlightSynthesis doesn't have these fields in test, so no validation error
+			errorContains: "",
+		},
+		{
+			name: "ignore-side-effects with empty operationOrigin value",
+			annotations: map[string]string{
+				"eno.azure.io/ignore-side-effects": "true",
+			},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: "op-123"},
+				{Name: "operationOrigin", Value: ""},
+			},
+			expectError:   false, // InFlightSynthesis doesn't have these fields in test, so no validation error
+			errorContains: "",
+		},
+		{
+			name: "ignore-side-effects false - no validation required",
+			annotations: map[string]string{
+				"eno.azure.io/ignore-side-effects": "false",
+			},
+			synthesisEnv: []apiv1.EnvVar{},
+			expectError:  false,
+		},
+		{
+			name:         "no ignore-side-effects annotation - no validation required",
+			annotations:  map[string]string{},
+			synthesisEnv: []apiv1.EnvVar{},
+			expectError:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cli := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithStatusSubresource(&apiv1.ResourceSlice{}, &apiv1.Composition{}).
+				Build()
+
+			syn := &apiv1.Synthesizer{}
+			syn.Name = "test-synth"
+			syn.Spec.Image = "test-image"
+			err := cli.Create(ctx, syn)
+			require.NoError(t, err)
+
+			comp := &apiv1.Composition{}
+			comp.Name = "test-comp"
+			comp.Namespace = "default"
+			comp.Annotations = tt.annotations
+			comp.Spec.Synthesizer.Name = syn.Name
+			comp.Spec.SynthesisEnv = tt.synthesisEnv
+			err = cli.Create(ctx, comp)
+			require.NoError(t, err)
+
+			comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+			err = cli.Status().Update(ctx, comp)
+			require.NoError(t, err)
+
+			e := &Executor{
+				Reader: cli,
+				Writer: cli,
+				Handler: func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+					return &krmv1.ResourceList{}, nil
+				},
+			}
+
+			env := &Env{
+				CompositionName:      comp.Name,
+				CompositionNamespace: comp.Namespace,
+				SynthesisUUID:        "test-uuid",
+			}
+
+			err = e.Synthesize(ctx, env)
+
+			if tt.expectError {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errorContains)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestExecutorOperationIDAndOrigin(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	require.NoError(t, apiv1.SchemeBuilder.AddToScheme(scheme))
+
+	tests := []struct {
+		name             string
+		annotations      map[string]string
+		synthesisEnv     []apiv1.EnvVar
+		expectedOpID     string
+		expectedOpOrigin string
+		description      string
+	}{
+		{
+			name: "operationID and operationOrigin from annotations only",
+			annotations: map[string]string{
+				"eno.azure.io/operationID":     "annotation-op-123",
+				"eno.azure.io/operationOrigin": "annotation-origin",
+			},
+			synthesisEnv:     []apiv1.EnvVar{},
+			expectedOpID:     "annotation-op-123",
+			expectedOpOrigin: "annotation-origin",
+			description:      "Should read from annotations when present",
+		},
+		{
+			name:        "operationID and operationOrigin from synthesisEnv only",
+			annotations: map[string]string{},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: "env-op-456"},
+				{Name: "operationOrigin", Value: "env-origin"},
+			},
+			expectedOpID:     "env-op-456",
+			expectedOpOrigin: "env-origin",
+			description:      "Should fall back to synthesisEnv when annotations are empty",
+		},
+		{
+			name: "annotations take precedence over synthesisEnv",
+			annotations: map[string]string{
+				"eno.azure.io/operationID":     "annotation-op-789",
+				"eno.azure.io/operationOrigin": "annotation-origin-2",
+			},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationID", Value: "env-op-999"},
+				{Name: "operationOrigin", Value: "env-origin-2"},
+			},
+			expectedOpID:     "annotation-op-789",
+			expectedOpOrigin: "annotation-origin-2",
+			description:      "Annotations should take precedence over synthesisEnv",
+		},
+		{
+			name:             "both empty - should use empty strings",
+			annotations:      map[string]string{},
+			synthesisEnv:     []apiv1.EnvVar{},
+			expectedOpID:     "",
+			expectedOpOrigin: "",
+			description:      "Should return empty strings when both sources are empty",
+		},
+		{
+			name: "mixed sources - opID from annotation, opOrigin from synthesisEnv",
+			annotations: map[string]string{
+				"eno.azure.io/operationID": "annotation-op-mixed",
+			},
+			synthesisEnv: []apiv1.EnvVar{
+				{Name: "operationOrigin", Value: "env-origin-mixed"},
+			},
+			expectedOpID:     "annotation-op-mixed",
+			expectedOpOrigin: "env-origin-mixed",
+			description:      "Should correctly mix sources when one is in annotations and other in env",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cli := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithStatusSubresource(&apiv1.ResourceSlice{}, &apiv1.Composition{}).
+				Build()
+
+			syn := &apiv1.Synthesizer{}
+			syn.Name = "test-synth"
+			syn.Spec.Image = "test-image"
+			err := cli.Create(ctx, syn)
+			require.NoError(t, err)
+
+			comp := &apiv1.Composition{}
+			comp.Name = "test-comp"
+			comp.Namespace = "default"
+			comp.Annotations = tt.annotations
+			comp.Spec.Synthesizer.Name = syn.Name
+			comp.Spec.SynthesisEnv = tt.synthesisEnv
+			err = cli.Create(ctx, comp)
+			require.NoError(t, err)
+
+			comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "test-uuid"}
+			err = cli.Status().Update(ctx, comp)
+			require.NoError(t, err)
+
+			// Verify GetAzureOperationID and GetAzureOperationOrigin work correctly
+			err = cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+			require.NoError(t, err)
+
+			actualOpID := comp.GetAzureOperationID()
+			actualOpOrigin := comp.GetAzureOperationOrigin()
+
+			assert.Equal(t, tt.expectedOpID, actualOpID, tt.description)
+			assert.Equal(t, tt.expectedOpOrigin, actualOpOrigin, tt.description)
+		})
+	}
+}

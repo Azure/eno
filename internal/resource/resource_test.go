@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"testing"
 	"time"
@@ -652,7 +653,9 @@ func TestSnapshotPatch(t *testing.T) {
 }
 
 func TestComparisons(t *testing.T) {
-	env := &envtest.Environment{}
+	env := &envtest.Environment{
+		BinaryAssetsDirectory: os.Getenv("UPSTREAM_KUBEBUILDER_ASSETS"),
+	}
 	t.Cleanup(func() {
 		err := env.Stop()
 		if err != nil {

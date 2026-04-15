@@ -40,6 +40,7 @@ func NewExecHandler() SynthesizerHandle {
 
 		err := json.NewEncoder(stdin).Encode(rl)
 		if err != nil {
+			logger.Error(err, "Error encoding resource")
 			return nil, fmt.Errorf("encoding inputs before execution: %s", err)
 		}
 
@@ -54,10 +55,11 @@ func NewExecHandler() SynthesizerHandle {
 		cmd.Stdout = stdout
 		err = cmd.Run()
 		if errors.Is(err, exec.ErrNotFound) {
+			logger.Error(err, "failed to run command (likely a mismatch between the Synthesizer object and container image)")
 			return nil, fmt.Errorf("%w (likely a mismatch between the Synthesizer object and container image)", err)
 		}
 		if err != nil {
-			logger.V(0).Info("stdout buffer contents", "stdout", stdout)
+			logger.Info("stdout buffer contents", "stdout", stdout)
 			return nil, fmt.Errorf("%w (see synthesis pod logs for more details)", err)
 		}
 

@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -30,7 +31,8 @@ func TestManagerBasics(t *testing.T) {
 			filepath.Join(root, "api", "v1", "config", "crd"),
 			testCrdDir,
 		},
-		ErrorIfCRDPathMissing: true,
+		ErrorIfCRDPathMissing:    true,
+		BinaryAssetsDirectory: os.Getenv("UPSTREAM_KUBEBUILDER_ASSETS"),
 	}
 	t.Cleanup(func() {
 		err := env.Stop()
@@ -155,7 +157,8 @@ func TestReconcilerLimitedScope(t *testing.T) {
 			filepath.Join(root, "api", "v1", "config", "crd"),
 			testCrdDir,
 		},
-		ErrorIfCRDPathMissing: true,
+		ErrorIfCRDPathMissing:    true,
+		BinaryAssetsDirectory: os.Getenv("UPSTREAM_KUBEBUILDER_ASSETS"),
 	}
 	t.Cleanup(func() {
 		err := env.Stop()
@@ -200,18 +203,21 @@ func TestReconcilerLimitedScope(t *testing.T) {
 	comp1.Name = "in-namespace-with-labels"
 	comp1.Namespace = ns.Name
 	comp1.Labels = map[string]string{"testkey": "testval"}
+	comp1.Spec.Synthesizer = apiv1.SynthesizerRef{Name: "some-synthesizer"}
 	err = mgr.GetClient().Create(ctx, comp1)
 	require.NoError(t, err)
 
 	comp2 := &apiv1.Composition{}
 	comp2.Name = "in-namespace-no-labels"
 	comp2.Namespace = ns.Name
+	comp2.Spec.Synthesizer = apiv1.SynthesizerRef{Name: "some-synthesizer"}
 	err = mgr.GetClient().Create(ctx, comp2)
 	require.NoError(t, err)
 
 	comp3 := &apiv1.Composition{}
 	comp3.Name = "in-different-namespace"
 	comp3.Namespace = "default"
+	comp3.Spec.Synthesizer = apiv1.SynthesizerRef{Name: "some-synthesizer"}
 	err = mgr.GetClient().Create(ctx, comp3)
 	require.NoError(t, err)
 

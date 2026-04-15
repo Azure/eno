@@ -1,0 +1,73 @@
+name: E2E Tests
+on:
+  push:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *"
+
+jobs:
+  e2e:
+    name: E2E (${{ matrix.config.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - name: Default
+            disable_ssa: "false"
+          - name: Disable SSA
+            disable_ssa: "true"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@v1
+
+      - name: Wait for apiserver
+        run: |
+          kind export kubeconfig --name chart-testing
+          while ! kubectl api-resources; do sleep 1; done
+
+      - name: Build and deploy Eno
+        env:
+          REGISTRY: localhost
+          SKIP_PUSH: "yes"
+          DISABLE_SSA: "${{ matrix.config.disable_ssa }}"
+        run: ./dev/build.sh
+
+      - name: Load images into Kind
+        run: |
+          for image in $(docker images --format "{{.Repository}}:{{.Tag}}" | grep localhost); do
+            kind load docker-image --name chart-testing $image
+          done
+
+      - name: Wait for Eno rollout
+        timeout-minutes: 3
+        run: |
+          kubectl rollout status deployment/eno-controller --timeout=120s
+          kubectl rollout status deployment/eno-reconciler --timeout=120s
+
+      - name: Run E2E tests
+        timeout-minutes: 10
+        run: make test-e2e
+
+      - name: Dump diagnostics
+        if: failure()
+        run: |
+          echo "=== Controller Logs ===" && kubectl logs -l app=eno-controller --tail=200 || true
+          echo "=== Reconciler Logs ===" && kubectl logs -l app=eno-reconciler --tail=200 || true
+          echo "=== Events ===" && kubectl get events --sort-by=.lastTimestamp || true
+          echo "=== Compositions ===" && kubectl get compositions -A -o yaml || true
+          echo "=== Synthesizers ===" && kubectl get synthesizers -o yaml || true
+          echo "=== ResourceSlices ===" && kubectl get resourceslices -A -o yaml || true
+          echo "=== Pods ===" && kubectl get pods -A -o wide || true

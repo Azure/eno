@@ -29,6 +29,7 @@ func TestMissingNamespace(t *testing.T) {
 		comp := &apiv1.Composition{}
 		comp.Name = "test-composition"
 		comp.Finalizers = []string{"eno.azure.io/cleanup"}
+		comp.Spec.Synthesizer = apiv1.SynthesizerRef{Name: "some-synthesizer"}
 		testMissingNamespace(t, comp)
 	})
 

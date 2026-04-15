@@ -8,6 +8,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const (
+	enoAzureOperationIDKey                   = "eno.azure.io/operationID"
+	enoAzureOperationOrigin                  = "eno.azure.io/operationOrigin"
+	OperationIdKey                    string = "operationID"
+	OperationOrigionKey               string = "operationOrigin"
+	CircularDependencyReason          string = "CircularDependency"
+	WaitingOnDependentsReason         string = "WaitingOnDependents"
+	WaitingOnDependenciesReason       string = "WaitingOnDependencies"
+	WaitingOnDependencyNotFoundReason string = "DependencyNotFound"
+	WaitingOnDependencyNotReadyReason string = "DependencyNotReady"
+)
+
 // +kubebuilder:object:root=true
 type CompositionList struct {
 	metav1.TypeMeta `json:",inline"`
@@ -49,6 +61,21 @@ type CompositionSpec struct {
 	// A set of environment variables that will be made available inside the synthesis Pod.
 	// +kubebuilder:validation:MaxItems:=500
 	SynthesisEnv []EnvVar `json:"synthesisEnv,omitempty"`
+
+	// Declare dependencies on other compositions by name and namespace. A composition can have at most 50 dependencies
+	// Compositions will not be scheduled for synthesis until all required
+	// dependencies have CurrentSynthesis.Ready != nil
+	// Deletion is blocked until all non-optional dependents are fully removed.
+	// +kubebuilder:validation:MaxItems:=50
+	DependsOn []CompositionDependency `json:"dependsOn,omitempty"`
+}
+
+type CompositionDependency struct {
+	// Name of the dependency composition
+	Name string `json:"name,omitempty"`
+
+	//Namespace of the dependency composition
+	Namespace string `json:"namespace,omitempty"`
 }
 
 type CompositionStatus struct {
@@ -57,6 +84,27 @@ type CompositionStatus struct {
 	CurrentSynthesis  *Synthesis        `json:"currentSynthesis,omitempty"`
 	PreviousSynthesis *Synthesis        `json:"previousSynthesis,omitempty"`
 	InputRevisions    []InputRevisions  `json:"inputRevisions,omitempty"`
+
+	// Set when composition is blocked by dependency constraints. Cleared when unblock
+	DependencyStatus *DependencyStatus `json:"dependencyStatus,omitempty"`
+}
+
+// DependencyStatus holds the information regarding the composition's dependencies.
+type DependencyStatus struct {
+	// Blocked is true when the composition cannot proceed due to dependencies/dependents
+	Blocked bool `json:"blocked,omitempty"`
+
+	// Reason "WaitingOnDependencies", "WaitingOnDependents"(Deletion), "CircularDependencies"
+	Reason string `json:"reason,omitempty"`
+
+	//BlockedBy: References to the compositions causing the block
+	BlockedBy []BlockedByRef `json:"blockedBy,omitempty"`
+}
+
+type BlockedByRef struct {
+	Name      string `json:"name,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	Reason    string `json:"reason,omitempty"` // "NotFound", "NotDeleted", "NotReady"
 }
 
 type SimplifiedStatus struct {
@@ -221,6 +269,33 @@ func (c *Composition) ShouldForceResynthesis() bool {
 
 func (c *Composition) ShouldOrphanResources() bool {
 	return c.Annotations["eno.azure.io/deletion-strategy"] == "orphan"
+}
+
+func (c *Composition) GetAzureOperationID() string {
+	opId := c.Annotations[enoAzureOperationIDKey]
+	if opId == "" {
+		opId = getSynthesisEnvValue(&c.Spec, OperationIdKey)
+	}
+
+	return opId
+}
+
+func (c *Composition) GetAzureOperationOrigin() string {
+	opOrigin := c.Annotations[enoAzureOperationOrigin]
+	if opOrigin == "" {
+		opOrigin = getSynthesisEnvValue(&c.Spec, OperationOrigionKey)
+	}
+	return opOrigin
+}
+
+func getSynthesisEnvValue(spec *CompositionSpec, key string) string {
+	synthesisEnv := spec.SynthesisEnv
+	for _, envVar := range synthesisEnv {
+		if envVar.Name == key {
+			return envVar.Value
+		}
+	}
+	return ""
 }
 
 func (s *CompositionStatus) getLatestSynthesisUUID() string {

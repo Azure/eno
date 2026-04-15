@@ -71,6 +71,14 @@ func readInputStruct(ir *InputReader, ow *OutputWriter, v reflect.Value) error {
 
 			err = ReadInput(ir, tagValue, input.Object)
 			if err != nil {
+				// Skip missing optional inputs - leave field as nil/zero value
+				if errors.Is(err, ErrInputNotFound) && ir.IsOptional(tagValue) {
+					// Reset field to nil/zero to avoid allocations from newInput
+					if fieldValue.Kind() == reflect.Ptr || fieldValue.Kind() == reflect.Map || fieldValue.Kind() == reflect.Slice {
+						fieldValue.Set(reflect.Zero(fieldValue.Type()))
+					}
+					continue
+				}
 				ow.AddResult(&krmv1.Result{
 					Message:  fmt.Sprintf("error while reading input with key %q: %s", tagValue, err),
 					Severity: krmv1.ResultSeverityError,

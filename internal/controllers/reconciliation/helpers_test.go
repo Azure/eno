@@ -14,6 +14,7 @@ import (
 	"github.com/Azure/eno/internal/controllers/synthesis"
 	"github.com/Azure/eno/internal/controllers/watch"
 	"github.com/Azure/eno/internal/flowcontrol"
+	"github.com/Azure/eno/internal/logging"
 	"github.com/Azure/eno/internal/resource"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/require"
@@ -31,7 +32,7 @@ func registerControllers(t *testing.T, mgr *testutil.Manager) {
 	require.NoError(t, resourceslice.NewController(mgr.Manager))
 	require.NoError(t, resourceslice.NewCleanupController(mgr.Manager))
 	require.NoError(t, composition.NewController(mgr.Manager, time.Second))
-	require.NoError(t, composition.NewStatusLogger(mgr.Manager, time.Second*10))
+	require.NoError(t, logging.NewCompositionStatusLogger(mgr.Manager, time.Second*10))
 	require.NoError(t, symphony.NewController(mgr.Manager))
 }
 

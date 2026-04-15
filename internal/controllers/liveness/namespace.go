@@ -67,19 +67,22 @@ func (c *namespaceController) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Delete the recreated namespace immediately.
 	// Its finalizers will keep it around until we've had time to remove our finalizers.
 	logger = logger.WithValues("resourceNamespace", ns.Name)
+	ctx = logr.NewContext(ctx, logger)
 	if ns.Annotations != nil && ns.Annotations[annoKey] == annoValue {
 		if ns.DeletionTimestamp != nil {
 			return ctrl.Result{}, c.cleanup(ctx, req.Name)
 		}
+		logger.Info("Sucessfully cleaned up orphaned eno resources")
 		err := c.client.Delete(ctx, ns)
 		if err != nil {
 			logger.Error(err, "failed to delete namespace")
 			return ctrl.Result{}, err
 		}
-		logger.V(1).Info("deleting recreated namespace")
+		logger.Info("Deleting recreated namespace")
 		return ctrl.Result{}, nil
 	}
 	if err == nil {
+		logger.Info("namespace still exits, do nothing")
 		// Successful GETs mean the namespace still exists - nothing for us to do
 		return ctrl.Result{}, nil
 	}
@@ -119,16 +122,14 @@ func (c *namespaceController) Reconcile(ctx context.Context, req ctrl.Request) (
 		logger.Error(err, "failed to create namespace")
 		return ctrl.Result{}, err
 	}
-	logger.V(0).Info("recreated missing namespace to free orphaned resources")
+	logger.Info("recreated missing namespace to free orphaned resources")
 	return ctrl.Result{}, nil
 }
 
-const removeFinalizersPatch = `[{ "op": "remove", "path": "/metadata/finalizers" }]`
-
 func (c *namespaceController) cleanup(ctx context.Context, ns string) error {
-	logger := logr.FromContextOrDiscard(ctx).WithValues("resourceNamespace", ns)
+	logger := logr.FromContextOrDiscard(ctx)
 
-	logger.V(1).Info("deleting any remaining resources in orphaned namespace")
+	logger.Info("deleting any remaining resource in orphaned namespace")
 	for _, kind := range orphanableKinds {
 		err := c.client.DeleteAllOf(ctx, &metav1.PartialObjectMetadata{
 			TypeMeta: metav1.TypeMeta{Kind: kind, APIVersion: apiv1.SchemeGroupVersion.String()},
@@ -141,7 +142,7 @@ func (c *namespaceController) cleanup(ctx context.Context, ns string) error {
 }
 
 func (c *namespaceController) findOrphans(ctx context.Context, ns, kind string) (bool, *ctrl.Result, error) {
-	logger := logr.FromContextOrDiscard(ctx).WithValues("namespace", ns)
+	logger := logr.FromContextOrDiscard(ctx)
 	list := &metav1.PartialObjectMetadataList{}
 	list.Kind = kind
 	list.APIVersion = "eno.azure.io/v1"
@@ -153,9 +154,14 @@ func (c *namespaceController) findOrphans(ctx context.Context, ns, kind string) 
 		return false, nil, nil // no orphaned resources, nothing to do
 	}
 	if delta := time.Since(mostRecentCreation(list)); delta < c.creationGracePeriod {
-		logger.V(1).Info("refusing to free orphaned resources because one or more are too new", "resourceKind", kind)
+		logger.Info(fmt.Sprintf("refusing to free orphaned resources because one or more are too new. Requeing after[%d]", delta), "resourceKind", kind)
 		return false, &ctrl.Result{RequeueAfter: delta}, nil // namespace probably just hasn't hit the cache yet
 	}
+	var names []string
+	for _, item := range list.Items {
+		names = append(names, item.Name)
+	}
+	logger.Info("found orphaned resources", "resourceKind", kind, "resourceCount", len(names), "names", names)
 	return true, nil, nil
 }
 

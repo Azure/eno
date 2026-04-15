@@ -17,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -63,9 +64,9 @@ func NewKindWatchController(ctx context.Context, parent *WatchController, resour
 	k.cancel = cancel
 
 	go func() {
-		logger.V(1).Info("starting kind watch controller")
+		logger.Info("starting kind watch controller")
 		rrc.Start(ctx)
-		logger.V(1).Info("kind watch controller stopped")
+		logger.Info("kind watch controller stopped")
 	}()
 
 	return k, nil
@@ -170,24 +171,36 @@ func (k *KindWatchController) Stop(ctx context.Context) {
 	if k.cancel != nil {
 		k.cancel()
 	}
-	logger.V(1).Info("stopping kind watch controller")
+	logger.Info("stopping kind watch controller")
 }
 
 func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx).WithValues("group", k.gvk.Group, "version", k.gvk.Version, "kind", k.gvk.Kind)
 
+	logger.Info("reconciling watched resource")
 	meta := &metav1.PartialObjectMetadata{}
 	meta.SetGroupVersionKind(k.gvk)
 	err := k.client.Get(ctx, req.NamespacedName, meta)
-	if err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+	isDeleted := errors.IsNotFound(err)
+	if err != nil && !isDeleted {
+		logger.Error(err, "failed to get watched resource")
+		return ctrl.Result{}, err
 	}
 
+	// If deleted, we still need to process it to remove from compositions
+	if isDeleted {
+		logger.Info("watched resource deleted, processing deletion")
+		meta.SetName(req.Name)
+		meta.SetNamespace(req.Namespace)
+	}
+
+	logger.Info("watched resource exists, processing update", "resourceVersion", meta.GetResourceVersion())
 	list := &apiv1.SynthesizerList{}
 	err = k.client.List(ctx, list, client.MatchingFields{
 		manager.IdxSynthesizersByRef: path.Join(k.gvk.Group, k.gvk.Version, k.gvk.Kind),
 	})
 	if err != nil {
+		logger.Error(err, "failed to list synthesizers for resource kind")
 		return ctrl.Result{}, fmt.Errorf("listing synthesizers: %w", err)
 	}
 	rand.Shuffle(len(list.Items), func(i, j int) { list.Items[i], list.Items[j] = list.Items[j], list.Items[i] })
@@ -203,9 +216,10 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 				manager.IdxCompositionsBySynthesizer: synth.Name,
 			})
 			if err != nil {
+				logger.Error(err, "failed to list compositions for synthesizer", "synthesizerName", synth.Name)
 				return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 			}
-			modified, err := k.updateCompositions(ctx, logger, &synth, meta, list)
+			modified, err := k.updateCompositions(ctx, logger, &synth, meta, list, isDeleted)
 			if modified || err != nil {
 				return ctrl.Result{}, err
 			}
@@ -216,39 +230,61 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 			manager.IdxCompositionsByBinding: path.Join(synth.Name, meta.Namespace, meta.Name),
 		})
 		if err != nil {
+			logger.Error(err, "failed to list compositions by binding", "synthesizerName", synth.Name)
 			return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 		}
-		modified, err := k.updateCompositions(ctx, logger, &synth, meta, list)
+		modified, err := k.updateCompositions(ctx, logger, &synth, meta, list, isDeleted)
 		if modified || err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
+	logger.Info("finished reconciling watched resource")
 	return ctrl.Result{}, nil
 }
 
-func (k *KindWatchController) updateCompositions(ctx context.Context, logger logr.Logger, synth *apiv1.Synthesizer, meta *metav1.PartialObjectMetadata, list *apiv1.CompositionList) (bool, error) {
+func (k *KindWatchController) updateCompositions(ctx context.Context, logger logr.Logger, synth *apiv1.Synthesizer, meta *metav1.PartialObjectMetadata, list *apiv1.CompositionList, isDeleted bool) (bool, error) {
 	for _, comp := range list.Items {
 		key := findRefKey(&comp, synth, meta)
 		if key == "" {
 			continue
 		}
 
-		revs := apiv1.NewInputRevisions(meta, key)
-		if !setInputRevisions(&comp, revs) {
-			continue
-		}
+		compKey := client.ObjectKeyFromObject(&comp)
+		var modified bool
 
-		// TODO: Reduce risk of conflict errors here
-		err := k.client.Status().Update(ctx, &comp)
-		if errors.IsConflict(err) {
-			return false, fmt.Errorf("composition was modified during input reconciliation - will retry")
-		}
+		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			// Re-fetch composition to get the latest version
+			if err := k.client.Get(ctx, compKey, &comp); err != nil {
+				return err
+			}
+
+			if isDeleted {
+				// Only remove InputRevisions for optional refs
+				// Required refs should trigger MissingInputs status instead
+				if isOptionalRef(synth, key) {
+					modified = removeInputRevision(&comp, key)
+				}
+				// For required refs, do nothing - the composition controller will handle MissingInputs
+			} else {
+				revs := apiv1.NewInputRevisions(meta, key)
+				modified = setInputRevisions(&comp, revs)
+			}
+
+			if !modified {
+				return nil
+			}
+
+			return k.client.Status().Update(ctx, &comp)
+		})
 		if err != nil {
 			return false, fmt.Errorf("updating input revisions: %w", err)
 		}
-		logger.V(1).Info("noticed input resource change", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key)
-		return true, nil // wait for requeue
+
+		if modified {
+			logger.V(1).Info("noticed input resource change", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key)
+			return true, nil // wait for requeue
+		}
 	}
 
 	return false, nil
@@ -274,6 +310,25 @@ func findRefKey(comp *apiv1.Composition, synth *apiv1.Synthesizer, meta *metav1.
 	}
 
 	return ""
+}
+
+func isOptionalRef(synth *apiv1.Synthesizer, key string) bool {
+	for _, ref := range synth.Spec.Refs {
+		if ref.Key == key {
+			return ref.Optional
+		}
+	}
+	return false
+}
+
+func removeInputRevision(comp *apiv1.Composition, key string) bool {
+	for i, ir := range comp.Status.InputRevisions {
+		if ir.Key == key {
+			comp.Status.InputRevisions = append(comp.Status.InputRevisions[:i], comp.Status.InputRevisions[i+1:]...)
+			return true
+		}
+	}
+	return false
 }
 
 func setInputRevisions(comp *apiv1.Composition, revs *apiv1.InputRevisions) bool {

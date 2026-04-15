@@ -37,6 +37,8 @@ type Options struct {
 
 	DisableServerSideApply bool
 	FailOpen               bool
+	MigratingFieldManagers []string
+	MigratingFields        []string
 
 	Timeout               time.Duration
 	ReadinessPollInterval time.Duration
@@ -44,16 +46,18 @@ type Options struct {
 }
 
 type Controller struct {
-	client                client.Client
-	writeBuffer           *flowcontrol.ResourceSliceWriteBuffer
-	resourceClient        *resource.Cache
-	resourceFilter        cel.Program
-	timeout               time.Duration
-	readinessPollInterval time.Duration
-	upstreamClient        client.Client
-	minReconcileInterval  time.Duration
-	disableSSA            bool
-	failOpen              bool
+	client                 client.Client
+	writeBuffer            *flowcontrol.ResourceSliceWriteBuffer
+	resourceClient         *resource.Cache
+	resourceFilter         cel.Program
+	timeout                time.Duration
+	readinessPollInterval  time.Duration
+	upstreamClient         client.Client
+	minReconcileInterval   time.Duration
+	disableSSA             bool
+	failOpen               bool
+	migratingFieldManagers []string
+	migratingFields        []string
 }
 
 func New(mgr ctrl.Manager, opts Options) error {
@@ -70,16 +74,18 @@ func New(mgr ctrl.Manager, opts Options) error {
 	}
 
 	c := &Controller{
-		client:                opts.Manager.GetClient(),
-		writeBuffer:           opts.WriteBuffer,
-		resourceClient:        cache,
-		resourceFilter:        opts.ResourceFilter,
-		timeout:               opts.Timeout,
-		readinessPollInterval: opts.ReadinessPollInterval,
-		upstreamClient:        upstreamClient,
-		minReconcileInterval:  opts.MinReconcileInterval,
-		disableSSA:            opts.DisableServerSideApply,
-		failOpen:              opts.FailOpen,
+		client:                 opts.Manager.GetClient(),
+		writeBuffer:            opts.WriteBuffer,
+		resourceClient:         cache,
+		resourceFilter:         opts.ResourceFilter,
+		timeout:                opts.Timeout,
+		readinessPollInterval:  opts.ReadinessPollInterval,
+		upstreamClient:         upstreamClient,
+		minReconcileInterval:   opts.MinReconcileInterval,
+		disableSSA:             opts.DisableServerSideApply,
+		failOpen:               opts.FailOpen,
+		migratingFieldManagers: opts.MigratingFieldManagers,
+		migratingFields:        opts.MigratingFields,
 	}
 
 	return builder.TypedControllerManagedBy[resource.Request](mgr).
@@ -99,6 +105,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 
 func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx)
+	logger.Info("reconciling resource", "compositionName", req.Composition.Name, "compositionNamespace", req.Composition.Namespace, "resourceRef", req.Resource.String())
 
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, types.NamespacedName{Name: req.Composition.Name, Namespace: req.Composition.Namespace}, comp)
@@ -110,7 +117,9 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		return ctrl.Result{}, err
 	}
 	synthesisUUID := comp.Status.GetCurrentSynthesisUUID()
-	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisUUID", synthesisUUID)
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisUUID", synthesisUUID,
+		"operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
+	ctx = logr.NewContext(ctx, logger)
 
 	if comp.Status.CurrentSynthesis == nil {
 		return ctrl.Result{}, nil // nothing to do
@@ -119,9 +128,15 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	ctx = logr.NewContext(ctx, logger)
 
 	// Find the current and (optionally) previous desired states in the cache
+	logger.Info("retrieving resource from cache", "synthesisUUID", synthesisUUID)
 	var prev *resource.Resource
 	resource, visible, exists := c.resourceClient.Get(ctx, synthesisUUID, req.Resource)
-	if !exists || !visible {
+	if !exists {
+		logger.Info("resource not found in cache, skipping", "synthesisUUID", synthesisUUID)
+		return ctrl.Result{}, nil
+	}
+	if !visible {
+		logger.Info("resource currently not visible, skipping", "synthesisUUID", synthesisUUID)
 		return ctrl.Result{}, nil
 	}
 	logger = logger.WithValues("resourceKind", resource.Ref.Kind, "resourceName", resource.Ref.Name, "resourceNamespace", resource.Ref.Namespace)
@@ -129,27 +144,32 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 
 	if syn := comp.Status.PreviousSynthesis; syn != nil {
 		prev, _, _ = c.resourceClient.Get(ctx, syn.UUID, req.Resource)
+		logger.Info("retrieved previous synthesis from cache", "previousSynthesisUUID", syn.UUID, "hasPrevious", prev != nil)
 	}
 
+	logger.Info("reconcileResource")
 	snap, current, ready, modified, err := c.reconcileResource(ctx, comp, prev, resource)
 	failingOpen := c.shouldFailOpen(resource)
 	if failingOpen {
+		logger.Info("FailOpen - suppressing errors")
 		err = nil
 		modified = false
 	}
 	if err != nil {
+		logger.Error(err, "resource reconciliation failed")
 		c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceError(err))
 		return ctrl.Result{}, err
 	}
 	if modified {
+		logger.Info("resource was modified, requeueing")
 		return ctrl.Result{Requeue: true}, nil
 	}
 
 	deleted := current == nil ||
 		(current.GetDeletionTimestamp() != nil && !snap.ForegroundDeletion) ||
 		(snap.Deleted() && (snap.Orphan || snap.Disable || failingOpen)) // orphaning should be reflected on the status.
-	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 
+	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 	return c.requeue(logger, snap, ready)
 }
 
@@ -162,6 +182,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 
 	// Fetch the current resource
 	current, err = c.getCurrent(ctx, resource)
+	logger.Info("fetching current state of resource")
 	if client.IgnoreNotFound(err) != nil && !isErrMissingNS(err) && !isErrNoKindMatch(err) {
 		logger.Error(err, "failed to get current state")
 		return nil, nil, nil, false, err
@@ -171,18 +192,22 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	// - Readiness checks are skipped when this version of the resource's desired state has already become ready
 	// - Readiness checks are skipped when the resource hasn't changed since the last check
 	// - Readiness defaults to true if no checks are given
+	logger.Info("evaluating resource readiness")
 	status := resource.State()
 	if status == nil || status.Ready == nil {
 		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, &apiv1.Composition{}, current)
 		if ok {
 			ready = &readiness.ReadyTime
+			logger.Info("resource is ready", "readyTime", ready)
 		}
 	} else {
 		ready = status.Ready
 	}
 
+	logger.Info("creating resource snapshot")
 	snap, err = resource.Snapshot(ctx, comp, current)
 	if err != nil {
+		logger.Error(err, "failed to create resource snapshot")
 		return nil, nil, nil, false, fmt.Errorf("failed to create resource snapshot: %w", err)
 	}
 	if status := snap.OverrideStatus(); len(status) > 0 {
@@ -192,7 +217,7 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 
 	modified, err = c.reconcileSnapshot(ctx, comp, prev, snap, current)
 	if err != nil {
-		logger.Error(err, "failed to reconcile resource")
+		logger.Error(err, "failed to reconcile resource snapshot")
 	}
 	return snap, current, ready, modified, err
 }
@@ -209,7 +234,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 	}()
 
 	if res.Deleted() {
-		if current == nil || current.GetDeletionTimestamp() != nil || res.Orphan || (comp.Labels != nil && comp.Labels["eno.azure.io/symphony-deleting"] == "true") {
+		if current == nil || current.GetDeletionTimestamp() != nil || (res.Orphan && comp.DeletionTimestamp != nil) || (comp.Labels != nil && comp.Labels["eno.azure.io/symphony-deleting"] == "true") {
 			return false, nil // already deleted - nothing to do
 		}
 
@@ -218,7 +243,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 		if err != nil {
 			return true, client.IgnoreNotFound(fmt.Errorf("deleting resource: %w", err))
 		}
-		logger.V(0).Info("deleted resource")
+		logger.Info("deleted resource")
 		return true, nil
 	}
 
@@ -227,7 +252,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 		return false, fmt.Errorf("building patch: %w", err)
 	}
 	if isPatch && current == nil {
-		logger.V(1).Info("resource doesn't exist - skipping patch")
+		logger.Info("resource doesn't exist - skipping patch")
 		return false, nil
 	}
 
@@ -238,7 +263,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 		if err != nil {
 			return false, fmt.Errorf("creating resource: %w", err)
 		}
-		logger.V(0).Info("created resource")
+		logger.Info("created resource")
 		return true, nil
 	}
 
@@ -256,23 +281,51 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 		updated := current.DeepCopy()
 		err := c.upstreamClient.Patch(ctx, updated, client.RawPatch(types.JSONPatchType, patchJson))
 		if err != nil {
+			logger.Error(err, "failed to patch resource")
 			return false, fmt.Errorf("applying patch: %w", err)
 		}
 		if updated.GetResourceVersion() == current.GetResourceVersion() {
-			logger.V(0).Info("resource didn't change after patch")
+			logger.Info("resource didn't change after patch")
 			return false, nil
 		}
-		logger.V(0).Info("patched resource", "resourceVersion", updated.GetResourceVersion())
+		logger.Info("patched resource", "resourceVersion", updated.GetResourceVersion())
 		return true, nil
 	}
 
 	// Dry-run the update to see if it's needed
 	if !c.disableSSA {
+		// Before the dry-run, normalize conflicting field managers to "eno" to prevent SSA validation errors
+		// caused by multiple managers owning overlapping fields. When managers are renamed to "eno", the
+		// subsequent SSA Apply will treat eno as the sole owner and automatically merge the managedFields
+		// entries into a single consolidated entry for eno.
+		if current != nil && len(c.migratingFieldManagers) > 0 {
+			wasModified, err := resource.NormalizeConflictingManagers(ctx, current, c.migratingFieldManagers, c.migratingFields)
+			if err != nil {
+				return false, fmt.Errorf("normalize conflicting manager failed: %w", err)
+			}
+			if wasModified {
+				logger.Info("Normalized conflicting managers to eno")
+				err = c.upstreamClient.Update(ctx, current, client.FieldOwner("eno"))
+				if err != nil {
+					return false, fmt.Errorf("normalizing managedFields failed: %w", err)
+				}
+				// refetch the current before apply dry-run
+				current, err = c.getCurrent(ctx, res.Resource)
+				if err != nil {
+					logger.Error(err, "failed to get current resource after eno ownership migration")
+					return false, fmt.Errorf("re-fetching after normalizing manager failed: %w", err)
+				}
+
+				logger.Info("Successfully normalized field managers to eno")
+			}
+		}
 		dryRun, err := c.update(ctx, comp, prev, res, current, true)
 		if err != nil {
+			logger.Error(err, "dry-run update failed.")
 			return false, fmt.Errorf("dry-run applying update: %w", err)
 		}
 		if resource.Compare(dryRun, current) {
+			logger.Info("resource insync, no operation needed")
 			return false, nil // in sync
 		}
 
@@ -281,11 +334,13 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 		if current != nil && prev != nil && !res.Replace {
 			snap, err := prev.SnapshotWithOverrides(ctx, comp, current, res.Resource)
 			if err != nil {
+				logger.Error(err, "failed to get SnapshotWithOverrides")
 				return false, fmt.Errorf("snapshotting previous version: %w", err)
 			}
 			dryRunPrev := snap.Unstructured()
 			err = c.upstreamClient.Patch(ctx, dryRunPrev, client.Apply, client.ForceOwnership, client.FieldOwner("eno"), client.DryRunAll)
 			if err != nil {
+				logger.Error(err, "failed to get managedFields values")
 				return false, fmt.Errorf("getting managed fields values for previous version: %w", err)
 			}
 
@@ -295,9 +350,10 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 
 				err := c.upstreamClient.Update(ctx, current, client.FieldOwner("eno"))
 				if err != nil {
+					logger.Error(err, "failed to update managed fields for resource")
 					return false, fmt.Errorf("updating managed fields metadata: %w", err)
 				}
-				logger.V(0).Info("corrected drift in managed fields metadata", "fields", fields)
+				logger.Info("corrected drift in managed fields metadata", "fields", fields)
 				return true, nil
 			}
 		}
@@ -307,16 +363,17 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 	reconciliationActions.WithLabelValues("apply").Inc()
 	updated, err := c.update(ctx, comp, prev, res, current, false)
 	if err != nil {
+		logger.Error(err, "failed when applying update")
 		return false, fmt.Errorf("applying update: %w", err)
 	}
 	if current != nil && updated.GetResourceVersion() == current.GetResourceVersion() {
-		logger.V(0).Info("resource didn't change after update")
+		logger.Info("resource didn't change after update")
 		return false, nil
 	}
 	if current != nil {
 		logger = logger.WithValues("oldResourceVersion", current.GetResourceVersion())
 	}
-	logger.V(0).Info("applied resource", "resourceVersion", updated.GetResourceVersion())
+	logger.Info("applied resource")
 	return true, nil
 }
 
@@ -449,7 +506,9 @@ func summarizeError(err error) string {
 		metav1.StatusReasonMethodNotAllowed,
 		metav1.StatusReasonGone,
 		metav1.StatusReasonForbidden,
-		metav1.StatusReasonUnauthorized:
+		metav1.StatusReasonUnauthorized,
+		metav1.StatusReasonInvalid,
+		metav1.StatusReasonInternalError:
 		return status.Message
 
 	default:

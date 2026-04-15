@@ -13,6 +13,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+var ErrInputNotFound = errors.New("input not found")
+
 type InputReader struct {
 	resources *krmv1.ResourceList
 }
@@ -32,6 +34,27 @@ func NewInputReader(r io.Reader) (*InputReader, error) {
 	}, nil
 }
 
+// IsOptional returns true if the input with the given key is marked as optional.
+// This is determined by checking the FunctionConfig.optionalRefs list which contains
+// all optional ref keys from the synthesizer spec.
+func (ir *InputReader) IsOptional(key string) bool {
+	if ir.resources.FunctionConfig == nil {
+		return false
+	}
+
+	optRefs, found, _ := unstructured.NestedStringSlice(ir.resources.FunctionConfig.Object, "optionalRefs")
+	if !found {
+		return false
+	}
+
+	for _, ref := range optRefs {
+		if ref == key {
+			return true
+		}
+	}
+	return false
+}
+
 func ReadInput[T client.Object](ir *InputReader, key string, out T) error {
 	var found bool
 	for _, i := range ir.resources.Items {
@@ -46,7 +69,7 @@ func ReadInput[T client.Object](ir *InputReader, key string, out T) error {
 		}
 	}
 	if !found {
-		return fmt.Errorf("input %q was not found", key)
+		return fmt.Errorf("input %q: %w", key, ErrInputNotFound)
 	}
 	return nil
 }

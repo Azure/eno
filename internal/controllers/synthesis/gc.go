@@ -57,6 +57,7 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Avoid waiting for the lease to expire for broken nodes
 	if delta := timeWaitingForKubelet(pod, time.Now()); delta > 0 {
 		if delta < p.creationTimeout {
+			logger.Info(fmt.Sprintf("Pod Name[%s], Namespace[%s] still creating - retrying after [%d]", pod.GetName(), pod.GetNamespace(), p.creationTimeout-delta))
 			return ctrl.Result{RequeueAfter: p.creationTimeout - delta}, nil
 		}
 		logger = logger.WithValues("reason", "ContainerCreationTimeout")
@@ -68,7 +69,8 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 	comp.Name = pod.GetLabels()[compositionNameLabelKey]
 	comp.Namespace = pod.GetLabels()[compositionNamespaceLabelKey]
 	err = p.client.Get(ctx, client.ObjectKeyFromObject(comp), comp)
-	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisAge", synthesisAge(comp))
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisAge", synthesisAge(comp),
+		"operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	if errors.IsNotFound(err) || comp.DeletionTimestamp != nil {
 		logger = logger.WithValues("reason", "CompositionDeleted")
 		return ctrl.Result{}, p.deletePod(ctx, pod, logger)

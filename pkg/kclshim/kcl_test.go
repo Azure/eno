@@ -1,130 +1,113 @@
 package kclshim
 
 import (
-	"io"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
 )
 
 func TestSynthesize(t *testing.T) {
+	// Load test input from fixture file
+	inputBytes, err := os.ReadFile("fixtures/example_input.json")
+	if err != nil {
+		t.Fatalf("Failed to read input file: %v", err)
+	}
+	var input map[string]interface{}
+	if err := json.Unmarshal(inputBytes, &input); err != nil {
+		t.Fatalf("Failed to unmarshal input JSON: %v", err)
+	}
+
 	tests := []struct {
 		name           string
 		workingDir     string
+		expectedErrs   []string
 		expectedOutput string
 	}{
 		{
 			name:       "successful synthesis",
 			workingDir: "fixtures/example_synthesizer",
-			expectedOutput: `{
-                "apiVersion":"config.kubernetes.io/v1",
-                "items":[
-                    {
-                        "apiVersion": "apps/v1",
-                        "kind": "Deployment",
-                        "metadata": {
-                            "name": "my-deployment",
-                            "namespace": "default"
-                        },
-                        "spec": {
-                            "replicas": 3,
-                            "selector": {
-                                "matchLabels": {
-                                    "app": "my-app"
-                                }
-                            },
-                            "template": {
-                                "metadata": {
-                                    "labels": {
-                                        "app": "my-app"
-                                    }
-                                },
-                                "spec": {
-                                    "containers": [
-                                        {
-                                            "image": "mcr.microsoft.com/a/b/my-image:latest",
-                                            "name": "my-container"
-                                        }
-                                    ]
-                                }
-                            }
-                        }
-                    },
-                    {
-                        "apiVersion": "v1",
-                        "kind": "ServiceAccount",
-                        "metadata": {
-                            "name": "my-service-account",
-                            "namespace": "default"
-                        }
-                    }
-                ],
-                "kind": "ResourceList"
-            }`,
+			expectedOutput: `[
+				{
+					"apiVersion": "apps/v1",
+					"kind": "Deployment",
+					"metadata": {
+						"name": "my-deployment",
+						"namespace": "default"
+					},
+					"spec": {
+						"replicas": 3,
+						"selector": {
+							"matchLabels": {
+								"app": "my-app"
+							}
+						},
+						"template": {
+							"metadata": {
+								"labels": {
+									"app": "my-app"
+								}
+							},
+							"spec": {
+								"containers": [
+									{
+										"image": "mcr.microsoft.com/a/b/my-image:latest",
+										"name": "my-container"
+									}
+								]
+							}
+						}
+					}
+				},
+				{
+					"apiVersion": "v1",
+					"kind": "ServiceAccount",
+					"metadata": {
+						"name": "my-service-account",
+						"namespace": "default"
+					}
+				}
+			]`,
 		},
 		{
-			name: "failed synthesis",
-			workingDir: "fixtures/bad_example_synthesizer",
-			expectedOutput: `{
-				"apiVersion":"config.kubernetes.io/v1",
-				"kind":"ResourceList",
-				"items":[],
-				"results":[
-					{
-						"message":"error updating dependencies: No such file or directory (os error 2)",
-						"severity":"error"
-					}
-				]
-			}`,	
+			name:         "failed synthesis",
+			workingDir:   "fixtures/bad_example_synthesizer",
+			expectedErrs: []string{"error updating dependencies", "No such file or directory"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			originalStdin := os.Stdin
-			originalStdout := os.Stdout
-			defer func() {
-				os.Stdin = originalStdin
-				os.Stdout = originalStdout
-			}()
+			output, err := Synthesize(tt.workingDir, input)
 
-			input, err := os.Open("fixtures/example_input.json")
-			if err != nil {
-				t.Fatalf("Failed to open input file: %v", err)
+			// Failure path
+			if len(tt.expectedErrs) > 0 {
+				if err == nil {
+					t.Fatal("Expected error, got nil")
+				}
+				for _, substr := range tt.expectedErrs {
+					if !strings.Contains(err.Error(), substr) {
+						t.Errorf("Expected error containing %q, got: %v", substr, err)
+					}
+				}
+				if output != nil {
+					t.Errorf("Expected nil output on error, got %d items", len(output))
+				}
+				return
 			}
-			defer input.Close()
 
-			stdin, w, err := os.Pipe()
+			// Success path
 			if err != nil {
-				t.Fatalf("Failed to create stdin pipe: %v", err)
+				t.Fatalf("Synthesize returned unexpected error: %v", err)
 			}
-			os.Stdin = stdin
 
-			go func() {
-				defer w.Close()
-				io.Copy(w, input)
-			}()
-
-			r, stdout, err := os.Pipe()
+			outputJSON, err := json.Marshal(output)
 			if err != nil {
-				t.Fatalf("Failed to create stdout pipe: %v", err)
+				t.Fatalf("Failed to marshal output to JSON: %v", err)
 			}
-			os.Stdout = stdout
 
-			Synthesize(tt.workingDir)
-			stdout.Close()
-
-			buf, err := io.ReadAll(r)
-			if err != nil {
-				t.Fatalf("Failed to read output: %v", err)
-			}
-			output := string(buf)
-
-			normalizedExpected := normalizeWhitespace(tt.expectedOutput)
-			normalizedOutput := normalizeWhitespace(output)
-
-			if normalizedOutput != normalizedExpected {
-				t.Errorf("Output mismatch\nExpected:\n%s\nGot:\n%s", normalizedExpected, normalizedOutput)
+			if normalizeWhitespace(string(outputJSON)) != normalizeWhitespace(tt.expectedOutput) {
+				t.Errorf("Output mismatch.\nExpected:\n%s\nGot:\n%s", tt.expectedOutput, string(outputJSON))
 			}
 		})
 	}

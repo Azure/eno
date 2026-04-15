@@ -26,8 +26,8 @@ func (c *pruningController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		logger.Error(err, "failed to get composition")
 		return ctrl.Result{}, err
 	}
-
-	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", comp.Spec.Synthesizer.Name)
+	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", comp.Spec.Synthesizer.Name,
+		"operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	ctx = logr.NewContext(ctx, logger)
 
 	synth := &apiv1.Synthesizer{}
@@ -42,6 +42,7 @@ func (c *pruningController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if hasBindingKey(comp, synth, ir.Key) {
 			continue
 		}
+		logger.Info("pruning input revision - no longer has binding", "key", ir.Key, "revision", ir.Revision, "index", i)
 		comp.Status.InputRevisions = append(comp.Status.InputRevisions[:i], comp.Status.InputRevisions[i+1:]...)
 		err = c.client.Status().Update(ctx, comp)
 		if err != nil {
@@ -49,7 +50,7 @@ func (c *pruningController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, err
 		}
 
-		logger.V(1).Info("pruned old input revision from composition status", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", ir.Key)
+		logger.Info("pruned old input revision from composition status", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", ir.Key)
 		return ctrl.Result{}, nil
 	}
 

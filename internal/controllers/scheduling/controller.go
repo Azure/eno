@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"path"
 	"sort"
 	"time"
 
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -86,9 +88,10 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			return ctrl.Result{}, err
 		}
 		if !ok {
-			logger.V(1).Info("waiting for cache to reflect previous operation")
+			logger.Info("waiting for cache to reflect previous operation", "waitDuration", wait, "compositionName", c.lastApplied.Composition.Name, "compositionNamespace", c.lastApplied.Composition.Namespace)
 			return ctrl.Result{RequeueAfter: wait}, nil
 		}
+		logger.Info("cache has reflected previous operation, proceeding", "compositionName", c.lastApplied.Composition.Name, "compositionNamespace", c.lastApplied.Composition.Namespace)
 		c.lastApplied = nil
 	}
 
@@ -99,6 +102,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, err
 	}
 	synthsByName, synthEpoch := indexSynthesizers(synths.Items)
+	logger.Info("listed synthesizers", "synthesizerCount", len(synths.Items), "synthEpoch", synthEpoch)
 
 	comps := &apiv1.CompositionList{}
 	err = c.client.List(ctx, comps)
@@ -107,10 +111,47 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, err
 	}
 	nextSlot := c.getNextCooldownSlot(comps)
+	logger.Info("listed compositions", "compositionCount", len(comps.Items), "nextCooldownSlot", nextSlot)
+
+	// Reset the compositionHealth metric before iterating through compositions
+	compositionHealth.Reset()
+
+	// Build readiness index and composition map for dependency checking
+	readySet := buildReadySet(comps)
+	existSet := buildExistsSet(comps)
+	sortedComps, cyclicSet := topoSortCompositions(comps.Items)
+
+	// Pre-loop: set/clear circular dependency status on all compositions.
+	// Cyclic compositions are excluded from sortedComps by Kahn's algorithm,
+	// so we must handle them here before the main loop.
+	for _, comp := range comps.Items {
+		comp := comp
+		if comp.DeletionTimestamp != nil || len(comp.Spec.DependsOn) == 0 {
+			continue
+		}
+		compKey := path.Join(comp.GetNamespace(), comp.GetName())
+		if cyclicSet[compKey] {
+			logger.Error(fmt.Errorf("circular dependency detected"),
+				"skipping composition synthesis",
+				"compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace())
+			if _, err := c.setDependencyStatus(ctx, &comp, &apiv1.DependencyStatus{
+				Blocked: true,
+				Reason:  apiv1.CircularDependencyReason,
+			}); err != nil {
+				logger.Error(err, "failed to update circular dependency status")
+				return ctrl.Result{}, err
+			}
+		} else if cleared, err := c.clearDependencyStatus(ctx, &comp, apiv1.CircularDependencyReason); err != nil {
+			logger.Error(err, "failed to clear circular dependency status")
+			return ctrl.Result{}, err
+		} else if cleared {
+			logger.Info("cleared stale circular dependency status", "compositionName", comp.GetName())
+		}
+	}
 
 	var inFlight int
 	var op *op
-	for _, comp := range comps.Items {
+	for _, comp := range sortedComps {
 		comp := comp
 		if comp.Synthesizing() {
 			inFlight++
@@ -119,6 +160,50 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		if missedReconciliation(&comp, c.watchdogThreshold) {
 			synth := synthsByName[comp.Spec.Synthesizer.Name]
 			stuckReconciling.WithLabelValues(comp.Spec.Synthesizer.Name, getSynthOwner(&synth)).Inc()
+			compositionHealth.WithLabelValues(comp.Name, comp.Namespace, comp.Spec.Synthesizer.Name).Set(1)
+			logger.Info("detected composition missed reconciliation", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", comp.Spec.Synthesizer.Name)
+		} else {
+			compositionHealth.WithLabelValues(comp.Name, comp.Namespace, comp.Spec.Synthesizer.Name).Set(0)
+		}
+
+		if comp.DeletionTimestamp == nil && len(comp.Spec.DependsOn) > 0 {
+			if !areDependenciesReady(&comp, readySet) {
+				// Build BlockedBy list
+				var blockedBy []apiv1.BlockedByRef
+				for _, dep := range comp.Spec.DependsOn {
+					key := path.Join(dep.Namespace, dep.Name)
+					if !readySet[key] {
+						reason := apiv1.WaitingOnDependencyNotReadyReason
+						if !existSet[key] {
+							reason = apiv1.WaitingOnDependencyNotFoundReason
+						}
+						logger.Info("dependency not satisfied for composition", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace(),
+							"dependencyName", dep.Name, "dependencyNamespace", dep.Namespace, "reason", reason)
+						blockedBy = append(blockedBy, apiv1.BlockedByRef{
+							Name:      dep.Name,
+							Namespace: dep.Namespace,
+							Reason:    reason,
+						})
+					}
+				}
+				if _, err := c.setDependencyStatus(ctx, &comp, &apiv1.DependencyStatus{
+					Blocked:   true,
+					Reason:    apiv1.WaitingOnDependenciesReason,
+					BlockedBy: blockedBy,
+				}); err != nil {
+					return ctrl.Result{}, err
+				}
+				logger.Info("not all dependent compositions are ready, skipping composition synthesis", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace())
+				continue
+			}
+
+			// clear the waitingonDependencies status
+			if cleared, err := c.clearDependencyStatus(ctx, &comp, apiv1.WaitingOnDependenciesReason); err != nil {
+				logger.Error(err, "failed to clear dependency status")
+				return ctrl.Result{}, err
+			} else if cleared {
+				logger.Info("cleared stale waiting on dependency status", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace())
+			}
 		}
 
 		synth, ok := synthsByName[comp.Spec.Synthesizer.Name]
@@ -133,15 +218,23 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 	freeSynthesisSlots.Set(float64(c.concurrencyLimit - inFlight))
 
-	if op == nil || inFlight >= c.concurrencyLimit {
+	if op == nil {
 		return ctrl.Result{}, nil
 	}
+
+	if inFlight >= c.concurrencyLimit {
+		logger.Info("concurrency limit reached, deferring synthesis", "inFlight", inFlight, "limit", c.concurrencyLimit, "nextCompositionName", op.Composition.Name, "nextCompositionNamespace", op.Composition.Namespace)
+		return ctrl.Result{}, nil
+	}
+
 	if !op.NotBefore.IsZero() { // the next op isn't ready to be dispathced yet
 		if wait := time.Until(op.NotBefore); wait > 0 {
+			logger.Info("synthesis operation not ready, waiting for cooldown", "compositionName", op.Composition.Name, "compositionNamespace", op.Composition.Namespace, "waitDuration", wait, "notBefore", op.NotBefore)
 			return ctrl.Result{RequeueAfter: wait}, nil
 		}
 	}
-	logger = logger.WithValues("compositionName", op.Composition.Name, "compositionNamespace", op.Composition.Namespace, "reason", op.Reason, "synthEpoch", synthEpoch, "synthesizerName", op.Composition.Spec.Synthesizer.Name)
+	logger = logger.WithValues("compositionName", op.Composition.Name, "compositionNamespace", op.Composition.Namespace, "reason", op.Reason, "synthEpoch", synthEpoch, "synthesizerName", op.Composition.Spec.Synthesizer.Name,
+		"operationID", op.Composition.GetAzureOperationID(), "operationOrigin", op.Composition.GetAzureOperationOrigin())
 
 	// Maintain ordering across synth/composition informers by doing a 2PC on the composition
 	if op.Reason == synthesizerModifiedOp && setSynthEpochAnnotation(op.Composition, synthEpoch) {
@@ -149,10 +242,11 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			logger.Error(err, "updating synthesizer epoch")
 			return ctrl.Result{}, err
 		}
-		logger.V(1).Info("updated global synthesizer epoch")
+		logger.Info("updated global synthesizer epoch")
 		return ctrl.Result{}, nil
 	}
 
+	logger.Info("dispatching synthesis operation", "synthesisUUID", op.id)
 	if err := c.dispatchOp(ctx, op); err != nil {
 		if errors.IsInvalid(err) {
 			logger.Error(err, "conflict while dispatching synthesis")
@@ -164,7 +258,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	op.Dispatched = time.Now()
 	c.lastApplied = op
-	logger.V(1).Info("dispatched synthesis", "synthesisUUID", op.id)
+	logger.Info("successfully dispatched synthesis", "synthesisUUID", op.id, "dispatchLatency", time.Since(start).Milliseconds())
 
 	return ctrl.Result{}, nil
 }
@@ -222,4 +316,40 @@ func getSynthOwner(synth *apiv1.Synthesizer) string {
 		return ""
 	}
 	return synth.GetAnnotations()["eno.azure.io/owner"]
+}
+
+// setDependencyStatus patches the composition's DependencyStatus if it doesn't already
+// match the given reason. Returns true if a patch was applied
+func (c *controller) setDependencyStatus(ctx context.Context, comp *apiv1.Composition, newStatus *apiv1.DependencyStatus) (bool, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+	// same status, we can ignore
+	if comp.Status.DependencyStatus != nil && equality.Semantic.DeepEqual(*comp.Status.DependencyStatus, *newStatus) {
+		return false, nil // modified=false, err = nil
+	}
+
+	copy := comp.DeepCopy()
+	copy.Status.DependencyStatus = newStatus
+	logger.Info("Setting DependencyStatus for composition", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace(),
+		"DependencyStatusReason", newStatus.Reason, "BlockedBy", newStatus.BlockedBy)
+	if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(comp)); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// clearDependencyStatus clears the composition's DependencyStatus if it currently has the given reason.
+// Returns true if a patch was applied
+func (c *controller) clearDependencyStatus(ctx context.Context, comp *apiv1.Composition, reason string) (bool, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+	if comp.Status.DependencyStatus == nil || comp.Status.DependencyStatus.Reason != reason {
+		return false, nil
+	}
+	copy := comp.DeepCopy()
+	copy.Status.DependencyStatus = nil
+	logger.Info("clearing dependency status", "compositionName", comp.GetName(), "compositionNamespace", comp.GetNamespace(),
+		"prevDependencyReason", comp.Status.DependencyStatus.Reason)
+	if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(comp)); err != nil {
+		return false, err
+	}
+	return true, nil
 }
