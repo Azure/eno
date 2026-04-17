@@ -1,5 +1,10 @@
 FROM mcr.microsoft.com/devcontainers/go:1.24 AS builder
-WORKDIR /app
+
+ENV GOTOOLCHAIN=auto
+
+# Disable workspace mode so go build uses the toolchain from go.mod
+ENV GOWORK=off
+
 
 ADD go.mod .
 ADD go.sum .

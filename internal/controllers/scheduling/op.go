@@ -207,6 +207,7 @@ func (o *op) BuildPatch() any {
 			"uuid":                          o.id.String(),
 			"deferred":                      o.Reason.Deferred(),
 			"attempts":                      attempts + 1,
+			"inputRevisions":                o.Composition.Status.InputRevisions,
 		},
 	})
 
@@ -273,8 +274,21 @@ func inputChangeCount(synth *apiv1.Synthesizer, a, b []apiv1.InputRevisions) (no
 		if !exists {
 			continue
 		}
-		br, exists := bByKey[ar.Key]
-		if !exists {
+		br, bExists := bByKey[ar.Key]
+		if !bExists {
+			// New input since last synthesis — only force resynthesis
+			// when explicitly annotated with ignore-side-effects: false.
+			// Do NOT count nil/true as a change: synthesis may legitimately
+			// omit optional inputs it didn't read, and treating those as
+			// changes causes an infinite synthesis loop.
+			if ar.IgnoreSideEffects != nil && !*ar.IgnoreSideEffects {
+				forced++
+				if ref.Defer {
+					deferred++
+				} else {
+					nonDeferred++
+				}
+			}
 			continue
 		}
 

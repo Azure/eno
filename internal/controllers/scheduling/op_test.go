@@ -10,6 +10,7 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/inputs"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/Azure/eno/internal/testutil/statespace"
 	"github.com/google/uuid"
@@ -124,6 +125,40 @@ func TestFuzzNewOp(t *testing.T) {
 	}).WithMutation("nilSynthesis", func(state newOpTestState) newOpTestState {
 		state.comp.Status.CurrentSynthesis = nil
 		return state
+	}).WithMutation("newOptionalInputForceFalse", func(state newOpTestState) newOpTestState {
+		// Simulate a new optional input appearing with ignore-side-effects: false
+		// Remove existing entries first to prevent duplicates when composed with other optional mutations
+		state.synth.Spec.Refs = slices.DeleteFunc(state.synth.Spec.Refs, func(r apiv1.Ref) bool { return r.Key == "optional-input" })
+		state.comp.Spec.Bindings = slices.DeleteFunc(state.comp.Spec.Bindings, func(b apiv1.Binding) bool { return b.Key == "optional-input" })
+		state.comp.Status.InputRevisions = slices.DeleteFunc(state.comp.Status.InputRevisions, func(ir apiv1.InputRevisions) bool { return ir.Key == "optional-input" })
+		state.synth.Spec.Refs = append(state.synth.Spec.Refs, apiv1.Ref{Key: "optional-input", Optional: true})
+		state.comp.Spec.Bindings = append(state.comp.Spec.Bindings, apiv1.Binding{Key: "optional-input", Resource: apiv1.ResourceBinding{Name: "optional-input"}})
+		state.comp.Status.InputRevisions = append(state.comp.Status.InputRevisions, apiv1.InputRevisions{
+			Key: "optional-input", ResourceVersion: "1", IgnoreSideEffects: ptr.To(false),
+		})
+		return state
+	}).WithMutation("newOptionalInputForceTrue", func(state newOpTestState) newOpTestState {
+		// Simulate a new optional input appearing with ignore-side-effects: true
+		state.synth.Spec.Refs = slices.DeleteFunc(state.synth.Spec.Refs, func(r apiv1.Ref) bool { return r.Key == "optional-input" })
+		state.comp.Spec.Bindings = slices.DeleteFunc(state.comp.Spec.Bindings, func(b apiv1.Binding) bool { return b.Key == "optional-input" })
+		state.comp.Status.InputRevisions = slices.DeleteFunc(state.comp.Status.InputRevisions, func(ir apiv1.InputRevisions) bool { return ir.Key == "optional-input" })
+		state.synth.Spec.Refs = append(state.synth.Spec.Refs, apiv1.Ref{Key: "optional-input", Optional: true})
+		state.comp.Spec.Bindings = append(state.comp.Spec.Bindings, apiv1.Binding{Key: "optional-input", Resource: apiv1.ResourceBinding{Name: "optional-input"}})
+		state.comp.Status.InputRevisions = append(state.comp.Status.InputRevisions, apiv1.InputRevisions{
+			Key: "optional-input", ResourceVersion: "1", IgnoreSideEffects: ptr.To(true),
+		})
+		return state
+	}).WithMutation("newOptionalInputNoAnnotation", func(state newOpTestState) newOpTestState {
+		// Simulate a new optional input appearing without any annotation
+		state.synth.Spec.Refs = slices.DeleteFunc(state.synth.Spec.Refs, func(r apiv1.Ref) bool { return r.Key == "optional-input" })
+		state.comp.Spec.Bindings = slices.DeleteFunc(state.comp.Spec.Bindings, func(b apiv1.Binding) bool { return b.Key == "optional-input" })
+		state.comp.Status.InputRevisions = slices.DeleteFunc(state.comp.Status.InputRevisions, func(ir apiv1.InputRevisions) bool { return ir.Key == "optional-input" })
+		state.synth.Spec.Refs = append(state.synth.Spec.Refs, apiv1.Ref{Key: "optional-input", Optional: true})
+		state.comp.Spec.Bindings = append(state.comp.Spec.Bindings, apiv1.Binding{Key: "optional-input", Resource: apiv1.ResourceBinding{Name: "optional-input"}})
+		state.comp.Status.InputRevisions = append(state.comp.Status.InputRevisions, apiv1.InputRevisions{
+			Key: "optional-input", ResourceVersion: "1",
+		})
+		return state
 	}).WithInvariant("returns nil when input revisions are out of lockstep with different revision numbers", func(state newOpTestState, op *op) bool {
 		if !state.hasInputsOutOfLockstep() {
 			return true
@@ -163,7 +198,7 @@ func TestFuzzNewOp(t *testing.T) {
 		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || !state.comp.ShouldIgnoreSideEffects() {
 			return true
 		}
-		if state.hasInputWithIgnoreSideEffectsFalse() {
+		if state.hasInputWithIgnoreSideEffectsFalse() || state.hasNewOptionalInputWithForceFalse() {
 			return true
 		}
 		return op == nil
@@ -171,7 +206,12 @@ func TestFuzzNewOp(t *testing.T) {
 		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() {
 			return true
 		}
-		if !state.comp.ShouldIgnoreSideEffects() || !state.hasInputWithIgnoreSideEffectsFalse() || !state.hasInputModified() {
+		if !state.comp.ShouldIgnoreSideEffects() {
+			return true
+		}
+		hasForce := state.hasInputWithIgnoreSideEffectsFalse() && state.hasInputModified()
+		hasNewOptionalForce := state.hasNewOptionalInputWithForceFalse()
+		if !hasForce && !hasNewOptionalForce {
 			return true
 		}
 		return op != nil && op.Reason == inputModifiedOp && !op.Reason.Deferred()
@@ -179,7 +219,7 @@ func TestFuzzNewOp(t *testing.T) {
 		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() {
 			return true
 		}
-		if state.comp.ShouldIgnoreSideEffects() && !state.hasInputWithIgnoreSideEffectsFalse() {
+		if state.comp.ShouldIgnoreSideEffects() && !state.hasInputWithIgnoreSideEffectsFalse() && !state.hasNewOptionalInputWithForceFalse() {
 			return true
 		}
 		if state.hasInputWithIgnoreSideEffectsTrue() && !state.hasInputWithIgnoreSideEffectsFalse() {
@@ -190,7 +230,7 @@ func TestFuzzNewOp(t *testing.T) {
 		}
 		return op != nil && op.Reason == inputModifiedOp && !op.Reason.Deferred()
 	}).WithInvariant("creates deferred input modified operation when deferred input changed and not synthesizing", func(state newOpTestState, op *op) bool {
-		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || state.hasInputModified() || !state.hasDeferredInputModified() {
+		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || state.hasInputModified() || state.hasNewOptionalInputWithForceFalse() || !state.hasDeferredInputModified() {
 			return true
 		}
 		if state.comp.Synthesizing() {
@@ -198,12 +238,12 @@ func TestFuzzNewOp(t *testing.T) {
 		}
 		return op != nil && op.Reason == deferredInputModifiedOp && op.Reason.Deferred()
 	}).WithInvariant("returns nil when synthesizer generation is zero indicating uninitialized state", func(state newOpTestState, op *op) bool {
-		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || state.hasInputModified() || state.hasDeferredInputModified() || state.synth.Generation != 0 {
+		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || state.hasInputModified() || state.hasNewOptionalInputWithForceFalse() || state.hasDeferredInputModified() || state.synth.Generation != 0 {
 			return true
 		}
 		return op == nil
 	}).WithInvariant("creates synthesizer modified operation when synthesizer generation increased and not synthesizing", func(state newOpTestState, op *op) bool {
-		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || state.hasInputModified() || state.hasDeferredInputModified() || state.synth.Generation == 0 || !state.isSynthesizerModified() {
+		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || state.hasInputModified() || state.hasNewOptionalInputWithForceFalse() || state.hasDeferredInputModified() || state.synth.Generation == 0 || !state.isSynthesizerModified() {
 			return true
 		}
 		if state.comp.Synthesizing() {
@@ -211,7 +251,7 @@ func TestFuzzNewOp(t *testing.T) {
 		}
 		return op != nil && op.Reason == synthesizerModifiedOp && op.Reason.Deferred()
 	}).WithInvariant("returns nil when no operation conditions are satisfied in valid state", func(state newOpTestState, op *op) bool {
-		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || state.hasInputModified() || state.hasDeferredInputModified() || state.synth.Generation == 0 || state.isSynthesizerModified() {
+		if state.hasInvalidState() || state.hasNilSynthesis() || state.comp.ShouldForceResynthesis() || state.isCompositionModified() || state.comp.ShouldIgnoreSideEffects() || state.hasInputModified() || state.hasNewOptionalInputWithForceFalse() || state.hasDeferredInputModified() || state.synth.Generation == 0 || state.isSynthesizerModified() {
 			return true
 		}
 		return op == nil
@@ -251,7 +291,7 @@ type newOpTestState struct {
 	comp, original *apiv1.Composition
 }
 
-func (s newOpTestState) hasInsufficientInputs() bool { return len(s.comp.Status.InputRevisions) < 2 }
+func (s newOpTestState) hasInsufficientInputs() bool { return !inputs.Exist(s.synth, s.comp) }
 func (s newOpTestState) isCompositionDeleting() bool { return s.comp.DeletionTimestamp != nil }
 func (s newOpTestState) isMissingFinalizer() bool    { return len(s.comp.Finalizers) == 0 }
 
@@ -323,6 +363,25 @@ func (s newOpTestState) hasInputWithIgnoreSideEffectsFalse() bool {
 	return len(s.comp.Status.InputRevisions) >= 1 &&
 		s.comp.Status.InputRevisions[0].IgnoreSideEffects != nil &&
 		!*s.comp.Status.InputRevisions[0].IgnoreSideEffects
+}
+
+func (s newOpTestState) hasNewOptionalInputWithForceFalse() bool {
+	// Check if there's a new optional input in status that has IgnoreSideEffects=false
+	// and doesn't exist in the synthesis's InputRevisions
+	syn := s.getCurrentSynthesis()
+	if syn == nil {
+		return false
+	}
+	synKeys := map[string]bool{}
+	for _, ir := range syn.InputRevisions {
+		synKeys[ir.Key] = true
+	}
+	for _, ir := range s.comp.Status.InputRevisions {
+		if !synKeys[ir.Key] && ir.IgnoreSideEffects != nil && !*ir.IgnoreSideEffects {
+			return true
+		}
+	}
+	return false
 }
 
 func TestFuzzInputChangeCount(t *testing.T) {
@@ -787,6 +846,142 @@ func TestInputChangeCount(t *testing.T) {
 			wantNonDeferred: 1,
 			wantDeferred:    0,
 			wantForced:      0,
+		},
+		{
+			name: "new input with ignoreSideEffects=false forces resynthesis",
+			refs: []apiv1.Ref{
+				{Key: "foo"},
+				{Key: "bar"},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+				{Key: "bar", ResourceVersion: "1", IgnoreSideEffects: ptr.To(false)},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+			},
+			wantNonDeferred: 1,
+			wantDeferred:    0,
+			wantForced:      1,
+		},
+		{
+			name: "new input with ignoreSideEffects=true suppressed",
+			refs: []apiv1.Ref{
+				{Key: "foo"},
+				{Key: "bar"},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+				{Key: "bar", ResourceVersion: "1", IgnoreSideEffects: ptr.To(true)},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+			},
+			wantNonDeferred: 0,
+			wantDeferred:    0,
+			wantForced:      0,
+		},
+		{
+			name: "new input with ignoreSideEffects=nil does not trigger change",
+			refs: []apiv1.Ref{
+				{Key: "foo"},
+				{Key: "bar"},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+				{Key: "bar", ResourceVersion: "1", IgnoreSideEffects: nil},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+			},
+			wantNonDeferred: 0,
+			wantDeferred:    0,
+			wantForced:      0,
+		},
+		{
+			name: "new deferred input with ignoreSideEffects=false forces resynthesis",
+			refs: []apiv1.Ref{
+				{Key: "foo"},
+				{Key: "bar", Defer: true},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+				{Key: "bar", ResourceVersion: "1", IgnoreSideEffects: ptr.To(false)},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+			},
+			wantNonDeferred: 0,
+			wantDeferred:    1,
+			wantForced:      1,
+		},
+		{
+			name: "new optional input with ignoreSideEffects=false forces resynthesis",
+			refs: []apiv1.Ref{
+				{Key: "foo"},
+				{Key: "bar", Optional: true},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+				{Key: "bar", ResourceVersion: "1", IgnoreSideEffects: ptr.To(false)},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+			},
+			wantNonDeferred: 1,
+			wantDeferred:    0,
+			wantForced:      1,
+		},
+		{
+			name: "new optional input with ignoreSideEffects=true suppressed",
+			refs: []apiv1.Ref{
+				{Key: "foo"},
+				{Key: "bar", Optional: true},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+				{Key: "bar", ResourceVersion: "1", IgnoreSideEffects: ptr.To(true)},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+			},
+			wantNonDeferred: 0,
+			wantDeferred:    0,
+			wantForced:      0,
+		},
+		{
+			name: "new optional input with ignoreSideEffects=nil does not trigger change",
+			refs: []apiv1.Ref{
+				{Key: "foo"},
+				{Key: "bar", Optional: true},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+				{Key: "bar", ResourceVersion: "1", IgnoreSideEffects: nil},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+			},
+			wantNonDeferred: 0,
+			wantDeferred:    0,
+			wantForced:      0,
+		},
+		{
+			name: "new optional deferred input with ignoreSideEffects=false forces resynthesis",
+			refs: []apiv1.Ref{
+				{Key: "foo"},
+				{Key: "bar", Optional: true, Defer: true},
+			},
+			current: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+				{Key: "bar", ResourceVersion: "1", IgnoreSideEffects: ptr.To(false)},
+			},
+			synthesis: []apiv1.InputRevisions{
+				{Key: "foo", ResourceVersion: "1"},
+			},
+			wantNonDeferred: 0,
+			wantDeferred:    1,
+			wantForced:      1,
 		},
 		{
 			name: "missing key in refs",
