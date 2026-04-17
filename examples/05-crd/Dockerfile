@@ -5,6 +5,7 @@ ENV GOTOOLCHAIN=auto
 # Disable workspace mode so go build uses the toolchain from go.mod
 ENV GOWORK=off
 
+WORKDIR /app
 
 ADD go.mod .
 ADD go.sum .
