@@ -219,11 +219,12 @@ func (i *InputRevisions) Less(b InputRevisions) bool {
 	if i.Revision != nil && b.Revision != nil {
 		return *i.Revision < *b.Revision
 	}
+	// When ResourceVersions match, prefer the revision that has IgnoreSideEffects=true
+	// A nil IgnoreSideEffects is treated as false, so we only return true when i is
+	// explicitly true and b is either nil or false.
 	if i.ResourceVersion == b.ResourceVersion {
-		if i.IgnoreSideEffects != nil && b.IgnoreSideEffects != nil {
-			return *i.IgnoreSideEffects && !*b.IgnoreSideEffects
-		}
-		return false
+		return i.IgnoreSideEffects != nil && *i.IgnoreSideEffects &&
+			(b.IgnoreSideEffects == nil || !*b.IgnoreSideEffects)
 	}
 	iInt, iErr := strconv.Atoi(i.ResourceVersion)
 	bInt, bErr := strconv.Atoi(b.ResourceVersion)
