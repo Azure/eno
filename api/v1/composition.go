@@ -206,6 +206,12 @@ func NewInputRevisions(obj client.Object, refKey string) *InputRevisions {
 	return &ir
 }
 
+// Less reports whetehr i should be ordered before b
+// both revisiions must share the same key. We can not compare across differnt keys
+// Below is the ordering rules
+// 1. If both sides have an explicit Revision, compare by Revision
+// 2. If ResourceVersions are equal, check if IgnoreSideEffects annotation is present. If ignore side effects variant is preferred.
+// 3. If ResourceVersions aren't parseable as ints, fall back to treating i as "less" so comparison degrades gracefully.
 func (i *InputRevisions) Less(b InputRevisions) bool {
 	if i.Key != b.Key {
 		panic(fmt.Sprintf("cannot compare input revisions for different keys: %s != %s", i.Key, b.Key))
@@ -214,7 +220,7 @@ func (i *InputRevisions) Less(b InputRevisions) bool {
 		return *i.Revision < *b.Revision
 	}
 	if i.ResourceVersion == b.ResourceVersion {
-		if i.IgnoreSideEffects != nil && b.IgnoreSideEffects != nil && *i.IgnoreSideEffects != *b.IgnoreSideEffects {
+		if i.IgnoreSideEffects != nil && b.IgnoreSideEffects != nil {
 			return *i.IgnoreSideEffects && !*b.IgnoreSideEffects
 		}
 		return false
