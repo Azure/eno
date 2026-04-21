@@ -257,31 +257,31 @@ func (r opReason) String() string {
 	}
 }
 
-func inputChangeCount(synth *apiv1.Synthesizer, a, b []apiv1.InputRevisions) (nonDeferred, deferred, forced int) {
+func inputChangeCount(synth *apiv1.Synthesizer, current, previous []apiv1.InputRevisions) (nonDeferred, deferred, forced int) {
 	refsByKey := map[string]apiv1.Ref{}
 	for _, ref := range synth.Spec.Refs {
 		ref := ref
 		refsByKey[ref.Key] = ref
 	}
 
-	bByKey := map[string]apiv1.InputRevisions{}
-	for _, br := range b {
-		bByKey[br.Key] = br
+	previousByKey := map[string]apiv1.InputRevisions{}
+	for _, prev := range previous {
+		previousByKey[prev.Key] = prev
 	}
 
-	for _, ar := range a {
-		ref, exists := refsByKey[ar.Key]
+	for _, cur := range current {
+		ref, exists := refsByKey[cur.Key]
 		if !exists {
 			continue
 		}
-		br, bExists := bByKey[ar.Key]
-		if !bExists {
+		prev, prevExists := previousByKey[cur.Key]
+		if !prevExists {
 			// New input since last synthesis — only force resynthesis
 			// when explicitly annotated with ignore-side-effects: false.
 			// Do NOT count nil/true as a change: synthesis may legitimately
 			// omit optional inputs it didn't read, and treating those as
 			// changes causes an infinite synthesis loop.
-			if ar.IgnoreSideEffects != nil && !*ar.IgnoreSideEffects {
+			if cur.IgnoreSideEffects != nil && !*cur.IgnoreSideEffects {
 				forced++
 				if ref.Defer {
 					deferred++
@@ -292,9 +292,9 @@ func inputChangeCount(synth *apiv1.Synthesizer, a, b []apiv1.InputRevisions) (no
 			continue
 		}
 
-		if br.Less(ar) {
-			if ar.IgnoreSideEffects != nil {
-				if *ar.IgnoreSideEffects {
+		if prev.Less(cur) {
+			if cur.IgnoreSideEffects != nil {
+				if *cur.IgnoreSideEffects {
 					continue
 				} else {
 					forced++

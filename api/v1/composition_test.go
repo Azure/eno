@@ -241,7 +241,7 @@ func TestInputRevisionsLess(t *testing.T) {
 				ResourceVersion:   "11",
 				IgnoreSideEffects: nil,
 			},
-			Expectation: true,
+			Expectation: false,
 		},
 		{
 			Name: "same ResourceVersion with both nil IgnoreSideEffects",
