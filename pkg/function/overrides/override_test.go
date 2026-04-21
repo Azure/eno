@@ -69,6 +69,91 @@ func TestOverrideValidate(t *testing.T) {
 	}
 }
 
+func TestValueProgram(t *testing.T) {
+	tests := []struct {
+		name    string
+		o       overrides.Override
+		wantErr bool
+	}{
+		{
+			name: "ValidValueProgram",
+			o: overrides.Override{
+				Path:         "self.metadata.name",
+				Condition:    "true",
+				ValueProgram: "self.metadata.name",
+			},
+			wantErr: false,
+		},
+		{
+			name: "InvalidValueProgram",
+			o: overrides.Override{
+				Path:         "self.metadata.name",
+				Condition:    "true",
+				ValueProgram: "1 +",
+			},
+			wantErr: true,
+		},
+		{
+			name: "ValueProgramWithoutValue",
+			o: overrides.Override{
+				Path:         "self.spec.foo",
+				Condition:    "has(self.spec.foo)",
+				ValueProgram: "self.spec.foo",
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tt.o.Test(map[string]any{
+				"self": map[string]any{
+					"metadata": map[string]any{"name": "test"},
+					"spec":     map[string]any{"foo": "bar"},
+				},
+			})
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Test() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestAnnotateOverrides_ValueProgram(t *testing.T) {
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+		},
+	}
+	ov := overrides.Override{
+		Path:         "self.data.foo",
+		Condition:    "has(self.data.foo)",
+		ValueProgram: "self.data.foo",
+	}
+	err := overrides.AnnotateOverrides(obj, []overrides.Override{ov})
+	if err != nil {
+		t.Fatalf("AnnotateOverrides() error: %v", err)
+	}
+
+	anns := obj.GetAnnotations()
+	val, ok := anns["eno.azure.io/overrides"]
+	if !ok {
+		t.Fatalf("expected annotation to be set")
+	}
+
+	var got []overrides.Override
+	if err := json.Unmarshal([]byte(val), &got); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 override, got %d", len(got))
+	}
+	if got[0].ValueProgram != "self.data.foo" {
+		t.Errorf("expected valueProgram 'self.data.foo', got %q", got[0].ValueProgram)
+	}
+}
+
 func TestAnnotateOverrides_Success(t *testing.T) {
 	obj := &unstructured.Unstructured{
 		Object: map[string]interface{}{

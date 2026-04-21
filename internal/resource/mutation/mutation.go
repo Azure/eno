@@ -10,6 +10,7 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/go-logr/logr"
 	"github.com/google/cel-go/cel"
+	"google.golang.org/protobuf/types/known/structpb"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	enocel "github.com/Azure/eno/internal/cel"
@@ -35,15 +36,17 @@ const (
 // Op is an operation that conditionally assigns a value to a path within an object.
 // Designed to be sent over the wire as JSON.
 type Op struct {
-	Path      *PathExpr
-	Condition cel.Program
-	Value     any
+	Path         *PathExpr
+	Condition    cel.Program
+	Value        any
+	ValueProgram cel.Program
 }
 
 type jsonOp struct {
-	Path      string `json:"path"`
-	Condition string `json:"condition"`
-	Value     any    `json:"value"`
+	Path         string `json:"path"`
+	Condition    string `json:"condition"`
+	Value        any    `json:"value"`
+	ValueProgram string `json:"valueProgram"`
 }
 
 func (o *Op) UnmarshalJSON(data []byte) error {
@@ -63,6 +66,13 @@ func (o *Op) UnmarshalJSON(data []byte) error {
 		o.Condition, err = enocel.Parse(j.Condition)
 		if err != nil {
 			return fmt.Errorf("parsing condition: %w", err)
+		}
+	}
+
+	if j.ValueProgram != "" {
+		o.ValueProgram, err = enocel.Parse(j.ValueProgram)
+		if err != nil {
+			return fmt.Errorf("parsing valueProgram: %w", err)
 		}
 	}
 
@@ -90,7 +100,26 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 		}
 	}
 	logger.Info("applying mutation to path", "path", o.Path.String(), "valueType", fmt.Sprintf("%T", o.Value))
-	status, err := o.Path.Apply(mutated.Object, o.Value)
+	resolvedValue := o.Value
+	if o.ValueProgram != nil {
+		if current == nil {
+			logger.Info("skipping CEL value evaluation - current resource is nil", "path", o.Path.String())
+			return StatusInactive, nil
+		}
+		val, err := enocel.Eval(ctx, o.ValueProgram, comp, current, o.Path)
+		if err != nil {
+			logger.Error(err, "failed to evaluate value expression", "path", o.Path.String())
+			return StatusInvalidCondition, nil
+		}
+		resolvedValue = val.Value()
+		if resolvedValue == nil || resolvedValue == structpb.NullValue_NULL_VALUE {
+			logger.Info("CEL value expression evaluated to null, skipping mutation", "path", o.Path.String())
+			return StatusInactive, nil
+		}
+		logger.Info("resolved CEL value expression", "path", o.Path.String(), "resolvedValue", resolvedValue)
+	}
+	status, err := o.Path.Apply(mutated.Object, resolvedValue)
+
 	if err != nil {
 		logger.Error(err, "failed to apply mutation", "path", o.Path.String(), "status", status)
 		return status, err

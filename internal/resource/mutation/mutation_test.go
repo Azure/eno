@@ -446,6 +446,67 @@ func TestOpApply(t *testing.T) {
 				"foo": "bar",
 			}},
 		},
+		{
+			name: "CELValueProgram_ResolvesFromCurrent",
+			op: Op{
+				Path:         mustParsePathExpr("self.foo"),
+				ValueProgram: mustParseCEL("self.bar"),
+			},
+			current: &unstructured.Unstructured{Object: map[string]any{
+				"bar": "resolved-value",
+			}},
+			mutated: &unstructured.Unstructured{Object: map[string]any{}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{
+				"foo": "resolved-value",
+			}},
+		},
+		{
+			name: "CELValueProgram_NilCurrent_Skipped",
+			op: Op{
+				Path:         mustParsePathExpr("self.foo"),
+				ValueProgram: mustParseCEL("self.bar"),
+			},
+			current:         nil,
+			mutated:         &unstructured.Unstructured{Object: map[string]any{}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{}},
+		},
+		{
+			name: "CELValueProgram_WithCondition",
+			op: Op{
+				Path:         mustParsePathExpr("self.foo"),
+				Condition:    mustParseCEL("has(self.bar)"),
+				ValueProgram: mustParseCEL("self.bar"),
+			},
+			current: &unstructured.Unstructured{Object: map[string]any{
+				"bar": "dynamic-val",
+			}},
+			mutated: &unstructured.Unstructured{Object: map[string]any{}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{
+				"foo": "dynamic-val",
+			}},
+		},
+		{
+			name: "CELValueProgram_NullResult_Skipped",
+			op: Op{
+				Path:         mustParsePathExpr("self.foo"),
+				ValueProgram: mustParseCEL("null"),
+			},
+			current:         &unstructured.Unstructured{Object: map[string]any{"bar": "val"}},
+			mutated:         &unstructured.Unstructured{Object: map[string]any{}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{}},
+		},
+		{
+			name: "StaticValue_StillWorks",
+			op: Op{
+				Path:  mustParsePathExpr("self.foo"),
+				Value: "static-val",
+			},
+			current: &unstructured.Unstructured{Object: map[string]any{}},
+			mutated: &unstructured.Unstructured{Object: map[string]any{}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{
+				"foo": "static-val",
+			}},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -491,6 +552,14 @@ func mustParseCondition(cond string) cel.Program {
 	prog, err := enocel.Parse(cond)
 	if err != nil {
 		panic(fmt.Sprintf("failed to parse condition %q: %v", cond, err))
+	}
+	return prog
+}
+
+func mustParseCEL(expr string) cel.Program {
+	prog, err := enocel.Parse(expr)
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse CEL expression %q: %v", expr, err))
 	}
 	return prog
 }
