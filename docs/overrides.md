@@ -66,7 +66,7 @@ annotations:
 This reads the current value of `maxAllowed.memory` from the live resource and preserves it, allowing customer overrides to persist across reconciliation cycles.
 
 - `valueProgram` is evaluated against the **current** (actual) resource state, same as `condition`
-- If the current resource doesn't exist yet, the override is skipped (returns `Inactive`)
+- If the current resource doesn't exist yet, the override is skipped
 - You can use both `condition` and `valueProgram` together — the condition is checked first
 - `value` and `valueProgram` are mutually exclusive; if both are set, `valueProgram` takes precedence
 

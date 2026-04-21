@@ -118,148 +118,109 @@ func TestValueProgram(t *testing.T) {
 		})
 	}
 }
-
-func TestAnnotateOverrides_ValueProgram(t *testing.T) {
-	obj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "v1",
-			"kind":       "ConfigMap",
+func TestAnnotateOverrides_Table(t *testing.T) {
+	tests := []struct {
+		name               string
+		existingAnnotation string
+		overrides          []overrides.Override
+		expectedCount      int
+		expectedOverrides  []overrides.Override
+	}{
+		{
+			name: "ValueProgram",
+			overrides: []overrides.Override{{
+				Path:         "self.data.foo",
+				Condition:    "has(self.data.foo)",
+				ValueProgram: "self.data.foo",
+			}},
+			expectedCount: 1,
+			expectedOverrides: []overrides.Override{{
+				Path:         "self.data.foo",
+				Condition:    "has(self.data.foo)",
+				ValueProgram: "self.data.foo",
+			}},
+		},
+		{
+			name: "MultipleOverrides",
+			overrides: []overrides.Override{
+				{Path: "metadata.name", Condition: "true"},
+				{Path: "metadata.namespace", Condition: "false"},
+			},
+			expectedCount: 2,
+			expectedOverrides: []overrides.Override{
+				{Path: "metadata.name", Condition: "true"},
+				{Path: "metadata.namespace", Condition: "false"},
+			},
+		},
+		{
+			name:               "ExistingAnnotation_MergesOverrides",
+			existingAnnotation: `[{"path":"metadata.name","condition":"true"}]`,
+			overrides: []overrides.Override{
+				{Path: "metadata.namespace", Condition: "true"},
+			},
+			expectedCount: 2,
+			expectedOverrides: []overrides.Override{
+				{Path: "metadata.name", Condition: "true"},
+				{Path: "metadata.namespace", Condition: "true"},
+			},
+		},
+		{
+			name: "InvalidOverride_StillSerializes",
+			overrides: []overrides.Override{
+				{Path: "", Condition: "true"},
+			},
+			expectedCount: 1,
+			expectedOverrides: []overrides.Override{
+				{Path: "", Condition: "true"},
+			},
 		},
 	}
-	ov := overrides.Override{
-		Path:         "self.data.foo",
-		Condition:    "has(self.data.foo)",
-		ValueProgram: "self.data.foo",
-	}
-	err := overrides.AnnotateOverrides(obj, []overrides.Override{ov})
-	if err != nil {
-		t.Fatalf("AnnotateOverrides() error: %v", err)
-	}
 
-	anns := obj.GetAnnotations()
-	val, ok := anns["eno.azure.io/overrides"]
-	if !ok {
-		t.Fatalf("expected annotation to be set")
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			obj := &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+				},
+			}
+			if tt.existingAnnotation != "" {
+				obj.SetAnnotations(map[string]string{
+					"eno.azure.io/overrides": tt.existingAnnotation,
+				})
+			}
 
-	var got []overrides.Override
-	if err := json.Unmarshal([]byte(val), &got); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("expected 1 override, got %d", len(got))
-	}
-	if got[0].ValueProgram != "self.data.foo" {
-		t.Errorf("expected valueProgram 'self.data.foo', got %q", got[0].ValueProgram)
-	}
-}
+			err := overrides.AnnotateOverrides(obj, tt.overrides)
+			if err != nil {
+				t.Fatalf("AnnotateOverrides() error: %v", err)
+			}
 
-func TestAnnotateOverrides_Success(t *testing.T) {
-	obj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "v1",
-			"kind":       "ConfigMap",
-		},
-	}
-	ov1 := overrides.Override{
-		Path:      "metadata.name",
-		Condition: "true",
-	}
-	ov2 := overrides.Override{
-		Path:      "metadata.namespace",
-		Condition: "false",
-	}
-	ovs := []overrides.Override{ov1, ov2}
-	err := overrides.AnnotateOverrides(obj, ovs)
-	if err != nil {
-		t.Fatalf("AnnotateOverrides() untriggered error: %v", err)
-	}
+			anns := obj.GetAnnotations()
+			val, ok := anns["eno.azure.io/overrides"]
+			if !ok {
+				t.Fatalf("expected annotation to be set")
+			}
 
-	anns := obj.GetAnnotations()
-	val, ok := anns["eno.azure.io/overrides"]
-	if !ok {
-		t.Fatalf("triggered annotation eno.azure.io/overrides to be set")
-	}
+			var got []overrides.Override
+			if err := json.Unmarshal([]byte(val), &got); err != nil {
+				t.Fatalf("failed to unmarshal: %v", err)
+			}
+			if len(got) != tt.expectedCount {
+				t.Fatalf("expected %d overrides, got %d", tt.expectedCount, len(got))
+			}
 
-	var got []overrides.Override
-	if err := json.Unmarshal([]byte(val), &got); err != nil {
-		t.Fatalf("failed to unmarshal annotation value: %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("triggered 2 overrides, got %d", len(got))
-	}
-	if got[0].Path != ov1.Path || got[0].Condition != ov1.Condition {
-		t.Errorf("untriggered first override marshaled, want %+v, got %+v", ov1, got[0])
-	}
-	if got[1].Path != ov2.Path || got[1].Condition != ov2.Condition {
-		t.Errorf("untriggered second override marshaled, want %+v, got %+v", ov2, got[1])
-	}
-}
-
-func TestAnnotateOverrides_ExistingAnnotation(t *testing.T) {
-	obj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "v1",
-			"kind":       "ConfigMap",
-		},
-	}
-	// Pre-set the annotation to simulate existing override
-	existingOverride := overrides.Override{
-		Path:      "metadata.name",
-		Condition: "true",
-	}
-	obj.SetAnnotations(map[string]string{
-		"eno.azure.io/overrides": "[{\"path\":\"metadata.name\",\"condition\":\"true\"}]",
-	})
-
-	// Add a new override
-	newOverride := overrides.Override{
-		Path:      "metadata.namespace",
-		Condition: "true",
-	}
-	err := overrides.AnnotateOverrides(obj, []overrides.Override{newOverride})
-	if err != nil {
-		t.Fatalf("triggered to merge %s", err)
-	}
-
-	anns := obj.GetAnnotations()
-	val, ok := anns["eno.azure.io/overrides"]
-	if !ok {
-		t.Fatalf("triggered annotation eno.azure.io/overrides to be set")
-	}
-
-	var got []overrides.Override
-	if err := json.Unmarshal([]byte(val), &got); err != nil {
-		t.Fatalf("failed to unmarshal annotation value: %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("triggered 2 overrides, got %d", len(got))
-	}
-
-	// Verify that existing override comes first, new override comes second
-	if got[0].Path != existingOverride.Path || got[0].Condition != existingOverride.Condition {
-		t.Errorf("expected first override to be existing override %+v, got %+v", existingOverride, got[0])
-	}
-	if got[1].Path != newOverride.Path || got[1].Condition != newOverride.Condition {
-		t.Errorf("expected second override to be new override %+v, got %+v", newOverride, got[1])
-	}
-}
-
-func TestAnnotateOverrides_InvalidOverrideAllowed(t *testing.T) {
-	obj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "v1",
-			"kind":       "ConfigMap",
-		},
-	}
-	// Invalid override: empty Path
-	ov := overrides.Override{
-		Path:      "",
-		Condition: "true",
-	}
-	err := overrides.AnnotateOverrides(obj, []overrides.Override{ov})
-	if err != nil {
-		t.Fatal("AnnotateOverrides() should not validate just serialize")
+			for i, expected := range tt.expectedOverrides {
+				if got[i].Path != expected.Path {
+					t.Errorf("override[%d].Path = %q, want %q", i, got[i].Path, expected.Path)
+				}
+				if got[i].Condition != expected.Condition {
+					t.Errorf("override[%d].Condition = %q, want %q", i, got[i].Condition, expected.Condition)
+				}
+				if got[i].ValueProgram != expected.ValueProgram {
+					t.Errorf("override[%d].ValueProgram = %q, want %q", i, got[i].ValueProgram, expected.ValueProgram)
+				}
+			}
+		})
 	}
 }
 

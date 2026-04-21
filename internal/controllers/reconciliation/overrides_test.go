@@ -1075,9 +1075,9 @@ func TestMigratingFieldManagersFieldRemoval(t *testing.T) {
 	assert.False(t, hasLegacy, "legacy-tool should no longer own any fields")
 }
 
-// TestOverrideValueExpression proves that valueExpression can read a field from the current
+// TestOverrideValueProgram proves that valueProgram can read a field from the current
 // (live) resource and use it as the override value, gated by an annotation-based condition.
-func TestOverrideValueExpression(t *testing.T) {
+func TestOverrideValueProgram(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
@@ -1139,7 +1139,7 @@ func TestOverrideValueExpression(t *testing.T) {
 
 	// The customer's value should be preserved because:
 	// 1. condition evaluates to true (annotation is set)
-	// 2. valueExpression reads "self.data.foo" from current (live) resource = "customer-value"
+	// 2. valueProgram reads "self.data.foo" from current (live) resource = "customer-value"
 	// 3. That value is applied to the mutated resource, so reconciliation won't overwrite it
 	time.Sleep(100 * time.Millisecond)
 	testutil.Eventually(t, func() bool {
@@ -1166,7 +1166,7 @@ func TestOverrideValueExpression(t *testing.T) {
 // TestOverrideVPAMinMax covers the allow-override-min annotation with 4 cases:
 //   - Annotation OFF, no changes: defaults preserved
 //   - Annotation OFF, customer changes values: Eno reverts to defaults
-//   - Annotation ON, no changes: defaults preserved (valueExpression reads same defaults)
+//   - Annotation ON, no changes: defaults preserved (valueProgram reads same defaults)
 //   - Annotation ON, customer changes values: customer values preserved
 func TestOverrideVPAMinMax(t *testing.T) {
 	ctx := testutil.NewContext(t)
@@ -1255,7 +1255,7 @@ func TestOverrideVPAMinMax(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// valueExpression reads self.data['min-cpu'] from live = "100m" (same as default), so no visible change
+	// valueProgram reads self.data['min-cpu'] from live = "100m" (same as default), so no visible change
 	time.Sleep(100 * time.Millisecond)
 	testutil.Eventually(t, func() bool {
 		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)

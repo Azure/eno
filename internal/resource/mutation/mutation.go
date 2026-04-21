@@ -25,12 +25,13 @@ var (
 type Status string
 
 const (
-	StatusActive           Status = "Active"
-	StatusInactive         Status = "Inactive"
-	StatusInvalidCondition Status = "InvalidCondition"
-	StatusMissingParent    Status = "MissingParent"
-	StatusIndexOutOfRange  Status = "IndexOutOfRange"
-	StatusPathTypeMismatch Status = "PathTypeMismatch"
+	StatusActive              Status = "Active"
+	StatusInactive            Status = "Inactive"
+	StatusInvalidCondition    Status = "InvalidCondition"
+	StatusMissingParent       Status = "MissingParent"
+	StatusIndexOutOfRange     Status = "IndexOutOfRange"
+	StatusPathTypeMismatch    Status = "PathTypeMismatch"
+	StatusInvalidValueProgram Status = "InvalidValueProgram"
 )
 
 // Op is an operation that conditionally assigns a value to a path within an object.
@@ -109,7 +110,7 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 		val, err := enocel.Eval(ctx, o.ValueProgram, comp, current, o.Path)
 		if err != nil {
 			logger.Error(err, "failed to evaluate value expression", "path", o.Path.String())
-			return StatusInvalidCondition, nil
+			return StatusInvalidValueProgram, nil
 		}
 		resolvedValue = val.Value()
 		if resolvedValue == nil || resolvedValue == structpb.NullValue_NULL_VALUE {
