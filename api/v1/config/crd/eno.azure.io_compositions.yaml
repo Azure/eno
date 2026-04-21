@@ -198,6 +198,8 @@ spec:
                         compositionGeneration:
                           format: int64
                           type: integer
+                        ignoreSideEffects:
+                          type: boolean
                         key:
                           type: string
                         resourceVersion:
@@ -300,6 +302,8 @@ spec:
                         compositionGeneration:
                           format: int64
                           type: integer
+                        ignoreSideEffects:
+                          type: boolean
                         key:
                           type: string
                         resourceVersion:
@@ -375,6 +379,8 @@ spec:
                     compositionGeneration:
                       format: int64
                       type: integer
+                    ignoreSideEffects:
+                      type: boolean
                     key:
                       type: string
                     resourceVersion:
@@ -419,6 +425,8 @@ spec:
                         compositionGeneration:
                           format: int64
                           type: integer
+                        ignoreSideEffects:
+                          type: boolean
                         key:
                           type: string
                         resourceVersion:
