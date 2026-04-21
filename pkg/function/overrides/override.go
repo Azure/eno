@@ -17,7 +17,7 @@ import (
 // could make it a composition but not going down that path yet
 type Override struct {
 	Path         string `json:"path"`
-	Value        any    `json:"value,omitempty"`
+	Value        any    `json:"value"`
 	Condition    string `json:"condition"`
 	ValueProgram string `json:"valueProgram,omitempty"`
 }
@@ -37,6 +37,11 @@ func (o *Override) validate() (cel.Program, error) {
 	if o.Condition == "" {
 		return nil, fmt.Errorf("condition is required")
 	}
+
+	if o.ValueProgram != "" && o.Value != nil {
+		return nil, fmt.Errorf("value and valueProgram are mutually exclusive for path %q", o.Path)
+	}
+
 	// Parse the expression
 	celEnv := intcel.Env
 	ast, issues := celEnv.Parse(o.Condition)
@@ -63,7 +68,6 @@ func (o *Override) validate() (cel.Program, error) {
 		}
 	}
 
-	//Value can be null which is abit wierd.
 	return p, nil
 
 }

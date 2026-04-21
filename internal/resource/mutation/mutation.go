@@ -56,6 +56,11 @@ func (o *Op) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
+
+	if j.Value != nil && j.ValueProgram != "" {
+		return fmt.Errorf("value and valueProgram are mutually exclusive for path %q", j.Path)
+	}
+
 	o.Value = j.Value
 
 	o.Path, err = ParsePathExpr(j.Path)
@@ -117,7 +122,9 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 			logger.Info("CEL value expression evaluated to null, skipping mutation", "path", o.Path.String())
 			return StatusInactive, nil
 		}
-		logger.Info("resolved CEL value expression", "path", o.Path.String(), "resolvedValue", resolvedValue)
+		logger.Info("override using valueProgram (resolved CEL value expression)", "path", o.Path.String())
+	} else {
+		logger.Info("override using static default value", "path", o.Path.String())
 	}
 	status, err := o.Path.Apply(mutated.Object, resolvedValue)
 
