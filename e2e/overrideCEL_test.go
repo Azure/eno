@@ -5,116 +5,103 @@ import (
     "testing"
     "time"
 
-    apiv1 "github.com/Azure/eno/api/v1"
-    "github.com/Azure/eno/internal/testutil"
-    krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
-
+    flow "github.com/Azure/go-workflow"
     "github.com/stretchr/testify/assert"
     "github.com/stretchr/testify/require"
 
     corev1 "k8s.io/api/core/v1"
     metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-    "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-    "sigs.k8s.io/controller-runtime/pkg/client"
+    "k8s.io/apimachinery/pkg/types"
+
+    apiv1 "github.com/Azure/eno/api/v1"
+    fw "github.com/Azure/eno/e2e/framework"
 )
 
-/*
-This test verifies that:
-- An override using CEL condition + valueProgram
-- Is evaluated during reconciliation
-- And mutates the synthesized resource correctly
-*/
 func TestOverrides_CELValueProgram_EndToEnd(t *testing.T) {
-    ctx := testutil.NewContext(t)
+    t.Parallel()
 
-    // testutil.NewManager wires all controllers internally
-    mgr := testutil.NewManager(t)
-    upstream := mgr.GetClient()
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+    defer cancel()
 
-    // Fake synthesizer executor:
-    // Emits a ConfigMap containing a CEL override.
-    testutil.WithFakeExecutor(t, mgr, func(
-        ctx context.Context,
-        s *apiv1.Synthesizer,
-        input *krmv1.ResourceList,
-    ) (*krmv1.ResourceList, error) {
+    cli := fw.NewClient(t)
 
-        return &krmv1.ResourceList{
-            Items: []*unstructured.Unstructured{
-                {
-                    Object: map[string]any{
-                        "apiVersion": "v1",
-                        "kind":       "ConfigMap",
-                        "metadata": map[string]any{
-                            "name":      "override-test-cm",
-                            "namespace": "default",
-                            "annotations": map[string]any{
-                                // Compact JSON avoids annotation parsing issues
-                                "eno.azure.io/overrides":
-                                    `[{"path":"self.data.foo","condition":"has(self.data.foo)","valueProgram":"self.data.foo + '-overridden'"}]`,
-                            },
-                        },
-                        "data": map[string]any{
-                            "foo": "original",
-                        },
-                    },
-                },
+    // Unique names to avoid collisions when tests run in parallel.
+    synthName := fw.UniqueName("override-cel-synth")
+    compName := fw.UniqueName("override-cel-comp")
+    cmName := fw.UniqueName("override-cel-cm")
+
+    // ConfigMap emitted by the synthesizer. It carries eno.azure.io/overrides with a valueProgram.
+    // The override evaluates against the live resource ("self") during reconciliation.
+    cm := &corev1.ConfigMap{
+        TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
+        ObjectMeta: metav1.ObjectMeta{
+            Name:      cmName,
+            Namespace: "default",
+            Annotations: map[string]string{
+                "eno.azure.io/overrides": `[{"path":"self.data.foo","condition":"has(self.data.foo)","valueProgram":"self.data.foo + '-overridden'"}]`,
             },
-        }, nil
+        },
+        Data: map[string]string{
+            "foo": "original",
+        },
+    }
+
+    // Synthesizer prints a KRM ResourceList containing the ConfigMap above.
+    synth := fw.NewMinimalSynthesizer(
+        synthName,
+        fw.WithCommand(fw.ToCommand(cm)),
+    )
+
+    // Composition binds to the synthesizer.
+    comp := fw.NewComposition(
+        compName,
+        "default",
+        fw.WithSynthesizerRefs(apiv1.SynthesizerRef{Name: synthName}),
+    )
+    compKey := types.NamespacedName{Name: compName, Namespace: "default"}
+
+    // --- Workflow steps ---
+    createSynth := fw.CreateStep(t, "createSynthesizer", cli, synth)
+    createComp := fw.CreateStep(t, "createComposition", cli, comp)
+
+    waitReady := flow.Func("waitReady", func(ctx context.Context) error {
+        fw.WaitForCompositionReady(t, ctx, cli, compKey, 3*time.Minute)
+        return nil
     })
 
-    // Start envtest manager (handles cache sync internally)
-    go mgr.Start(t)
+    verifyOverrideApplied := flow.Func("verifyOverrideApplied", func(ctx context.Context) error {
+        got := &corev1.ConfigMap{
+            ObjectMeta: metav1.ObjectMeta{Name: cmName, Namespace: "default"},
+        }
+        fw.WaitForResourceExists(t, ctx, cli, got, 60*time.Second)
 
-    // --- Create Synthesizer (cluster-scoped) ---
-    synth := &apiv1.Synthesizer{
-        ObjectMeta: metav1.ObjectMeta{
-            Name: "override-test-synth",
-        },
-        Spec: apiv1.SynthesizerSpec{
-            Image: "fake-image",
-            Refs: []apiv1.Ref{
-                {
-                    Key: "config",
-                    Resource: apiv1.ResourceRef{
-                        Group:   "",
-                        Version: "v1",
-                        Kind:    "ConfigMap",
-                    },
-                },
-            },
-        },
-    }
-    require.NoError(t, upstream.Create(ctx, synth))
+        // The reconciler should apply the override so foo becomes "original-overridden".
+        assert.Equal(t, "original-overridden", got.Data["foo"])
+        return nil
+    })
 
-    // --- Create Composition ---
-    comp := &apiv1.Composition{
-        ObjectMeta: metav1.ObjectMeta{
-            Name:      "override-test-comp",
-            Namespace: "default",
-        },
-        Spec: apiv1.CompositionSpec{
-            Synthesizer: apiv1.SynthesizerRef{
-                Name: synth.Name,
-            },
-        },
-    }
-    require.NoError(t, upstream.Create(ctx, comp))
+    deleteComp := fw.DeleteStep(t, "deleteComposition", cli, comp)
 
-    // --- Assertion ---
-    // Eventually the override should apply and mutate the value.
-    cm := &corev1.ConfigMap{}
-    require.Eventually(t, func() bool {
-        err := mgr.DownstreamClient.Get(
-            ctx,
-            client.ObjectKey{
-                Name:      "override-test-cm",
-                Namespace: "default",
-            },
-            cm,
-        )
-        return err == nil && cm.Data["foo"] == "original-overridden"
-    }, 30*time.Second, 500*time.Millisecond)
+    verifyCMDeleted := flow.Func("verifyConfigMapDeleted", func(ctx context.Context) error {
+        obj := &corev1.ConfigMap{
+            ObjectMeta: metav1.ObjectMeta{Name: cmName, Namespace: "default"},
+        }
+        fw.WaitForResourceDeleted(t, ctx, cli, obj, 2*time.Minute)
+        return nil
+    })
 
-    assert.Equal(t, "original-overridden", cm.Data["foo"])
+    cleanupSynth := fw.CleanupStep(t, "cleanupSynthesizer", cli, synth)
+
+    // --- DAG wiring ---
+    w := new(flow.Workflow)
+    w.Add(
+        flow.Step(createComp).DependsOn(createSynth),
+        flow.Step(waitReady).DependsOn(createComp),
+        flow.Step(verifyOverrideApplied).DependsOn(waitReady),
+        flow.Step(deleteComp).DependsOn(verifyOverrideApplied),
+        flow.Step(verifyCMDeleted).DependsOn(deleteComp),
+        flow.Step(cleanupSynth).DependsOn(verifyCMDeleted),
+    )
+
+    require.NoError(t, w.Do(ctx))
 }
