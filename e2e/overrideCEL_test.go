@@ -25,20 +25,27 @@ func TestOverrides_CELValueProgram_EndToEnd(t *testing.T) {
 
     cli := fw.NewClient(t)
 
-    // Unique names to avoid collisions when tests run in parallel.
     synthName := fw.UniqueName("override-cel-synth")
     compName := fw.UniqueName("override-cel-comp")
     cmName := fw.UniqueName("override-cel-cm")
 
-    // ConfigMap emitted by the synthesizer. It carries eno.azure.io/overrides with a valueProgram.
-    // The override evaluates against the live resource ("self") during reconciliation.
+    // ✅ Idempotent override — always produces the same value
+    overrideJSON := `[{
+        "path": "self.data.foo",
+        "condition": "has(self.data.foo)",
+        "valueProgram": "'cel-override-value'"
+    }]`
+
     cm := &corev1.ConfigMap{
-        TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
+        TypeMeta: metav1.TypeMeta{
+            APIVersion: "v1",
+            Kind:       "ConfigMap",
+        },
         ObjectMeta: metav1.ObjectMeta{
             Name:      cmName,
             Namespace: "default",
             Annotations: map[string]string{
-                "eno.azure.io/overrides": `[{"path":"self.data.foo","condition":"has(self.data.foo)","valueProgram":"self.data.foo + '-overridden'"}]`,
+                "eno.azure.io/overrides": overrideJSON,
             },
         },
         Data: map[string]string{
@@ -46,21 +53,22 @@ func TestOverrides_CELValueProgram_EndToEnd(t *testing.T) {
         },
     }
 
-    // Synthesizer prints a KRM ResourceList containing the ConfigMap above.
     synth := fw.NewMinimalSynthesizer(
         synthName,
         fw.WithCommand(fw.ToCommand(cm)),
     )
 
-    // Composition binds to the synthesizer.
     comp := fw.NewComposition(
         compName,
         "default",
         fw.WithSynthesizerRefs(apiv1.SynthesizerRef{Name: synthName}),
     )
-    compKey := types.NamespacedName{Name: compName, Namespace: "default"}
 
-    // --- Workflow steps ---
+    compKey := types.NamespacedName{
+        Name:      compName,
+        Namespace: "default",
+    }
+
     createSynth := fw.CreateStep(t, "createSynthesizer", cli, synth)
     createComp := fw.CreateStep(t, "createComposition", cli, comp)
 
@@ -71,12 +79,13 @@ func TestOverrides_CELValueProgram_EndToEnd(t *testing.T) {
 
     verifyOverrideApplied := flow.Func("verifyOverrideApplied", func(ctx context.Context) error {
         got := &corev1.ConfigMap{
-            ObjectMeta: metav1.ObjectMeta{Name: cmName, Namespace: "default"},
+            ObjectMeta: metav1.ObjectMeta{
+                Name:      cmName,
+                Namespace: "default",
+            },
         }
         fw.WaitForResourceExists(t, ctx, cli, got, 60*time.Second)
-
-        // The reconciler should apply the override so foo becomes "original-overridden".
-        assert.Equal(t, "original-overridden", got.Data["foo"])
+        assert.Equal(t, "cel-override-value", got.Data["foo"])
         return nil
     })
 
@@ -84,7 +93,10 @@ func TestOverrides_CELValueProgram_EndToEnd(t *testing.T) {
 
     verifyCMDeleted := flow.Func("verifyConfigMapDeleted", func(ctx context.Context) error {
         obj := &corev1.ConfigMap{
-            ObjectMeta: metav1.ObjectMeta{Name: cmName, Namespace: "default"},
+            ObjectMeta: metav1.ObjectMeta{
+                Name:      cmName,
+                Namespace: "default",
+            },
         }
         fw.WaitForResourceDeleted(t, ctx, cli, obj, 2*time.Minute)
         return nil
@@ -92,7 +104,6 @@ func TestOverrides_CELValueProgram_EndToEnd(t *testing.T) {
 
     cleanupSynth := fw.CleanupStep(t, "cleanupSynthesizer", cli, synth)
 
-    // --- DAG wiring ---
     w := new(flow.Workflow)
     w.Add(
         flow.Step(createComp).DependsOn(createSynth),
