@@ -17,7 +17,7 @@ import (
     fw "github.com/Azure/eno/e2e/framework"
 )
 
-func TestOverrides_CELValueProgram_EndToEnd(t *testing.T) {
+func TestOverrides_CELValueExpression_EndToEnd(t *testing.T) {
     t.Parallel()
 
     ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -33,7 +33,7 @@ func TestOverrides_CELValueProgram_EndToEnd(t *testing.T) {
     overrideJSON := `[{
         "path": "self.data.foo",
         "condition": "has(self.data.foo)",
-        "valueProgram": "'cel-override-value'"
+        "valueExpression": "'cel-override-value'"
     }]`
 
     cm := &corev1.ConfigMap{

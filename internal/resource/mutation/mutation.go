@@ -31,7 +31,7 @@ const (
 	StatusMissingParent       Status = "MissingParent"
 	StatusIndexOutOfRange     Status = "IndexOutOfRange"
 	StatusPathTypeMismatch    Status = "PathTypeMismatch"
-	StatusInvalidValueProgram Status = "InvalidValueProgram"
+	StatusInvalidValueExpression Status = "InvalidValueExpression"
 )
 
 // Op is an operation that conditionally assigns a value to a path within an object.
@@ -47,7 +47,7 @@ type jsonOp struct {
 	Path         string `json:"path"`
 	Condition    string `json:"condition"`
 	Value        any    `json:"value"`
-	ValueProgram string `json:"valueProgram"`
+	ValueExpression string `json:"valueExpression"`
 }
 
 func (o *Op) UnmarshalJSON(data []byte) error {
@@ -57,8 +57,8 @@ func (o *Op) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	if j.Value != nil && j.ValueProgram != "" {
-		return fmt.Errorf("value and valueProgram are mutually exclusive for path %q", j.Path)
+	if j.Value != nil && j.ValueExpression != "" {
+		return fmt.Errorf("value and valueExpression are mutually exclusive for path %q", j.Path)
 	}
 
 	o.Value = j.Value
@@ -75,10 +75,10 @@ func (o *Op) UnmarshalJSON(data []byte) error {
 		}
 	}
 
-	if j.ValueProgram != "" {
-		o.ValueProgram, err = enocel.Parse(j.ValueProgram)
+	if j.ValueExpression != "" {
+		o.ValueProgram, err = enocel.Parse(j.ValueExpression)
 		if err != nil {
-			return fmt.Errorf("parsing valueProgram: %w", err)
+			return fmt.Errorf("parsing valueExpression: %w", err)
 		}
 	}
 
@@ -115,14 +115,20 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 		val, err := enocel.Eval(ctx, o.ValueProgram, comp, current, o.Path)
 		if err != nil {
 			logger.Error(err, "failed to evaluate value expression", "path", o.Path.String())
-			return StatusInvalidValueProgram, nil
+			return StatusInvalidValueExpression, err
 		}
 		resolvedValue = val.Value()
-		if resolvedValue == nil || resolvedValue == structpb.NullValue_NULL_VALUE {
+		
+		if resolvedValue == structpb.NullValue_NULL_VALUE {
+			logger.Info("value expression evaluated to null (explicit unset)", "path", o.Path.String())
+			return StatusActive, nil
+		}
+
+		if resolvedValue == nil {
 			logger.Info("CEL value expression evaluated to null, skipping mutation", "path", o.Path.String())
 			return StatusInactive, nil
 		}
-		logger.Info("override using valueProgram (resolved CEL value expression)", "path", o.Path.String())
+		logger.Info("override using valueExpression (resolved CEL value expression)", "path", o.Path.String())
 	} else {
 		logger.Info("override using static default value", "path", o.Path.String())
 	}

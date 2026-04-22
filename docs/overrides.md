@@ -49,7 +49,7 @@ Supported fields:
 
 ## Dynamic Values with CEL
 
-Use `valueProgram` instead of `value` to dynamically resolve the override value from the resource's current state using a CEL expression:
+Use `valueExpression` instead of `value` to dynamically resolve the override value from the resource's current state using a CEL expression:
 
 ```yaml
 annotations:
@@ -57,7 +57,7 @@ annotations:
     [
       {
         "path": "self.spec.resourcePolicy.containerPolicies[0].maxAllowed.memory",
-        "valueProgram": "self.spec.resourcePolicy.containerPolicies[0].maxAllowed.memory",
+        "valueExpression": "self.spec.resourcePolicy.containerPolicies[0].maxAllowed.memory",
         "condition": "has(self.spec.resourcePolicy.containerPolicies[0].maxAllowed.memory)"
       }
     ]
@@ -65,10 +65,10 @@ annotations:
 
 This reads the current value of `maxAllowed.memory` from the live resource and preserves it, allowing customer overrides to persist across reconciliation cycles.
 
-- `valueProgram` is evaluated against the **current** (actual) resource state, same as `condition`
+- `valueExpression` is evaluated against the **current** (actual) resource state, same as `condition`
 - If the current resource doesn't exist yet, the override is skipped
-- You can use both `condition` and `valueProgram` together — the condition is checked first
-- `value` and `valueProgram` are mutually exclusive; if both are set, `valueProgram` takes precedence
+- You can use both `condition` and `valueExpression` together — the condition is checked first
+- `value` and `valueExpression` are mutually exclusive; if both are set, `valueExpression` takes precedence
 
 ## Overriding Annotations
 

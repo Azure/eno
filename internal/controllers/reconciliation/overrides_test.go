@@ -1075,9 +1075,9 @@ func TestMigratingFieldManagersFieldRemoval(t *testing.T) {
 	assert.False(t, hasLegacy, "legacy-tool should no longer own any fields")
 }
 
-// TestOverrideValueProgram proves that valueProgram can read a field from the current
+// TestOverrideValueExpression proves that valueExpression can read a field from the current
 // (live) resource and use it as the override value, gated by an annotation-based condition.
-func TestOverrideValueProgram(t *testing.T) {
+func TestOverrideValueExpression(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
@@ -1096,7 +1096,7 @@ func TestOverrideValueProgram(t *testing.T) {
 						"eno.azure.io/reconcile-interval": "10ms",
 						"eno.azure.io/overrides": `[{
 							"path": "self.data.foo",
-							"valueProgram": "self.data.foo",
+							"valueExpression": "self.data.foo",
 							"condition": "'allow-override-foo' in self.metadata.annotations && self.metadata.annotations['allow-override-foo'] == 'true'"
 						}]`,
 					},
@@ -1139,7 +1139,7 @@ func TestOverrideValueProgram(t *testing.T) {
 
 	// The customer's value should be preserved because:
 	// 1. condition evaluates to true (annotation is set)
-	// 2. valueProgram reads "self.data.foo" from current (live) resource = "customer-value"
+	// 2. valueExpression reads "self.data.foo" from current (live) resource = "customer-value"
 	// 3. That value is applied to the mutated resource, so reconciliation won't overwrite it
 	time.Sleep(100 * time.Millisecond)
 	testutil.Eventually(t, func() bool {
@@ -1166,7 +1166,7 @@ func TestOverrideValueProgram(t *testing.T) {
 // TestOverrideVPAMinMax covers the allow-override-min annotation with 4 cases:
 //   - Annotation OFF, no changes: defaults preserved
 //   - Annotation OFF, customer changes values: Eno reverts to defaults
-//   - Annotation ON, no changes: defaults preserved (valueProgram reads same defaults)
+//   - Annotation ON, no changes: defaults preserved (valueExpression reads same defaults)
 //   - Annotation ON, customer changes values: customer values preserved
 func TestOverrideVPAMinMax(t *testing.T) {
 	ctx := testutil.NewContext(t)
@@ -1186,10 +1186,10 @@ func TestOverrideVPAMinMax(t *testing.T) {
 					"annotations": map[string]any{
 						"eno.azure.io/reconcile-interval": "10ms",
 						"eno.azure.io/overrides": `[
-							{"path": "self.data['min-cpu']",    "valueProgram": "self.data['min-cpu']",    "condition": "has(self.metadata.annotations) && 'allow-override-min' in self.metadata.annotations && self.metadata.annotations['allow-override-min'] == 'true'"},
-							{"path": "self.data['min-memory']", "valueProgram": "self.data['min-memory']", "condition": "has(self.metadata.annotations) && 'allow-override-min' in self.metadata.annotations && self.metadata.annotations['allow-override-min'] == 'true'"},
-							{"path": "self.data['max-cpu']",    "valueProgram": "self.data['max-cpu']",    "condition": "has(self.metadata.annotations) && 'allow-override-max' in self.metadata.annotations && self.metadata.annotations['allow-override-max'] == 'true'"},
-							{"path": "self.data['max-memory']", "valueProgram": "self.data['max-memory']", "condition": "has(self.metadata.annotations) && 'allow-override-max' in self.metadata.annotations && self.metadata.annotations['allow-override-max'] == 'true'"}
+							{"path": "self.data['min-cpu']",    "valueExpression": "self.data['min-cpu']",    "condition": "has(self.metadata.annotations) && 'allow-override-min' in self.metadata.annotations && self.metadata.annotations['allow-override-min'] == 'true'"},
+							{"path": "self.data['min-memory']", "valueExpression": "self.data['min-memory']", "condition": "has(self.metadata.annotations) && 'allow-override-min' in self.metadata.annotations && self.metadata.annotations['allow-override-min'] == 'true'"},
+							{"path": "self.data['max-cpu']",    "valueExpression": "self.data['max-cpu']",    "condition": "has(self.metadata.annotations) && 'allow-override-max' in self.metadata.annotations && self.metadata.annotations['allow-override-max'] == 'true'"},
+							{"path": "self.data['max-memory']", "valueExpression": "self.data['max-memory']", "condition": "has(self.metadata.annotations) && 'allow-override-max' in self.metadata.annotations && self.metadata.annotations['allow-override-max'] == 'true'"}
 						]`,
 					},
 				},
@@ -1255,7 +1255,7 @@ func TestOverrideVPAMinMax(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// valueProgram reads self.data['min-cpu'] from live = "100m" (same as default), so no visible change
+	// valueExpression reads self.data['min-cpu'] from live = "100m" (same as default), so no visible change
 	time.Sleep(100 * time.Millisecond)
 	testutil.Eventually(t, func() bool {
 		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
@@ -1342,7 +1342,7 @@ func TestOverrideVPAUpdateMode(t *testing.T) {
 					"annotations": map[string]any{
 						"eno.azure.io/reconcile-interval": "10ms",
 						"eno.azure.io/overrides": `[
-							{"path": "self.data['update-mode']", "valueProgram": "self.data['update-mode']", "condition": "has(self.metadata.annotations) && 'allow-override-update-mode' in self.metadata.annotations && self.metadata.annotations['allow-override-update-mode'] == 'true'"}
+							{"path": "self.data['update-mode']", "valueExpression": "self.data['update-mode']", "condition": "has(self.metadata.annotations) && 'allow-override-update-mode' in self.metadata.annotations && self.metadata.annotations['allow-override-update-mode'] == 'true'"}
 						]`,
 					},
 				},

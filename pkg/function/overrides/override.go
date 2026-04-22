@@ -19,7 +19,7 @@ type Override struct {
 	Path         string `json:"path"`
 	Value        any    `json:"value"`
 	Condition    string `json:"condition"`
-	ValueExpression string `json:"valueExpression,omitempty"`
+	ValueExpression string `json:"valueExpression"`
 }
 
 func (o *Override) validate() (cel.Program, error) {
