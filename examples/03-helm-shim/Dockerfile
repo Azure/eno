@@ -1,5 +1,4 @@
 FROM mcr.microsoft.com/devcontainers/go:1.24 AS builder
-
 ENV GOTOOLCHAIN=auto
 
 WORKDIR /app

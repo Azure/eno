@@ -184,6 +184,7 @@ type InputRevisions struct {
 	Revision              *int   `json:"revision,omitempty"`
 	SynthesizerGeneration *int64 `json:"synthesizerGeneration,omitempty"`
 	CompositionGeneration *int64 `json:"compositionGeneration,omitempty"`
+	IgnoreSideEffects     *bool  `json:"ignoreSideEffects,omitempty"`
 }
 
 func NewInputRevisions(obj client.Object, refKey string) *InputRevisions {
@@ -200,9 +201,18 @@ func NewInputRevisions(obj client.Object, refKey string) *InputRevisions {
 	if rev, _ := strconv.ParseInt(obj.GetAnnotations()["eno.azure.io/composition-generation"], 10, 64); rev != 0 {
 		ir.CompositionGeneration = &rev
 	}
+	if val, err := strconv.ParseBool(obj.GetAnnotations()["eno.azure.io/ignore-side-effects"]); err == nil {
+		ir.IgnoreSideEffects = &val
+	}
 	return &ir
 }
 
+// Less reports whetehr i should be ordered before b
+// both revisiions must share the same key. We can not compare across differnt keys
+// Below is the ordering rules
+// 1. If both sides have an explicit Revision, compare by Revision
+// 2. If ResourceVersions are equal, check if IgnoreSideEffects annotation is present. If ignore side effects variant is preferred.
+// 3. If ResourceVersions aren't parseable as ints, fall back to treating i as "less" so comparison degrades gracefully.
 func (i *InputRevisions) Less(b InputRevisions) bool {
 	if i.Key != b.Key {
 		panic(fmt.Sprintf("cannot compare input revisions for different keys: %s != %s", i.Key, b.Key))
@@ -210,8 +220,12 @@ func (i *InputRevisions) Less(b InputRevisions) bool {
 	if i.Revision != nil && b.Revision != nil {
 		return *i.Revision < *b.Revision
 	}
+	// When ResourceVersions match, prefer the revision that has IgnoreSideEffects=true
+	// A nil IgnoreSideEffects is treated as false, so we only return true when i is
+	// explicitly true and b is either nil or false.
 	if i.ResourceVersion == b.ResourceVersion {
-		return false
+		return i.IgnoreSideEffects != nil && *i.IgnoreSideEffects &&
+			(b.IgnoreSideEffects == nil || !*b.IgnoreSideEffects)
 	}
 	iInt, iErr := strconv.Atoi(i.ResourceVersion)
 	bInt, bErr := strconv.Atoi(b.ResourceVersion)
