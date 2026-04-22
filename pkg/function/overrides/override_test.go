@@ -69,36 +69,36 @@ func TestOverrideValidate(t *testing.T) {
 	}
 }
 
-func TestValueProgram(t *testing.T) {
+func TestValueExpression(t *testing.T) {
 	tests := []struct {
 		name    string
 		o       overrides.Override
 		wantErr bool
 	}{
 		{
-			name: "ValidValueProgram",
+			name: "ValidValueExpression",
 			o: overrides.Override{
 				Path:         "self.metadata.name",
 				Condition:    "true",
-				ValueProgram: "self.metadata.name",
+				ValueExpression: "self.metadata.name",
 			},
 			wantErr: false,
 		},
 		{
-			name: "InvalidValueProgram",
+			name: "InvalidValueExpression",
 			o: overrides.Override{
 				Path:         "self.metadata.name",
 				Condition:    "true",
-				ValueProgram: "1 +",
+				ValueExpression: "1 +",
 			},
 			wantErr: true,
 		},
 		{
-			name: "ValueProgramWithoutValue",
+			name: "ValueExpressionWithoutValue",
 			o: overrides.Override{
 				Path:         "self.spec.foo",
 				Condition:    "has(self.spec.foo)",
-				ValueProgram: "self.spec.foo",
+				ValueExpression: "self.spec.foo",
 			},
 			wantErr: false,
 		},
@@ -127,17 +127,17 @@ func TestAnnotateOverrides_Table(t *testing.T) {
 		expectedOverrides  []overrides.Override
 	}{
 		{
-			name: "ValueProgram",
+			name: "ValueExpression",
 			overrides: []overrides.Override{{
 				Path:         "self.data.foo",
 				Condition:    "has(self.data.foo)",
-				ValueProgram: "self.data.foo",
+				ValueExpression: "self.data.foo",
 			}},
 			expectedCount: 1,
 			expectedOverrides: []overrides.Override{{
 				Path:         "self.data.foo",
 				Condition:    "has(self.data.foo)",
-				ValueProgram: "self.data.foo",
+				ValueExpression: "self.data.foo",
 			}},
 		},
 		{
@@ -216,8 +216,8 @@ func TestAnnotateOverrides_Table(t *testing.T) {
 				if got[i].Condition != expected.Condition {
 					t.Errorf("override[%d].Condition = %q, want %q", i, got[i].Condition, expected.Condition)
 				}
-				if got[i].ValueProgram != expected.ValueProgram {
-					t.Errorf("override[%d].ValueProgram = %q, want %q", i, got[i].ValueProgram, expected.ValueProgram)
+				if got[i].ValueExpression != expected.ValueExpression {
+					t.Errorf("override[%d].ValueExpression = %q, want %q", i, got[i].ValueExpression, expected.ValueExpression)
 				}
 			}
 		})

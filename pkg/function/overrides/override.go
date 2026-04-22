@@ -19,7 +19,7 @@ type Override struct {
 	Path         string `json:"path"`
 	Value        any    `json:"value"`
 	Condition    string `json:"condition"`
-	ValueProgram string `json:"valueProgram,omitempty"`
+	ValueExpression string `json:"valueExpression,omitempty"`
 }
 
 func (o *Override) validate() (cel.Program, error) {
@@ -38,8 +38,8 @@ func (o *Override) validate() (cel.Program, error) {
 		return nil, fmt.Errorf("condition is required")
 	}
 
-	if o.ValueProgram != "" && o.Value != nil {
-		return nil, fmt.Errorf("value and valueProgram are mutually exclusive for path %q", o.Path)
+	if o.ValueExpression != "" && o.Value != nil {
+		return nil, fmt.Errorf("value and valueExpression are mutually exclusive for path %q", o.Path)
 	}
 
 	// Parse the expression
@@ -61,10 +61,10 @@ func (o *Override) validate() (cel.Program, error) {
 		return nil, fmt.Errorf("failed to create program: %w", err)
 	}
 
-	if o.ValueProgram != "" {
-		_, err = intcel.Parse(o.ValueProgram)
+	if o.ValueExpression != "" {
+		_, err = intcel.Parse(o.ValueExpression)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse valueProgram: %w", err)
+			return nil, fmt.Errorf("failed to parse valueExpression: %w", err)
 		}
 	}
 
@@ -100,7 +100,7 @@ func (o *Override) Test(data map[string]interface{}) (bool, error) {
 // String is for debugging only because escaped json cel is hard to read.
 func (o *Override) String() string {
 	//not actual json becuse escaping is hard to read.
-	return fmt.Sprintf("{Path: %s,\n Value: %v,\n Condition: %s,\n ValueProgram: %s}", o.Path, o.Value, o.Condition, o.ValueProgram)
+	return fmt.Sprintf("{Path: %s,\n Value: %v,\n Condition: %s,\n ValueExpression: %s}", o.Path, o.Value, o.Condition, o.ValueExpression)
 }
 
 // AnnotateOverrides will take care of appropriatly serializng your overrides to annotations
