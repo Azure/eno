@@ -447,10 +447,10 @@ func TestOpApply(t *testing.T) {
 			}},
 		},
 		{
-			name: "CELValueProgram_ResolvesFromCurrent",
+			name: "CELValueExpression_ResolvesFromCurrent",
 			op: Op{
 				Path:         mustParsePathExpr("self.foo"),
-				ValueProgram: mustParseCEL("self.bar"),
+				ValueExpression: mustParseCEL("self.bar"),
 			},
 			current: &unstructured.Unstructured{Object: map[string]any{
 				"bar": "resolved-value",
@@ -461,21 +461,21 @@ func TestOpApply(t *testing.T) {
 			}},
 		},
 		{
-			name: "CELValueProgram_NilCurrent_Skipped",
+			name: "CELValueExpression_NilCurrent_Skipped",
 			op: Op{
 				Path:         mustParsePathExpr("self.foo"),
-				ValueProgram: mustParseCEL("self.bar"),
+				ValueExpression: mustParseCEL("self.bar"),
 			},
 			current:         nil,
 			mutated:         &unstructured.Unstructured{Object: map[string]any{}},
 			expectedMutated: &unstructured.Unstructured{Object: map[string]any{}},
 		},
 		{
-			name: "CELValueProgram_WithCondition",
+			name: "CELValueExpression_WithCondition",
 			op: Op{
 				Path:         mustParsePathExpr("self.foo"),
 				Condition:    mustParseCEL("has(self.bar)"),
-				ValueProgram: mustParseCEL("self.bar"),
+				ValueExpression: mustParseCEL("self.bar"),
 			},
 			current: &unstructured.Unstructured{Object: map[string]any{
 				"bar": "dynamic-val",
@@ -486,10 +486,10 @@ func TestOpApply(t *testing.T) {
 			}},
 		},
 		{
-			name: "CELValueProgram_NullResult_Skipped",
+			name: "CELValueExpression_NullResult_Skipped",
 			op: Op{
 				Path:         mustParsePathExpr("self.foo"),
-				ValueProgram: mustParseCEL("null"),
+				ValueExpression: mustParseCEL("null"),
 			},
 			current:         &unstructured.Unstructured{Object: map[string]any{"bar": "val"}},
 			mutated:         &unstructured.Unstructured{Object: map[string]any{}},

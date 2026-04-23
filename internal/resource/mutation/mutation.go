@@ -25,28 +25,28 @@ var (
 type Status string
 
 const (
-	StatusActive              Status = "Active"
-	StatusInactive            Status = "Inactive"
-	StatusInvalidCondition    Status = "InvalidCondition"
-	StatusMissingParent       Status = "MissingParent"
-	StatusIndexOutOfRange     Status = "IndexOutOfRange"
-	StatusPathTypeMismatch    Status = "PathTypeMismatch"
+	StatusActive                 Status = "Active"
+	StatusInactive               Status = "Inactive"
+	StatusInvalidCondition       Status = "InvalidCondition"
+	StatusMissingParent          Status = "MissingParent"
+	StatusIndexOutOfRange        Status = "IndexOutOfRange"
+	StatusPathTypeMismatch       Status = "PathTypeMismatch"
 	StatusInvalidValueExpression Status = "InvalidValueExpression"
 )
 
 // Op is an operation that conditionally assigns a value to a path within an object.
 // Designed to be sent over the wire as JSON.
 type Op struct {
-	Path         *PathExpr
-	Condition    cel.Program
-	Value        any
-	ValueProgram cel.Program
+	Path            *PathExpr
+	Condition       cel.Program
+	Value           any
+	ValueExpression cel.Program
 }
 
 type jsonOp struct {
-	Path         string `json:"path"`
-	Condition    string `json:"condition"`
-	Value        any    `json:"value"`
+	Path            string `json:"path"`
+	Condition       string `json:"condition"`
+	Value           any    `json:"value"`
 	ValueExpression string `json:"valueExpression"`
 }
 
@@ -76,7 +76,7 @@ func (o *Op) UnmarshalJSON(data []byte) error {
 	}
 
 	if j.ValueExpression != "" {
-		o.ValueProgram, err = enocel.Parse(j.ValueExpression)
+		o.ValueExpression, err = enocel.Parse(j.ValueExpression)
 		if err != nil {
 			return fmt.Errorf("parsing valueExpression: %w", err)
 		}
@@ -94,9 +94,9 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 		val, err := enocel.Eval(ctx, o.Condition, comp, current, o.Path)
 		if err != nil && current == nil {
 			if !strings.HasPrefix(err.Error(), "no such ") { // e.g. "no such property" or "no such key"
-				logger.Info("override condition is invalid", "error", err, "path", o.Path.String())
+				logger.Info("override condition is invalid", "path", o.Path.String(), "error", err)
 			} else {
-				logger.Info("condition evaluation failed on missing resource", "error", err, "path", o.Path.String())
+				logger.Info("condition evaluation failed on missing resource", "path", o.Path.String(), "error", err)
 			}
 			return StatusInvalidCondition, nil
 		}
@@ -107,18 +107,18 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 	}
 	logger.Info("applying mutation to path", "path", o.Path.String(), "valueType", fmt.Sprintf("%T", o.Value))
 	resolvedValue := o.Value
-	if o.ValueProgram != nil {
+	if o.ValueExpression != nil {
 		if current == nil {
 			logger.Info("skipping CEL value evaluation - current resource is nil", "path", o.Path.String())
 			return StatusInactive, nil
 		}
-		val, err := enocel.Eval(ctx, o.ValueProgram, comp, current, o.Path)
+		val, err := enocel.Eval(ctx, o.ValueExpression, comp, current, o.Path)
 		if err != nil {
 			logger.Error(err, "failed to evaluate value expression", "path", o.Path.String())
-			return StatusInvalidValueExpression, err
+			return StatusInvalidValueExpression, fmt.Errorf("evaluating value expression for path %s: %w", o.Path.String(), err)
 		}
 		resolvedValue = val.Value()
-		
+
 		if resolvedValue == structpb.NullValue_NULL_VALUE {
 			logger.Info("value expression evaluated to null (explicit unset)", "path", o.Path.String())
 			return StatusActive, nil
@@ -136,7 +136,7 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 
 	if err != nil {
 		logger.Error(err, "failed to apply mutation", "path", o.Path.String(), "status", status)
-		return status, err
+		return status, fmt.Errorf("applying mutation to path %s: %w", o.Path.String(), err)
 	}
 	logger.Info("successfully applied mutation", "path", o.Path.String(), "status", status)
 	return status, nil
