@@ -183,6 +183,20 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 func (c *compositionController) reconcileDeletedComposition(ctx context.Context, comp *apiv1.Composition) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
+	// In case in a partial cleanup, we need to check if we want to force remove finalizer before checking hasActiveDependents
+	if c.shouldForceRemoveFinalizer(ctx, comp) {
+		logger.Info("force removing finalizer: owning symphony is gone",
+			"compositionName", comp.Name, "compositionNamespace", comp.Namespace)
+		if controllerutil.RemoveFinalizer(comp, EnoCleanupFinalizer) {
+			if err := c.client.Update(ctx, comp); err != nil {
+				logger.Error(err, "Failed to remove finalizer")
+				return ctrl.Result{}, err
+			}
+		}
+		logger.Info("removed finalizer from composition")
+		return ctrl.Result{}, nil
+	}
+
 	// check whether the composition has any active dependants
 	blocked, blockedBy, err := c.hasActiveDependents(ctx, comp)
 	if err != nil {
@@ -227,15 +241,8 @@ func (c *compositionController) reconcileDeletedComposition(ctx context.Context,
 		}
 
 		if syn.Reconciled == nil {
-			// If this is an addon composition whose owning Symphony is already gone,
-			// force-remove the finalizer so the composition doesn't get stuck forever.
-			if c.shouldForceRemoveFinalizer(ctx, comp) {
-				logger.Info("force removing finalizer for composition because owning symphony is gone and composition is being marked force delete",
-					"compositionName", comp.Name, "compositionNamespace", comp.Namespace)
-			} else {
-				logger.Info("refusing to remove composition finalizer because it is still being reconciled")
-				return ctrl.Result{}, nil
-			}
+			logger.Info("refusing to remove composition finalizer because it is still being reconciled")
+			return ctrl.Result{}, nil
 		}
 	}
 
