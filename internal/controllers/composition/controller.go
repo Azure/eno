@@ -13,7 +13,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -50,13 +49,12 @@ func NewController(mgr ctrl.Manager, podTimeout time.Duration) error {
 		CreateFunc: func(e event.TypedCreateEvent[*apiv1.Composition]) bool { return false },
 		DeleteFunc: func(e event.TypedDeleteEvent[*apiv1.Composition]) bool { return true },
 		UpdateFunc: func(e event.TypedUpdateEvent[*apiv1.Composition]) bool {
-			// Only pass through updates where the composition is being deleted.
-			// This is the only case where newDependencyEventHandler produces
-			// reconcile requests — it notifies dependency targets so they can
-			// re-evaluate hasActiveDependents and unblock their own deletion.
-			return e.ObjectNew.DeletionTimestamp != nil
+			// We only notify dependents if their finalizer is removed, meaning actually deleted
+			prevHasFinalizer := controllerutil.ContainsFinalizer(e.ObjectOld, EnoCleanupFinalizer)
+			curHasFinalizer := controllerutil.ContainsFinalizer(e.ObjectNew, EnoCleanupFinalizer)
+			return prevHasFinalizer && !curHasFinalizer
 		},
-		GenericFunc: func(e event.TypedGenericEvent[*apiv1.Composition]) bool { return true },
+		GenericFunc: func(e event.TypedGenericEvent[*apiv1.Composition]) bool { return false },
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
@@ -68,18 +66,16 @@ func NewController(mgr ctrl.Manager, podTimeout time.Duration) error {
 
 func (c *compositionController) newDependencyEventHandler() handler.TypedEventHandler[*apiv1.Composition, reconcile.Request] {
 	fn := func(ctx context.Context, comp *apiv1.Composition) (reqs []reconcile.Request) {
-		// When a dependency changes (e.g. deleted), notify its dependencies
-		// so they can re-check hasActiveDependents during deletion ordering
-		// to avoid unnecessary noises, we only requeue when this is in a deletion call
-		if comp.DeletionTimestamp != nil {
-			for _, dep := range comp.Spec.DependsOn {
-				reqs = append(reqs, reconcile.Request{
-					NamespacedName: types.NamespacedName{
-						Name:      dep.Name,
-						Namespace: dep.Namespace,
-					},
-				})
-			}
+		// When a composition's finalizer is removed (effectively deleted),
+		// notify the compositions it depends on so they can re-check
+		// hasActiveDependents and unblock their own deletion.
+		for _, dep := range comp.Spec.DependsOn {
+			reqs = append(reqs, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      dep.Name,
+					Namespace: dep.Namespace,
+				},
+			})
 		}
 		return reqs
 	}
@@ -216,7 +212,7 @@ func (c *compositionController) reconcileDeletedComposition(ctx context.Context,
 		if _, err = c.clearDependencyStatus(ctx, comp); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{RequeueAfter: wait.Jitter(time.Second*5, 0.1)}, nil // Explicit requeue to continue deletion after clearing dependency status.
+		return ctrl.Result{}, nil
 	}
 
 	syn := comp.Status.CurrentSynthesis
