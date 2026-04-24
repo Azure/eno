@@ -448,3 +448,176 @@ func TestShouldForceRemoveFinalizer(t *testing.T) {
 		})
 	}
 }
+
+func TestHasActiveDependents(t *testing.T) {
+	const namespace = "default"
+
+	t.Run("no dependents", func(t *testing.T) {
+		comp := &apiv1.Composition{}
+		comp.Name = "parent"
+		comp.Namespace = namespace
+
+		ctx := testutil.NewContext(t)
+		cli := testutil.NewClient(t, comp)
+		c := &compositionController{client: cli}
+
+		blocked, blockedBy, err := c.hasActiveDependents(ctx, comp)
+		require.NoError(t, err)
+		assert.False(t, blocked)
+		assert.Empty(t, blockedBy)
+	})
+
+	t.Run("one active dependent", func(t *testing.T) {
+		comp := &apiv1.Composition{}
+		comp.Name = "parent"
+		comp.Namespace = namespace
+
+		dep := &apiv1.Composition{}
+		dep.Name = "child"
+		dep.Namespace = namespace
+		dep.Finalizers = []string{EnoCleanupFinalizer}
+		dep.Spec.DependsOn = []apiv1.CompositionDependency{{Name: "parent", Namespace: namespace}}
+
+		ctx := testutil.NewContext(t)
+		cli := testutil.NewClient(t, comp, dep)
+		c := &compositionController{client: cli}
+
+		blocked, blockedBy, err := c.hasActiveDependents(ctx, comp)
+		require.NoError(t, err)
+		assert.True(t, blocked)
+		require.Len(t, blockedBy, 1)
+		assert.Equal(t, "child", blockedBy[0].Name)
+		assert.Equal(t, namespace, blockedBy[0].Namespace)
+		assert.Equal(t, apiv1.WaitingOnDependentsDeletedReason, blockedBy[0].Reason)
+	})
+
+	t.Run("dependent being deleted with finalizer still blocks", func(t *testing.T) {
+		comp := &apiv1.Composition{}
+		comp.Name = "parent"
+		comp.Namespace = namespace
+
+		dep := &apiv1.Composition{}
+		dep.Name = "child"
+		dep.Namespace = namespace
+		dep.Finalizers = []string{EnoCleanupFinalizer}
+		dep.Spec.DependsOn = []apiv1.CompositionDependency{{Name: "parent", Namespace: namespace}}
+
+		ctx := testutil.NewContext(t)
+		cli := testutil.NewClient(t, comp, dep)
+		// Simulate deletion by deleting the dependent (fake client sets DeletionTimestamp when finalizers exist)
+		require.NoError(t, cli.Delete(ctx, dep))
+		c := &compositionController{client: cli}
+
+		blocked, blockedBy, err := c.hasActiveDependents(ctx, comp)
+		require.NoError(t, err)
+		assert.True(t, blocked)
+		require.Len(t, blockedBy, 1)
+		assert.Equal(t, "child", blockedBy[0].Name)
+	})
+
+	t.Run("dependent being deleted without finalizer does not block", func(t *testing.T) {
+		comp := &apiv1.Composition{}
+		comp.Name = "parent"
+		comp.Namespace = namespace
+
+		dep := &apiv1.Composition{}
+		dep.Name = "child"
+		dep.Namespace = namespace
+		// No finalizer - dependent will be fully deleted
+		dep.Spec.DependsOn = []apiv1.CompositionDependency{{Name: "parent", Namespace: namespace}}
+
+		ctx := testutil.NewContext(t)
+		cli := testutil.NewClient(t, comp, dep)
+		// Delete the dependent - without finalizers it gets removed immediately in fake client
+		require.NoError(t, cli.Delete(ctx, dep))
+		c := &compositionController{client: cli}
+
+		blocked, blockedBy, err := c.hasActiveDependents(ctx, comp)
+		require.NoError(t, err)
+		assert.False(t, blocked)
+		assert.Empty(t, blockedBy)
+	})
+
+	t.Run("multiple dependents mixed states", func(t *testing.T) {
+		comp := &apiv1.Composition{}
+		comp.Name = "parent"
+		comp.Namespace = namespace
+
+		activeDep := &apiv1.Composition{}
+		activeDep.Name = "active-child"
+		activeDep.Namespace = namespace
+		activeDep.Finalizers = []string{EnoCleanupFinalizer}
+		activeDep.Spec.DependsOn = []apiv1.CompositionDependency{{Name: "parent", Namespace: namespace}}
+
+		anotherActiveDep := &apiv1.Composition{}
+		anotherActiveDep.Name = "another-active-child"
+		anotherActiveDep.Namespace = namespace
+		anotherActiveDep.Finalizers = []string{EnoCleanupFinalizer}
+		anotherActiveDep.Spec.DependsOn = []apiv1.CompositionDependency{{Name: "parent", Namespace: namespace}}
+
+		// This dependent has no finalizer - will be fully deleted
+		deletableDep := &apiv1.Composition{}
+		deletableDep.Name = "deletable-child"
+		deletableDep.Namespace = namespace
+		deletableDep.Spec.DependsOn = []apiv1.CompositionDependency{{Name: "parent", Namespace: namespace}}
+
+		ctx := testutil.NewContext(t)
+		cli := testutil.NewClient(t, comp, activeDep, anotherActiveDep, deletableDep)
+		// Delete the one without a finalizer
+		require.NoError(t, cli.Delete(ctx, deletableDep))
+		c := &compositionController{client: cli}
+
+		blocked, blockedBy, err := c.hasActiveDependents(ctx, comp)
+		require.NoError(t, err)
+		assert.True(t, blocked)
+		assert.Len(t, blockedBy, 2)
+
+		names := []string{blockedBy[0].Name, blockedBy[1].Name}
+		assert.Contains(t, names, "active-child")
+		assert.Contains(t, names, "another-active-child")
+	})
+
+	t.Run("unrelated composition does not count as dependent", func(t *testing.T) {
+		comp := &apiv1.Composition{}
+		comp.Name = "parent"
+		comp.Namespace = namespace
+
+		unrelated := &apiv1.Composition{}
+		unrelated.Name = "unrelated"
+		unrelated.Namespace = namespace
+		unrelated.Finalizers = []string{EnoCleanupFinalizer}
+		// Depends on a different composition
+		unrelated.Spec.DependsOn = []apiv1.CompositionDependency{{Name: "other-parent", Namespace: namespace}}
+
+		ctx := testutil.NewContext(t)
+		cli := testutil.NewClient(t, comp, unrelated)
+		c := &compositionController{client: cli}
+
+		blocked, blockedBy, err := c.hasActiveDependents(ctx, comp)
+		require.NoError(t, err)
+		assert.False(t, blocked)
+		assert.Empty(t, blockedBy)
+	})
+
+	t.Run("dependent without finalizer and not deleted is active", func(t *testing.T) {
+		comp := &apiv1.Composition{}
+		comp.Name = "parent"
+		comp.Namespace = namespace
+
+		dep := &apiv1.Composition{}
+		dep.Name = "child-no-finalizer"
+		dep.Namespace = namespace
+		// No finalizer, not deleted - still counts as active
+		dep.Spec.DependsOn = []apiv1.CompositionDependency{{Name: "parent", Namespace: namespace}}
+
+		ctx := testutil.NewContext(t)
+		cli := testutil.NewClient(t, comp, dep)
+		c := &compositionController{client: cli}
+
+		blocked, blockedBy, err := c.hasActiveDependents(ctx, comp)
+		require.NoError(t, err)
+		assert.True(t, blocked)
+		require.Len(t, blockedBy, 1)
+		assert.Equal(t, "child-no-finalizer", blockedBy[0].Name)
+	})
+}

@@ -754,9 +754,8 @@ func TestDeletionOrderLiveness(t *testing.T) {
 						"name":      "fail-open",
 						"namespace": "default",
 						"annotations": map[string]any{
-							"eno.azure.io/deletion-group":    "678",
-							"eno.azure.io/fail-open":         "true",
-							"eno.azure.io/deletion-strategy": "Foreground",
+							"eno.azure.io/deletion-group": "678",
+							"eno.azure.io/fail-open":      "true",
 						},
 					},
 				},

@@ -18,6 +18,7 @@ const (
 	WaitingOnDependenciesReason       string = "WaitingOnDependencies"
 	WaitingOnDependencyNotFoundReason string = "DependencyNotFound"
 	WaitingOnDependencyNotReadyReason string = "DependencyNotReady"
+	WaitingOnDependentsDeletedReason  string = "DependentNotDeleted"
 )
 
 // +kubebuilder:object:root=true
