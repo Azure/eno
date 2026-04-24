@@ -225,8 +225,23 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		}
 	}
 
-	// Sync forward (create/update)
-	for _, variation := range symph.Spec.Variations {
+	// NEW: Build map of synthesizer name -> existing composition for dependency resolution
+	compBySynth := make(map[string]*apiv1.Composition, len(comps.Items))
+	for i := range comps.Items {
+		compBySynth[comps.Items[i].Spec.Synthesizer.Name] = &comps.Items[i]
+	}
+
+	// Sort variations so dependencies come first; detect cycles as a byproduct
+	sortedVariations, cyclicSynths := topoSortVariations(symph.Spec.Variations)
+	for synthName := range cyclicSynths {
+		logger.Error(fmt.Errorf("circular dependency detected in variation"),
+			"skipping variation",
+			"synthesizerName", synthName)
+	}
+
+	// Sync forward (create/update) — process ALL variations in dependency order
+	for _, variation := range sortedVariations {
+
 		comp := &apiv1.Composition{}
 		comp.Namespace = symph.Namespace
 		comp.GenerateName = variation.Synthesizer.Name + "-"
@@ -235,6 +250,42 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		comp.Spec.SynthesisEnv = getSynthesisEnv(symph, &variation)
 		comp.Labels = variation.Labels
 		comp.Annotations = variation.Annotations
+
+		// Resolve variation dependencies to composition dependencies. If the dependent composition does not exist yet
+		// DO NOT CREATE the current composition as it might lead to race condition and ordering not being respected
+		var validDeps []apiv1.VariationDependency
+		for _, dep := range variation.DependsOn {
+			if dep.Synthesizer == "" {
+				logger.Error(fmt.Errorf("No Variation Dependency Synthesizer"),
+					"Error: variation dependency has no synthesizer set, dependency will be ignored",
+					"synthesizerName", variation.Synthesizer.Name)
+				continue
+			}
+			validDeps = append(validDeps, dep)
+		}
+		deps, allresolved := resolveVariationDeps(validDeps, compBySynth)
+
+		comp.Spec.DependsOn = deps
+		idx := slices.IndexFunc(comps.Items, func(existing apiv1.Composition) bool {
+			return existing.Spec.Synthesizer.Name == variation.Synthesizer.Name
+		})
+
+		// Safety fallback: with topological sort this should not trigger since
+		// dependencies are processed first, but guards against edge cases like
+		// a failed Create earlier in the loop.
+		if !allresolved {
+			if idx == -1 {
+				logger.Error(fmt.Errorf("not all synthesizer-based dependencies resolved yet"),
+					"skipping composition creation",
+					"synthesizerName", variation.Synthesizer.Name)
+			} else {
+				logger.Error(fmt.Errorf("not all synthesizer-based dependencies resolved yet"),
+					"skipping composition update",
+					"synthesizerName", variation.Synthesizer.Name, "compositionName", comps.Items[idx].Name)
+			}
+			continue
+		}
+
 		err := controllerutil.SetControllerReference(symph, comp, c.client.Scheme())
 		if err != nil {
 			logger.Error(err, "failed to set controller reference", "synthesizerName", variation.Synthesizer.Name)
@@ -243,11 +294,13 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		logger := logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace,
 			"operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 
-		// Compose missing variations
-		idx := slices.IndexFunc(comps.Items, func(existing apiv1.Composition) bool {
-			return existing.Spec.Synthesizer.Name == variation.Synthesizer.Name
-		})
 		if idx == -1 {
+			// Assumption to ensure idx == -1 works correctly.
+			// noCacheClient.List returns all compositions in the namespace, which under the below assumptions is correct.
+			// Need to revisit if any of the below assumptions change.
+			// 1. One symphony per namespace
+			// 2. No standalone compositions in the namespace
+			// 3. No cross-symphony dependency references
 			err := c.noCacheClient.List(ctx, comps, client.InNamespace(symph.Namespace))
 			if err != nil {
 				logger.Error(err, "failed to list compositions without cache", "synthesizerName", variation.Synthesizer.Name)
@@ -272,7 +325,10 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 				return false, fmt.Errorf("creating composition: %w", err)
 			}
 			logger.Info("created composition for symphony", "compositionName", comp.Name, "synthesizerName", variation.Synthesizer.Name)
-			return true, nil
+			// Add to compBySynth so later iterations can resolve deps on this composition
+			compBySynth[variation.Synthesizer.Name] = comp
+			modified = true
+			continue
 		}
 
 		// Diff and update if needed
@@ -288,11 +344,11 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 			return false, fmt.Errorf("updating existing composition: %w", err)
 		}
 		logger.Info("updated composition because its variation changed")
-		return true, nil
+		modified = true
 	}
 
 	logger.Info("reconcile forward complete")
-	return false, nil
+	return modified, nil
 }
 
 func (c *symphonyController) syncStatus(ctx context.Context, symph *apiv1.Symphony, comps *apiv1.CompositionList) error {
@@ -461,4 +517,26 @@ func pruneAnnotations(variation *apiv1.Variation, existing *apiv1.Composition) b
 		}
 	}
 	return changed
+}
+
+func resolveVariationDeps(varDeps []apiv1.VariationDependency, compBySynth map[string]*apiv1.Composition) ([]apiv1.CompositionDependency, bool) {
+	if len(varDeps) == 0 {
+		return nil, true
+	}
+
+	allResolved := true
+	var resolved []apiv1.CompositionDependency
+	for _, dep := range varDeps {
+		target, ok := compBySynth[dep.Synthesizer]
+		if !ok {
+			allResolved = false
+			continue // composition does not exist yet - will resolve on next reconcile
+		}
+		resolved = append(resolved, apiv1.CompositionDependency{
+			Name:      target.Name,
+			Namespace: target.Namespace,
+		})
+
+	}
+	return resolved, allResolved
 }

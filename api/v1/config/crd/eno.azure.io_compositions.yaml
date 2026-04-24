@@ -87,6 +87,23 @@ spec:
                   - resource
                   type: object
                 type: array
+              dependsOn:
+                description: |-
+                  Declare dependencies on other compositions by name and namespace. A composition can have at most 50 dependencies
+                  Compositions will not be scheduled for synthesis until all required
+                  dependencies have CurrentSynthesis.Ready != nil
+                  Deletion is blocked until all non-optional dependents are fully removed.
+                items:
+                  properties:
+                    name:
+                      description: Name of the dependency composition
+                      type: string
+                    namespace:
+                      description: Namespace of the dependency composition
+                      type: string
+                  type: object
+                maxItems: 50
+                type: array
               synthesisEnv:
                 description: |-
                   SynthesisEnv
@@ -107,8 +124,6 @@ spec:
                 description: Compositions are synthesized by a Synthesizer, referenced
                   by name.
                 properties:
-                  name:
-                    type: string
                   labelSelector:
                     description: |-
                       A label selector is a label query over a set of resources. The result of matchLabels and
@@ -158,6 +173,8 @@ spec:
                         type: object
                     type: object
                     x-kubernetes-map-type: atomic
+                  name:
+                    type: string
                 type: object
                 x-kubernetes-validations:
                 - message: at least one of name or labelSelector must be set
@@ -198,6 +215,8 @@ spec:
                         compositionGeneration:
                           format: int64
                           type: integer
+                        ignoreSideEffects:
+                          type: boolean
                         key:
                           type: string
                         resourceVersion:
@@ -267,6 +286,32 @@ spec:
                       Used internally for strict ordering semantics.
                     type: string
                 type: object
+              dependencyStatus:
+                description: Set when composition is blocked by dependency constraints.
+                  Cleared when unblock
+                properties:
+                  blocked:
+                    description: Blocked is true when the composition cannot proceed
+                      due to dependencies/dependents
+                    type: boolean
+                  blockedBy:
+                    description: 'BlockedBy: References to the compositions causing
+                      the block'
+                    items:
+                      properties:
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                        reason:
+                          type: string
+                      type: object
+                    type: array
+                  reason:
+                    description: Reason "WaitingOnDependencies", "WaitingOnDependents"(Deletion),
+                      "CircularDependencies"
+                    type: string
+                type: object
               inFlightSynthesis:
                 description: |-
                   A synthesis is the result of synthesizing a composition.
@@ -300,6 +345,8 @@ spec:
                         compositionGeneration:
                           format: int64
                           type: integer
+                        ignoreSideEffects:
+                          type: boolean
                         key:
                           type: string
                         resourceVersion:
@@ -375,6 +422,8 @@ spec:
                     compositionGeneration:
                       format: int64
                       type: integer
+                    ignoreSideEffects:
+                      type: boolean
                     key:
                       type: string
                     resourceVersion:
@@ -419,6 +468,8 @@ spec:
                         compositionGeneration:
                           format: int64
                           type: integer
+                        ignoreSideEffects:
+                          type: boolean
                         key:
                           type: string
                         resourceVersion:

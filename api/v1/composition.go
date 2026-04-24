@@ -9,10 +9,16 @@ import (
 )
 
 const (
-	enoAzureOperationIDKey         = "eno.azure.io/operationID"
-	enoAzureOperationOrigin        = "eno.azure.io/operationOrigin"
-	OperationIdKey          string = "operationID"
-	OperationOrigionKey     string = "operationOrigin"
+	enoAzureOperationIDKey                   = "eno.azure.io/operationID"
+	enoAzureOperationOrigin                  = "eno.azure.io/operationOrigin"
+	OperationIdKey                    string = "operationID"
+	OperationOrigionKey               string = "operationOrigin"
+	CircularDependencyReason          string = "CircularDependency"
+	WaitingOnDependentsReason         string = "WaitingOnDependents"
+	WaitingOnDependenciesReason       string = "WaitingOnDependencies"
+	WaitingOnDependencyNotFoundReason string = "DependencyNotFound"
+	WaitingOnDependencyNotReadyReason string = "DependencyNotReady"
+	WaitingOnDependentsDeletedReason  string = "DependentNotDeleted"
 )
 
 // +kubebuilder:object:root=true
@@ -56,6 +62,21 @@ type CompositionSpec struct {
 	// A set of environment variables that will be made available inside the synthesis Pod.
 	// +kubebuilder:validation:MaxItems:=500
 	SynthesisEnv []EnvVar `json:"synthesisEnv,omitempty"`
+
+	// Declare dependencies on other compositions by name and namespace. A composition can have at most 50 dependencies
+	// Compositions will not be scheduled for synthesis until all required
+	// dependencies have CurrentSynthesis.Ready != nil
+	// Deletion is blocked until all non-optional dependents are fully removed.
+	// +kubebuilder:validation:MaxItems:=50
+	DependsOn []CompositionDependency `json:"dependsOn,omitempty"`
+}
+
+type CompositionDependency struct {
+	// Name of the dependency composition
+	Name string `json:"name,omitempty"`
+
+	//Namespace of the dependency composition
+	Namespace string `json:"namespace,omitempty"`
 }
 
 type CompositionStatus struct {
@@ -64,6 +85,27 @@ type CompositionStatus struct {
 	CurrentSynthesis  *Synthesis        `json:"currentSynthesis,omitempty"`
 	PreviousSynthesis *Synthesis        `json:"previousSynthesis,omitempty"`
 	InputRevisions    []InputRevisions  `json:"inputRevisions,omitempty"`
+
+	// Set when composition is blocked by dependency constraints. Cleared when unblock
+	DependencyStatus *DependencyStatus `json:"dependencyStatus,omitempty"`
+}
+
+// DependencyStatus holds the information regarding the composition's dependencies.
+type DependencyStatus struct {
+	// Blocked is true when the composition cannot proceed due to dependencies/dependents
+	Blocked bool `json:"blocked,omitempty"`
+
+	// Reason "WaitingOnDependencies", "WaitingOnDependents"(Deletion), "CircularDependencies"
+	Reason string `json:"reason,omitempty"`
+
+	//BlockedBy: References to the compositions causing the block
+	BlockedBy []BlockedByRef `json:"blockedBy,omitempty"`
+}
+
+type BlockedByRef struct {
+	Name      string `json:"name,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	Reason    string `json:"reason,omitempty"` // "NotFound", "NotDeleted", "NotReady"
 }
 
 type SimplifiedStatus struct {
@@ -142,6 +184,7 @@ type InputRevisions struct {
 	Revision              *int   `json:"revision,omitempty"`
 	SynthesizerGeneration *int64 `json:"synthesizerGeneration,omitempty"`
 	CompositionGeneration *int64 `json:"compositionGeneration,omitempty"`
+	IgnoreSideEffects     *bool  `json:"ignoreSideEffects,omitempty"`
 }
 
 func NewInputRevisions(obj client.Object, refKey string) *InputRevisions {
@@ -158,9 +201,18 @@ func NewInputRevisions(obj client.Object, refKey string) *InputRevisions {
 	if rev, _ := strconv.ParseInt(obj.GetAnnotations()["eno.azure.io/composition-generation"], 10, 64); rev != 0 {
 		ir.CompositionGeneration = &rev
 	}
+	if val, err := strconv.ParseBool(obj.GetAnnotations()["eno.azure.io/ignore-side-effects"]); err == nil {
+		ir.IgnoreSideEffects = &val
+	}
 	return &ir
 }
 
+// Less reports whetehr i should be ordered before b
+// both revisiions must share the same key. We can not compare across differnt keys
+// Below is the ordering rules
+// 1. If both sides have an explicit Revision, compare by Revision
+// 2. If ResourceVersions are equal, check if IgnoreSideEffects annotation is present. If ignore side effects variant is preferred.
+// 3. If ResourceVersions aren't parseable as ints, fall back to treating i as "less" so comparison degrades gracefully.
 func (i *InputRevisions) Less(b InputRevisions) bool {
 	if i.Key != b.Key {
 		panic(fmt.Sprintf("cannot compare input revisions for different keys: %s != %s", i.Key, b.Key))
@@ -168,8 +220,12 @@ func (i *InputRevisions) Less(b InputRevisions) bool {
 	if i.Revision != nil && b.Revision != nil {
 		return *i.Revision < *b.Revision
 	}
+	// When ResourceVersions match, prefer the revision that has IgnoreSideEffects=true
+	// A nil IgnoreSideEffects is treated as false, so we only return true when i is
+	// explicitly true and b is either nil or false.
 	if i.ResourceVersion == b.ResourceVersion {
-		return false
+		return i.IgnoreSideEffects != nil && *i.IgnoreSideEffects &&
+			(b.IgnoreSideEffects == nil || !*b.IgnoreSideEffects)
 	}
 	iInt, iErr := strconv.Atoi(i.ResourceVersion)
 	bInt, bErr := strconv.Atoi(b.ResourceVersion)

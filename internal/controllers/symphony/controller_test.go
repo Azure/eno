@@ -6,6 +6,8 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/controllers/composition"
+	"github.com/Azure/eno/internal/controllers/scheduling"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -832,5 +834,254 @@ func TestPruneAnnotationsOrdering(t *testing.T) {
 			t.Fatalf("annotation should never be set on both compositions!")
 		}
 		return setOn1
+	})
+}
+
+func TestResolveVariationDeps(t *testing.T) {
+	compA := &apiv1.Composition{}
+	compA.Name = "comp-a"
+	compA.Namespace = "default"
+
+	compB := &apiv1.Composition{}
+	compB.Name = "comp-b"
+	compB.Namespace = "ns-other"
+
+	compBySynth := map[string]*apiv1.Composition{
+		"synth-a": compA,
+		"synth-b": compB,
+	}
+
+	tests := []struct {
+		name            string
+		varDeps         []apiv1.VariationDependency
+		compBySynth     map[string]*apiv1.Composition
+		expectedDeps    []apiv1.CompositionDependency
+		expectedAllResv bool
+	}{
+		{
+			name:            "empty deps",
+			varDeps:         nil,
+			compBySynth:     compBySynth,
+			expectedDeps:    nil,
+			expectedAllResv: true,
+		},
+		{
+			name: "synthesizer resolved",
+			varDeps: []apiv1.VariationDependency{
+				{Synthesizer: "synth-a"},
+			},
+			compBySynth: compBySynth,
+			expectedDeps: []apiv1.CompositionDependency{
+				{Name: "comp-a", Namespace: "default"},
+			},
+			expectedAllResv: true,
+		},
+		{
+			name: "synthesizer unresolved",
+			varDeps: []apiv1.VariationDependency{
+				{Synthesizer: "synth-missing"},
+			},
+			compBySynth:     compBySynth,
+			expectedDeps:    nil,
+			expectedAllResv: false,
+		},
+		{
+			name: "unresolved synth blocks",
+			varDeps: []apiv1.VariationDependency{
+				{Synthesizer: "synth-missing"},
+			},
+			compBySynth:     compBySynth,
+			expectedDeps:    nil,
+			expectedAllResv: false,
+		},
+		{
+			name: "dep with empty synthesizer is unresolved",
+			varDeps: []apiv1.VariationDependency{
+				{},
+			},
+			compBySynth:     compBySynth,
+			expectedDeps:    nil,
+			expectedAllResv: false,
+		},
+		{
+			name: "partial synth resolution",
+			varDeps: []apiv1.VariationDependency{
+				{Synthesizer: "synth-a"},
+				{Synthesizer: "synth-missing"},
+				{Synthesizer: "synth-b"},
+			},
+			compBySynth: compBySynth,
+			expectedDeps: []apiv1.CompositionDependency{
+				{Name: "comp-a", Namespace: "default"},
+				{Name: "comp-b", Namespace: "ns-other"},
+			},
+			expectedAllResv: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, allResolved := resolveVariationDeps(tc.varDeps, tc.compBySynth)
+			assert.Equal(t, tc.expectedAllResv, allResolved)
+			assert.Equal(t, tc.expectedDeps, deps)
+		})
+	}
+}
+
+// TestSymphonyNoDependencyVariationsReconcileNormally proves that a symphony
+// whose variations have no dependsOn creates compositions that get synthesized
+// without any ordering constraints.
+func TestSymphonyNoDependencyVariationsReconcileNormally(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	cli := mgr.GetClient()
+
+	require.NoError(t, NewController(mgr.Manager))
+	require.NoError(t, scheduling.NewController(mgr.Manager, 100, 2*time.Second, 0))
+	require.NoError(t, composition.NewController(mgr.Manager, time.Minute))
+	mgr.Start(t)
+
+	// Create synthesizers
+	synthA := &apiv1.Synthesizer{}
+	synthA.Name = "synth-a"
+	synthA.Namespace = "default"
+	require.NoError(t, cli.Create(ctx, synthA))
+
+	synthB := &apiv1.Synthesizer{}
+	synthB.Name = "synth-b"
+	synthB.Namespace = "default"
+	require.NoError(t, cli.Create(ctx, synthB))
+
+	// Create symphony with NO dependsOn
+	sym := &apiv1.Symphony{}
+	sym.Name = "test-no-deps"
+	sym.Namespace = "default"
+	sym.Spec.Variations = []apiv1.Variation{
+		{Synthesizer: apiv1.SynthesizerRef{Name: "synth-a"}},
+		{Synthesizer: apiv1.SynthesizerRef{Name: "synth-b"}},
+	}
+	require.NoError(t, cli.Create(ctx, sym))
+
+	// Both compositions should be created
+	testutil.Eventually(t, func() bool {
+		comps := &apiv1.CompositionList{}
+		cli.List(ctx, comps)
+		return len(comps.Items) == 2
+	})
+
+	// Neither composition should have DependsOn
+	comps := &apiv1.CompositionList{}
+	require.NoError(t, cli.List(ctx, comps))
+	for _, comp := range comps.Items {
+		assert.Empty(t, comp.Spec.DependsOn, "composition %s should have no dependencies", comp.Name)
+	}
+
+	// Both compositions should eventually get an InFlightSynthesis (no blocking)
+	testutil.Eventually(t, func() bool {
+		comps := &apiv1.CompositionList{}
+		cli.List(ctx, comps)
+		for _, comp := range comps.Items {
+			if comp.Status.InFlightSynthesis == nil {
+				return false
+			}
+		}
+		return len(comps.Items) == 2
+	})
+}
+
+// TestSymphonyDependencyVariationsReconcileInOrder proves that when variation B
+// depends on variation A (via synthesizer reference), comp-B is not synthesized
+// until comp-A is marked as Ready.
+func TestSymphonyDependencyVariationsReconcileInOrder(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	cli := mgr.GetClient()
+
+	require.NoError(t, NewController(mgr.Manager))
+	require.NoError(t, scheduling.NewController(mgr.Manager, 100, 2*time.Second, 0))
+	require.NoError(t, composition.NewController(mgr.Manager, time.Minute))
+	mgr.Start(t)
+
+	// Create synthesizers
+	synthA := &apiv1.Synthesizer{}
+	synthA.Name = "synth-a"
+	synthA.Namespace = "default"
+	require.NoError(t, cli.Create(ctx, synthA))
+
+	synthB := &apiv1.Synthesizer{}
+	synthB.Name = "synth-b"
+	synthB.Namespace = "default"
+	require.NoError(t, cli.Create(ctx, synthB))
+
+	// Create symphony: variation B depends on variation A
+	sym := &apiv1.Symphony{}
+	sym.Name = "test-dep-order"
+	sym.Namespace = "default"
+	sym.Spec.Variations = []apiv1.Variation{
+		{Synthesizer: apiv1.SynthesizerRef{Name: "synth-a"}},
+		{
+			Synthesizer: apiv1.SynthesizerRef{Name: "synth-b"},
+			DependsOn: []apiv1.VariationDependency{
+				{Synthesizer: "synth-a"},
+			},
+		},
+	}
+	require.NoError(t, cli.Create(ctx, sym))
+
+	// Wait for both compositions to be created
+	testutil.Eventually(t, func() bool {
+		comps := &apiv1.CompositionList{}
+		cli.List(ctx, comps)
+		return len(comps.Items) == 2
+	})
+
+	// Verify comp-b has DependsOn pointing to comp-a
+	var compA, compB *apiv1.Composition
+	comps := &apiv1.CompositionList{}
+	require.NoError(t, cli.List(ctx, comps))
+	for i := range comps.Items {
+		switch comps.Items[i].Spec.Synthesizer.Name {
+		case "synth-a":
+			compA = &comps.Items[i]
+		case "synth-b":
+			compB = &comps.Items[i]
+		}
+	}
+	require.NotNil(t, compA)
+	require.NotNil(t, compB)
+	require.Len(t, compB.Spec.DependsOn, 1)
+	assert.Equal(t, compA.Name, compB.Spec.DependsOn[0].Name)
+	assert.Equal(t, compA.Namespace, compB.Spec.DependsOn[0].Namespace)
+
+	// comp-a should get an InFlightSynthesis (no deps)
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(compA), compA)
+		return compA.Status.InFlightSynthesis != nil
+	})
+
+	// comp-b should NOT have InFlightSynthesis yet (dependency not ready)
+	cli.Get(ctx, client.ObjectKeyFromObject(compB), compB)
+	assert.Nil(t, compB.Status.InFlightSynthesis, "comp-b should be blocked while comp-a is not ready")
+
+	// Mark comp-a synthesis as complete and Ready
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(compA), compA)
+		compA.Status.CurrentSynthesis = &apiv1.Synthesis{
+			UUID:                          compA.Status.InFlightSynthesis.UUID,
+			ObservedCompositionGeneration: compA.Generation,
+			ObservedSynthesizerGeneration: synthA.Generation,
+			Synthesized:                   ptr.To(metav1.Now()),
+			Reconciled:                    ptr.To(metav1.Now()),
+			Ready:                         ptr.To(metav1.Now()),
+		}
+		compA.Status.InFlightSynthesis = nil
+		return cli.Status().Update(ctx, compA)
+	})
+	require.NoError(t, err)
+
+	// Now comp-b should eventually get an InFlightSynthesis (dependency is ready)
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(compB), compB)
+		return compB.Status.InFlightSynthesis != nil
 	})
 }

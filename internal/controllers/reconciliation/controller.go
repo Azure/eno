@@ -149,7 +149,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 
 	logger.Info("reconcileResource")
 	snap, current, ready, modified, err := c.reconcileResource(ctx, comp, prev, resource)
-	failingOpen := c.shouldFailOpen(resource)
+	failingOpen := c.shouldFailOpen(snap, resource)
 	if failingOpen {
 		logger.Info("FailOpen - suppressing errors")
 		err = nil
@@ -165,15 +165,16 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	deleted := current == nil ||
-		(current.GetDeletionTimestamp() != nil && !snap.ForegroundDeletion) ||
-		(snap.Deleted() && (snap.Orphan || snap.Disable || failingOpen)) // orphaning should be reflected on the status.
+	deleted := markResourceAsDeleted(current, snap, failingOpen)
 
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 	return c.requeue(logger, snap, ready)
 }
 
-func (c *Controller) shouldFailOpen(resource *resource.Resource) bool {
+func (c *Controller) shouldFailOpen(snap *resource.Snapshot, resource *resource.Resource) bool {
+	if snap != nil && snap.Deleted() && snap.ForegroundDeletion {
+		return false
+	}
 	return (resource.FailOpen == nil && c.failOpen) || (resource.FailOpen != nil && *resource.FailOpen)
 }
 
@@ -532,4 +533,22 @@ func isErrNoKindMatch(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "no matches for kind")
+}
+
+func markResourceAsDeleted(current *unstructured.Unstructured, snap *resource.Snapshot, failingOpen bool) bool {
+	// Resource does not exist at all
+	if current == nil {
+		return true
+	}
+
+	// Resource has a deletion timestamp and is using background deletion
+	if current.GetDeletionTimestamp() != nil && !snap.ForegroundDeletion {
+		return true
+	}
+
+	// Orphaned or disabled resources should be reflected as deleted
+	if snap.Deleted() && (snap.Orphan || snap.Disable || failingOpen) {
+		return true
+	}
+	return false
 }

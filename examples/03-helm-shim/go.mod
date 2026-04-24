@@ -1,8 +1,8 @@
 module github.com/Azure/eno/examples/helm-shim
 
-go 1.24.0
+go 1.25.0
 
-toolchain go1.24.3
+toolchain go1.25.9
 
 replace github.com/Azure/eno/pkg/helmshim => ../../pkg/helmshim
 

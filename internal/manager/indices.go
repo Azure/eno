@@ -13,6 +13,7 @@ const (
 	IdxCompositionsBySymphony    = ".compositionsBySymphony"
 	IdxCompositionsByBinding     = ".compositionsByBinding"
 	IdxSynthesizersByRef         = ".synthesizersByRef"
+	IdxCompositionsByDependency  = ".spec.dependsOn"
 )
 
 func indexController() client.IndexerFunc {
@@ -50,6 +51,20 @@ func indexSynthRefs() client.IndexerFunc {
 		keys := []string{}
 		for _, ref := range synth.Spec.Refs {
 			keys = append(keys, path.Join(ref.Resource.Group, ref.Resource.Version, ref.Resource.Kind))
+		}
+		return keys
+	}
+}
+
+func indexCompositionsByDependency() client.IndexerFunc {
+	return func(o client.Object) []string {
+		comp, ok := o.(*apiv1.Composition)
+		if !ok {
+			return nil
+		}
+		var keys []string
+		for _, dep := range comp.Spec.DependsOn {
+			keys = append(keys, path.Join(dep.Namespace, dep.Name))
 		}
 		return keys
 	}
