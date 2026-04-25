@@ -120,14 +120,13 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 		resolvedValue = val.Value()
 
 		if resolvedValue == structpb.NullValue_NULL_VALUE {
-			logger.Info("value expression evaluated to null (explicit unset)", "path", o.Path.String())
-			return StatusActive, nil
+			resolvedValue = nil
 		}
 
 		if resolvedValue == nil {
 			logger.Info("CEL value expression evaluated to null, skipping mutation", "path", o.Path.String())
-			return StatusInactive, nil
 		}
+
 		logger.Info("override using valueExpression (resolved CEL value expression)", "path", o.Path.String())
 	} else {
 		logger.Info("override using static default value", "path", o.Path.String())
