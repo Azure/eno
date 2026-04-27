@@ -246,19 +246,20 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		if _, ok := anno[readinessGroupKey]; !ok {
 			logger.Info("User did not specify a readiness-group for managed kind, assigning default readiness group to infrastructure kind",
 				"kind", res.GVK.Kind, "defaultGroup", defaultGrp)
-			res.applyDefaultReadinessGroupOrdering(defaultGrp)
+			res.readinessGroup = defaultGrp
 		} else {
-			logger.Info("User provided default readiness group. Skip setting default infrastructure kind",
+			logger.Info("user-specified readiness group present, skipping default for managed kind",
 				"kind", res.GVK.Kind, "readinessGroup", res.readinessGroup)
 		}
 
 		if _, ok := anno[deletionGroupKey]; !ok {
 			logger.Info("User did not specify a deletion group for managed kind, assigning default deletion group to infrastructure kind",
 				"kind", res.GVK.Kind, "defaultGroup", defaultGrp)
-			res.applyDefaultDeletionGroupOrdering(-defaultGrp)
+			delGroup := -defaultGrp
+			res.deletionGroup = &delGroup
 		} else {
-			logger.Info("User provided default deletion group. Skip setting default infrastructure kind",
-				"kind", res.GVK.Kind, "deletionGroup", res.deletionGroup)
+			logger.Info("user-specified deletion group present, skipping default for managed kind",
+				"kind", res.GVK.Kind, "deletionGroup", *res.deletionGroup)
 		}
 	}
 

@@ -2,7 +2,6 @@ package e2e
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -29,10 +28,10 @@ import (
 //   - Both resources are created successfully
 //   - The Deployment becomes available (at least one ready pod)
 //   - Pods have zero restarts (no CrashLoopBackOff)
-//   - No volume mount failure events occurred
+//   - No container errors (waiting/terminated with failure)
 func TestResourceDependencyOrdering(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
 	cli := fw.NewClient(t)
@@ -66,7 +65,7 @@ func TestResourceDependencyOrdering(t *testing.T) {
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
 						Name:    "test",
-						Image:   "docker.io/busybox:latest",
+						Image:   "docker.io/busybox:1.36.1",
 						Command: []string{"sh", "-c", "cat /etc/secret-vol/token && sleep 3600"},
 						VolumeMounts: []corev1.VolumeMount{{
 							Name:      "secret-vol",
@@ -160,31 +159,26 @@ func TestResourceDependencyOrdering(t *testing.T) {
 		return nil
 	})
 
-	verifyNoMountErrors := flow.Func("verifyNoMountErrors", func(ctx context.Context) error {
+	verifyNoContainerErrors := flow.Func("verifyNoContainerErrors", func(ctx context.Context) error {
 		podList := &corev1.PodList{}
 		require.NoError(t, cli.List(ctx, podList,
 			client.InNamespace("default"),
 			client.MatchingLabels{"app": deployName}))
-
-		eventList := &corev1.EventList{}
-		require.NoError(t, cli.List(ctx, eventList, client.InNamespace("default")))
+		require.NotEmpty(t, podList.Items)
 
 		for _, pod := range podList.Items {
-			for _, event := range eventList.Items {
-				if event.InvolvedObject.Name == pod.Name &&
-					event.InvolvedObject.Kind == "Pod" {
-					assert.False(t,
-						strings.Contains(event.Message, "MountVolume.SetUp failed"),
-						"pod %s should not have volume mount failures: %s",
-						pod.Name, event.Message)
-					assert.False(t,
-						strings.Contains(event.Reason, "FailedMount"),
-						"pod %s should not have FailedMount event: %s",
-						pod.Name, event.Message)
+			for _, cs := range pod.Status.ContainerStatuses {
+				if cs.State.Waiting != nil {
+					t.Errorf("pod %s container %s is waiting: %s - %s",
+						pod.Name, cs.Name, cs.State.Waiting.Reason, cs.State.Waiting.Message)
+				}
+				if cs.State.Terminated != nil && cs.State.Terminated.ExitCode != 0 {
+					t.Errorf("pod %s container %s terminated with exit code %d: %s",
+						pod.Name, cs.Name, cs.State.Terminated.ExitCode, cs.State.Terminated.Reason)
 				}
 			}
 		}
-		t.Log("no volume mount errors found in pod events")
+		t.Log("no container errors found")
 		return nil
 	})
 
@@ -218,11 +212,11 @@ func TestResourceDependencyOrdering(t *testing.T) {
 
 		// Pod-level checks after deployment is verified ready
 		flow.Step(verifyZeroRestarts).DependsOn(verifyDeploymentReady),
-		flow.Step(verifyNoMountErrors).DependsOn(verifyDeploymentReady),
+		flow.Step(verifyNoContainerErrors).DependsOn(verifyDeploymentReady),
 
 		// Cleanup after all verifications pass
 		flow.Step(deleteComposition).DependsOn(
-			verifySecret, verifyZeroRestarts, verifyNoMountErrors),
+			verifySecret, verifyZeroRestarts, verifyNoContainerErrors),
 		flow.Step(verifyResourcesDeleted).DependsOn(deleteComposition),
 		flow.Step(cleanupSynthesizer).DependsOn(verifyResourcesDeleted),
 	)

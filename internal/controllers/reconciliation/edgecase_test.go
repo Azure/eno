@@ -173,6 +173,9 @@ func TestLargeNamespaceDeletion(t *testing.T) {
 		output.Items = []*unstructured.Unstructured{ns}
 
 		for i := 0; i < 500; i++ {
+			// Explicit readiness/deletion groups: Namespace/Secret/ConfigMap now
+			// default into the reserved [-100,-81] range, but this test wants the
+			// legacy "everything in group 0" behavior.
 			cm := &unstructured.Unstructured{
 				Object: map[string]any{
 					"apiVersion": "v1",

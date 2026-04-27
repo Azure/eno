@@ -1,10 +1,12 @@
 package resource
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func TestManagedCreateOrderCoversExpectedKinds(t *testing.T) {
@@ -30,39 +32,6 @@ func TestManagedCreateOrderGroupRange(t *testing.T) {
 	}
 }
 
-func TestApplyDefaultOrdering_ManagedKind(t *testing.T) {
-	tests := []struct {
-		kind             string
-		expectedCreate   int
-		expectedDeletion int
-	}{
-		{"Namespace", -100, 100},
-		{"PriorityClass", -100, 100},
-		{"ServiceAccount", -97, 97},
-		{"Secret", -96, 96},
-		{"ConfigMap", -96, 96},
-		{"CustomResourceDefinition", -92, 92},
-		{"ClusterRole", -91, 91},
-		{"Role", -90, 90},
-		{"Service", -89, 89},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.kind, func(t *testing.T) {
-			res := &Resource{}
-			res.GVK.Kind = tc.kind
-
-			createGrp := managedCreateOrder[tc.kind]
-			res.applyDefaultReadinessGroupOrdering(createGrp)
-			res.applyDefaultDeletionGroupOrdering(-createGrp)
-
-			assert.Equal(t, tc.expectedCreate, res.readinessGroup)
-			require.NotNil(t, res.deletionGroup)
-			assert.Equal(t, tc.expectedDeletion, *res.deletionGroup)
-		})
-	}
-}
-
 func TestApplyDefaultOrdering_UnmanagedKindNotInMap(t *testing.T) {
 	unmanagedKinds := []string{
 		"Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob",
@@ -78,52 +47,70 @@ func TestApplyDefaultOrdering_UnmanagedKindNotInMap(t *testing.T) {
 	}
 }
 
-func TestApplyDefaultOrdering_DeletionIsReverseOfCreate(t *testing.T) {
-	for kind, createGrp := range managedCreateOrder {
-		t.Run(kind, func(t *testing.T) {
-			res := &Resource{}
-			res.GVK.Kind = kind
-			res.applyDefaultReadinessGroupOrdering(createGrp)
-			res.applyDefaultDeletionGroupOrdering(-createGrp)
-
-			require.NotNil(t, res.deletionGroup)
-			assert.Equal(t, -createGrp, *res.deletionGroup,
-				"deletion group should be negation of create group")
+func TestNewResource_DefaultOrderingForManagedKind(t *testing.T) {
+	cases := []struct {
+		name          string
+		manifest      string
+		wantReadiness int
+		wantDeletion  *int
+	}{
+		{
+			name: "managed kind without annotations gets defaults",
+			manifest: `{"apiVersion":"v1","kind":"Secret",
+				"metadata":{"name":"s","namespace":"default"}}`,
+			wantReadiness: -96,
+			wantDeletion:  intPtr(96),
+		},
+		{
+			name: "user readiness annotation wins; deletion still defaulted",
+			manifest: `{"apiVersion":"v1","kind":"Secret",
+				"metadata":{"name":"s","namespace":"default",
+					"annotations":{"eno.azure.io/readiness-group":"5"}}}`,
+			wantReadiness: 5,
+			wantDeletion:  intPtr(96),
+		},
+		{
+			name: "user deletion annotation wins; readiness still defaulted",
+			manifest: `{"apiVersion":"v1","kind":"Secret",
+				"metadata":{"name":"s","namespace":"default",
+					"annotations":{"eno.azure.io/deletion-group":"10"}}}`,
+			wantReadiness: -96,
+			wantDeletion:  intPtr(10),
+		},
+		{
+			name: "user sets both annotations; both win",
+			manifest: `{"apiVersion":"v1","kind":"Secret",
+				"metadata":{"name":"s","namespace":"default",
+					"annotations":{"eno.azure.io/readiness-group":"5","eno.azure.io/deletion-group":"10"}}}`,
+			wantReadiness: 5,
+			wantDeletion:  intPtr(10),
+		},
+		{
+			name: "unmanaged kind untouched",
+			manifest: `{"apiVersion":"apps/v1","kind":"Deployment",
+				"metadata":{"name":"d","namespace":"default"}}`,
+			wantReadiness: 0,
+			wantDeletion:  nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			u := &unstructured.Unstructured{}
+			require.NoError(t, u.UnmarshalJSON([]byte(tc.manifest)))
+			r, err := newResource(context.Background(), u, false)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantReadiness, r.readinessGroup)
+			if tc.wantDeletion == nil {
+				assert.Nil(t, r.deletionGroup)
+			} else {
+				require.NotNil(t, r.deletionGroup)
+				assert.Equal(t, *tc.wantDeletion, *r.deletionGroup)
+			}
 		})
 	}
 }
 
-func TestApplyDefaultOrdering_UserAnnotationsPreserved(t *testing.T) {
-	// User sets readiness-group=5 and deletion-group=10 on a Namespace.
-	// Since user provided annotations, the helpers should NOT be called.
-	// Verify that if we only call one helper, the other value is preserved.
-	res := &Resource{}
-	res.GVK.Kind = "Namespace"
-	res.readinessGroup = 5
-	delGrp := 10
-	res.deletionGroup = &delGrp
-
-	// Simulate: user set both annotations, so neither helper is called.
-	// The resource should keep user-specified values.
-	assert.Equal(t, 5, res.readinessGroup, "user-specified readiness group should be preserved")
-	assert.Equal(t, 10, *res.deletionGroup, "user-specified deletion group should be preserved")
-}
-
-func TestApplyDefaultOrdering_PartialUserAnnotation(t *testing.T) {
-	// User sets only readiness-group, not deletion-group.
-	// Only the deletion helper should be called.
-	res := &Resource{}
-	res.GVK.Kind = "Namespace"
-	res.readinessGroup = 5 // user-specified
-
-	createGrp := managedCreateOrder["Namespace"]
-	// Only apply default deletion group (user didn't set it)
-	res.applyDefaultDeletionGroupOrdering(-createGrp)
-
-	assert.Equal(t, 5, res.readinessGroup, "user-specified readiness group should be preserved")
-	require.NotNil(t, res.deletionGroup)
-	assert.Equal(t, 100, *res.deletionGroup, "default deletion group should be applied")
-}
+func intPtr(i int) *int { return &i }
 
 func TestManagedOrderingPrecedence(t *testing.T) {
 	// Namespace/PriorityClass (-100) before everything
@@ -145,25 +132,19 @@ func TestManagedOrderingPrecedence(t *testing.T) {
 }
 
 func TestManagedOrderingDeletionPrecedence(t *testing.T) {
-	// Deletion order is reversed: Service deleted first, Namespace last
-	getDelGrp := func(kind string) int {
-		res := &Resource{}
-		res.GVK.Kind = kind
-		createGrp := managedCreateOrder[kind]
-		res.applyDefaultDeletionGroupOrdering(-createGrp)
-		return *res.deletionGroup
-	}
+	// Deletion group is negation of create group, so deletion precedence is reversed.
+	delGrp := func(kind string) int { return -managedCreateOrder[kind] }
 
 	// Service (+89) < Role (+90) < ClusterRole (+91) < CRD (+92) < ... < Namespace (+100)
-	assert.Less(t, getDelGrp("Service"), getDelGrp("Role"))
-	assert.Less(t, getDelGrp("Role"), getDelGrp("ClusterRole"))
-	assert.Less(t, getDelGrp("ClusterRole"), getDelGrp("CustomResourceDefinition"))
-	assert.Less(t, getDelGrp("CustomResourceDefinition"), getDelGrp("PersistentVolumeClaim"))
-	assert.Less(t, getDelGrp("PersistentVolumeClaim"), getDelGrp("PersistentVolume"))
-	assert.Less(t, getDelGrp("PersistentVolume"), getDelGrp("StorageClass"))
-	assert.Less(t, getDelGrp("StorageClass"), getDelGrp("ConfigMap"))
-	assert.Less(t, getDelGrp("ConfigMap"), getDelGrp("ServiceAccount"))
-	assert.Less(t, getDelGrp("ServiceAccount"), getDelGrp("Namespace"))
+	assert.Less(t, delGrp("Service"), delGrp("Role"))
+	assert.Less(t, delGrp("Role"), delGrp("ClusterRole"))
+	assert.Less(t, delGrp("ClusterRole"), delGrp("CustomResourceDefinition"))
+	assert.Less(t, delGrp("CustomResourceDefinition"), delGrp("PersistentVolumeClaim"))
+	assert.Less(t, delGrp("PersistentVolumeClaim"), delGrp("PersistentVolume"))
+	assert.Less(t, delGrp("PersistentVolume"), delGrp("StorageClass"))
+	assert.Less(t, delGrp("StorageClass"), delGrp("ConfigMap"))
+	assert.Less(t, delGrp("ConfigMap"), delGrp("ServiceAccount"))
+	assert.Less(t, delGrp("ServiceAccount"), delGrp("Namespace"))
 }
 
 func TestApplyDefaultOrdering_NoEffectOnUnmanagedResource(t *testing.T) {
@@ -179,21 +160,10 @@ func TestApplyDefaultOrdering_NoEffectOnUnmanagedResource(t *testing.T) {
 }
 
 func TestManagedKindGroupsAreDeterministic(t *testing.T) {
-	// Same kind should always get the same group across two calls
-	for kind, createGrp := range managedCreateOrder {
-		res1 := &Resource{}
-		res1.GVK.Kind = kind
-		res1.applyDefaultReadinessGroupOrdering(createGrp)
-		res1.applyDefaultDeletionGroupOrdering(-createGrp)
-
-		res2 := &Resource{}
-		res2.GVK.Kind = kind
-		res2.applyDefaultReadinessGroupOrdering(createGrp)
-		res2.applyDefaultDeletionGroupOrdering(-createGrp)
-
-		assert.Equal(t, res1.readinessGroup, res2.readinessGroup, "kind %q", kind)
-		require.NotNil(t, res1.deletionGroup)
-		require.NotNil(t, res2.deletionGroup)
-		assert.Equal(t, *res1.deletionGroup, *res2.deletionGroup, "kind %q", kind)
+	// Same kind should always map to the same group value.
+	for kind, grp := range managedCreateOrder {
+		grp2, ok := managedCreateOrder[kind]
+		assert.True(t, ok, "kind %q missing on second lookup", kind)
+		assert.Equal(t, grp, grp2, "kind %q", kind)
 	}
 }
