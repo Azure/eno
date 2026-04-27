@@ -198,6 +198,10 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		if err != nil {
 			logger.Info("invalid readiness group - ignoring")
 		} else {
+			if rg >= -100 && rg <= -81 {
+				logger.Info("WARNING: user-supplied readiness-group is in Eno reserved range [-100, -81]",
+					"kind", res.GVK.Kind, "readinessGroup", rg)
+			}
 			res.readinessGroup = rg
 		}
 	}
@@ -213,6 +217,10 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		if err != nil {
 			logger.Info("invalid deletion group - ignoring")
 		} else {
+			if rg >= 81 && rg <= 100 {
+				logger.Info("WARNING: user-supplied deletion-group is in Eno reserved range [81, 100]",
+					"kind", res.GVK.Kind, "deletionGroup", rg)
+			}
 			res.deletionGroup = &rg
 		}
 	}
@@ -244,7 +252,7 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 	// This indicates that this is an infrastructure Kind
 	if defaultGrp, ok := managedCreateOrder[res.GVK.Kind]; ok {
 		if _, ok := anno[readinessGroupKey]; !ok {
-			logger.Info("User did not specify a readiness-group for managed kind, assigning default readiness group to infrastructure kind",
+			logger.Info("assigning default readiness group to managed kind",
 				"kind", res.GVK.Kind, "defaultGroup", defaultGrp)
 			res.readinessGroup = defaultGrp
 		} else {
@@ -253,7 +261,7 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		}
 
 		if _, ok := anno[deletionGroupKey]; !ok {
-			logger.Info("User did not specify a deletion group for managed kind, assigning default deletion group to infrastructure kind",
+			logger.Info("assigning default deletion group to managed kind",
 				"kind", res.GVK.Kind, "defaultGroup", defaultGrp)
 			delGroup := -defaultGrp
 			res.deletionGroup = &delGroup

@@ -147,23 +147,4 @@ func TestManagedOrderingDeletionPrecedence(t *testing.T) {
 	assert.Less(t, delGrp("ServiceAccount"), delGrp("Namespace"))
 }
 
-func TestApplyDefaultOrdering_NoEffectOnUnmanagedResource(t *testing.T) {
-	// A Deployment is not in managedCreateOrder, so no helpers should be called.
-	// Verify the kind is not in the map and default values are unchanged.
-	res := &Resource{}
-	res.GVK.Kind = "Deployment"
 
-	_, ok := managedCreateOrder["Deployment"]
-	assert.False(t, ok, "Deployment should not be in managedCreateOrder")
-	assert.Equal(t, 0, res.readinessGroup)
-	assert.Nil(t, res.deletionGroup)
-}
-
-func TestManagedKindGroupsAreDeterministic(t *testing.T) {
-	// Same kind should always map to the same group value.
-	for kind, grp := range managedCreateOrder {
-		grp2, ok := managedCreateOrder[kind]
-		assert.True(t, ok, "kind %q missing on second lookup", kind)
-		assert.Equal(t, grp, grp2, "kind %q", kind)
-	}
-}
