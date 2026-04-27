@@ -114,5 +114,107 @@ func TestOverrides_CELValueExpression_EndToEnd(t *testing.T) {
         flow.Step(cleanupSynth).DependsOn(verifyCMDeleted),
     )
 
-    require.NoError(t, w.Do(ctx))
+	require.NoError(t, w.Do(ctx))
+}
+
+func TestOverrides_CELValueExpression_NullUnset_EndToEnd(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	cli := fw.NewClient(t)
+
+	synthName := fw.UniqueName("override-null-synth")
+	compName := fw.UniqueName("override-null-comp")
+	cmName := fw.UniqueName("override-null-cm")
+
+	// valueExpression evaluates to null → the targeted field should be deleted
+	overrideJSON := `[{
+		"path": "self.data.foo",
+		"condition": "has(self.data.foo)",
+		"valueExpression": "null"
+	}]`
+
+	cm := &corev1.ConfigMap{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "ConfigMap",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cmName,
+			Namespace: "default",
+			Annotations: map[string]string{
+				"eno.azure.io/overrides": overrideJSON,
+			},
+		},
+		Data: map[string]string{
+			"foo": "should-be-removed",
+			"bar": "keep-me",
+		},
+	}
+
+	synth := fw.NewMinimalSynthesizer(
+		synthName,
+		fw.WithCommand(fw.ToCommand(cm)),
+	)
+
+	comp := fw.NewComposition(
+		compName,
+		"default",
+		fw.WithSynthesizerRefs(apiv1.SynthesizerRef{Name: synthName}),
+	)
+
+	compKey := types.NamespacedName{
+		Name:      compName,
+		Namespace: "default",
+	}
+
+	createSynth := fw.CreateStep(t, "createSynthesizer", cli, synth)
+	createComp := fw.CreateStep(t, "createComposition", cli, comp)
+
+	waitReady := flow.Func("waitReady", func(ctx context.Context) error {
+		fw.WaitForCompositionReady(t, ctx, cli, compKey, 3*time.Minute)
+		return nil
+	})
+
+	verifyNullUnset := flow.Func("verifyNullUnset", func(ctx context.Context) error {
+		got := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      cmName,
+				Namespace: "default",
+			},
+		}
+		fw.WaitForResourceExists(t, ctx, cli, got, 60*time.Second)
+		assert.NotContains(t, got.Data, "foo", "expected 'foo' to be removed by null valueExpression")
+		assert.Equal(t, "keep-me", got.Data["bar"], "expected 'bar' to be untouched")
+		return nil
+	})
+
+	deleteComp := fw.DeleteStep(t, "deleteComposition", cli, comp)
+
+	verifyCMDeleted := flow.Func("verifyConfigMapDeleted", func(ctx context.Context) error {
+		obj := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      cmName,
+				Namespace: "default",
+			},
+		}
+		fw.WaitForResourceDeleted(t, ctx, cli, obj, 2*time.Minute)
+		return nil
+	})
+
+	cleanupSynth := fw.CleanupStep(t, "cleanupSynthesizer", cli, synth)
+
+	w := new(flow.Workflow)
+	w.Add(
+		flow.Step(createComp).DependsOn(createSynth),
+		flow.Step(waitReady).DependsOn(createComp),
+		flow.Step(verifyNullUnset).DependsOn(waitReady),
+		flow.Step(deleteComp).DependsOn(verifyNullUnset),
+		flow.Step(verifyCMDeleted).DependsOn(deleteComp),
+		flow.Step(cleanupSynth).DependsOn(verifyCMDeleted),
+	)
+
+	require.NoError(t, w.Do(ctx))
 }
