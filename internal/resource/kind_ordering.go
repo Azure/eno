@@ -5,8 +5,8 @@ package resource
 // whose Kind matches one of these names is treated as infrastructure
 // and reconciled first, regardless of its API group.
 //
-// User-supplied readiness/deletion groups must be >= -80.
-// Values in [-100, -81] are reserved for Eno-managed infrastructure defaults.
+// User-supplied readiness/deletion groups must be >= -60.
+// Values in [-100, -60] are reserved for Eno-managed infrastructure defaults.
 // Deletion groups are the negation of the create groups.
 // Order derived from Helm's InstallOrder/UninstallOrder:
 // https://github.com/helm/helm/blob/main/pkg/release/v1/util/kind_sorter.go

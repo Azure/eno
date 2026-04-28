@@ -24,6 +24,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+const (
+	ReservedReadinessGroupLowerBound = -100
+	ReservedReadinessGroupUpperBound = -60
+)
+
 var patchGVK = schema.GroupVersionKind{
 	Group:   "eno.azure.io",
 	Version: "v1",
@@ -198,8 +203,9 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		if err != nil {
 			logger.Info("invalid readiness group - ignoring")
 		} else {
-			if rg >= -100 && rg <= -81 {
-				logger.Info("WARNING: user-supplied readiness-group is in Eno reserved range [-100, -81]",
+			if rg >= ReservedReadinessGroupLowerBound && rg <= ReservedReadinessGroupUpperBound {
+				logger.Info(fmt.Sprintf("WARNING: user-supplied readiness-group is in Eno reserved range [%d, %d]",
+					ReservedReadinessGroupLowerBound, ReservedReadinessGroupUpperBound),
 					"kind", res.GVK.Kind, "readinessGroup", rg)
 			}
 			res.readinessGroup = rg
@@ -217,8 +223,8 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		if err != nil {
 			logger.Info("invalid deletion group - ignoring")
 		} else {
-			if rg >= 81 && rg <= 100 {
-				logger.Info("WARNING: user-supplied deletion-group is in Eno reserved range [81, 100]",
+			if rg >= -ReservedReadinessGroupUpperBound && rg <= -ReservedReadinessGroupLowerBound {
+				logger.Info(fmt.Sprintf("WARNING: user-supplied deletion-group is in Eno reserved range [%d, %d]", -ReservedReadinessGroupUpperBound, -ReservedReadinessGroupLowerBound),
 					"kind", res.GVK.Kind, "deletionGroup", rg)
 			}
 			res.deletionGroup = &rg
