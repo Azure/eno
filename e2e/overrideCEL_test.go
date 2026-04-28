@@ -1,118 +1,119 @@
 package e2e
 
 import (
-    "context"
-    "testing"
-    "time"
+	"context"
+	"testing"
+	"time"
 
-    flow "github.com/Azure/go-workflow"
-    "github.com/stretchr/testify/assert"
-    "github.com/stretchr/testify/require"
+	flow "github.com/Azure/go-workflow"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
-    corev1 "k8s.io/api/core/v1"
-    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-    "k8s.io/apimachinery/pkg/types"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 
-    apiv1 "github.com/Azure/eno/api/v1"
-    fw "github.com/Azure/eno/e2e/framework"
+	apiv1 "github.com/Azure/eno/api/v1"
+	fw "github.com/Azure/eno/e2e/framework"
 )
 
 func TestOverrides_CELValueExpression_EndToEnd(t *testing.T) {
-    t.Parallel()
+	t.Parallel()
 
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-    defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
 
-    cli := fw.NewClient(t)
+	cli := fw.NewClient(t)
 
-    synthName := fw.UniqueName("override-cel-synth")
-    compName := fw.UniqueName("override-cel-comp")
-    cmName := fw.UniqueName("override-cel-cm")
+	synthName := fw.UniqueName("override-cel-synth")
+	compName := fw.UniqueName("override-cel-comp")
+	cmName := fw.UniqueName("override-cel-cm")
 
-    // ✅ Idempotent override — always produces the same value
-    overrideJSON := `[{
+	// ✅ Idempotent override — always produces the same value
+	overrideJSON := `[{
         "path": "self.data.foo",
         "condition": "has(self.data.foo)",
         "valueExpression": "'cel-override-value'"
     }]`
 
-    cm := &corev1.ConfigMap{
-        TypeMeta: metav1.TypeMeta{
-            APIVersion: "v1",
-            Kind:       "ConfigMap",
-        },
-        ObjectMeta: metav1.ObjectMeta{
-            Name:      cmName,
-            Namespace: "default",
-            Annotations: map[string]string{
-                "eno.azure.io/overrides": overrideJSON,
-            },
-        },
-        Data: map[string]string{
-            "foo": "original",
-        },
-    }
+	cm := &corev1.ConfigMap{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "ConfigMap",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cmName,
+			Namespace: "default",
+			Annotations: map[string]string{
+				"eno.azure.io/overrides": overrideJSON,
+			},
+		},
+		Data: map[string]string{
+			"foo": "original",
+		},
+	}
 
-    synth := fw.NewMinimalSynthesizer(
-        synthName,
-        fw.WithCommand(fw.ToCommand(cm)),
-    )
+	synth := fw.NewMinimalSynthesizer(
+		synthName,
+		fw.WithCommand(fw.ToCommand(cm)),
+	)
 
-    comp := fw.NewComposition(
-        compName,
-        "default",
-        fw.WithSynthesizerRefs(apiv1.SynthesizerRef{Name: synthName}),
-    )
+	comp := fw.NewComposition(
+		compName,
+		"default",
+		fw.WithSynthesizerRefs(apiv1.SynthesizerRef{Name: synthName}),
+	)
 
-    compKey := types.NamespacedName{
-        Name:      compName,
-        Namespace: "default",
-    }
+	compKey := types.NamespacedName{
+		Name:      compName,
+		Namespace: "default",
+	}
 
-    createSynth := fw.CreateStep(t, "createSynthesizer", cli, synth)
-    createComp := fw.CreateStep(t, "createComposition", cli, comp)
+	createSynth := fw.CreateStep(t, "createSynthesizer", cli, synth)
+	createComp := fw.CreateStep(t, "createComposition", cli, comp)
 
-    waitReady := flow.Func("waitReady", func(ctx context.Context) error {
-        fw.WaitForCompositionReady(t, ctx, cli, compKey, 3*time.Minute)
-        return nil
-    })
+	waitReady := flow.Func("waitReady", func(ctx context.Context) error {
+		fw.WaitForCompositionReady(t, ctx, cli, compKey, 3*time.Minute)
+		return nil
+	})
 
-    verifyOverrideApplied := flow.Func("verifyOverrideApplied", func(ctx context.Context) error {
-        got := &corev1.ConfigMap{
-            ObjectMeta: metav1.ObjectMeta{
-                Name:      cmName,
-                Namespace: "default",
-            },
-        }
-        fw.WaitForResourceExists(t, ctx, cli, got, 60*time.Second)
-        assert.Equal(t, "cel-override-value", got.Data["foo"])
-        return nil
-    })
+	verifyOverrideApplied := flow.Func("verifyOverrideApplied", func(ctx context.Context) error {
+		got := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      cmName,
+				Namespace: "default",
+			},
+		}
+		fw.WaitForResourceExists(t, ctx, cli, got, 60*time.Second)
+		assert.Equal(t, "cel-override-value", got.Data["foo"])
+		return nil
+	})
 
-    deleteComp := fw.DeleteStep(t, "deleteComposition", cli, comp)
+	deleteComp := fw.DeleteStep(t, "deleteComposition", cli, comp)
 
-    verifyCMDeleted := flow.Func("verifyConfigMapDeleted", func(ctx context.Context) error {
-        obj := &corev1.ConfigMap{
-            ObjectMeta: metav1.ObjectMeta{
-                Name:      cmName,
-                Namespace: "default",
-            },
-        }
-        fw.WaitForResourceDeleted(t, ctx, cli, obj, 2*time.Minute)
-        return nil
-    })
+	verifyCMDeleted := flow.Func("verifyConfigMapDeleted", func(ctx context.Context) error {
+		obj := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      cmName,
+				Namespace: "default",
+			},
+		}
+		fw.WaitForResourceDeleted(t, ctx, cli, obj, 2*time.Minute)
+		return nil
+	})
 
-    cleanupSynth := fw.CleanupStep(t, "cleanupSynthesizer", cli, synth)
+	cleanupSynth := fw.CleanupStep(t, "cleanupSynthesizer", cli, synth)
 
-    w := new(flow.Workflow)
-    w.Add(
-        flow.Step(createComp).DependsOn(createSynth),
-        flow.Step(waitReady).DependsOn(createComp),
-        flow.Step(verifyOverrideApplied).DependsOn(waitReady),
-        flow.Step(deleteComp).DependsOn(verifyOverrideApplied),
-        flow.Step(verifyCMDeleted).DependsOn(deleteComp),
-        flow.Step(cleanupSynth).DependsOn(verifyCMDeleted),
-    )
+	w := new(flow.Workflow)
+	w.Add(
+		flow.Step(createComp).DependsOn(createSynth),
+		flow.Step(waitReady).DependsOn(createComp),
+		flow.Step(verifyOverrideApplied).DependsOn(waitReady),
+		flow.Step(deleteComp).DependsOn(verifyOverrideApplied),
+		flow.Step(verifyCMDeleted).DependsOn(deleteComp),
+		flow.Step(cleanupSynth).DependsOn(verifyCMDeleted),
+	)
 
 	require.NoError(t, w.Do(ctx))
 }
@@ -132,7 +133,6 @@ func TestOverrides_CELValueExpression_NullUnset_EndToEnd(t *testing.T) {
 	// valueExpression evaluates to null → the targeted field should be deleted
 	overrideJSON := `[{
 		"path": "self.data.foo",
-		"condition": "has(self.data.foo)",
 		"valueExpression": "null"
 	}]`
 
@@ -179,15 +179,22 @@ func TestOverrides_CELValueExpression_NullUnset_EndToEnd(t *testing.T) {
 	})
 
 	verifyNullUnset := flow.Func("verifyNullUnset", func(ctx context.Context) error {
-		got := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      cmName,
-				Namespace: "default",
-			},
-		}
-		fw.WaitForResourceExists(t, ctx, cli, got, 60*time.Second)
-		assert.NotContains(t, got.Data, "foo", "expected 'foo' to be removed by null valueExpression")
-		assert.Equal(t, "keep-me", got.Data["bar"], "expected 'bar' to be untouched")
+		// First reconciliation creates the CM with foo (current=nil, so valueExpression
+		// is skipped). On the next reconciliation current exists, null deletes foo.
+		// Poll until the deletion takes effect.
+		err := wait.PollUntilContextTimeout(ctx, 2*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
+			got := &corev1.ConfigMap{}
+			if err := cli.Get(ctx, types.NamespacedName{Name: cmName, Namespace: "default"}, got); err != nil {
+				return false, nil
+			}
+			if _, hasFoo := got.Data["foo"]; hasFoo {
+				t.Logf("ConfigMap %s still has key 'foo', waiting for null override", cmName)
+				return false, nil
+			}
+			assert.Equal(t, "keep-me", got.Data["bar"], "expected 'bar' to be untouched")
+			return true, nil
+		})
+		require.NoError(t, err, "timed out waiting for 'foo' to be removed by null valueExpression")
 		return nil
 	})
 
