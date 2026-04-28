@@ -30,8 +30,8 @@ var newResourceTests = []struct {
 	{
 		Name: "configmap",
 		Manifest: `{
-			"apiVersion": "v1",
-			"kind": "ConfigMap",
+			"apiVersion": "example.io/v1",
+			"kind": "Widget",
 			"metadata": {
 				"name": "foo",
 				"annotations": {
@@ -51,14 +51,14 @@ var newResourceTests = []struct {
 			}
 		}`,
 		Assert: func(t *testing.T, r *Snapshot) {
-			assert.Equal(t, schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, r.GVK)
+			assert.Equal(t, schema.GroupVersionKind{Group: "example.io", Version: "v1", Kind: "Widget"}, r.GVK)
 			assert.Len(t, r.ReadinessChecks, 2)
 			assert.Equal(t, time.Second*10, r.ReconcileInterval.Duration)
 			assert.Equal(t, Ref{
 				Name:      "foo",
 				Namespace: "",
-				Group:     "",
-				Kind:      "ConfigMap",
+				Group:     "example.io",
+				Kind:      "Widget",
 			}, r.Ref)
 			assert.True(t, r.Disable)
 			assert.True(t, r.DisableUpdates)
@@ -110,8 +110,8 @@ var newResourceTests = []struct {
 	{
 		Name: "zero-readiness-group",
 		Manifest: `{
-			"apiVersion": "v1",
-			"kind": "ConfigMap",
+			"apiVersion": "example.io/v1",
+			"kind": "Widget",
 			"metadata": {
 				"name": "foo",
 				"annotations": {
@@ -213,8 +213,8 @@ var newResourceTests = []struct {
 	{
 		Name: "negative-readiness-group",
 		Manifest: `{
-			"apiVersion": "v1",
-			"kind": "ConfigMap",
+			"apiVersion": "example.io/v1",
+			"kind": "Widget",
 			"metadata": {
 				"name": "foo",
 				"annotations": {

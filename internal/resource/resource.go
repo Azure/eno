@@ -24,6 +24,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+const (
+	ReservedReadinessGroupLowerBound = -100
+	ReservedReadinessGroupUpperBound = -60
+)
+
 var patchGVK = schema.GroupVersionKind{
 	Group:   "eno.azure.io",
 	Version: "v1",
@@ -198,6 +203,11 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		if err != nil {
 			logger.Info("invalid readiness group - ignoring")
 		} else {
+			if rg >= ReservedReadinessGroupLowerBound && rg <= ReservedReadinessGroupUpperBound {
+				logger.Info(fmt.Sprintf("WARNING: user-supplied readiness-group is in Eno reserved range [%d, %d]",
+					ReservedReadinessGroupLowerBound, ReservedReadinessGroupUpperBound),
+					"kind", res.GVK.Kind, "readinessGroup", rg)
+			}
 			res.readinessGroup = rg
 		}
 	}
@@ -213,6 +223,10 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		if err != nil {
 			logger.Info("invalid deletion group - ignoring")
 		} else {
+			if rg >= -ReservedReadinessGroupUpperBound && rg <= -ReservedReadinessGroupLowerBound {
+				logger.Info(fmt.Sprintf("WARNING: user-supplied deletion-group is in Eno reserved range [%d, %d]", -ReservedReadinessGroupUpperBound, -ReservedReadinessGroupLowerBound),
+					"kind", res.GVK.Kind, "deletionGroup", rg)
+			}
 			res.deletionGroup = &rg
 		}
 	}
@@ -241,6 +255,28 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		res.ReadinessChecks = append(res.ReadinessChecks, check)
 	}
 	sort.Slice(res.ReadinessChecks, func(i, j int) bool { return res.ReadinessChecks[i].Name < res.ReadinessChecks[j].Name })
+	// This indicates that this is an infrastructure Kind
+	if defaultGrp, ok := managedCreateOrder[res.GVK.Kind]; ok {
+		if _, ok := anno[readinessGroupKey]; !ok {
+			logger.Info("assigning default readiness group to managed kind",
+				"kind", res.GVK.Kind, "defaultGroup", defaultGrp)
+			res.readinessGroup = defaultGrp
+		} else {
+			logger.Info("user-specified readiness group present, skipping default for managed kind",
+				"kind", res.GVK.Kind, "readinessGroup", res.readinessGroup)
+		}
+
+		if _, ok := anno[deletionGroupKey]; !ok {
+			logger.Info("assigning default deletion group to managed kind",
+				"kind", res.GVK.Kind, "defaultGroup", defaultGrp)
+			delGroup := -defaultGrp
+			res.deletionGroup = &delGroup
+		} else {
+			logger.Info("user-specified deletion group present, skipping default for managed kind",
+				"kind", res.GVK.Kind, "deletionGroup", *res.deletionGroup)
+		}
+	}
+
 	logger.Info("resource created successfully")
 	return res, nil
 }

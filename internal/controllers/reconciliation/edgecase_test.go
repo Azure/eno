@@ -161,6 +161,10 @@ func TestLargeNamespaceDeletion(t *testing.T) {
 			"kind":       "Namespace",
 			"metadata": map[string]any{
 				"name": "test",
+				"annotations": map[string]any{
+					"eno.azure.io/readiness-group": "0",
+					"eno.azure.io/deletion-group":  "0",
+				},
 			},
 		},
 	}
@@ -169,6 +173,9 @@ func TestLargeNamespaceDeletion(t *testing.T) {
 		output.Items = []*unstructured.Unstructured{ns}
 
 		for i := 0; i < 500; i++ {
+			// Explicit readiness/deletion groups: Namespace/Secret/ConfigMap now
+			// default into the reserved [-100,-81] range, but this test wants the
+			// legacy "everything in group 0" behavior.
 			cm := &unstructured.Unstructured{
 				Object: map[string]any{
 					"apiVersion": "v1",
@@ -176,6 +183,10 @@ func TestLargeNamespaceDeletion(t *testing.T) {
 					"metadata": map[string]any{
 						"name":      fmt.Sprintf("test-%d", i),
 						"namespace": ns.GetName(),
+						"annotations": map[string]any{
+							"eno.azure.io/readiness-group": "0",
+							"eno.azure.io/deletion-group":  "0",
+						},
 					},
 				},
 			}

@@ -58,6 +58,11 @@ func TestReadinessGroups(t *testing.T) {
 					"metadata": map[string]any{
 						"name":      "test-obj-1",
 						"namespace": "default",
+						// Explicit readiness-group: ConfigMap now defaults into the reserved
+					// [-100,-81] range; this test wants the legacy group-0 behavior.
+					"annotations": map[string]string{
+							"eno.azure.io/readiness-group": "0",
+						},
 					},
 					"data": map[string]any{"image": s.Spec.Image},
 				},
