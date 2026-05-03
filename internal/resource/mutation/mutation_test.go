@@ -69,7 +69,7 @@ func TestApply(t *testing.T) {
 			path:     "self.foo.bar",
 			obj:      map[string]any{"another": "baz"},
 			value:    123,
-			expected: map[string]any{"another": "baz"},
+			expected: map[string]any{"another": "baz", "foo": map[string]any{"bar": 123}},
 			status:   StatusActive,
 		},
 		{
@@ -93,7 +93,7 @@ func TestApply(t *testing.T) {
 			path:     `self.foo["bar"]`,
 			obj:      map[string]any{"another": "baz"},
 			value:    123,
-			expected: map[string]any{"another": "baz"},
+			expected: map[string]any{"another": "baz", "foo": map[string]any{"bar": 123}},
 			status:   StatusActive,
 		},
 		{
@@ -322,6 +322,30 @@ func TestApply(t *testing.T) {
 			},
 		},
 		{
+			name:     "Map_CreateMissingIntermediateMap",
+			path:     "self.spec.minAllowed.memory",
+			obj:      map[string]any{"spec": map[string]any{}},
+			value:    "20Mi",
+			expected: map[string]any{"spec": map[string]any{"minAllowed": map[string]any{"memory": "20Mi"}}},
+			status:   StatusActive,
+		},
+		{
+			name:     "Map_CreateMissingIntermediateMap_NilValue",
+			path:     "self.spec.minAllowed.memory",
+			obj:      map[string]any{"spec": map[string]any{}},
+			value:    nil,
+			expected: map[string]any{"spec": map[string]any{}},
+			status:   StatusActive,
+		},
+		{
+			name:     "Map_CreateDeeplyNestedMissingMaps",
+			path:     "self.a.b.c.d",
+			obj:      map[string]any{},
+			value:    "val",
+			expected: map[string]any{"a": map[string]any{"b": map[string]any{"c": map[string]any{"d": "val"}}}},
+			status:   StatusActive,
+		},
+		{
 			name:     "Root",
 			path:     "self",
 			obj:      map[string]any{},
@@ -486,14 +510,14 @@ func TestOpApply(t *testing.T) {
 			}},
 		},
 		{
-			name: "CELValueExpression_NullResult_DeletesField",
+			name: "CELValueExpression_NullResult_SkipsMutation",
 			op: Op{
 				Path:            mustParsePathExpr("self.foo"),
 				ValueExpression: mustParseCEL("null"),
 			},
 			current:         &unstructured.Unstructured{Object: map[string]any{"bar": "val"}},
 			mutated:         &unstructured.Unstructured{Object: map[string]any{"foo": "old-value"}},
-			expectedMutated: &unstructured.Unstructured{Object: map[string]any{}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{"foo": "old-value"}},
 		},
 		{
 			name: "CELValueExpression_NullResult_NoFieldToDelete",
@@ -504,6 +528,153 @@ func TestOpApply(t *testing.T) {
 			current:         &unstructured.Unstructured{Object: map[string]any{"bar": "val"}},
 			mutated:         &unstructured.Unstructured{Object: map[string]any{}},
 			expectedMutated: &unstructured.Unstructured{Object: map[string]any{}},
+		},
+		{
+			name: "StaticNilValue_DeletesField",
+			op: Op{
+				Path:  mustParsePathExpr("self.foo"),
+				Value: nil,
+			},
+			current:         &unstructured.Unstructured{Object: map[string]any{"bar": "val"}},
+			mutated:         &unstructured.Unstructured{Object: map[string]any{"foo": "old-value"}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{}},
+		},
+		{
+			name: "ConditionMet_AnnotationExists_MutationApplied",
+			op: Op{
+				Path:      mustParsePathExpr("self.spec.minAllowed.cpu"),
+				Condition: mustParseCEL(`self.metadata.annotations['override-min-max'] == 'enabled'`),
+				Value:     "100m",
+			},
+			current: &unstructured.Unstructured{Object: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						"override-min-max": "enabled",
+					},
+				},
+				"spec": map[string]any{},
+			}},
+			mutated: &unstructured.Unstructured{Object: map[string]any{
+				"spec": map[string]any{},
+			}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{
+				"spec": map[string]any{"minAllowed": map[string]any{"cpu": "100m"}},
+			}},
+		},
+		{
+			name: "ConditionNotMet_AnnotationDisabled_NoMutation",
+			op: Op{
+				Path:      mustParsePathExpr("self.spec.minAllowed.cpu"),
+				Condition: mustParseCEL(`self.metadata.annotations['override-min-max'] == 'enabled'`),
+				Value:     "100m",
+			},
+			current: &unstructured.Unstructured{Object: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						"override-min-max": "disabled",
+					},
+				},
+				"spec": map[string]any{},
+			}},
+			mutated: &unstructured.Unstructured{Object: map[string]any{
+				"spec": map[string]any{},
+			}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{
+				"spec": map[string]any{},
+			}},
+		},
+		{
+			name: "Bug1_AnnotationKeyMissing_CurrentExists_SilentlyInactive",
+			op: Op{
+				Path:      mustParsePathExpr("self.spec.minAllowed.cpu"),
+				Condition: mustParseCEL(`self.metadata.annotations['override-min-max'] == 'enabled'`),
+				Value:     "100m",
+			},
+			current: &unstructured.Unstructured{Object: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{},
+				},
+				"spec": map[string]any{},
+			}},
+			mutated: &unstructured.Unstructured{Object: map[string]any{
+				"spec": map[string]any{},
+			}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{
+				"spec": map[string]any{},
+			}},
+		},
+		{
+			name: "Bug1_NoAnnotationsMap_CurrentExists_SilentlyInactive",
+			op: Op{
+				Path:      mustParsePathExpr("self.spec.minAllowed.cpu"),
+				Condition: mustParseCEL(`self.metadata.annotations['override-min-max'] == 'enabled'`),
+				Value:     "100m",
+			},
+			current: &unstructured.Unstructured{Object: map[string]any{
+				"metadata": map[string]any{},
+				"spec":     map[string]any{},
+			}},
+			mutated: &unstructured.Unstructured{Object: map[string]any{
+				"spec": map[string]any{},
+			}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{
+				"spec": map[string]any{},
+			}},
+		},
+		{
+			name: "Bug1_NilCurrent_ConditionRefsSelf_InvalidCondition",
+			op: Op{
+				Path:      mustParsePathExpr("self.spec.minAllowed.cpu"),
+				Condition: mustParseCEL(`self.metadata.annotations['override-min-max'] == 'enabled'`),
+				Value:     "100m",
+			},
+			current: nil,
+			mutated: &unstructured.Unstructured{Object: map[string]any{
+				"spec": map[string]any{},
+			}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{
+				"spec": map[string]any{},
+			}},
+		},
+		{
+			name: "HasGuard_AnnotationMissing_ConditionFalse_NoMutation",
+			op: Op{
+				Path:      mustParsePathExpr("self.spec.minAllowed.cpu"),
+				Condition: mustParseCEL(`has(self.metadata.annotations) && 'override-min-max' in self.metadata.annotations && self.metadata.annotations['override-min-max'] == 'enabled'`),
+				Value:     "100m",
+			},
+			current: &unstructured.Unstructured{Object: map[string]any{
+				"metadata": map[string]any{},
+				"spec":     map[string]any{},
+			}},
+			mutated: &unstructured.Unstructured{Object: map[string]any{
+				"spec": map[string]any{},
+			}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{
+				"spec": map[string]any{},
+			}},
+		},
+		{
+			name: "HasGuard_AnnotationPresent_ConditionTrue_MutationApplied",
+			op: Op{
+				Path:      mustParsePathExpr("self.spec.minAllowed.cpu"),
+				Condition: mustParseCEL(`has(self.metadata.annotations) && 'override-min-max' in self.metadata.annotations && self.metadata.annotations['override-min-max'] == 'enabled'`),
+				Value:     "100m",
+			},
+			current: &unstructured.Unstructured{Object: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						"override-min-max": "enabled",
+					},
+				},
+				"spec": map[string]any{},
+			}},
+			mutated: &unstructured.Unstructured{Object: map[string]any{
+				"spec": map[string]any{},
+			}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{
+				"spec": map[string]any{"minAllowed": map[string]any{"cpu": "100m"}},
+			}},
 		},
 		{
 			name: "StaticValue_StillWorks",
@@ -534,6 +705,46 @@ func TestOpApply(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	}
+}
+
+func TestOpApplyValueExpressionErrorFailsOpen(t *testing.T) {
+	ctx := context.Background()
+
+	op := Op{
+		Path:            mustParsePathExpr("self.foo"),
+		ValueExpression: mustParseCEL("self.bar.baz"),
+	}
+
+	current := &unstructured.Unstructured{Object: map[string]any{
+		"bar": "not-a-map",
+	}}
+	mutated := &unstructured.Unstructured{Object: map[string]any{
+		"foo": "synthesized-default",
+	}}
+
+	status, err := op.Apply(ctx, &apiv1.Composition{}, current, mutated)
+	require.NoError(t, err)
+	assert.Equal(t, StatusInvalidValueExpression, status)
+	assert.Equal(t, map[string]any{"foo": "synthesized-default"}, mutated.Object)
+}
+
+func TestOpApplyPathTypeMismatchFailsOpen(t *testing.T) {
+	ctx := context.Background()
+
+	op := Op{
+		Path:  mustParsePathExpr("self.foo[*]"),
+		Value: "new-value",
+	}
+
+	current := &unstructured.Unstructured{Object: map[string]any{}}
+	mutated := &unstructured.Unstructured{Object: map[string]any{
+		"foo": "scalar",
+	}}
+
+	status, err := op.Apply(ctx, &apiv1.Composition{}, current, mutated)
+	require.NoError(t, err)
+	assert.Equal(t, StatusPathTypeMismatch, status)
+	assert.Equal(t, map[string]any{"foo": "scalar"}, mutated.Object)
 }
 
 // TestInvalidPathInJson proves that the non-nil ops with nil paths left after failed unmarshalling will not panic when applied.

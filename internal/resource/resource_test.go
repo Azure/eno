@@ -422,6 +422,7 @@ var newResourceTests = []struct {
 		}`,
 		Assert: func(t *testing.T, r *Snapshot) {
 			assert.Len(t, r.overrides, 0)
+			assert.Contains(t, r.OverrideStatus(), "eno.azure.io/overrides=InvalidJSON")
 		},
 	},
 	{

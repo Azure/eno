@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"strings"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/go-logr/logr"
@@ -92,12 +91,8 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 
 	if o.Condition != nil {
 		val, err := enocel.Eval(ctx, o.Condition, comp, current, o.Path)
-		if err != nil && current == nil {
-			if !strings.HasPrefix(err.Error(), "no such ") { // e.g. "no such property" or "no such key"
-				logger.Info("override condition is invalid", "path", o.Path.String(), "error", err)
-			} else {
-				logger.Info("condition evaluation failed on missing resource", "path", o.Path.String(), "error", err)
-			}
+		if err != nil {
+			logger.Info("override condition evaluation failed", "path", o.Path.String(), "error", err, "currentExists", current != nil)
 			return StatusInvalidCondition, nil
 		}
 		if b, ok := val.Value().(bool); !ok || !b {
@@ -114,8 +109,9 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 		}
 		val, err := enocel.Eval(ctx, o.ValueExpression, comp, current, o.Path)
 		if err != nil {
-			logger.Error(err, "failed to evaluate value expression", "path", o.Path.String())
-			return StatusInvalidValueExpression, fmt.Errorf("evaluating value expression for path %s: %w", o.Path.String(), err)
+			// Fail open: keep the synthesized/default value when user-provided CEL is invalid.
+			logger.Error(err, "failed to evaluate value expression - skipping override and keeping synthesized value", "path", o.Path.String())
+			return StatusInvalidValueExpression, nil
 		}
 		resolvedValue = val.Value()
 
@@ -124,7 +120,9 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 		}
 
 		if resolvedValue == nil {
+			// Treat null from valueExpression as "no override" (fail-open), not a delete.
 			logger.Info("CEL value expression evaluated to null, skipping mutation", "path", o.Path.String())
+			return StatusInactive, nil
 		}
 
 		logger.Info("override using valueExpression (resolved CEL value expression)", "path", o.Path.String())
@@ -134,8 +132,9 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 	status, err := o.Path.Apply(mutated.Object, resolvedValue)
 
 	if err != nil {
-		logger.Error(err, "failed to apply mutation", "path", o.Path.String(), "status", status)
-		return status, fmt.Errorf("applying mutation to path %s: %w", o.Path.String(), err)
+		// Fail open: invalid mutation paths should not block reconciliation.
+		logger.Error(err, "failed to apply mutation - skipping override and keeping synthesized value", "path", o.Path.String(), "status", status)
+		return status, nil
 	}
 	logger.Info("successfully applied mutation", "path", o.Path.String(), "status", status)
 	return status, nil

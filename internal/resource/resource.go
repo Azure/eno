@@ -65,6 +65,7 @@ type Resource struct {
 	readinessGroup     int
 	deletionGroup      *int
 	overrides          []*mutation.Op
+	overrideParseError error
 	latestKnownState   atomic.Pointer[apiv1.ResourceState]
 }
 
@@ -169,6 +170,7 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		}
 		if err != nil {
 			logger.Error(err, "invalid override json")
+			res.overrideParseError = err
 		}
 	}
 
@@ -276,13 +278,16 @@ func (r *Resource) Snapshot(ctx context.Context, comp *apiv1.Composition, actual
 func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Composition, actual *unstructured.Unstructured, overrideRes *Resource) (*Snapshot, error) {
 	copy := r.parsed.DeepCopy()
 
-	overrideStatus := make([]string, len(overrideRes.overrides))
+	overrideStatus := make([]string, 0, len(overrideRes.overrides)+1)
+	if overrideRes.overrideParseError != nil {
+		overrideStatus = append(overrideStatus, fmt.Sprintf("eno.azure.io/overrides=InvalidJSON(%v)", overrideRes.overrideParseError))
+	}
 	for i, op := range overrideRes.overrides {
 		status, err := op.Apply(ctx, comp, actual, copy)
 		if err != nil {
 			return nil, fmt.Errorf("applying override %d: %w", i+1, err)
 		}
-		overrideStatus[i] = fmt.Sprintf("%s=%s", op.Path, status)
+		overrideStatus = append(overrideStatus, fmt.Sprintf("%s=%s", op.Path, status))
 	}
 
 	snap := &Snapshot{
