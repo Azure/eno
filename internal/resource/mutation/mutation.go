@@ -95,12 +95,13 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 			logger.Info("override condition evaluation failed", "path", o.Path.String(), "error", err, "currentExists", current != nil)
 			return StatusInvalidCondition, nil
 		}
+		logger.Info("override condition evaluated", "path", o.Path.String(), "conditionResult", summarizeValue(val.Value()), "resultType", fmt.Sprintf("%T", val.Value()))
 		if b, ok := val.Value().(bool); !ok || !b {
 			logger.Info("mutation condition not met, skipping", "path", o.Path.String(), "conditionResult", val.Value(), "resultType", fmt.Sprintf("%T", val.Value()))
 			return StatusInactive, nil // condition not met
 		}
 	}
-	logger.Info("applying mutation to path", "path", o.Path.String(), "valueType", fmt.Sprintf("%T", o.Value))
+	logger.Info("applying mutation to path", "path", o.Path.String(), "valueType", fmt.Sprintf("%T", o.Value), "hasValueExpression", o.ValueExpression != nil)
 	resolvedValue := o.Value
 	if o.ValueExpression != nil {
 		if current == nil {
@@ -119,6 +120,8 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 			resolvedValue = nil
 		}
 
+		logger.Info("override valueExpression evaluated", "path", o.Path.String(), "resolvedValue", summarizeValue(resolvedValue), "resolvedType", fmt.Sprintf("%T", resolvedValue))
+
 		if resolvedValue == nil {
 			// Treat null from valueExpression as "no override" (fail-open), not a delete.
 			logger.Info("CEL value expression evaluated to null, skipping mutation", "path", o.Path.String())
@@ -127,7 +130,7 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 
 		logger.Info("override using valueExpression (resolved CEL value expression)", "path", o.Path.String())
 	} else {
-		logger.Info("override using static default value", "path", o.Path.String())
+		logger.Info("override using static default value", "path", o.Path.String(), "resolvedValue", summarizeValue(resolvedValue), "resolvedType", fmt.Sprintf("%T", resolvedValue))
 	}
 	status, err := o.Path.Apply(mutated.Object, resolvedValue)
 
@@ -138,6 +141,13 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 	}
 	logger.Info("successfully applied mutation", "path", o.Path.String(), "status", status)
 	return status, nil
+}
+
+func summarizeValue(v any) string {
+	if v == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%v", v)
 }
 
 // unquoteKey removes quotes from a key string, handling both single and double quotes

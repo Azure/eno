@@ -408,7 +408,20 @@ func (c *Controller) update(ctx context.Context, comp *apiv1.Composition, previo
 		patch = client.Apply
 		opts = append(opts, client.ForceOwnership, client.FieldOwner("eno"))
 	}
+	if dryrun {
+		js, _ := json.Marshal(updated.Object)
+		fmt.Println("=== SSA DRY-RUN REQUEST OBJECT ===")
+		fmt.Println(string(js))
 
+		spec, _, _ := unstructured.NestedMap(updated.Object, "spec")
+		updatePolicy, _, _ := unstructured.NestedMap(spec, "updatePolicy")
+		updateMode, found, _ := unstructured.NestedString(spec, "updatePolicy", "updateMode")
+
+		fmt.Println("=== FIELD CHECK ===")
+		fmt.Println("has updatePolicy:", updatePolicy != nil)
+		fmt.Println("has updateMode:", found)
+		fmt.Println("updateMode value:", updateMode)
+	}
 	err = c.upstreamClient.Patch(ctx, updated, patch, opts...)
 	return
 }
@@ -419,6 +432,18 @@ func buildNonStrategicPatch(ctx context.Context, comp *apiv1.Composition, previo
 		from = &unstructured.Unstructured{Object: map[string]any{}}
 	} else {
 		snap, err := previous.Snapshot(ctx, comp, current)
+		js, _ := json.Marshal(snap.Unstructured().Object)
+		fmt.Println("=== SNAPSHOT OBJECT ===")
+		fmt.Println(string(js))
+
+		spec, _, _ := unstructured.NestedMap(snap.Unstructured().Object, "spec")
+		updatePolicy, _, _ := unstructured.NestedMap(spec, "updatePolicy")
+		updateMode, found, _ := unstructured.NestedString(spec, "updatePolicy", "updateMode")
+
+		fmt.Println("=== SNAPSHOT FIELD CHECK ===")
+		fmt.Println("has updatePolicy:", updatePolicy != nil)
+		fmt.Println("has updateMode:", found)
+		fmt.Println("updateMode value:", updateMode)
 		if err != nil {
 			return nil, err
 		}

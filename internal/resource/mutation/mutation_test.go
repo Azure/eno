@@ -530,6 +530,22 @@ func TestOpApply(t *testing.T) {
 			expectedMutated: &unstructured.Unstructured{Object: map[string]any{}},
 		},
 		{
+			name: "UpdateMode_NullValueExpression_KeepsSynthesizedDefault",
+			op: Op{
+				Path:            mustParsePathExpr("self.spec.updatePolicy.updateMode"),
+				ValueExpression: mustParseCEL("null"),
+			},
+			current: &unstructured.Unstructured{Object: map[string]any{
+				"spec": map[string]any{"updatePolicy": map[string]any{}},
+			}},
+			mutated: &unstructured.Unstructured{Object: map[string]any{
+				"spec": map[string]any{"updatePolicy": map[string]any{"updateMode": "Recreate"}},
+			}},
+			expectedMutated: &unstructured.Unstructured{Object: map[string]any{
+				"spec": map[string]any{"updatePolicy": map[string]any{"updateMode": "Recreate"}},
+			}},
+		},
+		{
 			name: "StaticNilValue_DeletesField",
 			op: Op{
 				Path:  mustParsePathExpr("self.foo"),
