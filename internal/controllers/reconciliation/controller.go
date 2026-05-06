@@ -324,6 +324,34 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 			logger.Error(err, "dry-run update failed.")
 			return false, fmt.Errorf("dry-run applying update: %w", err)
 		}
+		if res.Resource.Ref.Kind == "VerticalPodAutoscaler" &&
+			res.Resource.Ref.Name == "cost-analysis" {
+			if current != nil {
+				logger.Info("SSA debug - current managedFields",
+					"count", len(current.GetManagedFields()),
+				)
+				for _, f := range current.GetManagedFields() {
+					if f.FieldsV1 != nil {
+						logger.Info("SSA debug - current field",
+							"manager", f.Manager,
+							"fieldsRaw", string(f.FieldsV1.Raw),
+						)
+					}
+				}
+			}
+
+			logger.Info("SSA debug - dryRun managedFields",
+				"count", len(dryRun.GetManagedFields()),
+			)
+			for _, f := range dryRun.GetManagedFields() {
+				if f.FieldsV1 != nil {
+					logger.Info("SSA debug - dryRun field",
+						"manager", f.Manager,
+						"fieldsRaw", string(f.FieldsV1.Raw),
+					)
+				}
+			}
+		}
 		if resource.Compare(dryRun, current) {
 			logger.Info("resource insync, no operation needed")
 			return false, nil // in sync
@@ -408,19 +436,31 @@ func (c *Controller) update(ctx context.Context, comp *apiv1.Composition, previo
 		patch = client.Apply
 		opts = append(opts, client.ForceOwnership, client.FieldOwner("eno"))
 	}
-	if dryrun {
-		js, _ := json.Marshal(updated.Object)
-		fmt.Println("=== SSA DRY-RUN REQUEST OBJECT ===")
-		fmt.Println(string(js))
+	logger := logr.FromContextOrDiscard(ctx)
+
+	if dryrun &&
+		resource.Resource.Ref.Kind == "VerticalPodAutoscaler" &&
+		resource.Resource.Ref.Name == "cost-analysis" {
+
+		for _, f := range updated.GetManagedFields() {
+			if f.FieldsV1 != nil {
+				logger.Info("SSA debug - managed field",
+					"manager", f.Manager,
+					"operation", f.Operation,
+					"fieldsRaw", string(f.FieldsV1.Raw),
+				)
+			}
+		}
 
 		spec, _, _ := unstructured.NestedMap(updated.Object, "spec")
 		updatePolicy, _, _ := unstructured.NestedMap(spec, "updatePolicy")
 		updateMode, found, _ := unstructured.NestedString(spec, "updatePolicy", "updateMode")
 
-		fmt.Println("=== FIELD CHECK ===")
-		fmt.Println("has updatePolicy:", updatePolicy != nil)
-		fmt.Println("has updateMode:", found)
-		fmt.Println("updateMode value:", updateMode)
+		logger.Info("SSA debug - field check",
+			"hasUpdatePolicy", updatePolicy != nil,
+			"hasUpdateMode", found,
+			"updateModeValue", updateMode,
+		)
 	}
 	err = c.upstreamClient.Patch(ctx, updated, patch, opts...)
 	return
@@ -432,20 +472,33 @@ func buildNonStrategicPatch(ctx context.Context, comp *apiv1.Composition, previo
 		from = &unstructured.Unstructured{Object: map[string]any{}}
 	} else {
 		snap, err := previous.Snapshot(ctx, comp, current)
-		js, _ := json.Marshal(snap.Unstructured().Object)
-		fmt.Println("=== SNAPSHOT OBJECT ===")
-		fmt.Println(string(js))
-
-		spec, _, _ := unstructured.NestedMap(snap.Unstructured().Object, "spec")
-		updatePolicy, _, _ := unstructured.NestedMap(spec, "updatePolicy")
-		updateMode, found, _ := unstructured.NestedString(spec, "updatePolicy", "updateMode")
-
-		fmt.Println("=== SNAPSHOT FIELD CHECK ===")
-		fmt.Println("has updatePolicy:", updatePolicy != nil)
-		fmt.Println("has updateMode:", found)
-		fmt.Println("updateMode value:", updateMode)
 		if err != nil {
 			return nil, err
+		}
+		logger := logr.FromContextOrDiscard(ctx)
+
+		// ✅ 只打目标资源，避免日志爆炸（可选但强烈建议）
+		if snap.Resource.Ref.Kind == "VerticalPodAutoscaler" &&
+		snap.Resource.Ref.Name == "cost-analysis" {
+
+			u := snap.Unstructured()
+			spec, _, _ := unstructured.NestedMap(u.Object, "spec")
+			updatePolicy, _, _ := unstructured.NestedMap(spec, "updatePolicy")
+			updateMode, found, _ := unstructured.NestedString(spec, "updatePolicy", "updateMode")
+
+			logger.Info("SNAPSHOT debug - spec",
+				"resourceKind", snap.Resource.Ref.Kind,
+				"resourceName", snap.Resource.Ref.Name,
+				"namespace", snap.Resource.Ref.Namespace,
+				"synthesisUUID", comp.Status.GetCurrentSynthesisUUID(),
+				"spec", spec,
+			)
+
+			logger.Info("SNAPSHOT debug - field check",
+				"hasUpdatePolicy", updatePolicy != nil,
+				"hasUpdateMode", found,
+				"updateModeValue", updateMode,
+			)
 		}
 		from = snap.Unstructured()
 	}
