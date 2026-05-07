@@ -1074,3 +1074,367 @@ func TestMigratingFieldManagersFieldRemoval(t *testing.T) {
 	assert.True(t, hasEno, "eno should own the fields")
 	assert.False(t, hasLegacy, "legacy-tool should no longer own any fields")
 }
+
+// TestOverrideValueExpression proves that valueExpression can read a field from the current
+// (live) resource and use it as the override value, gated by an annotation-based condition.
+func TestOverrideValueExpression(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]any{
+						"eno.azure.io/reconcile-interval": "10ms",
+						"eno.azure.io/overrides": `[{
+							"path": "self.data.foo",
+							"valueExpression": "self.data.foo",
+							"condition": "'allow-override-foo' in self.metadata.annotations && self.metadata.annotations['allow-override-foo'] == 'true'"
+						}]`,
+					},
+				},
+				"data": map[string]any{"foo": "default-value"},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	cm := &corev1.ConfigMap{}
+	cm.Name = "test-obj"
+	cm.Namespace = "default"
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["foo"] == "default-value"
+	})
+
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		if err != nil {
+			return err
+		}
+		if cm.Annotations == nil {
+			cm.Annotations = map[string]string{}
+		}
+		cm.Annotations["allow-override-foo"] = "true"
+		cm.Data["foo"] = "customer-value"
+		return mgr.DownstreamClient.Update(ctx, cm)
+	})
+	require.NoError(t, err)
+
+	// The customer's value should be preserved because:
+	// 1. condition evaluates to true (annotation is set)
+	// 2. valueExpression reads "self.data.foo" from current (live) resource = "customer-value"
+	// 3. That value is applied to the mutated resource, so reconciliation won't overwrite it
+	time.Sleep(100 * time.Millisecond)
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["foo"] == "customer-value"
+	})
+
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		if err != nil {
+			return err
+		}
+		delete(cm.Annotations, "allow-override-foo")
+		return mgr.DownstreamClient.Update(ctx, cm)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["foo"] == "default-value"
+	})
+}
+
+// TestOverrideVPAMinMax covers the allow-override-min annotation with 4 cases:
+//   - Annotation OFF, no changes: defaults preserved
+//   - Annotation OFF, customer changes values: Eno reverts to defaults
+//   - Annotation ON, no changes: defaults preserved (valueExpression reads same defaults)
+//   - Annotation ON, customer changes values: customer values preserved
+func TestOverrideVPAMinMax(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "vpa-min-max",
+					"namespace": "default",
+					"annotations": map[string]any{
+						"eno.azure.io/reconcile-interval": "10ms",
+						"eno.azure.io/overrides": `[
+							{"path": "self.data['min-cpu']",    "valueExpression": "self.data['min-cpu']",    "condition": "has(self.metadata.annotations) && 'allow-override-min' in self.metadata.annotations && self.metadata.annotations['allow-override-min'] == 'true'"},
+							{"path": "self.data['min-memory']", "valueExpression": "self.data['min-memory']", "condition": "has(self.metadata.annotations) && 'allow-override-min' in self.metadata.annotations && self.metadata.annotations['allow-override-min'] == 'true'"},
+							{"path": "self.data['max-cpu']",    "valueExpression": "self.data['max-cpu']",    "condition": "has(self.metadata.annotations) && 'allow-override-max' in self.metadata.annotations && self.metadata.annotations['allow-override-max'] == 'true'"},
+							{"path": "self.data['max-memory']", "valueExpression": "self.data['max-memory']", "condition": "has(self.metadata.annotations) && 'allow-override-max' in self.metadata.annotations && self.metadata.annotations['allow-override-max'] == 'true'"}
+						]`,
+					},
+				},
+				"data": map[string]any{
+					"min-cpu":    "100m",
+					"min-memory": "128Mi",
+					"max-cpu":    "2",
+					"max-memory": "4Gi",
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	cm := &corev1.ConfigMap{}
+	cm.Name = "vpa-min-max"
+	cm.Namespace = "default"
+
+	// === Case 1: Annotation OFF, no changes — defaults preserved ===
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["min-cpu"] == "100m" && cm.Data["min-memory"] == "128Mi" &&
+			cm.Data["max-cpu"] == "2" && cm.Data["max-memory"] == "4Gi"
+	})
+
+	// === Case 2: Annotation OFF, customer changes values — Eno reverts ===
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+			return err
+		}
+		cm.Data["min-cpu"] = "500m"
+		cm.Data["min-memory"] = "1Gi"
+		cm.Data["max-cpu"] = "16"
+		cm.Data["max-memory"] = "32Gi"
+		return mgr.DownstreamClient.Update(ctx, cm)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["min-cpu"] == "100m" && cm.Data["min-memory"] == "128Mi" &&
+			cm.Data["max-cpu"] == "2" && cm.Data["max-memory"] == "4Gi"
+	})
+
+	// === Case 3: Annotation ON (min only), no value changes — defaults preserved ===
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+			return err
+		}
+		if cm.Annotations == nil {
+			cm.Annotations = map[string]string{}
+		}
+		cm.Annotations["allow-override-min"] = "true"
+		return mgr.DownstreamClient.Update(ctx, cm)
+	})
+	require.NoError(t, err)
+
+	// valueExpression reads self.data['min-cpu'] from live = "100m" (same as default), so no visible change
+	time.Sleep(100 * time.Millisecond)
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["min-cpu"] == "100m" && cm.Data["min-memory"] == "128Mi" &&
+			cm.Data["max-cpu"] == "2" && cm.Data["max-memory"] == "4Gi"
+	})
+
+	// === Case 4: Annotation ON (min), customer changes min values — preserved ===
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+			return err
+		}
+		cm.Annotations["allow-override-min"] = "true"
+		cm.Data["min-cpu"] = "500m"
+		cm.Data["min-memory"] = "1Gi"
+		return mgr.DownstreamClient.Update(ctx, cm)
+	})
+	require.NoError(t, err)
+
+	time.Sleep(100 * time.Millisecond)
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["min-cpu"] == "500m" && cm.Data["min-memory"] == "1Gi" &&
+			cm.Data["max-cpu"] == "2" && cm.Data["max-memory"] == "4Gi"
+	})
+
+	// === Case 4b: Annotation ON (max), customer changes max values — preserved ===
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+			return err
+		}
+		cm.Annotations["allow-override-max"] = "true"
+		cm.Data["max-cpu"] = "16"
+		cm.Data["max-memory"] = "32Gi"
+		return mgr.DownstreamClient.Update(ctx, cm)
+	})
+	require.NoError(t, err)
+
+	time.Sleep(100 * time.Millisecond)
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["min-cpu"] == "500m" && cm.Data["min-memory"] == "1Gi" &&
+			cm.Data["max-cpu"] == "16" && cm.Data["max-memory"] == "32Gi"
+	})
+
+	// === Cleanup: Remove both annotations — Eno reverts everything ===
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+			return err
+		}
+		delete(cm.Annotations, "allow-override-min")
+		delete(cm.Annotations, "allow-override-max")
+		return mgr.DownstreamClient.Update(ctx, cm)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["min-cpu"] == "100m" && cm.Data["min-memory"] == "128Mi" &&
+			cm.Data["max-cpu"] == "2" && cm.Data["max-memory"] == "4Gi"
+	})
+}
+
+// TestOverrideVPAUpdateMode covers the allow-override-update-mode annotation with 4 cases:
+//   - Annotation OFF, no changes: default "Auto" preserved
+//   - Annotation OFF, customer changes value: Eno reverts to "Auto"
+//   - Annotation ON, no changes: default "Auto" preserved
+//   - Annotation ON, customer changes value: customer value preserved
+func TestOverrideVPAUpdateMode(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "vpa-update-mode",
+					"namespace": "default",
+					"annotations": map[string]any{
+						"eno.azure.io/reconcile-interval": "10ms",
+						"eno.azure.io/overrides": `[
+							{"path": "self.data['update-mode']", "valueExpression": "self.data['update-mode']", "condition": "has(self.metadata.annotations) && 'allow-override-update-mode' in self.metadata.annotations && self.metadata.annotations['allow-override-update-mode'] == 'true'"}
+						]`,
+					},
+				},
+				"data": map[string]any{
+					"update-mode": "Auto",
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubject(t, mgr)
+	mgr.Start(t)
+	_, comp := writeGenericComposition(t, upstream)
+
+	testutil.Eventually(t, func() bool {
+		return upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp) == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready != nil
+	})
+
+	cm := &corev1.ConfigMap{}
+	cm.Name = "vpa-update-mode"
+	cm.Namespace = "default"
+
+	// === Case 1: Annotation OFF, no changes — default "Auto" ===
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["update-mode"] == "Auto"
+	})
+
+	// === Case 2: Annotation OFF, customer changes to "Off" — Eno reverts ===
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+			return err
+		}
+		cm.Data["update-mode"] = "Off"
+		return mgr.DownstreamClient.Update(ctx, cm)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["update-mode"] == "Auto"
+	})
+
+	// === Case 3: Annotation ON, no value changes — default preserved ===
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+			return err
+		}
+		if cm.Annotations == nil {
+			cm.Annotations = map[string]string{}
+		}
+		cm.Annotations["allow-override-update-mode"] = "true"
+		return mgr.DownstreamClient.Update(ctx, cm)
+	})
+	require.NoError(t, err)
+
+	time.Sleep(100 * time.Millisecond)
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["update-mode"] == "Auto"
+	})
+
+	// === Case 4: Annotation ON, customer changes to "Off" — preserved ===
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+			return err
+		}
+		cm.Annotations["allow-override-update-mode"] = "true"
+		cm.Data["update-mode"] = "Off"
+		return mgr.DownstreamClient.Update(ctx, cm)
+	})
+	require.NoError(t, err)
+
+	time.Sleep(100 * time.Millisecond)
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["update-mode"] == "Off"
+	})
+
+	// === Cleanup: Remove annotation — Eno reverts ===
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+			return err
+		}
+		delete(cm.Annotations, "allow-override-update-mode")
+		return mgr.DownstreamClient.Update(ctx, cm)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		return cm.Data["update-mode"] == "Auto"
+	})
+}

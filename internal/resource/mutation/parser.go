@@ -181,16 +181,32 @@ func (p *PathExpr) apply(path *PathExpr, startIndex int, obj any, value any) (St
 				return StatusActive, nil
 			}
 
-			child := m[keyStr]
-			if child != nil {
-				status, err := p.apply(path, startIndex+i+1, child, value)
-				if err != nil {
-					return status, err
+			child, exists := m[keyStr]
+			if child == nil {
+				if !exists && value != nil {
+					// Key is missing entirely — create intermediate map so overrides
+					// targeting nested paths (e.g. minAllowed.memory) work even when
+					// the intermediate key doesn't exist in the desired state.
+					child = map[string]any{}
+					m[keyStr] = child
+				} else {
+					// Key exists but is explicitly nil, or value is nil — skip
+					return StatusActive, nil
 				}
-				if value == nil {
-					if nextMap, ok := child.(map[string]any); ok && len(nextMap) == 0 {
-						delete(m, keyStr)
-					}
+			}
+			childLen := 0
+			if cm, ok := child.(map[string]any); ok {
+				childLen = len(cm)
+			}
+			status, err := p.apply(path, startIndex+i+1, child, value)
+			if err != nil {
+				return status, err
+			}
+			// Clean up intermediate maps that became empty as a result of deletion,
+			// but not maps that were already empty before the operation.
+			if value == nil {
+				if nextMap, ok := child.(map[string]any); ok && len(nextMap) == 0 && childLen > 0 {
+					delete(m, keyStr)
 				}
 			}
 			return StatusActive, nil
