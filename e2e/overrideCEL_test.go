@@ -2,7 +2,6 @@ package e2e
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/wait"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	fw "github.com/Azure/eno/e2e/framework"
@@ -119,10 +117,7 @@ func TestOverrides_CELValueExpression_EndToEnd(t *testing.T) {
 	require.NoError(t, w.Do(ctx))
 }
 
-func TestOverrides_CELValueExpression_NullUnset_EndToEnd(t *testing.T) {
-	if os.Getenv("DISABLE_SSA") == "true" {
-		t.Skip("null valueExpression override is a known limitation in non-SSA mode: buildNonStrategicPatch applies the null override to both sides of the diff, producing an empty patch")
-	}
+func TestOverrides_CELValueExpression_NullNoOp_EndToEnd(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -134,7 +129,7 @@ func TestOverrides_CELValueExpression_NullUnset_EndToEnd(t *testing.T) {
 	compName := fw.UniqueName("override-null-comp")
 	cmName := fw.UniqueName("override-null-cm")
 
-	// valueExpression evaluates to null → the targeted field should be deleted
+	// valueExpression evaluates to null -> override is skipped (no-op)
 	overrideJSON := `[{
 		"path": "self.data.foo",
 		"valueExpression": "null"
@@ -153,7 +148,7 @@ func TestOverrides_CELValueExpression_NullUnset_EndToEnd(t *testing.T) {
 			},
 		},
 		Data: map[string]string{
-			"foo": "should-be-removed",
+			"foo": "should-remain",
 			"bar": "keep-me",
 		},
 	}
@@ -182,23 +177,11 @@ func TestOverrides_CELValueExpression_NullUnset_EndToEnd(t *testing.T) {
 		return nil
 	})
 
-	verifyNullUnset := flow.Func("verifyNullUnset", func(ctx context.Context) error {
-		// First reconciliation creates the CM with foo (current=nil, so valueExpression
-		// is skipped). On the next reconciliation current exists, null deletes foo.
-		// Poll until the deletion takes effect.
-		err := wait.PollUntilContextTimeout(ctx, 2*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
-			got := &corev1.ConfigMap{}
-			if err := cli.Get(ctx, types.NamespacedName{Name: cmName, Namespace: "default"}, got); err != nil {
-				return false, nil
-			}
-			if _, hasFoo := got.Data["foo"]; hasFoo {
-				t.Logf("ConfigMap %s still has key 'foo', waiting for null override", cmName)
-				return false, nil
-			}
-			assert.Equal(t, "keep-me", got.Data["bar"], "expected 'bar' to be untouched")
-			return true, nil
-		})
-		require.NoError(t, err, "timed out waiting for 'foo' to be removed by null valueExpression")
+	verifyNullNoOp := flow.Func("verifyNullNoOp", func(ctx context.Context) error {
+		got := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: cmName, Namespace: "default"}}
+		fw.WaitForResourceExists(t, ctx, cli, got, 60*time.Second)
+		assert.Equal(t, "should-remain", got.Data["foo"], "expected null valueExpression to be treated as no-op")
+		assert.Equal(t, "keep-me", got.Data["bar"], "expected 'bar' to be untouched")
 		return nil
 	})
 
@@ -221,8 +204,8 @@ func TestOverrides_CELValueExpression_NullUnset_EndToEnd(t *testing.T) {
 	w.Add(
 		flow.Step(createComp).DependsOn(createSynth),
 		flow.Step(waitReady).DependsOn(createComp),
-		flow.Step(verifyNullUnset).DependsOn(waitReady),
-		flow.Step(deleteComp).DependsOn(verifyNullUnset),
+		flow.Step(verifyNullNoOp).DependsOn(waitReady),
+		flow.Step(deleteComp).DependsOn(verifyNullNoOp),
 		flow.Step(verifyCMDeleted).DependsOn(deleteComp),
 		flow.Step(cleanupSynth).DependsOn(verifyCMDeleted),
 	)
