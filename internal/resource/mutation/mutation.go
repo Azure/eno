@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/go-logr/logr"
@@ -92,7 +93,13 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 	if o.Condition != nil {
 		val, err := enocel.Eval(ctx, o.Condition, comp, current, o.Path)
 		if err != nil {
-			logger.Info("override condition evaluation failed", "path", o.Path.String(), "error", err, "currentExists", current != nil)
+			if current == nil {
+				if strings.HasPrefix(err.Error(), "no such ") {
+					logger.Info("condition evaluation failed on missing resource", "error", err, "path", o.Path.String())
+				} else {
+					logger.Info("override condition is invalid", "error", err, "path", o.Path.String())
+				}
+			}
 			return StatusInvalidCondition, nil
 		}
 		if b, ok := val.Value().(bool); !ok || !b {
@@ -124,7 +131,6 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 			logger.Info("CEL value expression evaluated to null, skipping mutation", "path", o.Path.String())
 			return StatusInactive, nil
 		}
-
 		logger.Info("override using valueExpression (resolved CEL value expression)", "path", o.Path.String())
 	} else {
 		logger.Info("override using static default value", "path", o.Path.String())

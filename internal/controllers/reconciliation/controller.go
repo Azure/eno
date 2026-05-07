@@ -408,7 +408,6 @@ func (c *Controller) update(ctx context.Context, comp *apiv1.Composition, previo
 		patch = client.Apply
 		opts = append(opts, client.ForceOwnership, client.FieldOwner("eno"))
 	}
-
 	err = c.upstreamClient.Patch(ctx, updated, patch, opts...)
 	return
 }
