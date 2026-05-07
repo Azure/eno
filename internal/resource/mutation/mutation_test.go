@@ -776,6 +776,127 @@ func TestInvalidPathInJson(t *testing.T) {
 	}
 }
 
+func TestVPAOverrideMatrix(t *testing.T) {
+	ctx := context.Background()
+
+	const (
+		defaultMin  = "10Mi"
+		defaultMax  = "30Mi"
+		defaultMode = "Recreate"
+	)
+
+	ops := []Op{
+		{
+			Path:            mustParsePathExpr(`self.spec.resourcePolicy.containerPolicies[containerName="cost-analysis-agent"].minAllowed.memory`),
+			Condition:       mustParseCEL(`self.metadata.annotations['autoscaler.addons.k8s.io/override-min-max'] == 'enabled'`),
+			ValueExpression: mustParseCEL(`self.spec.resourcePolicy.containerPolicies[0].minAllowed.memory`),
+		},
+		{
+			Path:            mustParsePathExpr(`self.spec.resourcePolicy.containerPolicies[containerName="cost-analysis-agent"].maxAllowed.memory`),
+			Condition:       mustParseCEL(`self.metadata.annotations['autoscaler.addons.k8s.io/override-min-max'] == 'enabled'`),
+			ValueExpression: mustParseCEL(`self.spec.resourcePolicy.containerPolicies[0].maxAllowed.memory`),
+		},
+		{
+			Path:            mustParsePathExpr("self.spec.updatePolicy.updateMode"),
+			Condition:       mustParseCEL(`self.metadata.annotations['autoscaler.addons.k8s.io/override-update-mode'] == 'enabled'`),
+			ValueExpression: mustParseCEL("self.spec.updatePolicy.updateMode"),
+		},
+	}
+
+	testCases := []struct {
+		name               string
+		minMaxOverride     string
+		updateModeOverride string
+		currentMin         string
+		currentMax         string
+		currentUpdateMode  string
+		expectedMin        string
+		expectedMax        string
+		expectedUpdateMode string
+	}{
+		{name: "Case01_EnabledEnabled", minMaxOverride: "enabled", updateModeOverride: "enabled", currentMin: "99Mi", currentMax: "99Mi", currentUpdateMode: "Off", expectedMin: "99Mi", expectedMax: "99Mi", expectedUpdateMode: "Off"},
+		{name: "Case02_DisabledDisabled", minMaxOverride: "disabled", updateModeOverride: "disabled", currentMin: "99Mi", currentMax: "99Mi", currentUpdateMode: "Off", expectedMin: defaultMin, expectedMax: defaultMax, expectedUpdateMode: defaultMode},
+		{name: "Case03_EnabledDisabled", minMaxOverride: "enabled", updateModeOverride: "disabled", currentMin: "99Mi", currentMax: "99Mi", currentUpdateMode: "Off", expectedMin: "99Mi", expectedMax: "99Mi", expectedUpdateMode: defaultMode},
+		{name: "Case04_DisabledEnabled", minMaxOverride: "disabled", updateModeOverride: "enabled", currentMin: "99Mi", currentMax: "99Mi", currentUpdateMode: "Off", expectedMin: defaultMin, expectedMax: defaultMax, expectedUpdateMode: "Off"},
+		{name: "Case05_EnabledEnabled_ChangeMin", minMaxOverride: "enabled", updateModeOverride: "enabled", currentMin: "50Mi", currentMax: "30Mi", currentUpdateMode: "Recreate", expectedMin: "50Mi", expectedMax: "30Mi", expectedUpdateMode: "Recreate"},
+		{name: "Case06_EnabledEnabled_ChangeMax", minMaxOverride: "enabled", updateModeOverride: "enabled", currentMin: "10Mi", currentMax: "100Mi", currentUpdateMode: "Recreate", expectedMin: "10Mi", expectedMax: "100Mi", expectedUpdateMode: "Recreate"},
+		{name: "Case07_EnabledEnabled_ChangeMode", minMaxOverride: "enabled", updateModeOverride: "enabled", currentMin: "10Mi", currentMax: "30Mi", currentUpdateMode: "Auto", expectedMin: "10Mi", expectedMax: "30Mi", expectedUpdateMode: "Auto"},
+		{name: "Case08_EnabledEnabled_ChangeMinMax", minMaxOverride: "enabled", updateModeOverride: "enabled", currentMin: "20Mi", currentMax: "60Mi", currentUpdateMode: "Recreate", expectedMin: "20Mi", expectedMax: "60Mi", expectedUpdateMode: "Recreate"},
+		{name: "Case09_EnabledEnabled_ChangeMinMode", minMaxOverride: "enabled", updateModeOverride: "enabled", currentMin: "25Mi", currentMax: "30Mi", currentUpdateMode: "Initial", expectedMin: "25Mi", expectedMax: "30Mi", expectedUpdateMode: "Initial"},
+		{name: "Case10_EnabledEnabled_ChangeAll", minMaxOverride: "enabled", updateModeOverride: "enabled", currentMin: "15Mi", currentMax: "50Mi", currentUpdateMode: "Auto", expectedMin: "15Mi", expectedMax: "50Mi", expectedUpdateMode: "Auto"},
+		{name: "Case11_DisabledDisabled_ChangeAll", minMaxOverride: "disabled", updateModeOverride: "disabled", currentMin: "15Mi", currentMax: "50Mi", currentUpdateMode: "Auto", expectedMin: defaultMin, expectedMax: defaultMax, expectedUpdateMode: defaultMode},
+		{name: "Case12_EnabledDisabled_ChangeAll", minMaxOverride: "enabled", updateModeOverride: "disabled", currentMin: "15Mi", currentMax: "50Mi", currentUpdateMode: "Auto", expectedMin: "15Mi", expectedMax: "50Mi", expectedUpdateMode: defaultMode},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			current := buildCostAnalysisVPA(tc.minMaxOverride, tc.updateModeOverride, tc.currentMin, tc.currentMax, tc.currentUpdateMode)
+			mutated := buildCostAnalysisVPA(tc.minMaxOverride, tc.updateModeOverride, defaultMin, defaultMax, defaultMode)
+
+			for i := range ops {
+				_, err := ops[i].Apply(ctx, &apiv1.Composition{}, current, mutated)
+				require.NoError(t, err)
+			}
+
+			gotMin, gotMax, gotMode := readCostAnalysisVPA(mutated)
+			assert.Equal(t, tc.expectedMin, gotMin)
+			assert.Equal(t, tc.expectedMax, gotMax)
+			assert.Equal(t, tc.expectedUpdateMode, gotMode)
+		})
+	}
+}
+
+func buildCostAnalysisVPA(minMaxOverride, updateModeOverride, min, max, updateMode string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		"metadata": map[string]any{
+			"annotations": map[string]any{
+				"autoscaler.addons.k8s.io/override-min-max":     minMaxOverride,
+				"autoscaler.addons.k8s.io/override-update-mode": updateModeOverride,
+			},
+		},
+		"spec": map[string]any{
+			"updatePolicy": map[string]any{
+				"updateMode": updateMode,
+			},
+			"resourcePolicy": map[string]any{
+				"containerPolicies": []any{
+					map[string]any{
+						"containerName": "cost-analysis-agent",
+						"minAllowed":    map[string]any{"memory": min},
+						"maxAllowed":    map[string]any{"memory": max},
+					},
+				},
+			},
+		},
+	}}
+}
+
+func readCostAnalysisVPA(obj *unstructured.Unstructured) (min, max, mode string) {
+	mode, _, _ = unstructured.NestedString(obj.Object, "spec", "updatePolicy", "updateMode")
+	policies, _, _ := unstructured.NestedSlice(obj.Object, "spec", "resourcePolicy", "containerPolicies")
+	for _, p := range policies {
+		m, ok := p.(map[string]any)
+		if !ok {
+			continue
+		}
+		if m["containerName"] != "cost-analysis-agent" {
+			continue
+		}
+		if minAllowed, ok := m["minAllowed"].(map[string]any); ok {
+			if v, ok := minAllowed["memory"].(string); ok {
+				min = v
+			}
+		}
+		if maxAllowed, ok := m["maxAllowed"].(map[string]any); ok {
+			if v, ok := maxAllowed["memory"].(string); ok {
+				max = v
+			}
+		}
+		break
+	}
+	return min, max, mode
+}
+
 // helper functions for tests
 func mustParsePathExpr(path string) *PathExpr {
 	expr, err := ParsePathExpr(path)
