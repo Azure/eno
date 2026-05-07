@@ -279,19 +279,6 @@ func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Compos
 	logger := logr.FromContextOrDiscard(ctx)
 	copy := r.parsed.DeepCopy()
 
-	if r.Ref.Kind == "VerticalPodAutoscaler" && r.Ref.Name == "cost-analysis" {
-		if actual == nil {
-			logger.Info("[ENO-VPA-IN] no actual resource found", "namespace", r.Ref.Namespace, "name", r.Ref.Name)
-		} else {
-			spec, err := json.Marshal(actual.Object["spec"])
-			if err != nil {
-				logger.Info("[ENO-VPA-IN] failed to marshal actual spec", "namespace", r.Ref.Namespace, "name", r.Ref.Name, "error", err)
-			} else {
-				logger.Info("[ENO-VPA-IN] actual spec", "namespace", r.Ref.Namespace, "name", r.Ref.Name, "spec", string(spec))
-			}
-		}
-	}
-
 	overrideStatus := make([]string, 0, len(overrideRes.overrides)+1)
 	if overrideRes.overrideParseError != nil {
 		logger.Info("override annotation parse error", "error", overrideRes.overrideParseError)
@@ -302,17 +289,7 @@ func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Compos
 		if err != nil {
 			return nil, fmt.Errorf("applying override %d: %w", i+1, err)
 		}
-		logger.Info("override operation result", "index", i+1, "path", op.Path.String(), "status", status)
 		overrideStatus = append(overrideStatus, fmt.Sprintf("%s=%s", op.Path, status))
-	}
-
-	if r.Ref.Kind == "VerticalPodAutoscaler" && r.Ref.Name == "cost-analysis" {
-		spec, err := json.Marshal(copy.Object["spec"])
-		if err != nil {
-			logger.Info("[ENO-VPA-OUT] failed to marshal desired spec", "namespace", r.Ref.Namespace, "name", r.Ref.Name, "error", err)
-		} else {
-			logger.Info("[ENO-VPA-OUT] desired spec after overrides", "namespace", r.Ref.Namespace, "name", r.Ref.Name, "spec", string(spec))
-		}
 	}
 
 	snap := &Snapshot{
