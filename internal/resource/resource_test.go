@@ -123,7 +123,9 @@ var newResourceTests = []struct {
 			assert.Equal(t, int(0), r.readinessGroup)
 			assert.False(t, r.DisableUpdates)
 			assert.False(t, r.Replace)
-			assert.Nil(t, r.deletionGroup)
+			if assert.NotNil(t, r.deletionGroup) {
+				assert.Equal(t, -managedCreateOrder["ConfigMap"], *r.deletionGroup)
+			}
 		},
 	},
 	{
