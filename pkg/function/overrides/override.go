@@ -16,9 +16,10 @@ import (
 // trying to do type Override = intmut.Op will get you an erro about extending methods.
 // could make it a composition but not going down that path yet
 type Override struct {
-	Path      string `json:"path"`
-	Value     any    `json:"value"`
-	Condition string `json:"condition"`
+	Path         string `json:"path"`
+	Value        any    `json:"value"`
+	Condition    string `json:"condition"`
+	ValueExpression string `json:"valueExpression"`
 }
 
 func (o *Override) validate() (cel.Program, error) {
@@ -36,6 +37,11 @@ func (o *Override) validate() (cel.Program, error) {
 	if o.Condition == "" {
 		return nil, fmt.Errorf("condition is required")
 	}
+
+	if o.ValueExpression != "" && o.Value != nil {
+		return nil, fmt.Errorf("value and valueExpression are mutually exclusive for path %q", o.Path)
+	}
+
 	// Parse the expression
 	celEnv := intcel.Env
 	ast, issues := celEnv.Parse(o.Condition)
@@ -55,7 +61,13 @@ func (o *Override) validate() (cel.Program, error) {
 		return nil, fmt.Errorf("failed to create program: %w", err)
 	}
 
-	//Value can be null which is abit wierd.
+	if o.ValueExpression != "" {
+		_, err = intcel.Parse(o.ValueExpression)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse valueExpression: %w", err)
+		}
+	}
+
 	return p, nil
 
 }
@@ -88,7 +100,7 @@ func (o *Override) Test(data map[string]interface{}) (bool, error) {
 // String is for debugging only because escaped json cel is hard to read.
 func (o *Override) String() string {
 	//not actual json becuse escaping is hard to read.
-	return fmt.Sprintf("{Path: %s,\n Value: %v,\n Condition: %s}", o.Path, o.Value, o.Condition)
+	return fmt.Sprintf("{Path: %s,\n Value: %v,\n Condition: %s,\n ValueExpression: %s}", o.Path, o.Value, o.Condition, o.ValueExpression)
 }
 
 // AnnotateOverrides will take care of appropriatly serializng your overrides to annotations

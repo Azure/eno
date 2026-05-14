@@ -47,6 +47,29 @@ Supported fields:
 - `composition.metadata.labels`
 - `composition.metadata.annotations`
 
+## Dynamic Values with CEL
+
+Use `valueExpression` instead of `value` to dynamically resolve the override value from the resource's current state using a CEL expression:
+
+```yaml
+annotations:
+  eno.azure.io/overrides: |
+    [
+      {
+        "path": "self.spec.resourcePolicy.containerPolicies[0].maxAllowed.memory",
+        "valueExpression": "self.spec.resourcePolicy.containerPolicies[0].maxAllowed.memory",
+        "condition": "has(self.spec.resourcePolicy.containerPolicies[0].maxAllowed.memory)"
+      }
+    ]
+```
+
+This reads the current value of `maxAllowed.memory` from the live resource and preserves it, allowing customer overrides to persist across reconciliation cycles.
+
+- `valueExpression` is evaluated against the **current** (actual) resource state, same as `condition`
+- If the current resource doesn't exist yet, the override is skipped
+- You can use both `condition` and `valueExpression` together — the condition is checked first
+- `value` and `valueExpression` are mutually exclusive; if both are set, `valueExpression` takes precedence
+
 ## Overriding Annotations
 
 Override these Eno annotations to modify `eno-reconciler` behavior at runtime:

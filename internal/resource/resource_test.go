@@ -30,8 +30,8 @@ var newResourceTests = []struct {
 	{
 		Name: "configmap",
 		Manifest: `{
-			"apiVersion": "example.io/v1",
-			"kind": "Widget",
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
 			"metadata": {
 				"name": "foo",
 				"annotations": {
@@ -51,14 +51,14 @@ var newResourceTests = []struct {
 			}
 		}`,
 		Assert: func(t *testing.T, r *Snapshot) {
-			assert.Equal(t, schema.GroupVersionKind{Group: "example.io", Version: "v1", Kind: "Widget"}, r.GVK)
+			assert.Equal(t, schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, r.GVK)
 			assert.Len(t, r.ReadinessChecks, 2)
 			assert.Equal(t, time.Second*10, r.ReconcileInterval.Duration)
 			assert.Equal(t, Ref{
 				Name:      "foo",
 				Namespace: "",
-				Group:     "example.io",
-				Kind:      "Widget",
+				Group:     "",
+				Kind:      "ConfigMap",
 			}, r.Ref)
 			assert.True(t, r.Disable)
 			assert.True(t, r.DisableUpdates)
@@ -110,8 +110,8 @@ var newResourceTests = []struct {
 	{
 		Name: "zero-readiness-group",
 		Manifest: `{
-			"apiVersion": "example.io/v1",
-			"kind": "Widget",
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
 			"metadata": {
 				"name": "foo",
 				"annotations": {
@@ -123,7 +123,9 @@ var newResourceTests = []struct {
 			assert.Equal(t, int(0), r.readinessGroup)
 			assert.False(t, r.DisableUpdates)
 			assert.False(t, r.Replace)
-			assert.Nil(t, r.deletionGroup)
+			if assert.NotNil(t, r.deletionGroup) {
+				assert.Equal(t, -managedCreateOrder["ConfigMap"], *r.deletionGroup)
+			}
 		},
 	},
 	{
@@ -213,8 +215,8 @@ var newResourceTests = []struct {
 	{
 		Name: "negative-readiness-group",
 		Manifest: `{
-			"apiVersion": "example.io/v1",
-			"kind": "Widget",
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
 			"metadata": {
 				"name": "foo",
 				"annotations": {
@@ -422,6 +424,7 @@ var newResourceTests = []struct {
 		}`,
 		Assert: func(t *testing.T, r *Snapshot) {
 			assert.Len(t, r.overrides, 0)
+			assert.Contains(t, r.OverrideStatus(), "eno.azure.io/overrides=InvalidJSON")
 		},
 	},
 	{
