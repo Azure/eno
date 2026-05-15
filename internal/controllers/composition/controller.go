@@ -262,6 +262,15 @@ func (c *compositionController) reconcileSimplifiedStatus(ctx context.Context, s
 		return false, nil
 	}
 
+	if next != nil && synth != nil {
+		switch next.Status {
+		case "MissingInputs":
+			logger.Info("composition is missing required inputs", "missingInputs", inputs.Missing(synth, comp))
+		case "MismatchedInputs":
+			logger.Info("composition has inputs that are out of lockstep", "mismatchedInputs", inputs.Mismatched(synth, comp, comp.Status.InputRevisions), "synthesizerGeneration", synth.Generation, "compositionGeneration", comp.Generation)
+		}
+	}
+
 	logger.Info("composition status changed", "previousStatus", comp.Status.Simplified, "currentStatus", next)
 	copy := comp.DeepCopy()
 	copy.Status.Simplified = next

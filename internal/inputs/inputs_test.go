@@ -491,3 +491,245 @@ func TestOutOfLockstep(t *testing.T) {
 		})
 	}
 }
+
+func TestMissing(t *testing.T) {
+	tests := []struct {
+		Name        string
+		Composition apiv1.Composition
+		Synthesizer apiv1.Synthesizer
+		Expectation []string
+	}{
+		{
+			Name: "All required refs present",
+			Composition: apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Key: "key1"},
+						{Key: "key2"},
+					},
+				},
+			},
+			Synthesizer: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "key1"},
+						{Key: "key2"},
+					},
+				},
+			},
+			Expectation: nil,
+		},
+		{
+			Name: "One required ref missing",
+			Composition: apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Key: "key1"},
+					},
+				},
+			},
+			Synthesizer: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "key1"},
+						{Key: "key2"},
+					},
+				},
+			},
+			Expectation: []string{"key2"},
+		},
+		{
+			Name: "Multiple required refs missing reported in spec order",
+			Composition: apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Key: "key2"},
+					},
+				},
+			},
+			Synthesizer: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "key1"},
+						{Key: "key2"},
+						{Key: "key3"},
+					},
+				},
+			},
+			Expectation: []string{"key1", "key3"},
+		},
+		{
+			Name: "Optional missing ref is not reported",
+			Composition: apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Key: "key1"},
+					},
+				},
+			},
+			Synthesizer: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "key1"},
+						{Key: "key2", Optional: true},
+					},
+				},
+			},
+			Expectation: nil,
+		},
+		{
+			Name: "Required missing while optional missing - only required reported",
+			Composition: apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{},
+				},
+			},
+			Synthesizer: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "key1"},
+						{Key: "key2", Optional: true},
+					},
+				},
+			},
+			Expectation: []string{"key1"},
+		},
+		{
+			Name: "No refs declared",
+			Composition: apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{},
+				},
+			},
+			Synthesizer: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{Refs: []apiv1.Ref{}},
+			},
+			Expectation: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.Name, func(t *testing.T) {
+			result := Missing(&tt.Synthesizer, &tt.Composition)
+			assert.Equal(t, tt.Expectation, result)
+			// Consistency check: Exist iff Missing is empty.
+			assert.Equal(t, len(tt.Expectation) == 0, Exist(&tt.Synthesizer, &tt.Composition))
+		})
+	}
+}
+
+func TestMismatched(t *testing.T) {
+	revision1 := 1
+	revision2 := 2
+
+	tests := []struct {
+		Name        string
+		Input       apiv1.Composition
+		Synth       apiv1.Synthesizer
+		Expectation []MismatchedInput
+	}{
+		{
+			Name: "No revisions",
+			Input: apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{},
+				},
+			},
+			Expectation: nil,
+		},
+		{
+			Name: "All revisions match",
+			Input: apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Key: "a", Revision: &revision1},
+						{Key: "b", Revision: &revision1},
+					},
+				},
+			},
+			Expectation: nil,
+		},
+		{
+			Name: "One lagging behind",
+			Input: apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Key: "a", Revision: &revision1},
+						{Key: "b", Revision: &revision2},
+						{Key: "c", Revision: &revision1},
+					},
+				},
+			},
+			Expectation: []MismatchedInput{
+				{Key: "a", Revision: &revision1, MaxRevision: &revision2},
+				{Key: "c", Revision: &revision1, MaxRevision: &revision2},
+			},
+		},
+		{
+			Name: "Nil revision is not reported as mismatch",
+			Input: apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Key: "a", Revision: &revision1},
+						{Key: "b", Revision: nil},
+					},
+				},
+			},
+			Expectation: nil,
+		},
+		{
+			Name: "Stale synthesizer generation",
+			Input: apiv1.Composition{
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Key: "a", SynthesizerGeneration: ptr.To(int64(122))},
+					},
+				},
+			},
+			Synth: apiv1.Synthesizer{
+				ObjectMeta: metav1.ObjectMeta{Generation: 123},
+			},
+			Expectation: []MismatchedInput{
+				{Key: "a", SynthesizerGeneration: ptr.To(int64(122))},
+			},
+		},
+		{
+			Name: "Stale composition generation",
+			Input: apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{Generation: 5},
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Key: "a", CompositionGeneration: ptr.To(int64(4))},
+					},
+				},
+			},
+			Expectation: []MismatchedInput{
+				{Key: "a", CompositionGeneration: ptr.To(int64(4))},
+			},
+		},
+		{
+			Name: "Stale gens and revision mismatch combined",
+			Input: apiv1.Composition{
+				ObjectMeta: metav1.ObjectMeta{Generation: 5},
+				Status: apiv1.CompositionStatus{
+					InputRevisions: []apiv1.InputRevisions{
+						{Key: "a", Revision: &revision1, CompositionGeneration: ptr.To(int64(4))},
+						{Key: "b", Revision: &revision2, CompositionGeneration: ptr.To(int64(5))},
+					},
+				},
+			},
+			Expectation: []MismatchedInput{
+				{Key: "a", Revision: &revision1, MaxRevision: &revision2, CompositionGeneration: ptr.To(int64(4))},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.Name, func(t *testing.T) {
+			result := Mismatched(&tt.Synth, &tt.Input, tt.Input.Status.InputRevisions)
+			assert.Equal(t, tt.Expectation, result)
+			// Consistency check: OutOfLockstep iff Mismatched is non-empty.
+			assert.Equal(t, len(tt.Expectation) > 0, OutOfLockstep(&tt.Synth, &tt.Input, tt.Input.Status.InputRevisions))
+		})
+	}
+}
