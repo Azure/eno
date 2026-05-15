@@ -734,8 +734,8 @@ func TestMismatched(t *testing.T) {
 				},
 			},
 			Expectation: []MismatchedInput{
-				{Key: "a", Revision: &revision1, MaxRevision: &revision2},
-				{Key: "c", Revision: &revision1, MaxRevision: &revision2},
+				{Key: "a", Revision: revision1, MaxRevision: revision2},
+				{Key: "c", Revision: revision1, MaxRevision: revision2},
 			},
 		},
 		{
@@ -763,7 +763,7 @@ func TestMismatched(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Generation: 123},
 			},
 			Expectation: []MismatchedInput{
-				{Key: "a", SynthesizerGeneration: ptr.To(int64(122))},
+				{Key: "a", SynthesizerGeneration: 122},
 			},
 		},
 		{
@@ -777,7 +777,7 @@ func TestMismatched(t *testing.T) {
 				},
 			},
 			Expectation: []MismatchedInput{
-				{Key: "a", CompositionGeneration: ptr.To(int64(4))},
+				{Key: "a", CompositionGeneration: 4},
 			},
 		},
 		{
@@ -792,7 +792,7 @@ func TestMismatched(t *testing.T) {
 				},
 			},
 			Expectation: []MismatchedInput{
-				{Key: "a", Revision: &revision1, MaxRevision: &revision2, CompositionGeneration: ptr.To(int64(4))},
+				{Key: "a", Revision: revision1, MaxRevision: revision2, CompositionGeneration: 4},
 			},
 		},
 	}

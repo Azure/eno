@@ -50,14 +50,15 @@ func OutOfLockstep(synth *apiv1.Synthesizer, comp *apiv1.Composition, revs []api
 	return len(Mismatched(synth, comp, revs)) > 0
 }
 
-// MismatchedInput describes a single input revision that is out of lockstep with the others
-// (or with the current synthesizer/composition generation). It is intended for logging/telemetry.
+// MismatchedInput describes a single input revision that is out of lockstep,
+// either with peer revisions or with the current synthesizer/composition
+// generation. Intended for logging only. Numeric fields are 0 when unknown.
 type MismatchedInput struct {
 	Key                   string
-	Revision              *int
-	MaxRevision           *int
-	SynthesizerGeneration *int64
-	CompositionGeneration *int64
+	Revision              int   // 0 if unset
+	MaxRevision           int   // 0 if no peer revision was observed
+	SynthesizerGeneration int64 // 0 if unset
+	CompositionGeneration int64 // 0 if unset
 }
 
 // Mismatched returns the set of input revisions that are out of lockstep with the others, or
@@ -66,13 +67,15 @@ func Mismatched(synth *apiv1.Synthesizer, comp *apiv1.Composition, revs []apiv1.
 	var mismatched []MismatchedInput
 
 	// First, find the max revision across all bindings
-	var maxRevision *int
+	maxRevision := 0
+	maxSet := false
 	for _, rev := range revs {
 		if rev.Revision == nil {
 			continue
 		}
-		if maxRevision == nil || *rev.Revision > *maxRevision {
-			maxRevision = rev.Revision
+		if !maxSet || *rev.Revision > maxRevision {
+			maxRevision = *rev.Revision
+			maxSet = true
 		}
 	}
 
@@ -84,17 +87,24 @@ func Mismatched(synth *apiv1.Synthesizer, comp *apiv1.Composition, revs []apiv1.
 		if rev.CompositionGeneration != nil && *rev.CompositionGeneration < comp.Generation {
 			stale = true
 		}
-		revMismatch := maxRevision != nil && rev.Revision != nil && *rev.Revision != *maxRevision
+		revMismatch := maxSet && rev.Revision != nil && *rev.Revision != maxRevision
 		if !stale && !revMismatch {
 			continue
 		}
-		mismatched = append(mismatched, MismatchedInput{
-			Key:                   rev.Key,
-			Revision:              rev.Revision,
-			MaxRevision:           maxRevision,
-			SynthesizerGeneration: rev.SynthesizerGeneration,
-			CompositionGeneration: rev.CompositionGeneration,
-		})
+		entry := MismatchedInput{Key: rev.Key}
+		if maxSet {
+			entry.MaxRevision = maxRevision
+		}
+		if rev.Revision != nil {
+			entry.Revision = *rev.Revision
+		}
+		if rev.SynthesizerGeneration != nil {
+			entry.SynthesizerGeneration = *rev.SynthesizerGeneration
+		}
+		if rev.CompositionGeneration != nil {
+			entry.CompositionGeneration = *rev.CompositionGeneration
+		}
+		mismatched = append(mismatched, entry)
 	}
 	return mismatched
 }

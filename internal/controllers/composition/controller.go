@@ -33,6 +33,8 @@ const (
 	AKSComponentLabel                   = "aks.azure.com/component-type" // TODO(ruinanliu): Temp workaround remove after 14802391 is released
 	addOnLabelValue                     = "addon"                        // TODO(ruinanliu):  Temp workaround remove after 14802391 is released
 	EnoCleanupFinalizer                 = "eno.azure.io/cleanup"
+	MissingInputStatus                  = "MissingInputs"
+	MismatchedInputsStatus              = "MismatchedInputs"
 )
 
 type compositionController struct {
@@ -262,11 +264,11 @@ func (c *compositionController) reconcileSimplifiedStatus(ctx context.Context, s
 		return false, nil
 	}
 
-	if next != nil && synth != nil {
+	if synth != nil {
 		switch next.Status {
-		case "MissingInputs":
+		case MissingInputStatus:
 			logger.Info("composition is missing required inputs", "missingInputs", inputs.Missing(synth, comp), "expectedInputs", inputs.Expected(synth))
-		case "MismatchedInputs":
+		case MismatchedInputsStatus:
 			logger.Info("composition has inputs that are out of lockstep", "mismatchedInputs", inputs.Mismatched(synth, comp, comp.Status.InputRevisions), "synthesizerGeneration", synth.Generation, "compositionGeneration", comp.Generation)
 		}
 	}
@@ -392,11 +394,11 @@ func buildSimplifiedStatus(synth *apiv1.Synthesizer, comp *apiv1.Composition) *a
 	}
 
 	if !inputs.Exist(synth, comp) {
-		status.Status = "MissingInputs"
+		status.Status = MissingInputStatus
 		return status
 	}
 	if inputs.OutOfLockstep(synth, comp, comp.Status.InputRevisions) {
-		status.Status = "MismatchedInputs"
+		status.Status = MismatchedInputsStatus
 	}
 
 	if comp.Status.CurrentSynthesis == nil && comp.Status.InFlightSynthesis == nil {
