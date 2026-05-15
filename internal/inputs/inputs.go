@@ -32,6 +32,18 @@ func Missing(syn *apiv1.Synthesizer, c *apiv1.Composition) []string {
 	return missing
 }
 
+// Expected returns the keys of all non-optional inputs declared by the synthesizer.
+func Expected(syn *apiv1.Synthesizer) []string {
+	var expected []string
+	for _, ref := range syn.Spec.Refs {
+		if ref.Optional {
+			continue
+		}
+		expected = append(expected, ref.Key)
+	}
+	return expected
+}
+
 // OutOfLockstep returns true when one or more inputs that specify a revision do not match the others.
 // It also returns true if any revision is derived from a synthesizer/composition generation older than the ones provided.
 func OutOfLockstep(synth *apiv1.Synthesizer, comp *apiv1.Composition, revs []apiv1.InputRevisions) bool {

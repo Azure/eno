@@ -618,6 +618,79 @@ func TestMissing(t *testing.T) {
 	}
 }
 
+func TestExpected(t *testing.T) {
+	tests := []struct {
+		Name        string
+		Synthesizer apiv1.Synthesizer
+		Expectation []string
+	}{
+		{
+			Name: "All required refs",
+			Synthesizer: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "key1"},
+						{Key: "key2"},
+					},
+				},
+			},
+			Expectation: []string{"key1", "key2"},
+		},
+		{
+			Name: "Optional refs excluded",
+			Synthesizer: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "key1"},
+						{Key: "key2", Optional: true},
+						{Key: "key3"},
+					},
+				},
+			},
+			Expectation: []string{"key1", "key3"},
+		},
+		{
+			Name: "All optional refs",
+			Synthesizer: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "key1", Optional: true},
+						{Key: "key2", Optional: true},
+					},
+				},
+			},
+			Expectation: nil,
+		},
+		{
+			Name: "No refs declared",
+			Synthesizer: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{Refs: []apiv1.Ref{}},
+			},
+			Expectation: nil,
+		},
+		{
+			Name: "Spec order is preserved",
+			Synthesizer: apiv1.Synthesizer{
+				Spec: apiv1.SynthesizerSpec{
+					Refs: []apiv1.Ref{
+						{Key: "c"},
+						{Key: "a"},
+						{Key: "b"},
+					},
+				},
+			},
+			Expectation: []string{"c", "a", "b"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.Name, func(t *testing.T) {
+			result := Expected(&tt.Synthesizer)
+			assert.Equal(t, tt.Expectation, result)
+		})
+	}
+}
+
 func TestMismatched(t *testing.T) {
 	revision1 := 1
 	revision2 := 2
