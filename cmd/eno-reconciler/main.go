@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,9 +52,17 @@ func run() error {
 
 		recOpts = reconciliation.Options{}
 	)
+	defaultMaxConcurrentReconciles := 1
+	if v := os.Getenv("ENO_RECONCILER_MAX_CONCURRENT_RECONCILES"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("invalid ENO_RECONCILER_MAX_CONCURRENT_RECONCILES %q: %w", v, err)
+		}
+		defaultMaxConcurrentReconciles = n
+	}
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.StringVar(&remoteKubeconfigFile, "remote-kubeconfig", "", "Path to the kubeconfig of the apiserver where the resources will be reconciled. The config from the environment is used if this is not provided")
-	flag.Float64Var(&remoteQPS, "remote-qps", 50, "Max requests per second to the remote apiserver")
+	flag.Float64Var(&remoteQPS, "remote-qps", 100, "Max requests per second to the remote apiserver")
 	flag.DurationVar(&recOpts.Timeout, "timeout", time.Minute, "Per-resource reconciliation timeout. Avoids cases where client retries/timeouts are configured poorly and the loop gets blocked")
 	flag.DurationVar(&recOpts.ReadinessPollInterval, "readiness-poll-interval", time.Second*5, "Interval at which non-ready resources will be checked for readiness")
 	flag.DurationVar(&recOpts.MinReconcileInterval, "min-reconcile-interval", time.Second, "Minimum value of eno.azure.com/reconcile-interval that will be honored by the controller")
@@ -66,6 +75,7 @@ func run() error {
 	flag.BoolVar(&recOpts.FailOpen, "fail-open", false, "Report that resources are reconciled once they've been seen, even if reconciliation failed. Overridden by individual resources with 'eno.azure.io/fail-open: true|false'")
 	flag.StringVar(&migratingFieldManagers, "migrating-field-managers", os.Getenv("MIGRATING_FIELD_MANAGERS"), "Comma-separated list of Kubernetes SSA field manager names to take ownership from during migrations")
 	flag.StringVar(&migratingFields, "migrating-fields", os.Getenv("MIGRATING_FIELDS"), "Comma-seperated list of fields Kubernetes fields(metadata.labels, spec, stringData...) to migrate the ownership to eno")
+	flag.IntVar(&recOpts.MaxConcurrentReconciles, "max-concurrent-reconciles", defaultMaxConcurrentReconciles, "Maximum number of concurrent reconciles for the reconciliation controller")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 
@@ -79,6 +89,26 @@ func run() error {
 	}
 	enoBuildVersion = os.Getenv("ENO_BUILD_VERSION")
 	logger := logging.NewLoggerWithBuild(zl, enoBuildVersion)
+
+	logger.Info("reconciler configuration",
+		"debugLogging", debugLogging,
+		"remoteKubeconfigFile", remoteKubeconfigFile,
+		"remoteQPS", remoteQPS,
+		"timeout", recOpts.Timeout,
+		"readinessPollInterval", recOpts.ReadinessPollInterval,
+		"minReconcileInterval", recOpts.MinReconcileInterval,
+		"disableServerSideApply", recOpts.DisableServerSideApply,
+		"compositionLabelSelector", compositionSelector,
+		"compositionNamespace", compositionNamespace,
+		"resourceFilter", resourceFilter,
+		"namespaceCreationGracePeriod", namespaceCreationGracePeriod,
+		"namespaceCleanup", namespaceCleanup,
+		"failOpen", recOpts.FailOpen,
+		"migratingFieldManagers", migratingFieldManagers,
+		"migratingFields", migratingFields,
+		"maxConcurrentReconciles", recOpts.MaxConcurrentReconciles,
+		"enoBuildVersion", enoBuildVersion,
+	)
 
 	mgrOpts.CompositionNamespace = compositionNamespace
 	if compositionSelector != "" {
