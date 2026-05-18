@@ -53,7 +53,7 @@ func run() error {
 	)
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.StringVar(&remoteKubeconfigFile, "remote-kubeconfig", "", "Path to the kubeconfig of the apiserver where the resources will be reconciled. The config from the environment is used if this is not provided")
-	flag.Float64Var(&remoteQPS, "remote-qps", 100, "Max requests per second to the remote apiserver")
+	flag.Float64Var(&remoteQPS, "remote-qps", 50, "Max requests per second to the remote apiserver")
 	flag.DurationVar(&recOpts.Timeout, "timeout", time.Minute, "Per-resource reconciliation timeout. Avoids cases where client retries/timeouts are configured poorly and the loop gets blocked")
 	flag.DurationVar(&recOpts.ReadinessPollInterval, "readiness-poll-interval", time.Second*5, "Interval at which non-ready resources will be checked for readiness")
 	flag.DurationVar(&recOpts.MinReconcileInterval, "min-reconcile-interval", time.Second, "Minimum value of eno.azure.com/reconcile-interval that will be honored by the controller")
