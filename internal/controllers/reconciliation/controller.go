@@ -43,21 +43,24 @@ type Options struct {
 	Timeout               time.Duration
 	ReadinessPollInterval time.Duration
 	MinReconcileInterval  time.Duration
+
+	MaxConcurrentReconciles int
 }
 
 type Controller struct {
-	client                 client.Client
-	writeBuffer            *flowcontrol.ResourceSliceWriteBuffer
-	resourceClient         *resource.Cache
-	resourceFilter         cel.Program
-	timeout                time.Duration
-	readinessPollInterval  time.Duration
-	upstreamClient         client.Client
-	minReconcileInterval   time.Duration
-	disableSSA             bool
-	failOpen               bool
-	migratingFieldManagers []string
-	migratingFields        []string
+	client                  client.Client
+	writeBuffer             *flowcontrol.ResourceSliceWriteBuffer
+	resourceClient          *resource.Cache
+	resourceFilter          cel.Program
+	timeout                 time.Duration
+	readinessPollInterval   time.Duration
+	upstreamClient          client.Client
+	minReconcileInterval    time.Duration
+	disableSSA              bool
+	failOpen                bool
+	migratingFieldManagers  []string
+	migratingFields         []string
+	maxConcurrentReconciles int
 }
 
 func New(mgr ctrl.Manager, opts Options) error {
@@ -74,18 +77,19 @@ func New(mgr ctrl.Manager, opts Options) error {
 	}
 
 	c := &Controller{
-		client:                 opts.Manager.GetClient(),
-		writeBuffer:            opts.WriteBuffer,
-		resourceClient:         cache,
-		resourceFilter:         opts.ResourceFilter,
-		timeout:                opts.Timeout,
-		readinessPollInterval:  opts.ReadinessPollInterval,
-		upstreamClient:         upstreamClient,
-		minReconcileInterval:   opts.MinReconcileInterval,
-		disableSSA:             opts.DisableServerSideApply,
-		failOpen:               opts.FailOpen,
-		migratingFieldManagers: opts.MigratingFieldManagers,
-		migratingFields:        opts.MigratingFields,
+		client:                  opts.Manager.GetClient(),
+		writeBuffer:             opts.WriteBuffer,
+		resourceClient:          cache,
+		resourceFilter:          opts.ResourceFilter,
+		timeout:                 opts.Timeout,
+		readinessPollInterval:   opts.ReadinessPollInterval,
+		upstreamClient:          upstreamClient,
+		minReconcileInterval:    opts.MinReconcileInterval,
+		disableSSA:              opts.DisableServerSideApply,
+		failOpen:                opts.FailOpen,
+		migratingFieldManagers:  opts.MigratingFieldManagers,
+		migratingFields:         opts.MigratingFields,
+		maxConcurrentReconciles: opts.MaxConcurrentReconciles,
 	}
 
 	return builder.TypedControllerManagedBy[resource.Request](mgr).
@@ -97,7 +101,8 @@ func New(mgr ctrl.Manager, opts Options) error {
 			//
 			// This rate limiter uses the same per-item rate limiter as the default, but without
 			// the additional shared/global/non-item-scoped limiter.
-			RateLimiter: workqueue.NewTypedItemExponentialFailureRateLimiter[resource.Request](5*time.Millisecond, 1000*time.Second),
+			RateLimiter:             workqueue.NewTypedItemExponentialFailureRateLimiter[resource.Request](5*time.Millisecond, 1000*time.Second),
+			MaxConcurrentReconciles: c.maxConcurrentReconciles,
 		}).
 		WatchesRawSource(src).
 		Complete(c)

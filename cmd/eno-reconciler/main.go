@@ -66,6 +66,7 @@ func run() error {
 	flag.BoolVar(&recOpts.FailOpen, "fail-open", false, "Report that resources are reconciled once they've been seen, even if reconciliation failed. Overridden by individual resources with 'eno.azure.io/fail-open: true|false'")
 	flag.StringVar(&migratingFieldManagers, "migrating-field-managers", os.Getenv("MIGRATING_FIELD_MANAGERS"), "Comma-separated list of Kubernetes SSA field manager names to take ownership from during migrations")
 	flag.StringVar(&migratingFields, "migrating-fields", os.Getenv("MIGRATING_FIELDS"), "Comma-seperated list of fields Kubernetes fields(metadata.labels, spec, stringData...) to migrate the ownership to eno")
+	flag.IntVar(&recOpts.MaxConcurrentReconciles, "max-concurrent-reconciles", 1, "Maximum number of concurrent reconciles for the reconciliation controller")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 
@@ -148,6 +149,26 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("constructing reconciliation controller: %w", err)
 	}
+
+	logger.Info("reconciler configuration",
+		"debugLogging", debugLogging,
+		"remoteKubeconfigFile", remoteKubeconfigFile,
+		"remoteQPS", remoteQPS,
+		"timeout", recOpts.Timeout,
+		"readinessPollInterval", recOpts.ReadinessPollInterval,
+		"minReconcileInterval", recOpts.MinReconcileInterval,
+		"disableServerSideApply", recOpts.DisableServerSideApply,
+		"compositionLabelSelector", compositionSelector,
+		"compositionNamespace", compositionNamespace,
+		"resourceFilter", resourceFilter,
+		"namespaceCreationGracePeriod", namespaceCreationGracePeriod,
+		"namespaceCleanup", namespaceCleanup,
+		"failOpen", recOpts.FailOpen,
+		"migratingFieldManagers", migratingFieldManagers,
+		"migratingFields", migratingFields,
+		"maxConcurrentReconciles", recOpts.MaxConcurrentReconciles,
+		"enoBuildVersion", enoBuildVersion,
+	)
 
 	return mgr.Start(ctx)
 }
