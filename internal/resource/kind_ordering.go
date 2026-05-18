@@ -35,5 +35,6 @@ var managedCreateOrder = map[string]int{
 	"RoleBinding":              -100,
 	"RoleBindingList":          -100,
 	"Service":                  -100,
-	"EtcdCluster":              -100,
+	// TO-DO: Cleanup this once ETCD will reconcile on its own
+	"EtcdCluster": -100,
 }
