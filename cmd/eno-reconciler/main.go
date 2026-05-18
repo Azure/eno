@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -52,14 +51,6 @@ func run() error {
 
 		recOpts = reconciliation.Options{}
 	)
-	defaultMaxConcurrentReconciles := 1
-	if v := os.Getenv("ENO_RECONCILER_MAX_CONCURRENT_RECONCILES"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			return fmt.Errorf("invalid ENO_RECONCILER_MAX_CONCURRENT_RECONCILES %q: %w", v, err)
-		}
-		defaultMaxConcurrentReconciles = n
-	}
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.StringVar(&remoteKubeconfigFile, "remote-kubeconfig", "", "Path to the kubeconfig of the apiserver where the resources will be reconciled. The config from the environment is used if this is not provided")
 	flag.Float64Var(&remoteQPS, "remote-qps", 100, "Max requests per second to the remote apiserver")
@@ -75,7 +66,7 @@ func run() error {
 	flag.BoolVar(&recOpts.FailOpen, "fail-open", false, "Report that resources are reconciled once they've been seen, even if reconciliation failed. Overridden by individual resources with 'eno.azure.io/fail-open: true|false'")
 	flag.StringVar(&migratingFieldManagers, "migrating-field-managers", os.Getenv("MIGRATING_FIELD_MANAGERS"), "Comma-separated list of Kubernetes SSA field manager names to take ownership from during migrations")
 	flag.StringVar(&migratingFields, "migrating-fields", os.Getenv("MIGRATING_FIELDS"), "Comma-seperated list of fields Kubernetes fields(metadata.labels, spec, stringData...) to migrate the ownership to eno")
-	flag.IntVar(&recOpts.MaxConcurrentReconciles, "max-concurrent-reconciles", defaultMaxConcurrentReconciles, "Maximum number of concurrent reconciles for the reconciliation controller")
+	flag.IntVar(&recOpts.MaxConcurrentReconciles, "max-concurrent-reconciles", 1, "Maximum number of concurrent reconciles for the reconciliation controller")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 
