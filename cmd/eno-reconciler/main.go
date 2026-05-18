@@ -81,26 +81,6 @@ func run() error {
 	enoBuildVersion = os.Getenv("ENO_BUILD_VERSION")
 	logger := logging.NewLoggerWithBuild(zl, enoBuildVersion)
 
-	logger.Info("reconciler configuration",
-		"debugLogging", debugLogging,
-		"remoteKubeconfigFile", remoteKubeconfigFile,
-		"remoteQPS", remoteQPS,
-		"timeout", recOpts.Timeout,
-		"readinessPollInterval", recOpts.ReadinessPollInterval,
-		"minReconcileInterval", recOpts.MinReconcileInterval,
-		"disableServerSideApply", recOpts.DisableServerSideApply,
-		"compositionLabelSelector", compositionSelector,
-		"compositionNamespace", compositionNamespace,
-		"resourceFilter", resourceFilter,
-		"namespaceCreationGracePeriod", namespaceCreationGracePeriod,
-		"namespaceCleanup", namespaceCleanup,
-		"failOpen", recOpts.FailOpen,
-		"migratingFieldManagers", migratingFieldManagers,
-		"migratingFields", migratingFields,
-		"maxConcurrentReconciles", recOpts.MaxConcurrentReconciles,
-		"enoBuildVersion", enoBuildVersion,
-	)
-
 	mgrOpts.CompositionNamespace = compositionNamespace
 	if compositionSelector != "" {
 		var err error
@@ -169,6 +149,26 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("constructing reconciliation controller: %w", err)
 	}
+
+	logger.Info("reconciler configuration",
+		"debugLogging", debugLogging,
+		"remoteKubeconfigFile", remoteKubeconfigFile,
+		"remoteQPS", remoteQPS,
+		"timeout", recOpts.Timeout,
+		"readinessPollInterval", recOpts.ReadinessPollInterval,
+		"minReconcileInterval", recOpts.MinReconcileInterval,
+		"disableServerSideApply", recOpts.DisableServerSideApply,
+		"compositionLabelSelector", compositionSelector,
+		"compositionNamespace", compositionNamespace,
+		"resourceFilter", resourceFilter,
+		"namespaceCreationGracePeriod", namespaceCreationGracePeriod,
+		"namespaceCleanup", namespaceCleanup,
+		"failOpen", recOpts.FailOpen,
+		"migratingFieldManagers", migratingFieldManagers,
+		"migratingFields", migratingFields,
+		"maxConcurrentReconciles", recOpts.MaxConcurrentReconciles,
+		"enoBuildVersion", enoBuildVersion,
+	)
 
 	return mgr.Start(ctx)
 }
