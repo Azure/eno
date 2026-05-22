@@ -103,6 +103,16 @@ func New(mgr ctrl.Manager, opts Options) error {
 			// the additional shared/global/non-item-scoped limiter.
 			RateLimiter:             workqueue.NewTypedItemExponentialFailureRateLimiter[resource.Request](5*time.Millisecond, 1000*time.Second),
 			MaxConcurrentReconciles: c.maxConcurrentReconciles,
+			// Build the workqueue ourselves so we can capture a reference to it for metrics relateing to reconciliation
+			// The constructor below is what controller-runtime would have called by default.
+			NewQueue: func(name string, rl workqueue.TypedRateLimiter[resource.Request]) workqueue.TypedRateLimitingInterface[resource.Request] {
+				q := workqueue.NewTypedRateLimitingQueueWithConfig(
+					rl,
+					workqueue.TypedRateLimitingQueueConfig[resource.Request]{Name: name},
+				)
+				setWorkqueueLenSource(q.Len)
+				return q
+			},
 		}).
 		WatchesRawSource(src).
 		Complete(c)
@@ -236,7 +246,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 	logger := logr.FromContextOrDiscard(ctx)
 	start := time.Now()
 	defer func() {
-		reconciliationLatency.Observe(float64(time.Since(start).Milliseconds()))
+		reconciliationLatency.Observe(time.Since(start).Seconds())
 	}()
 
 	if res.Deleted() {

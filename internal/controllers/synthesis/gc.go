@@ -20,6 +20,18 @@ type podGarbageCollector struct {
 	client          client.Client
 	creationTimeout time.Duration
 }
+type terminalReason string
+
+const (
+	reasonSuccess            terminalReason = "success"
+	reasonTimeout            terminalReason = "timeout"
+	reasonSuperseded         terminalReason = "superseded"
+	reasonOrphaned           terminalReason = "orphaned"
+	reasonImageChanged       terminalReason = "image_changed"
+	reasonCompositionDeleted terminalReason = "composition_deleted"
+	reasonSynthesizerDeleted terminalReason = "synthesizer_deleted"
+	reasonKubeletTimeout     terminalReason = "kubelet_timeout"
+)
 
 func NewPodGC(mgr ctrl.Manager, creationTimeout time.Duration) error {
 	c := &podGarbageCollector{
@@ -61,7 +73,7 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{RequeueAfter: p.creationTimeout - delta}, nil
 		}
 		logger = logger.WithValues("reason", "ContainerCreationTimeout")
-		return ctrl.Result{}, p.deletePod(ctx, pod, logger)
+		return ctrl.Result{}, p.deletePod(ctx, pod, getSynthesizerName(pod), reasonKubeletTimeout, logger)
 	}
 
 	// GC pods from deleted compositions
@@ -73,7 +85,7 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 		"operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	if errors.IsNotFound(err) || comp.DeletionTimestamp != nil {
 		logger = logger.WithValues("reason", "CompositionDeleted")
-		return ctrl.Result{}, p.deletePod(ctx, pod, logger)
+		return ctrl.Result{}, p.deletePod(ctx, pod, getSynthesizerName(pod), reasonCompositionDeleted, logger)
 	}
 	if err != nil {
 		logger.Error(err, "failed to get composition resource")
@@ -87,7 +99,7 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 	logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
 	if errors.IsNotFound(err) {
 		logger = logger.WithValues("reason", "SynthesizerDeleted")
-		return ctrl.Result{}, p.deletePod(ctx, pod, logger)
+		return ctrl.Result{}, p.deletePod(ctx, pod, getSynthesizerName(pod), reasonSynthesizerDeleted, logger)
 	}
 	if err != nil {
 		logger.Error(err, "failed to get synthesizer")
@@ -104,19 +116,19 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 	// The image tag must match the current synthesizer, otherwise other properties (e.g. refs) may be incorrect
 	if img := findContainerImage(pod); img != "" && img != syn.Spec.Image {
 		logger = logger.WithValues("reason", "ImageChanged")
-		return ctrl.Result{}, p.deletePod(ctx, pod, logger)
+		return ctrl.Result{}, p.deletePod(ctx, pod, getSynthesizerName(pod), reasonImageChanged, logger)
 	}
 
 	if syn := comp.Status.InFlightSynthesis; syn != nil {
 		if syn.Canceled != nil {
 			logger = logger.WithValues("reason", "Timeout")
-			return ctrl.Result{}, p.deletePod(ctx, pod, logger)
+			return ctrl.Result{}, p.deletePod(ctx, pod, getSynthesizerName(pod), reasonTimeout, logger)
 		}
 
 		// A new synthesis has replaced the previous
 		if syn.UUID != pod.Labels[synthesisIDLabelKey] {
 			logger = logger.WithValues("reason", "Superseded")
-			return ctrl.Result{}, p.deletePod(ctx, pod, logger)
+			return ctrl.Result{}, p.deletePod(ctx, pod, getSynthesizerName(pod), reasonSuperseded, logger)
 		}
 
 		return ctrl.Result{RequeueAfter: time.Second}, nil // still active
@@ -125,15 +137,15 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 	// In-flight synthesis being swapped to current == synthesis completed
 	if syn := comp.Status.CurrentSynthesis; syn != nil && syn.UUID == pod.Labels[synthesisIDLabelKey] {
 		logger = logger.WithValues("reason", "Success")
-		return ctrl.Result{}, p.deletePod(ctx, pod, logger)
+		return ctrl.Result{}, p.deletePod(ctx, pod, getSynthesizerName(pod), reasonSuccess, logger)
 	}
 
 	// This condition should only be able to happen when the composition has been deleted
 	logger = logger.WithValues("reason", "Orphaned")
-	return ctrl.Result{}, p.deletePod(ctx, pod, logger)
+	return ctrl.Result{}, p.deletePod(ctx, pod, getSynthesizerName(pod), reasonOrphaned, logger)
 }
 
-func (p *podGarbageCollector) deletePod(ctx context.Context, pod *corev1.Pod, logger logr.Logger) error {
+func (p *podGarbageCollector) deletePod(ctx context.Context, pod *corev1.Pod, synthesizerName string, reason terminalReason, logger logr.Logger) error {
 	logger = logger.WithValues("podPhase", string(pod.Status.Phase), "podNodeName", pod.Spec.NodeName)
 	if cs := pod.Status.ContainerStatuses; len(cs) > 0 {
 		logger = logger.WithValues("restarts", cs[0].RestartCount, "containerStarted", cs[0].Started, "containerImage", cs[0].Image)
@@ -142,6 +154,11 @@ func (p *podGarbageCollector) deletePod(ctx context.Context, pod *corev1.Pod, lo
 	if err != nil {
 		return fmt.Errorf("deleting pod: %w", err)
 	}
+	latency := time.Since(pod.CreationTimestamp.Time)
+
+	synthesisResults.WithLabelValues(synthesizerName, string(reason)).Inc()
+	synthesisDuration.WithLabelValues(synthesizerName, string(reason)).Observe(latency.Seconds())
+
 	logger.Info("deleted synthesizer pod", "latency", time.Since(pod.CreationTimestamp.Time).Milliseconds())
 	return nil
 }
@@ -169,4 +186,8 @@ func synthesisAge(comp *apiv1.Composition) *int64 {
 		return nil
 	}
 	return ptr.To(time.Since(syn.Initialized.Time).Milliseconds())
+}
+
+func getSynthesizerName(pod *corev1.Pod) string {
+	return pod.GetLabels()[synthesizerNameLabelKey]
 }

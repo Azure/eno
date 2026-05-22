@@ -37,10 +37,25 @@ var (
 			Help: "Health status of each composition (0 = healthy, 1 = stuck/unhealthy)",
 		}, []string{"composition_name", "composition_namespace", "synthesizer_name"},
 	)
+
+	// Per-composition wait between Synthesis.Initialized (the moment the controller
+	// decided this composition should be synthesized) and successful creation of
+	// the synthesizer pod. Captures customer-visible queueing latency that is
+	// independent of synthesizer pod runtime. Anomaly example: p95 jumps from
+	// sub-second into the 60-300s bucket while `eno_free_synthesis_slots` is
+	// occasionally non-zero — points at a dispatch-loop stall or apiserver
+	// contention rather than raw capacity exhaustion.
+	synthesisDispatchWait = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "eno_composition_synthesis_wait_seconds",
+			Help:    "Time from Synthesis.Initialized to successful pod creation",
+			Buckets: []float64{0.1, 0.5, 1, 5, 15, 60, 300, 900},
+		},
+	)
 )
 
 func init() {
-	metrics.Registry.MustRegister(freeSynthesisSlots, schedulingLatency, stuckReconciling, compositionHealth)
+	metrics.Registry.MustRegister(freeSynthesisSlots, schedulingLatency, stuckReconciling, compositionHealth, synthesisDispatchWait)
 }
 
 func missedReconciliation(comp *apiv1.Composition, threshold time.Duration) bool {
@@ -55,4 +70,8 @@ func missedReconciliation(comp *apiv1.Composition, threshold time.Duration) bool
 		return true // stuck waiting for synthesis dispatch
 	}
 	return syn != nil && syn.Initialized != nil && time.Since(syn.Initialized.Time) > threshold // stuck waiting for reconciliation
+}
+
+func ObserveSynthesisDispatchWait(seconds float64) {
+	synthesisDispatchWait.Observe(seconds)
 }

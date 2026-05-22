@@ -16,6 +16,7 @@ const (
 	compositionNameLabelKey      = "eno.azure.io/composition-name"
 	compositionNamespaceLabelKey = "eno.azure.io/composition-namespace"
 	synthesisIDLabelKey          = "eno.azure.io/synthesis-uuid"
+	synthesizerNameLabelKey      = "eno.azure.io/synthesizer-name"
 )
 
 func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev1.Pod {
@@ -26,6 +27,7 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 		compositionNameLabelKey:      comp.Name,
 		compositionNamespaceLabelKey: comp.Namespace,
 		synthesisIDLabelKey:          comp.Status.InFlightSynthesis.UUID,
+		synthesizerNameLabelKey:      comp.Spec.Synthesizer.Name,
 		manager.ManagerLabelKey:      manager.ManagerLabelValue,
 	}
 	// Apply controller flag overrides first.
