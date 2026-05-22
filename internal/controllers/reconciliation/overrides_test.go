@@ -1218,7 +1218,9 @@ func TestOverrideVPAMinMax(t *testing.T) {
 
 	// === Case 1: Annotation OFF, no changes — defaults preserved ===
 	testutil.Eventually(t, func() bool {
-		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+			return false
+		}
 		return cm.Data["min-cpu"] == "100m" && cm.Data["min-memory"] == "128Mi" &&
 			cm.Data["max-cpu"] == "2" && cm.Data["max-memory"] == "4Gi"
 	})
@@ -1237,7 +1239,9 @@ func TestOverrideVPAMinMax(t *testing.T) {
 	require.NoError(t, err)
 
 	testutil.Eventually(t, func() bool {
-		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+			return false
+		}
 		return cm.Data["min-cpu"] == "100m" && cm.Data["min-memory"] == "128Mi" &&
 			cm.Data["max-cpu"] == "2" && cm.Data["max-memory"] == "4Gi"
 	})
@@ -1258,7 +1262,9 @@ func TestOverrideVPAMinMax(t *testing.T) {
 	// valueExpression reads self.data['min-cpu'] from live = "100m" (same as default), so no visible change
 	time.Sleep(100 * time.Millisecond)
 	testutil.Eventually(t, func() bool {
-		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+			return false
+		}
 		return cm.Data["min-cpu"] == "100m" && cm.Data["min-memory"] == "128Mi" &&
 			cm.Data["max-cpu"] == "2" && cm.Data["max-memory"] == "4Gi"
 	})
@@ -1277,7 +1283,9 @@ func TestOverrideVPAMinMax(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 	testutil.Eventually(t, func() bool {
-		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+			return false
+		}
 		return cm.Data["min-cpu"] == "500m" && cm.Data["min-memory"] == "1Gi" &&
 			cm.Data["max-cpu"] == "2" && cm.Data["max-memory"] == "4Gi"
 	})
@@ -1296,7 +1304,9 @@ func TestOverrideVPAMinMax(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 	testutil.Eventually(t, func() bool {
-		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+			return false
+		}
 		return cm.Data["min-cpu"] == "500m" && cm.Data["min-memory"] == "1Gi" &&
 			cm.Data["max-cpu"] == "16" && cm.Data["max-memory"] == "32Gi"
 	})
