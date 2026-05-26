@@ -105,7 +105,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 			// the additional shared/global/non-item-scoped limiter.
 			RateLimiter:             workqueue.NewTypedItemExponentialFailureRateLimiter[resource.Request](5*time.Millisecond, 1000*time.Second),
 			MaxConcurrentReconciles: c.maxConcurrentReconciles,
-			// Build the workqueue ourselves so we can capture a reference to it for metrics relateing to reconciliation
+			// Build the workqueue ourselves so we can capture a reference to it for metrics relating to reconciliation
 			// The constructor below is what controller-runtime would have called by default.
 			NewQueue: func(name string, rl workqueue.TypedRateLimiter[resource.Request]) workqueue.TypedRateLimitingInterface[resource.Request] {
 				q := workqueue.NewTypedRateLimitingQueueWithConfig(

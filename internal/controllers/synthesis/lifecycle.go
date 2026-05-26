@@ -148,6 +148,10 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	logger.Info("created synthesizer pod", "podName", pod.Name)
 	sytheses.Inc()
 	if init := comp.Status.InFlightSynthesis.Initialized; init != nil {
+		// TODO: This introduces a synthesis -> scheduling import dependency. If
+		// more cross-package metric observations come up, extract shared metrics
+		// into a common package (e.g. internal/metrics) so neither controller
+		// imports the other.
 		scheduling.ObserveSynthesisDispatchWait(time.Since(init.Time).Seconds())
 	}
 

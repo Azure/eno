@@ -189,5 +189,8 @@ func synthesisAge(comp *apiv1.Composition) *int64 {
 }
 
 func getSynthesizerName(pod *corev1.Pod) string {
-	return pod.GetLabels()[synthesizerNameLabelKey]
+	if name := pod.GetLabels()[synthesizerNameLabelKey]; name != "" {
+		return name
+	}
+	return "unknown"
 }
