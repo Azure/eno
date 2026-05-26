@@ -92,6 +92,8 @@ func New(mgr ctrl.Manager, opts Options) error {
 		maxConcurrentReconciles: opts.MaxConcurrentReconciles,
 	}
 
+	reconciliationMaxConcurrent.Set(float64(opts.MaxConcurrentReconciles))
+
 	return builder.TypedControllerManagedBy[resource.Request](mgr).
 		Named("reconciliationController").
 		WithLogConstructor(manager.NewTypedLogConstructor[*resource.Request](mgr, "reconciliationController")).
@@ -119,6 +121,9 @@ func New(mgr ctrl.Manager, opts Options) error {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.Result, error) {
+	reconciliationsInFlight.Inc()
+	defer reconciliationsInFlight.Dec()
+
 	logger := logr.FromContextOrDiscard(ctx)
 	logger.Info("reconciling resource", "compositionName", req.Composition.Name, "compositionNamespace", req.Composition.Namespace, "resourceRef", req.Resource.String())
 

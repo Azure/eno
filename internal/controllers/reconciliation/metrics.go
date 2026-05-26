@@ -23,9 +23,23 @@ var (
 		}, []string{"action"},
 	)
 
+	reconciliationsInFlight = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "eno_reconciliations_in_flight",
+			Help: "Number of resource reconciliations currently being processed. Bounded by MaxConcurrentReconciles.",
+		},
+	)
+
+	reconciliationMaxConcurrent = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "eno_reconciliation_controller_max_concurrent_reconciles",
+			Help: "Configured maximum number of concurrent reconciliations for the reconciliation controller.",
+		},
+	)
+
 	reconciliationWorkqueueDepth = prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
-			Name: "eno_reconciliation_workqueue_depth",
+			Name: "eno_reconciliation_controller_workqueue_depth",
 			Help: "Current depth of the reconciliation controller workqueue",
 		},
 		func() float64 {
@@ -43,7 +57,7 @@ var (
 )
 
 func init() {
-	metrics.Registry.MustRegister(reconciliationLatency, reconciliationActions, reconciliationWorkqueueDepth)
+	metrics.Registry.MustRegister(reconciliationLatency, reconciliationActions, reconciliationsInFlight, reconciliationMaxConcurrent, reconciliationWorkqueueDepth)
 }
 
 // setWorkqueueLenSource installs the queue.Len reader used by the gauge above.
