@@ -35,7 +35,7 @@ type ResourceSliceWriteBuffer struct {
 	mut           sync.Mutex
 	state         map[types.NamespacedName][]*resourceSliceStatusUpdate
 	insertionTime map[types.NamespacedName]time.Time
-	queue         workqueue.RateLimitingInterface
+	queue         workqueue.TypedRateLimitingInterface[types.NamespacedName]
 }
 
 func NewResourceSliceWriteBufferForManager(mgr ctrl.Manager) *ResourceSliceWriteBuffer {
@@ -45,15 +45,17 @@ func NewResourceSliceWriteBufferForManager(mgr ctrl.Manager) *ResourceSliceWrite
 }
 
 func NewResourceSliceWriteBuffer(cli client.Client) *ResourceSliceWriteBuffer {
+	q := workqueue.NewTypedRateLimitingQueueWithConfig(
+		workqueue.NewTypedItemExponentialFailureRateLimiter[types.NamespacedName](time.Millisecond*100, 8*time.Second),
+		workqueue.TypedRateLimitingQueueConfig[types.NamespacedName]{
+			Name: "writeBuffer",
+		})
+	setWriteBufferLenSource(q.Len)
 	return &ResourceSliceWriteBuffer{
 		client:        cli,
 		state:         make(map[types.NamespacedName][]*resourceSliceStatusUpdate),
 		insertionTime: make(map[types.NamespacedName]time.Time),
-		queue: workqueue.NewRateLimitingQueueWithConfig(
-			workqueue.NewItemExponentialFailureRateLimiter(time.Millisecond*100, 8*time.Second),
-			workqueue.RateLimitingQueueConfig{
-				Name: "writeBuffer",
-			}),
+		queue:         q,
 	}
 }
 
@@ -95,17 +97,16 @@ func (w *ResourceSliceWriteBuffer) Start(ctx context.Context) error {
 }
 
 func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
-	item, shutdown := w.queue.Get()
+	sliceNSN, shutdown := w.queue.Get()
 	if shutdown {
 		return false
 	}
-	defer w.queue.Done(item)
-	sliceNSN := item.(types.NamespacedName)
+	defer w.queue.Done(sliceNSN)
 
 	logger := logr.FromContextOrDiscard(ctx).WithValues("resourceSliceName", sliceNSN.Name, "resourceSliceNamespace", sliceNSN.Namespace, "controller", "writeBuffer")
 	ctx = logr.NewContext(ctx, logger)
 
-	logger.Info("processing write buffer queue item", "requeues", w.queue.NumRequeues(item))
+	logger.Info("processing write buffer queue item", "requeues", w.queue.NumRequeues(sliceNSN))
 	w.mut.Lock()
 	insertionTime := w.insertionTime[sliceNSN]
 	updates := w.state[sliceNSN]
@@ -125,7 +126,7 @@ func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 	// So the first write is fast, but a steady stream of writes will be throttled exponentially.
 	if len(updates) == 0 {
 		logger.Info("no updates to process, forgetting rate limit")
-		w.queue.Forget(item)
+		w.queue.Forget(sliceNSN)
 		w.mut.Lock()
 		delete(w.insertionTime, sliceNSN)
 		w.mut.Unlock()
@@ -134,7 +135,7 @@ func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 
 	if w.updateSlice(ctx, insertionTime, sliceNSN, updates) {
 		logger.Info("successfully updated resource slice, re-queueing to process remaining updates")
-		w.queue.AddRateLimited(item)
+		w.queue.AddRateLimited(sliceNSN)
 		return true
 	}
 
@@ -143,7 +144,7 @@ func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 	w.mut.Lock()
 	w.state[sliceNSN] = append(updates, w.state[sliceNSN]...)
 	w.mut.Unlock()
-	w.queue.AddRateLimited(item)
+	w.queue.AddRateLimited(sliceNSN)
 
 	logger.Info("re-queued resource slice with rate limiting")
 	return true
@@ -159,6 +160,7 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, insertionTim
 	err := w.client.Get(ctx, client.ObjectKeyFromObject(slice), slice)
 	if client.IgnoreNotFound(err) != nil {
 		logger.Error(err, "unable to get resource slice")
+		writeBufferStatusUpdateErrors.WithLabelValues("get").Inc()
 		return false
 	}
 
@@ -172,6 +174,7 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, insertionTim
 	patchJson, err := json.Marshal(&patches)
 	if err != nil {
 		logger.Error(err, "unable to encode patch")
+		writeBufferStatusUpdateErrors.WithLabelValues("marshal").Inc()
 		return false
 	}
 	err = w.client.Status().Patch(ctx, slice, client.RawPatch(types.JSONPatchType, patchJson))
@@ -181,6 +184,7 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, insertionTim
 	}
 	if err != nil {
 		logger.Error(err, "unable to update resource slice")
+		writeBufferStatusUpdateErrors.WithLabelValues("patch").Inc()
 		return false
 	}
 

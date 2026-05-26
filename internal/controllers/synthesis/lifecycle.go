@@ -3,6 +3,7 @@ package synthesis
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -18,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/controllers/scheduling"
 	"github.com/Azure/eno/internal/manager"
 )
 
@@ -145,6 +147,13 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	logger.Info("created synthesizer pod", "podName", pod.Name)
 	sytheses.Inc()
+	if init := comp.Status.InFlightSynthesis.Initialized; init != nil {
+		// TODO: This introduces a synthesis -> scheduling import dependency. If
+		// more cross-package metric observations come up, extract shared metrics
+		// into a common package (e.g. internal/metrics) so neither controller
+		// imports the other.
+		scheduling.ObserveSynthesisDispatchWait(time.Since(init.Time).Seconds())
+	}
 
 	return ctrl.Result{}, nil
 }
