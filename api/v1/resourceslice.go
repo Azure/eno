@@ -39,6 +39,12 @@ type Manifest struct {
 
 	// Deleted is true when this manifest represents a "tombstone" - a resource that should no longer exist.
 	Deleted bool `json:"deleted,omitempty"`
+
+	// ParsedKind and ParsedName are populated by the informer cache Transform so the
+	// per-resource identifier survives the manifest stripping done to bound cache memory.
+	// They are never serialized to the API server and never appear in the CRD schema.
+	ParsedKind string `json:"-"`
+	ParsedName string `json:"-"`
 }
 
 type ResourceSliceStatus struct {
@@ -76,15 +82,20 @@ type ResourceSliceRef struct {
 	Name string `json:"name,omitempty"`
 }
 
-// IdentifierAt returns "Kind/Name" for the manifest at the same index in the slice's spec. or "" if the
-// manifest can not be parsed.
+// IdentifierAt returns "Kind/Name" for the manifest at the same index in the slice's spec, or "" if the
+// manifest can not be parsed. Prefers pre-parsed fields populated by the cache Transform; falls back
+// to parsing the raw manifest JSON for callers that hold a non-cached slice (tests, direct API reads).
 func (s *ResourceSlice) IdentifierAt(idx int) string {
 	if idx < 0 || idx >= len(s.Spec.Resources) {
 		return ""
 	}
 
-	rawJson := s.Spec.Resources[idx].Manifest
-	if rawJson == "" {
+	r := s.Spec.Resources[idx]
+	if r.ParsedKind != "" && r.ParsedName != "" {
+		return path.Join(r.ParsedKind, r.ParsedName)
+	}
+
+	if r.Manifest == "" {
 		return ""
 	}
 
@@ -95,7 +106,7 @@ func (s *ResourceSlice) IdentifierAt(idx int) string {
 		} `json:"metadata"`
 	}
 
-	if err := json.Unmarshal([]byte(rawJson), &shallowCopy); err != nil {
+	if err := json.Unmarshal([]byte(r.Manifest), &shallowCopy); err != nil {
 		return ""
 	}
 	if shallowCopy.Kind == "" || shallowCopy.Metadata.Name == "" {

@@ -216,7 +216,7 @@ func TestBuildStatus(t *testing.T) {
 
 		comps := &apiv1.CompositionList{}
 
-		status := c.buildStatus(symph, comps)
+		status, _ := c.buildStatus(symph, comps)
 		assert.Equal(t, apiv1.SymphonyStatus{
 			ObservedGeneration: symph.Generation,
 		}, status)
@@ -244,7 +244,7 @@ func TestBuildStatus(t *testing.T) {
 			},
 		}}
 
-		status := c.buildStatus(symph, comps)
+		status, _ := c.buildStatus(symph, comps)
 		assert.Equal(t, apiv1.SymphonyStatus{
 			Ready: readyTime,
 		}, status)
@@ -285,7 +285,7 @@ func TestBuildStatus(t *testing.T) {
 			},
 		}
 
-		status := c.buildStatus(symph, comps)
+		status, _ := c.buildStatus(symph, comps)
 		assert.Equal(t, apiv1.SymphonyStatus{}, status)
 	})
 
@@ -324,7 +324,7 @@ func TestBuildStatus(t *testing.T) {
 			},
 		}
 
-		status := c.buildStatus(symph, comps)
+		status, _ := c.buildStatus(symph, comps)
 		assert.Equal(t, apiv1.SymphonyStatus{
 			Ready: readyTime,
 		}, status)
@@ -365,7 +365,7 @@ func TestBuildStatus(t *testing.T) {
 			},
 		}
 
-		status := c.buildStatus(symph, comps)
+		status, _ := c.buildStatus(symph, comps)
 		assert.Equal(t, apiv1.SymphonyStatus{
 			Ready: readyTime,
 		}, status)

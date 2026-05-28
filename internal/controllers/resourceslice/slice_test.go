@@ -9,6 +9,7 @@ import (
 	"github.com/Azure/eno/internal/testutil/statespace"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
@@ -566,7 +567,13 @@ func TestFuzzProcessCompositionTransition(t *testing.T) {
 				errorTransition = s.Error != state.Snapshot.Error
 			}
 
-			return result == (readinessTransition || reconciledTransition || errorTransition)
+			// The conditions on CurrentSynthesis must be seeded on the first reconcile
+			// after this controller starts owning them, so a missing condition is itself
+			// a state transition that requires a write.
+			conditionSeed := meta.FindStatusCondition(syn.Conditions, apiv1.ConditionResourcesApplied) == nil ||
+				meta.FindStatusCondition(syn.Conditions, apiv1.ConditionResourcesReady) == nil
+
+			return result == (readinessTransition || reconciledTransition || errorTransition || conditionSeed)
 		}).
 		Evaluate(t)
 }

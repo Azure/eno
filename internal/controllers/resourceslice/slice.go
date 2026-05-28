@@ -19,9 +19,9 @@ import (
 )
 
 const (
-	reasonAllResourceHealthy = "AllResourceHealthy"
-	reasonNotAllApplied      = "NotAllApplied"
-	reasonNotAllReady        = "NotAllReady"
+	reasonAllResourcesHealthy = "AllResourcesHealthy"
+	reasonNotAllApplied       = "NotAllApplied"
+	reasonNotAllReady         = "NotAllReady"
 )
 
 // sliceController manages the lifecycle of resource slices in the context of their owning composition.
@@ -302,7 +302,7 @@ func buildResourceConditions(condType string, ok bool, blockingResources []strin
 
 	if ok {
 		condition.Status = metav1.ConditionTrue
-		condition.Reason = reasonAllResourceHealthy
+		condition.Reason = reasonAllResourcesHealthy
 		return condition
 	}
 

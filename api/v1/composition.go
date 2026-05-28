@@ -171,10 +171,10 @@ type Synthesis struct {
 	// or an input with a ref that sets `Defer == true`.
 	Deferred bool `json:"deferred,omitempty"`
 
-	// Conditions is the list of conditions describing the aggregate state of the resoruces owned by this synthesis
-	// known condition types:
-	// - ResourceApplied: all resources have been applied
-	// - ResourceReady: all resources have singalled ready
+	// Conditions is the list of conditions describing the aggregate state of the resources owned by this synthesis.
+	// Known condition types:
+	// - ResourcesApplied: all resources have been applied
+	// - ResourcesReady: all resources have signalled ready
 	// +listType=map
 	// +listMapKey=type
 	// +optional

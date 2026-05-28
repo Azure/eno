@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -141,6 +142,20 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 			return obj, nil
 		}
 		for i := range slice.Spec.Resources {
+			// Extract Kind/Name into small in-memory fields before dropping the full manifest,
+			// so per-resource identifiers remain available for status condition messages.
+			if raw := slice.Spec.Resources[i].Manifest; raw != "" {
+				var shallow struct {
+					Kind     string `json:"kind"`
+					Metadata struct {
+						Name string `json:"name"`
+					} `json:"metadata"`
+				}
+				if err := json.Unmarshal([]byte(raw), &shallow); err == nil {
+					slice.Spec.Resources[i].ParsedKind = shallow.Kind
+					slice.Spec.Resources[i].ParsedName = shallow.Metadata.Name
+				}
+			}
 			slice.Spec.Resources[i].Manifest = "" // remove big manifest that we don't need
 		}
 		return slice, nil
