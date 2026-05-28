@@ -1,6 +1,16 @@
 package v1
 
-import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+import (
+	"encoding/json"
+	"path"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+const (
+	ConditionResourcesApplied = "ResourcesApplied"
+	ConditionResourcesReady   = "ResourcesReady"
+)
 
 // +kubebuilder:object:root=true
 type ResourceSliceList struct {
@@ -64,4 +74,32 @@ func (r *ResourceState) Equal(rr *ResourceState) bool {
 
 type ResourceSliceRef struct {
 	Name string `json:"name,omitempty"`
+}
+
+// IdentifierAt returns "Kind/Name" for the manifest at the same index in the slice's spec. or "" if the
+// manifest can not be parsed.
+func (s *ResourceSlice) IdentifierAt(idx int) string {
+	if idx < 0 || idx >= len(s.Spec.Resources) {
+		return ""
+	}
+
+	rawJson := s.Spec.Resources[idx].Manifest
+	if rawJson == "" {
+		return ""
+	}
+
+	var shallowCopy struct {
+		Kind     string `json:"kind"`
+		Metadata struct {
+			Name string `json:"name"`
+		} `json:"metadata"`
+	}
+
+	if err := json.Unmarshal([]byte(rawJson), &shallowCopy); err != nil {
+		return ""
+	}
+	if shallowCopy.Kind == "" || shallowCopy.Metadata.Name == "" {
+		return ""
+	}
+	return path.Join(shallowCopy.Kind, shallowCopy.Metadata.Name)
 }
