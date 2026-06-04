@@ -16,9 +16,9 @@ const (
 	//
 	//	NotApplied: CompA [Deployment/foo, Service/bar], CompB [ConfigMap/baz]
 	//	NotReady: CompA [Deployment/foo], CompC [StatefulSet/db]
-	ConditionSymphonyReady       = "SymphonyReady"
-	AllCompositionReadyReason    = "AllCompositionsReady"
-	NotAllCompositionReadyReason = "NotAllCompositionsReady"
+	ConditionSymphonyReady        = "SymphonyReady"
+	AllCompositionsReadyReason    = "AllCompositionsReady"
+	NotAllCompositionsReadyReason = "NotAllCompositionsReady"
 )
 
 // Symphony is a set of variations on a composition.

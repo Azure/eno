@@ -27,7 +27,7 @@ type symphonyController struct {
 }
 type symphonyConditions struct {
 	name       string
-	appliedMsg string // copied from compositions' ResoruceApplied condition. "" if synthInvalid or unset
+	appliedMsg string // copied from compositions' ResourcesApplied condition. "" if synthInvalid or unset
 	readyMsg   string // copied from compositions' ResourceReady condition. "" if synthInvalid or unset
 	notApplied bool
 	notReady   bool
@@ -371,10 +371,10 @@ func (c *symphonyController) syncStatus(ctx context.Context, symph *apiv1.Sympho
 	}
 	if len(blockers) == 0 {
 		cond.Status = metav1.ConditionTrue
-		cond.Reason = apiv1.AllCompositionReadyReason
+		cond.Reason = apiv1.AllCompositionsReadyReason
 	} else {
 		cond.Status = metav1.ConditionFalse
-		cond.Reason = apiv1.NotAllCompositionReadyReason
+		cond.Reason = apiv1.NotAllCompositionsReadyReason
 		cond.Message = formatSymphonyMessage(blockers)
 	}
 	// Seed Conditions from the existing status so meta.SetStatusCondition

@@ -290,7 +290,7 @@ func TestSyncStatus_MessagePropagation(t *testing.T) {
 	cond := meta.FindStatusCondition(symph.Status.Conditions, apiv1.ConditionSymphonyReady)
 	require.NotNil(t, cond)
 	assert.Equal(t, metav1.ConditionFalse, cond.Status)
-	assert.Equal(t, apiv1.NotAllCompositionReadyReason, cond.Reason)
+	assert.Equal(t, apiv1.NotAllCompositionsReadyReason, cond.Reason)
 	assert.Equal(t, "NotApplied: a [Deployment/foo, Service/bar]", cond.Message)
 }
 
@@ -325,8 +325,8 @@ func TestSyncStatus_BlockerClears(t *testing.T) {
 	after := meta.FindStatusCondition(symph.Status.Conditions, apiv1.ConditionSymphonyReady)
 	require.NotNil(t, after)
 	assert.Equal(t, metav1.ConditionTrue, after.Status)
-	assert.Equal(t, apiv1.AllCompositionReadyReason, after.Reason)
+	assert.Equal(t, apiv1.AllCompositionsReadyReason, after.Reason)
 	assert.Empty(t, after.Message)
-	assert.True(t, after.LastTransitionTime.After(before.LastTransitionTime.Time) || after.LastTransitionTime == before.LastTransitionTime,
-		"LastTransitionTime must move forward on a real flip")
+	assert.True(t, after.LastTransitionTime.After(before.LastTransitionTime.Time),
+		"LastTransitionTime must strictly advance on a real status flip")
 }

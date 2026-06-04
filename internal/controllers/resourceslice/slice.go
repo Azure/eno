@@ -244,7 +244,7 @@ type statusSnapshot struct {
 	Error      string
 
 	// NotApplied is a bounded list of "kind/Name" identifiers for resources that have not yet been reconciled
-	// capped at resourcesCap; if there are more resources blocking. the overflow resource applied will track the count beyong the cap
+	// capped at resourcesCap; if there are more resources blocking. the overflow resource applied will track the count beyond the cap
 	NotApplied      []string
 	NotReady        []string
 	OverflowApplied int
@@ -320,7 +320,9 @@ func buildResourceConditions(condType string, ok bool, blockingResources []strin
 // conditionMatches returns true iff the named condition already exists with
 // the desired status and message. A missing condition never matches — that
 // forces a write to seed it (important on the first reconcile after rollout
-// for already-healthy compositions).
+// for already-healthy compositions). The CurrentSynthesis==nil short-circuit
+// is safe because processCompositionTransition guards the condition write on
+// the same nil check before this helper's result is consulted there.
 func conditionMatches(comp *apiv1.Composition, t string, wantTrue bool, wantMsg string) bool {
 	if comp.Status.CurrentSynthesis == nil {
 		return true

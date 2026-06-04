@@ -154,6 +154,8 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 				if err := json.Unmarshal([]byte(raw), &shallow); err == nil {
 					slice.Spec.Resources[i].ParsedKind = shallow.Kind
 					slice.Spec.Resources[i].ParsedName = shallow.Metadata.Name
+				} else {
+					log.Log.V(1).Info("failed to parse resource manifest in cache Transform; identifier will be empty in status messages", "sliceName", slice.Name, "sliceNamespace", slice.Namespace, "resourceIndex", i, "error", err.Error())
 				}
 			}
 			slice.Spec.Resources[i].Manifest = "" // remove big manifest that we don't need
