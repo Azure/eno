@@ -9,6 +9,18 @@ type SymphonyList struct {
 	Items           []Symphony `json:"items"`
 }
 
+const (
+	// ConditionSymphonyReady reports the aggregate health of all non-optional child Compositions owned by the Symphony.
+	// False when any child reports ResourcesApplied != True or ResourcesReady != True
+	// The condition's .message enumerates the blocking compositions and their blocking resources in the form
+	//
+	//	NotApplied: CompA [Deployment/foo, Service/bar], CompB [ConfigMap/baz]
+	//	NotReady: CompA [Deployment/foo], CompC [StatefulSet/db]
+	ConditionSymphonyReady        = "SymphonyReady"
+	AllCompositionsReadyReason    = "AllCompositionsReady"
+	NotAllCompositionsReadyReason = "NotAllCompositionsReady"
+)
+
 // Symphony is a set of variations on a composition.
 // Useful for creating several compositions that use a common set of bindings but different synthesizers.
 //
@@ -46,6 +58,11 @@ type SymphonyStatus struct {
 	Synthesized        *metav1.Time `json:"synthesized,omitempty"`
 	Reconciled         *metav1.Time `json:"reconciled,omitempty"`
 	Ready              *metav1.Time `json:"ready,omitempty"`
+
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 type Variation struct {

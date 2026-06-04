@@ -170,6 +170,15 @@ type Synthesis struct {
 	// Deferred is true when this synthesis was caused by a change to either the synthesizer
 	// or an input with a ref that sets `Defer == true`.
 	Deferred bool `json:"deferred,omitempty"`
+
+	// Conditions is the list of conditions describing the aggregate state of the resources owned by this synthesis.
+	// Known condition types:
+	// - ResourcesApplied: all resources have been applied
+	// - ResourcesReady: all resources have signalled ready
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 type Result struct {
