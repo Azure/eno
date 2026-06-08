@@ -41,7 +41,7 @@ type Manifest struct {
 	Deleted bool `json:"deleted,omitempty"`
 
 	// ParsedKind and ParsedName are populated by the informer cache Transform so the per-resource identifier survives the manifest
-	// stripping done to bound cache memory. They are never serialized to the API Server and never appera in the CRD schema
+	// stripping done to bound cache memory. They are never serialized to the API Server and never appear in the CRD schema.
 	ParsedKind string `json:"-"`
 	ParsedName string `json:"-"`
 }

@@ -4,14 +4,17 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 const (
 	// ConditionSymphonyReady reports the aggregate health of all non-optional child Compositions owned by the Symphony.
-	// False when any child reports ResourcesApplied != True or ResourcesReady != True
+	// False when any child reports ResourceApplied != True or ResourceReady != True.
 	// The condition's .message enumerates the blocking compositions and their blocking resources in the form
 	//
 	//	NotApplied: CompA [Deployment/foo, Service/bar], CompB [ConfigMap/baz]
 	//	NotReady: CompA [Deployment/foo], CompC [StatefulSet/db]
+	ConditionSymphonyReady = "SymphonyReady"
 
-	ConditionsSymphonyReady       = "SymphonyReady"
-	AllCompositionsReadyReason    = "AllCompositionsReady"
+	// AllCompositionsReadyReason is set on ConditionSymphonyReady=True when every non-optional child Composition is applied and ready.
+	AllCompositionsReadyReason = "AllCompositionsReady"
+
+	// NotAllCompositionsReadyReason is set on ConditionSymphonyReady=False when at least one non-optional child Composition is not yet applied or not yet ready.
 	NotAllCompositionsReadyReason = "NotAllCompositionsReady"
 )
 
