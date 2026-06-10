@@ -2,6 +2,7 @@ package reconciliation
 
 import (
 	"context"
+	"encoding/json"
 	goerrors "errors"
 	"fmt"
 	"strings"
@@ -315,29 +316,44 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 
 	// Dry-run the update to see if it's needed
 	if !c.disableSSA {
-		// Before the dry-run, normalize conflicting field managers to "eno" to prevent SSA validation errors
-		// caused by multiple managers owning overlapping fields. When managers are renamed to "eno", the
-		// subsequent SSA Apply will treat eno as the sole owner and automatically merge the managedFields
-		// entries into a single consolidated entry for eno.
-		if current != nil && len(c.migratingFieldManagers) > 0 {
-			wasModified, err := resource.NormalizeConflictingManagers(ctx, current, c.migratingFieldManagers, c.migratingFields)
+		// One-shot migration of managedFields ownership from configured legacy
+		// managers into eno's Apply entry, scoped to the configured field
+		// prefixes. NormalizeConflictingManagers returns modified=true only
+		// while a legacy manager still owns an allowed field, so subsequent
+		// reconciles short-circuit once ownership is transferred.
+		if current != nil && len(c.migratingFieldManagers) > 0 && len(c.migratingFields) > 0 {
+			normalized := current.DeepCopy()
+			modified, err := resource.NormalizeConflictingManagers(ctx, normalized, c.migratingFieldManagers, c.migratingFields)
 			if err != nil {
-				return false, fmt.Errorf("normalize conflicting manager failed: %w", err)
+				return false, fmt.Errorf("computing managedFields migration: %w", err)
 			}
-			if wasModified {
-				logger.Info("Normalized conflicting managers to eno")
-				err = c.upstreamClient.Update(ctx, current, client.FieldOwner("eno"))
+			if modified {
+				desiredMF, _ := json.Marshal(normalized.GetManagedFields())
+				beforeMF, _ := json.Marshal(current.GetManagedFields())
+				patch, err := json.Marshal([]map[string]any{
+					{"op": "replace", "path": "/metadata/managedFields", "value": normalized.GetManagedFields()},
+					// Optimistic lock: rejected with 409 if another writer raced us.
+					{"op": "replace", "path": "/metadata/resourceVersion", "value": current.GetResourceVersion()},
+				})
 				if err != nil {
-					return false, fmt.Errorf("normalizing managedFields failed: %w", err)
+					return false, fmt.Errorf("marshalling managedFields migration patch: %w", err)
 				}
-				// refetch the current before apply dry-run
+				logger.Info("migrating managedFields ownership to eno",
+					"managers", c.migratingFieldManagers,
+					"fields", c.migratingFields,
+					"beforeManagedFields", string(beforeMF),
+					"desiredManagedFields", string(desiredMF))
+				if err := c.upstreamClient.Patch(ctx, current.DeepCopy(), client.RawPatch(types.JSONPatchType, patch)); err != nil {
+					return false, fmt.Errorf("applying managedFields migration patch failed: %w", err)
+				}
 				current, err = c.getCurrent(ctx, res.Resource)
 				if err != nil {
-					logger.Error(err, "failed to get current resource after eno ownership migration")
-					return false, fmt.Errorf("re-fetching after normalizing manager failed: %w", err)
+					logger.Error(err, "failed to get current resource after managedFields migration")
+					return false, fmt.Errorf("re-fetching after managedFields migration failed: %w", err)
 				}
-
-				logger.Info("Successfully normalized field managers to eno")
+				afterMF, _ := json.Marshal(current.GetManagedFields())
+				logger.Info("successfully migrated managedFields ownership to eno",
+					"afterManagedFields", string(afterMF))
 			}
 		}
 		dryRun, err := c.update(ctx, comp, prev, res, current, true)

@@ -1358,3 +1358,131 @@ func TestNormalizeConflictingManagers_CustomMigratingFields(t *testing.T) {
 		})
 	}
 }
+
+// TestCreateMergedEnoEntry_APIVersionFallback covers the three-tier fallback
+// that prevents the apiserver from silently dropping eno's managedFields entry
+// when no prior eno Apply entry exists (k8s.io/apimachinery's DecodeManagedFields
+// hard-rejects empty APIVersion and falls back to live managedFields, making the
+// migration a no-op).
+func TestCreateMergedEnoEntry_APIVersionFallback(t *testing.T) {
+	mergedSet := &fieldpath.Set{}
+	mergedSet.Insert(fieldpath.MakePathOrDie("spec", "replicas"))
+
+	tests := []struct {
+		name               string
+		entries            []metav1.ManagedFieldsEntry
+		expectedAPIVersion string
+		expectedFieldsType string
+	}{
+		{
+			name: "prefer existing eno Apply entry's apiVersion",
+			entries: []metav1.ManagedFieldsEntry{
+				{Manager: "helm-controller", APIVersion: "apps/v1beta1", FieldsType: "FieldsV1"},
+				{Manager: "eno", Operation: metav1.ManagedFieldsOperationApply, APIVersion: "apps/v1", FieldsType: "FieldsV1"},
+				{Manager: "kubectl", APIVersion: "apps/v1beta2", FieldsType: "FieldsV1"},
+			},
+			expectedAPIVersion: "apps/v1",
+			expectedFieldsType: "FieldsV1",
+		},
+		{
+			name: "fall back to any non-subresource entry when no eno entry exists",
+			entries: []metav1.ManagedFieldsEntry{
+				{Manager: "kube-controller-manager", APIVersion: "apps/v1", Subresource: "status", FieldsType: "FieldsV1"},
+				{Manager: "helm-controller", APIVersion: "apps/v1", FieldsType: "FieldsV1"},
+			},
+			expectedAPIVersion: "apps/v1",
+			expectedFieldsType: "FieldsV1",
+		},
+		{
+			name: "fall back to subresource entry when nothing else is available",
+			entries: []metav1.ManagedFieldsEntry{
+				{Manager: "kube-controller-manager", APIVersion: "apps/v1", Subresource: "status", FieldsType: "FieldsV1"},
+			},
+			expectedAPIVersion: "apps/v1",
+			expectedFieldsType: "FieldsV1",
+		},
+		{
+			name: "default fieldsType to FieldsV1 when blank on source entry",
+			entries: []metav1.ManagedFieldsEntry{
+				{Manager: "helm-controller", APIVersion: "rbac.authorization.k8s.io/v1"},
+			},
+			expectedAPIVersion: "rbac.authorization.k8s.io/v1",
+			expectedFieldsType: "FieldsV1",
+		},
+		{
+			name: "skip entries with empty apiVersion when choosing template",
+			entries: []metav1.ManagedFieldsEntry{
+				{Manager: "broken-manager", APIVersion: "", FieldsType: "FieldsV1"},
+				{Manager: "helm-controller", APIVersion: "v1", FieldsType: "FieldsV1"},
+			},
+			expectedAPIVersion: "v1",
+			expectedFieldsType: "FieldsV1",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			entry, err := createMergedEnoEntry(mergedSet, nil, tc.entries)
+			require.NoError(t, err)
+
+			assert.Equal(t, "eno", entry.Manager)
+			assert.Equal(t, metav1.ManagedFieldsOperationApply, entry.Operation)
+			assert.Equal(t, tc.expectedAPIVersion, entry.APIVersion,
+				"empty APIVersion makes apimachinery silently drop the entry during managedFields normalization")
+			assert.Equal(t, tc.expectedFieldsType, entry.FieldsType)
+			require.NotNil(t, entry.FieldsV1)
+			assert.NotEmpty(t, entry.FieldsV1.Raw)
+		})
+	}
+}
+
+// TestNormalizeConflictingManagers_PreservesAPIVersionFromLegacyManager is the
+// end-to-end regression test for the silent-drop bug. The setup mirrors the
+// hubble-relay/hubble-peer case from a live cluster: helm-controller owned
+// spec on an apps/v1 Deployment, no eno Apply entry existed yet, so the eno
+// entry the controller emitted had to inherit apps/v1 from helm-controller.
+// Previously this produced an entry with APIVersion="" that apimachinery
+// silently dropped, making the migration patch a no-op.
+func TestNormalizeConflictingManagers_PreservesAPIVersionFromLegacyManager(t *testing.T) {
+	obj := &unstructured.Unstructured{}
+	obj.SetManagedFields([]metav1.ManagedFieldsEntry{
+		{
+			Manager:    "helm-controller",
+			Operation:  metav1.ManagedFieldsOperationUpdate,
+			APIVersion: "apps/v1",
+			FieldsType: "FieldsV1",
+			FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{},"f:template":{"f:spec":{"f:containers":{}}}}}`)},
+		},
+		{
+			Manager:    "kube-controller-manager",
+			Operation:  metav1.ManagedFieldsOperationUpdate,
+			APIVersion: "apps/v1",
+			Subresource: "status",
+			FieldsType: "FieldsV1",
+			FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:replicas":{}}}`)},
+		},
+	})
+
+	modified, err := NormalizeConflictingManagers(
+		context.Background(),
+		obj,
+		[]string{"helm-controller"},
+		[]string{"spec", "data", "stringData", "binaryData", "metadata.labels", "metadata.annotations"},
+	)
+	require.NoError(t, err)
+	require.True(t, modified, "expected migration to fire when helm-controller owns f:spec")
+
+	var enoEntry *metav1.ManagedFieldsEntry
+	for i, entry := range obj.GetManagedFields() {
+		if entry.Manager == "eno" && entry.Operation == metav1.ManagedFieldsOperationApply {
+			enoEntry = &obj.GetManagedFields()[i]
+			break
+		}
+	}
+	require.NotNil(t, enoEntry, "expected migration to produce an eno Apply entry")
+	assert.Equal(t, "apps/v1", enoEntry.APIVersion,
+		"empty APIVersion makes apimachinery silently drop the entry during managedFields normalization, turning the migration into a no-op")
+	assert.Equal(t, "FieldsV1", enoEntry.FieldsType)
+	require.NotNil(t, enoEntry.FieldsV1)
+	assert.NotEmpty(t, enoEntry.FieldsV1.Raw)
+}
