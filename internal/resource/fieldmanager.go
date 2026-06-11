@@ -340,7 +340,7 @@ func createMergedEnoEntry(mergedSet *fieldpath.Set, timestamp *metav1.Time, mana
 	}
 
 	// Find an existing entry to use as a template for apiVersion and fieldsType.
-	// Prefer an existing eno Apply entry. Otherwise borrow from any non-status
+	// Prefer an existing eno Apply entry. Otherwise borrow from any non-subresource
 	// entry (all entries describe the same GVK at the main resource scope).
 	// Without a non-empty apiVersion the apiserver silently drops the entry
 	// during managedFields normalization, so the migration becomes a no-op.
@@ -370,6 +370,9 @@ func createMergedEnoEntry(mergedSet *fieldpath.Set, timestamp *metav1.Time, mana
 				break
 			}
 		}
+	}
+	if apiVersion == "" {
+		return metav1.ManagedFieldsEntry{}, fmt.Errorf("cannot synthesize eno managedFields entry: no source entry with non-empty APIVersion")
 	}
 	if fieldsType == "" {
 		fieldsType = "FieldsV1"

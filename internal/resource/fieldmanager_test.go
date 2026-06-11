@@ -285,6 +285,21 @@ func makeFields(t *testing.T, manager string, fields []string) metav1.ManagedFie
 	return entry
 }
 
+// withDefaultAPIVersion returns a copy of the entries with APIVersion="v1"
+// filled in where missing. Real managedFields entries from the apiserver
+// always have a non-empty APIVersion; defaulting here keeps test fixtures
+// concise without relying on the now-rejected empty-APIVersion fallback.
+func withDefaultAPIVersion(entries []metav1.ManagedFieldsEntry) []metav1.ManagedFieldsEntry {
+	out := make([]metav1.ManagedFieldsEntry, len(entries))
+	copy(out, entries)
+	for i := range out {
+		if out[i].APIVersion == "" {
+			out[i].APIVersion = "v1"
+		}
+	}
+	return out
+}
+
 func parseFieldEntries(entries []metav1.ManagedFieldsEntry) []*fieldpath.Set {
 	sets := make([]*fieldpath.Set, len(entries))
 	for i, entry := range entries {
@@ -610,7 +625,7 @@ func TestNormalizeConflictingManagers(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			obj := &unstructured.Unstructured{}
-			obj.SetManagedFields(tc.managedFields)
+			obj.SetManagedFields(withDefaultAPIVersion(tc.managedFields))
 
 			modified, err := NormalizeConflictingManagers(context.Background(), obj, tc.migratingManagers, []string{"spec", "data", "stringData", "binaryData", "metadata.labels", "metadata.annotations"})
 
@@ -826,7 +841,7 @@ func TestNormalizeConflictingManagers_FieldMerging(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			obj := &unstructured.Unstructured{}
-			obj.SetManagedFields(tc.managedFields)
+			obj.SetManagedFields(withDefaultAPIVersion(tc.managedFields))
 
 			modified, err := NormalizeConflictingManagers(context.Background(), obj, tc.migratingManagers, []string{"spec", "data", "stringData", "binaryData", "metadata.labels", "metadata.annotations"})
 
@@ -946,7 +961,7 @@ func TestNormalizeConflictingManagers_AnnotationGating(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			obj := &unstructured.Unstructured{}
-			obj.SetManagedFields(tc.managedFields)
+			obj.SetManagedFields(withDefaultAPIVersion(tc.managedFields))
 			if tc.annotations != nil {
 				obj.SetAnnotations(tc.annotations)
 			}
@@ -1079,7 +1094,7 @@ func TestNormalizeConflictingManagers_FieldPathFiltering(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			obj := &unstructured.Unstructured{}
-			obj.SetManagedFields(tc.managedFields)
+			obj.SetManagedFields(withDefaultAPIVersion(tc.managedFields))
 
 			modified, err := NormalizeConflictingManagers(context.Background(), obj, tc.migratingManagers, []string{"spec", "data", "stringData", "binaryData", "metadata.labels", "metadata.annotations"})
 
@@ -1280,7 +1295,7 @@ func TestNormalizeConflictingManagers_CustomMigratingFields(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			obj := &unstructured.Unstructured{}
-			obj.SetManagedFields(tc.managedFields)
+			obj.SetManagedFields(withDefaultAPIVersion(tc.managedFields))
 
 			modified, err := NormalizeConflictingManagers(context.Background(), obj, tc.migratingManagers, tc.migratingFields)
 
@@ -1436,6 +1451,39 @@ func TestCreateMergedEnoEntry_APIVersionFallback(t *testing.T) {
 	}
 }
 
+// TestCreateMergedEnoEntry_NoUsableAPIVersion ensures the function refuses to
+// synthesize an eno entry rather than silently producing one with APIVersion=""
+// (which apimachinery would drop during managedFields decode).
+func TestCreateMergedEnoEntry_NoUsableAPIVersion(t *testing.T) {
+	mergedSet := &fieldpath.Set{}
+	mergedSet.Insert(fieldpath.MakePathOrDie("spec", "replicas"))
+
+	tests := []struct {
+		name    string
+		entries []metav1.ManagedFieldsEntry
+	}{
+		{
+			name:    "no entries at all",
+			entries: nil,
+		},
+		{
+			name: "entries present but all have empty APIVersion",
+			entries: []metav1.ManagedFieldsEntry{
+				{Manager: "broken-a", APIVersion: "", FieldsType: "FieldsV1"},
+				{Manager: "broken-b", APIVersion: "", FieldsType: "FieldsV1"},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := createMergedEnoEntry(mergedSet, nil, tc.entries)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "no source entry with non-empty APIVersion")
+		})
+	}
+}
+
 // TestNormalizeConflictingManagers_PreservesAPIVersionFromLegacyManager is the
 // end-to-end regression test for the silent-drop bug. The setup mirrors the
 // hubble-relay/hubble-peer case from a live cluster: helm-controller owned
@@ -1454,12 +1502,12 @@ func TestNormalizeConflictingManagers_PreservesAPIVersionFromLegacyManager(t *te
 			FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{},"f:template":{"f:spec":{"f:containers":{}}}}}`)},
 		},
 		{
-			Manager:    "kube-controller-manager",
-			Operation:  metav1.ManagedFieldsOperationUpdate,
-			APIVersion: "apps/v1",
+			Manager:     "kube-controller-manager",
+			Operation:   metav1.ManagedFieldsOperationUpdate,
+			APIVersion:  "apps/v1",
 			Subresource: "status",
-			FieldsType: "FieldsV1",
-			FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:replicas":{}}}`)},
+			FieldsType:  "FieldsV1",
+			FieldsV1:    &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:replicas":{}}}`)},
 		},
 	})
 

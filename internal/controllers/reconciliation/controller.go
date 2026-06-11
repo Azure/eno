@@ -328,8 +328,6 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 				return false, fmt.Errorf("computing managedFields migration: %w", err)
 			}
 			if modified {
-				desiredMF, _ := json.Marshal(normalized.GetManagedFields())
-				beforeMF, _ := json.Marshal(current.GetManagedFields())
 				patch, err := json.Marshal([]map[string]any{
 					{"op": "replace", "path": "/metadata/managedFields", "value": normalized.GetManagedFields()},
 					// Optimistic lock: rejected with 409 if another writer raced us.
@@ -340,9 +338,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 				}
 				logger.Info("migrating managedFields ownership to eno",
 					"managers", c.migratingFieldManagers,
-					"fields", c.migratingFields,
-					"beforeManagedFields", string(beforeMF),
-					"desiredManagedFields", string(desiredMF))
+					"fields", c.migratingFields)
 				if err := c.upstreamClient.Patch(ctx, current.DeepCopy(), client.RawPatch(types.JSONPatchType, patch)); err != nil {
 					return false, fmt.Errorf("applying managedFields migration patch failed: %w", err)
 				}
@@ -351,9 +347,7 @@ func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composit
 					logger.Error(err, "failed to get current resource after managedFields migration")
 					return false, fmt.Errorf("re-fetching after managedFields migration failed: %w", err)
 				}
-				afterMF, _ := json.Marshal(current.GetManagedFields())
-				logger.Info("successfully migrated managedFields ownership to eno",
-					"afterManagedFields", string(afterMF))
+				logger.Info("successfully migrated managedFields ownership to eno")
 			}
 		}
 		dryRun, err := c.update(ctx, comp, prev, res, current, true)
