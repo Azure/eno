@@ -339,15 +339,40 @@ func createMergedEnoEntry(mergedSet *fieldpath.Set, timestamp *metav1.Time, mana
 		return metav1.ManagedFieldsEntry{}, fmt.Errorf("failed to serialize merged eno fields: %w", err)
 	}
 
-	// Find an existing eno entry to use as a template for apiVersion and fieldsType
+	// Find an existing entry to use as a template for apiVersion and fieldsType.
+	// Prefer an existing eno Apply entry. Otherwise borrow from any non-subresource
+	// entry (all entries describe the same GVK at the main resource scope).
+	// Without a non-empty apiVersion the apiserver silently drops the entry
+	// during managedFields normalization, so the migration becomes a no-op.
 	var apiVersion string
 	var fieldsType string
 	for i := range managedFields {
-		if managedFields[i].Manager == enoManager {
+		if managedFields[i].Manager == enoManager && managedFields[i].APIVersion != "" {
 			apiVersion = managedFields[i].APIVersion
 			fieldsType = managedFields[i].FieldsType
 			break
 		}
+	}
+	if apiVersion == "" {
+		for i := range managedFields {
+			if managedFields[i].APIVersion != "" && managedFields[i].Subresource == "" {
+				apiVersion = managedFields[i].APIVersion
+				fieldsType = managedFields[i].FieldsType
+				break
+			}
+		}
+	}
+	if apiVersion == "" {
+		for i := range managedFields {
+			if managedFields[i].APIVersion != "" {
+				apiVersion = managedFields[i].APIVersion
+				fieldsType = managedFields[i].FieldsType
+				break
+			}
+		}
+	}
+	if apiVersion == "" {
+		return metav1.ManagedFieldsEntry{}, fmt.Errorf("cannot synthesize eno managedFields entry: no source entry with non-empty APIVersion")
 	}
 	if fieldsType == "" {
 		fieldsType = "FieldsV1"
