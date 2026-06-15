@@ -63,6 +63,15 @@ type SymphonyStatus struct {
 	Reconciled         *metav1.Time `json:"reconciled,omitempty"`
 	Ready              *metav1.Time `json:"ready,omitempty"`
 
+	// Conditions describes the aggregate state of the compositions managed by this Symphony.
+	// Known condition types:
+	//  - SymphonyReady: all non-optional child compositions have been applied and are ready
+	//
+	// When the SymphonyReady condition is False, the condition's message enumerates the
+	// blocking compositions and their blocking resources in the form:
+	//
+	//	NotApplied: CompA [Deployment/foo, Service/bar], CompB [ConfigMap/baz]
+	//	NotReady: CompA [Deployment/foo], CompC [StatefulSet/db]
 	// +listType=map
 	// +listMapKey=type
 	// +optional
