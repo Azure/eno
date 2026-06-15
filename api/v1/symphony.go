@@ -2,6 +2,22 @@ package v1
 
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+const (
+	// ConditionSymphonyReady reports the aggregate health of all non-optional child Compositions owned by the Symphony.
+	// False when any child reports ResourceApplied != True or ResourceReady != True.
+	// The condition's .message enumerates the blocking compositions and their blocking resources in the form
+	//
+	//	NotApplied: CompA [Deployment/foo, Service/bar], CompB [ConfigMap/baz]
+	//	NotReady: CompA [Deployment/foo], CompC [StatefulSet/db]
+	ConditionSymphonyReady = "SymphonyReady"
+
+	// AllCompositionsReadyReason is set on ConditionSymphonyReady=True when every non-optional child Composition is applied and ready.
+	AllCompositionsReadyReason = "AllCompositionsReady"
+
+	// NotAllCompositionsReadyReason is set on ConditionSymphonyReady=False when at least one non-optional child Composition is not yet applied or not yet ready.
+	NotAllCompositionsReadyReason = "NotAllCompositionsReady"
+)
+
 // +kubebuilder:object:root=true
 type SymphonyList struct {
 	metav1.TypeMeta `json:",inline"`
@@ -46,6 +62,20 @@ type SymphonyStatus struct {
 	Synthesized        *metav1.Time `json:"synthesized,omitempty"`
 	Reconciled         *metav1.Time `json:"reconciled,omitempty"`
 	Ready              *metav1.Time `json:"ready,omitempty"`
+
+	// Conditions describes the aggregate state of the compositions managed by this Symphony.
+	// Known condition types:
+	//  - SymphonyReady: all non-optional child compositions have been applied and are ready
+	//
+	// When the SymphonyReady condition is False, the condition's message enumerates the
+	// blocking compositions and their blocking resources in the form:
+	//
+	//	NotApplied: CompA [Deployment/foo, Service/bar], CompB [ConfigMap/baz]
+	//	NotReady: CompA [Deployment/foo], CompC [StatefulSet/db]
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 type Variation struct {
