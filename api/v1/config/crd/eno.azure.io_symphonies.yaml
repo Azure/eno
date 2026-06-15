@@ -236,6 +236,13 @@ spec:
           status:
             properties:
               conditions:
+                description: "Conditions describes the aggregate state of the compositions
+                  managed by this Symphony.\nKnown condition types:\n - SymphonyReady:
+                  all non-optional child compositions have been applied and are ready\n\nWhen
+                  the SymphonyReady condition is False, the condition's message enumerates
+                  the\nblocking compositions and their blocking resources in the form:\n\n\tNotApplied:
+                  CompA [Deployment/foo, Service/bar], CompB [ConfigMap/baz]\n\tNotReady:
+                  CompA [Deployment/foo], CompC [StatefulSet/db]"
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
