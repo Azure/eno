@@ -3,9 +3,12 @@ package resourceslice
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -13,6 +16,17 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/go-logr/logr"
+)
+
+const (
+	reasonAllResourcesHealthy = "AllResourcesHealthy"
+	reasonNotAllApplied       = "NotAllApplied"
+	reasonNotAllReady         = "NotAllReady"
+
+	// resourcesCap bounds the number of per-resource identifiers reported in
+	// each condition message. Anything beyond the cap is collapsed into a
+	// "+N more" suffix to avoid unbounded growth of the composition status.
+	resourcesCap = 25
 )
 
 // sliceController manages the lifecycle of resource slices in the context of their owning composition.
@@ -71,30 +85,49 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			continue
 		}
 
-		// Handle a case where the reconciliation controller hasn't updated the slice's status yet
-		if len(slice.Status.Resources) == 0 && len(slice.Spec.Resources) > 0 {
-			snapshot.Ready = false
-			snapshot.Reconciled = false
-			break // no need to check the other slices
-		}
+		// Iterate over Spec.Resources rather than Status.Resources so resources that
+		// have not yet been observed by the reconciliation controller surface as
+		// "not applied" instead of being silently dropped from the snapshot.
+		for i := range slice.Spec.Resources {
+			var state *apiv1.ResourceState
+			if i < len(slice.Status.Resources) {
+				state = &slice.Status.Resources[i]
+			}
 
-		// Collect the state of every resource
-		for _, state := range slice.Status.Resources {
-			state := state
-			if resourceNotReconciled(comp, &state) {
+			if state == nil || resourceNotReconciled(comp, state) {
 				snapshot.Reconciled = false
+				if len(snapshot.NotApplied) < resourcesCap {
+					if id := slice.IdentifierAt(i); id != "" {
+						snapshot.NotApplied = append(snapshot.NotApplied, id)
+					}
+				} else {
+					snapshot.OverflowApplied++
+				}
 			}
-			if state.Ready == nil {
+			if state == nil || state.Ready == nil {
 				snapshot.Ready = false
+				if len(snapshot.NotReady) < resourcesCap {
+					if id := slice.IdentifierAt(i); id != "" {
+						snapshot.NotReady = append(snapshot.NotReady, id)
+					}
+				} else {
+					snapshot.OverflowReady++
+				}
 			}
-			if state.Ready != nil && (snapshot.ReadyTime == nil || state.Ready.After(snapshot.ReadyTime.Time)) {
+			if state != nil && state.Ready != nil && (snapshot.ReadyTime == nil || state.Ready.After(snapshot.ReadyTime.Time)) {
 				snapshot.ReadyTime = state.Ready
 			}
-			if e := state.ReconciliationError; e != nil && (snapshot.Error == "" || *e > snapshot.Error) {
-				snapshot.Error = *e
+			if state != nil {
+				if e := state.ReconciliationError; e != nil && (snapshot.Error == "" || *e > snapshot.Error) {
+					snapshot.Error = *e
+				}
 			}
 		}
 	}
+
+	// Sort blocking-resource samples for deterministic condition messages
+	sort.Strings(snapshot.NotApplied)
+	sort.Strings(snapshot.NotReady)
 
 	// Aggregate the status of all slices into the composition
 	if !processCompositionTransition(ctx, comp, snapshot) {
@@ -160,9 +193,10 @@ func (s *sliceController) handleMissingSlice(ctx context.Context, comp *apiv1.Co
 func processCompositionTransition(ctx context.Context, comp *apiv1.Composition, snapshot statusSnapshot) (modified bool) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	synthesisMatches := comp.Status.CurrentSynthesis == nil || ((comp.Status.CurrentSynthesis.Reconciled != nil) == snapshot.Reconciled && (comp.Status.CurrentSynthesis.Ready != nil) == snapshot.Ready)
-	errorsMatch := comp.Status.Simplified == nil || comp.Status.Simplified.Status != "Reconciling" || comp.Status.Simplified.Error == snapshot.Error
-	if synthesisMatches && errorsMatch {
+	appliedMsg := formatBlockingMessages(snapshot.NotApplied, snapshot.OverflowApplied)
+	readyMsg := formatBlockingMessages(snapshot.NotReady, snapshot.OverflowReady)
+
+	if snapshot.synthesisMatches(comp, appliedMsg, readyMsg) && snapshot.errorsMatch(comp) {
 		logger.Info("no composition status change detected", "snapshotReconciled", snapshot.Reconciled, "snapshotReady", snapshot.Ready, "snapshotError", snapshot.Error)
 		return false // either no change or no synthesis yet
 	}
@@ -187,6 +221,12 @@ func processCompositionTransition(ctx context.Context, comp *apiv1.Composition, 
 	now := metav1.Now()
 	comp.Status.CurrentSynthesis.Reconciled = snapshot.GetReconciled(comp, &now, logger)
 	comp.Status.CurrentSynthesis.Ready = snapshot.GetReady(comp, logger)
+
+	observedGen := comp.Status.CurrentSynthesis.ObservedCompositionGeneration
+	meta.SetStatusCondition(&comp.Status.CurrentSynthesis.Conditions,
+		buildResourceConditions(apiv1.ConditionResourceApplied, snapshot.Reconciled, snapshot.NotApplied, snapshot.OverflowApplied, observedGen))
+	meta.SetStatusCondition(&comp.Status.CurrentSynthesis.Conditions,
+		buildResourceConditions(apiv1.ConditionResourceReady, snapshot.Ready, snapshot.NotReady, snapshot.OverflowReady, observedGen))
 	return true
 }
 
@@ -200,10 +240,90 @@ func resourceNotReconciled(comp *apiv1.Composition, state *apiv1.ResourceState) 
 }
 
 type statusSnapshot struct {
-	Reconciled bool
-	Ready      bool
-	ReadyTime  *metav1.Time
-	Error      string
+	Reconciled      bool
+	Ready           bool
+	ReadyTime       *metav1.Time
+	Error           string
+	NotApplied      []string
+	NotReady        []string
+	OverflowApplied int
+	OverflowReady   int
+}
+
+// synthesisMatches reports whether the snapshot's reconciled/ready signals already match
+// the composition's current synthesis status.
+func (s *statusSnapshot) synthesisMatches(comp *apiv1.Composition, appliedMsg, readyMsg string) bool {
+	syn := comp.Status.CurrentSynthesis
+	if syn == nil {
+		return true
+	}
+	if (syn.Reconciled != nil) != s.Reconciled || (syn.Ready != nil) != s.Ready {
+		return false
+	}
+	if !conditionMatches(comp, apiv1.ConditionResourceApplied, s.Reconciled, appliedMsg) {
+		return false
+	}
+	if !conditionMatches(comp, apiv1.ConditionResourceReady, s.Ready, readyMsg) {
+		return false
+	}
+	return true
+}
+
+// errorsMatch reports whether the snapshot's error string already matches the composition's
+// simplified-error field (only relevant while Status == "Reconciling").
+func (s *statusSnapshot) errorsMatch(comp *apiv1.Composition) bool {
+	return comp.Status.Simplified == nil || comp.Status.Simplified.Status != "Reconciling" || comp.Status.Simplified.Error == s.Error
+}
+
+// conditionMatches returns true iff the named condition already exists with the desired status and
+// message. A missing condition never matches — that forces a write to seed it (important on the first
+// reconcile after rollout for already-healthy compositions).
+func conditionMatches(comp *apiv1.Composition, t string, wantTrue bool, wantMsg string) bool {
+	if comp.Status.CurrentSynthesis == nil {
+		return true
+	}
+	condition := meta.FindStatusCondition(comp.Status.CurrentSynthesis.Conditions, t)
+	if condition == nil {
+		return false
+	}
+	isTrue := condition.Status == metav1.ConditionTrue
+	return isTrue == wantTrue && condition.Message == wantMsg
+}
+
+// formatBlockingMessages renders a deterministic, length-bounded sample of resource identifiers
+// for use in condition messages.
+func formatBlockingMessages(blockingResources []string, overflow int) string {
+	if len(blockingResources) == 0 {
+		return ""
+	}
+	msg := strings.Join(blockingResources, ", ")
+	if overflow > 0 {
+		msg += fmt.Sprintf(", +%d more", overflow)
+	}
+	return msg
+}
+
+// buildResourceConditions assembles a metav1.Condition describing the aggregate state of resources
+// applied/ready, with sample identifiers in the message when not all are healthy.
+func buildResourceConditions(condType string, ok bool, blockingResources []string, overflow int, observedGen int64) metav1.Condition {
+	cond := metav1.Condition{
+		Type:               condType,
+		ObservedGeneration: observedGen,
+	}
+	if ok {
+		cond.Status = metav1.ConditionTrue
+		cond.Reason = reasonAllResourcesHealthy
+		return cond
+	}
+	cond.Status = metav1.ConditionFalse
+	switch condType {
+	case apiv1.ConditionResourceApplied:
+		cond.Reason = reasonNotAllApplied
+	case apiv1.ConditionResourceReady:
+		cond.Reason = reasonNotAllReady
+	}
+	cond.Message = formatBlockingMessages(blockingResources, overflow)
+	return cond
 }
 
 func (s *statusSnapshot) GetReconciled(comp *apiv1.Composition, now *metav1.Time, logger logr.Logger) *metav1.Time {
