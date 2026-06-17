@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"sort"
 	"time"
 
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
@@ -287,6 +288,10 @@ func (c *compositionController) reconcileSimplifiedStatus(ctx context.Context, s
 	return true, nil
 }
 
+// logSampleCap bounds how many resource identifiers are included per list in a single
+// not-ready log line, so very large compositions can't produce an oversized log entry.
+const logSampleCap = 100
+
 // logNotReadyResources queries the composition's resource slices and logs the identifiers
 // (Kind/Name) of resources that have not yet been applied/reconciled or become ready. The
 // detail lives only in logs (for Kusto querying), not in status conditions, to avoid a status
@@ -330,8 +335,32 @@ func (c *compositionController) logNotReadyResources(ctx context.Context, comp *
 	if len(notApplied) == 0 && len(notReady) == 0 {
 		return
 	}
+
+	// Canonical order so the logged set is stable across reconciles (and hashable if we ever
+	// dedupe these lines by content).
+	sort.Strings(notApplied)
+	sort.Strings(notReady)
+
+	// Bound the payload so a composition with thousands of resources can't emit a log line that
+	// exceeds the logging backend's row-size limit; the overflow counts preserve the signal.
+	notAppliedOverflow := 0
+	if len(notApplied) > logSampleCap {
+		notAppliedOverflow = len(notApplied) - logSampleCap
+		notApplied = notApplied[:logSampleCap]
+	}
+	notReadyOverflow := 0
+	if len(notReady) > logSampleCap {
+		notReadyOverflow = len(notReady) - logSampleCap
+		notReady = notReady[:logSampleCap]
+	}
+
 	logger.Info("composition has resources that are not yet ready",
-		"notApplied", notApplied, "notReady", notReady)
+		"observedGeneration", comp.Status.CurrentSynthesis.ObservedCompositionGeneration,
+		"notApplied", notApplied,
+		"notAppliedOverflow", notAppliedOverflow,
+		"notReady", notReady,
+		"notReadyOverflow", notReadyOverflow,
+	)
 }
 
 // shouldForceRemoveFinalizer returns true if and only if the composition has the
