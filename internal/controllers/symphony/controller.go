@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"slices"
 	"sort"
-	"strings"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
@@ -14,7 +13,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -24,14 +22,6 @@ import (
 type symphonyController struct {
 	client        client.Client
 	noCacheClient client.Reader
-}
-
-type symphonyConditions struct {
-	name       string
-	appliedMsg string // copied from compositions' ResourcesApplied condition. "" if synthInvalid or unset
-	readyMsg   string // copied from compositions' ResourceReady condition. "" if synthInvalid or unset
-	notApplied bool
-	notReady   bool
 }
 
 func NewController(mgr ctrl.Manager) error {
@@ -364,28 +354,7 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 func (c *symphonyController) syncStatus(ctx context.Context, symph *apiv1.Symphony, comps *apiv1.CompositionList) error {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	newStatus, blockers := c.buildStatus(symph, comps)
-
-	cond := metav1.Condition{
-		Type:               apiv1.ConditionSymphonyReady,
-		ObservedGeneration: symph.Generation,
-	}
-	if len(blockers) == 0 {
-		cond.Status = metav1.ConditionTrue
-		cond.Reason = apiv1.AllCompositionsReadyReason
-	} else {
-		cond.Status = metav1.ConditionFalse
-		cond.Reason = apiv1.NotAllCompositionsReadyReason
-		cond.Message = formatSymphonyMessage(blockers)
-	}
-
-	// Seed the new status with the existing conditions so SetStatusCondition can preserve
-	// LastTransitionTime when nothing has actually changed.
-	if existing := symph.Status.DeepCopy(); existing != nil {
-		newStatus.Conditions = existing.Conditions
-	}
-	meta.SetStatusCondition(&newStatus.Conditions, cond)
-
+	newStatus := c.buildStatus(symph, comps)
 	if equality.Semantic.DeepEqual(newStatus, symph.Status) {
 		return nil
 	}
@@ -400,7 +369,7 @@ func (c *symphonyController) syncStatus(ctx context.Context, symph *apiv1.Sympho
 	return nil
 }
 
-func (c *symphonyController) buildStatus(symph *apiv1.Symphony, comps *apiv1.CompositionList) (apiv1.SymphonyStatus, []symphonyConditions) {
+func (c *symphonyController) buildStatus(symph *apiv1.Symphony, comps *apiv1.CompositionList) apiv1.SymphonyStatus {
 	newStatus := apiv1.SymphonyStatus{
 		ObservedGeneration: symph.Generation,
 	}
@@ -437,71 +406,26 @@ func (c *symphonyController) buildStatus(symph *apiv1.Symphony, comps *apiv1.Com
 	}
 
 	// Status should be nil for any states that haven't been reached by all compositions
-	conditionStatus := []symphonyConditions{}
 	for _, comp := range comps.Items {
 		if _, ok := optionalSynths[comp.Spec.Synthesizer.Name]; ok {
 			continue
 		}
 
 		syn := comp.Status.CurrentSynthesis
-		synthInvalid := syn == nil || syn.ObservedCompositionGeneration != comp.Generation || comp.DeletionTimestamp != nil
+		synInvalid := syn == nil || syn.ObservedCompositionGeneration != comp.Generation || comp.DeletionTimestamp != nil
 
-		if synthInvalid || syn.Ready == nil {
+		if synInvalid || syn.Ready == nil {
 			newStatus.Ready = nil
 		}
-		if synthInvalid || syn.Reconciled == nil {
+		if synInvalid || syn.Reconciled == nil {
 			newStatus.Reconciled = nil
 		}
-		if synthInvalid || syn.Synthesized == nil {
+		if synInvalid || syn.Synthesized == nil {
 			newStatus.Synthesized = nil
 		}
-
-		blockingCondition := symphonyConditions{name: comp.Name}
-		if synthInvalid {
-			blockingCondition.notApplied = true
-			blockingCondition.notReady = true
-		} else {
-			if condition := meta.FindStatusCondition(syn.Conditions, apiv1.ConditionResourceApplied); condition != nil && condition.Status != metav1.ConditionTrue {
-				blockingCondition.notApplied = true
-				blockingCondition.appliedMsg = condition.Message
-			}
-			if condition := meta.FindStatusCondition(syn.Conditions, apiv1.ConditionResourceReady); condition != nil && condition.Status != metav1.ConditionTrue {
-				blockingCondition.notReady = true
-				blockingCondition.readyMsg = condition.Message
-			}
-		}
-		if blockingCondition.notApplied || blockingCondition.notReady {
-			conditionStatus = append(conditionStatus, blockingCondition)
-		}
 	}
 
-	sort.Slice(conditionStatus, func(i, j int) bool {
-		return conditionStatus[i].name < conditionStatus[j].name
-	})
-
-	return newStatus, conditionStatus
-}
-
-// formatSymphonyMessage renders the SymphonyReady condition's message, listing the blocking
-// compositions and their per-resource samples on dedicated NotApplied/NotReady lines.
-func formatSymphonyMessage(symphonyConditions []symphonyConditions) string {
-	var notAppliedComps, notReadyComps []string
-	for _, cond := range symphonyConditions {
-		if cond.notApplied {
-			notAppliedComps = append(notAppliedComps, fmt.Sprintf("%s [%s]", cond.name, cond.appliedMsg))
-		}
-		if cond.notReady {
-			notReadyComps = append(notReadyComps, fmt.Sprintf("%s [%s]", cond.name, cond.readyMsg))
-		}
-	}
-	var lines []string
-	if len(notAppliedComps) > 0 {
-		lines = append(lines, "NotApplied: "+strings.Join(notAppliedComps, ", "))
-	}
-	if len(notReadyComps) > 0 {
-		lines = append(lines, "NotReady: "+strings.Join(notReadyComps, ", "))
-	}
-	return strings.Join(lines, "\n")
+	return newStatus
 }
 
 // getBindings generates the bindings for a variation given it's symphony.

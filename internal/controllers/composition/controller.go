@@ -150,6 +150,10 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 	ctx = logr.NewContext(ctx, logger)
 
+	// Log which resources are still not ready so stuck rollouts can be diagnosed via logs/Kusto
+	// without persisting the (volatile) per-resource list into status conditions.
+	c.logNotReadyResources(ctx, comp)
+
 	// Write the simplified status
 	modified, err := c.reconcileSimplifiedStatus(ctx, synth, comp)
 	if err != nil {
@@ -281,6 +285,53 @@ func (c *compositionController) reconcileSimplifiedStatus(ctx context.Context, s
 	}
 	logger.Info("sucessfully updated status for composition")
 	return true, nil
+}
+
+// logNotReadyResources queries the composition's resource slices and logs the identifiers
+// (Kind/Name) of resources that have not yet been applied/reconciled or become ready. The
+// detail lives only in logs (for Kusto querying), not in status conditions, to avoid a status
+// write storm on busy underlays. It only emits when at least one resource is still outstanding.
+func (c *compositionController) logNotReadyResources(ctx context.Context, comp *apiv1.Composition) {
+	logger := logr.FromContextOrDiscard(ctx)
+	if comp.Status.CurrentSynthesis == nil {
+		return
+	}
+
+	var notApplied, notReady []string
+	for _, ref := range comp.Status.CurrentSynthesis.ResourceSlices {
+		slice := &apiv1.ResourceSlice{}
+		slice.Name = ref.Name
+		slice.Namespace = comp.Namespace
+		if err := c.client.Get(ctx, client.ObjectKeyFromObject(slice), slice); err != nil {
+			logger.V(1).Info("could not get resource slice while logging not-ready resources", "resourceSliceName", ref.Name, "error", err.Error())
+			continue
+		}
+
+		// Status.Resources is index-aligned with Spec.Resources, so IdentifierAt(i) names the
+		// resource whose state lives at slice.Status.Resources[i].
+		for i := range slice.Spec.Resources {
+			id := slice.IdentifierAt(i)
+			if id == "" {
+				continue
+			}
+			var state *apiv1.ResourceState
+			if i < len(slice.Status.Resources) {
+				state = &slice.Status.Resources[i]
+			}
+			if state == nil || !state.Reconciled {
+				notApplied = append(notApplied, id)
+			}
+			if state == nil || state.Ready == nil {
+				notReady = append(notReady, id)
+			}
+		}
+	}
+
+	if len(notApplied) == 0 && len(notReady) == 0 {
+		return
+	}
+	logger.Info("composition has resources that are not yet ready",
+		"notApplied", notApplied, "notReady", notReady)
 }
 
 // shouldForceRemoveFinalizer returns true if and only if the composition has the

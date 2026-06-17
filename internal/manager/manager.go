@@ -141,9 +141,10 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 		if !ok {
 			return obj, nil
 		}
+		parseFailureLogged := false
 		for i := range slice.Spec.Resources {
 			// Extract Kind/Name into small in-memory fields before dropping the full manifest,
-			// so per-resource identifiers remain available for status condition messages.
+			// so per-resource identifiers remain available for diagnostic logging.
 			if raw := slice.Spec.Resources[i].Manifest; raw != "" {
 				var shallow struct {
 					Kind     string `json:"kind"`
@@ -155,7 +156,12 @@ func newMgr(logger logr.Logger, opts *Options, isController, isReconciler bool) 
 					slice.Spec.Resources[i].ParsedKind = shallow.Kind
 					slice.Spec.Resources[i].ParsedName = shallow.Metadata.Name
 				} else {
-					log.Log.V(1).Info("failed to parse resource manifest in cache Transform; identifier will be empty in status messages", "sliceName", slice.Name, "sliceNamespace", slice.Namespace, "resourceIndex", i, "error", err.Error())
+					if !parseFailureLogged {
+						log.Log.Info("failed to parse at least one resource manifest in cache Transform; identifiers may be missing in diagnostic logs", "sliceName", slice.Name, "sliceNamespace", slice.Namespace, "firstResourceIndex", i, "error", err.Error())
+						parseFailureLogged = true
+					} else {
+						log.Log.V(1).Info("failed to parse resource manifest in cache Transform; identifier will be empty in diagnostic logs", "sliceName", slice.Name, "sliceNamespace", slice.Namespace, "resourceIndex", i, "error", err.Error())
+					}
 				}
 			}
 			slice.Spec.Resources[i].Manifest = ""
