@@ -220,9 +220,10 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, &apiv1.Composition{}, current)
 		if ok {
 			ready = &readiness.ReadyTime
+			resource.ResetNotReadyReason()
 			logger.Info("resource is ready", "readyTime", ready)
 		} else {
-			logResourceNotReady(logger, resource, current)
+			logResourceNotReady(ctx, logger, resource, current)
 		}
 	} else {
 		ready = status.Ready
@@ -250,15 +251,29 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 // ready. It surfaces which readiness checks are still failing and the resource's reported
 // status conditions (including any custom conditions), so stuck rollouts can be diagnosed
 // from logs/Kusto without inspecting the live cluster.
-func logResourceNotReady(logger logr.Logger, res *resource.Resource, current *unstructured.Unstructured) {
+//
+// To avoid log spam on the hot path (not-ready resources are requeued every readiness poll
+// interval), it only logs when the not-ready reason changes since the last observation.
+func logResourceNotReady(ctx context.Context, logger logr.Logger, res *resource.Resource, current *unstructured.Unstructured) {
 	if current == nil {
-		logger.Info("resource is not ready because it does not exist yet")
+		if res.ObserveNotReadyReason("resource-does-not-exist") {
+			logger.Info("resource is not ready because it does not exist yet")
+		}
+		return
+	}
+
+	unmetReadinessChecks := res.ReadinessChecks.Unsatisfied(ctx, &apiv1.Composition{}, current)
+	conditions := summarizeConditions(current)
+
+	// Only log on a transition (when the reason changes) to keep this off the hot path.
+	reason := fmt.Sprintf("checks=%v|conditions=%v", unmetReadinessChecks, conditions)
+	if !res.ObserveNotReadyReason(reason) {
 		return
 	}
 
 	logger.Info("resource is not ready",
-		"unmetReadinessChecks", res.ReadinessChecks.Unsatisfied(context.Background(), &apiv1.Composition{}, current),
-		"conditions", summarizeConditions(current),
+		"unmetReadinessChecks", unmetReadinessChecks,
+		"conditions", conditions,
 	)
 }
 
