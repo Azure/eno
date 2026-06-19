@@ -1,16 +1,6 @@
 package v1
 
-import (
-	"encoding/json"
-	"path"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-)
-
-const (
-	ConditionResourceApplied = "ResourceApplied"
-	ConditionResourceReady   = "ResourceReady"
-)
+import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // +kubebuilder:object:root=true
 type ResourceSliceList struct {
@@ -39,11 +29,6 @@ type Manifest struct {
 
 	// Deleted is true when this manifest represents a "tombstone" - a resource that should no longer exist.
 	Deleted bool `json:"deleted,omitempty"`
-
-	// ParsedKind and ParsedName are populated by the informer cache Transform so the per-resource identifier survives the manifest
-	// stripping done to bound cache memory. They are never serialized to the API Server and never appear in the CRD schema.
-	ParsedKind string `json:"-"`
-	ParsedName string `json:"-"`
 }
 
 type ResourceSliceStatus struct {
@@ -79,36 +64,4 @@ func (r *ResourceState) Equal(rr *ResourceState) bool {
 
 type ResourceSliceRef struct {
 	Name string `json:"name,omitempty"`
-}
-
-// IdentifierAt returns "kind/name" for the manifest at the same index in the slice's spec, or "" if the manifest can not be parsed.
-// Prefers pre-parsed fields by the cache Transforms and then falls back to parsing the raw json manifest.
-func (s *ResourceSlice) IdentifierAt(idx int) string {
-	if idx < 0 || idx >= len(s.Spec.Resources) {
-		return ""
-	}
-
-	r := s.Spec.Resources[idx]
-	if r.ParsedKind != "" && r.ParsedName != "" {
-		return path.Join(r.ParsedKind, r.ParsedName)
-	}
-
-	if r.Manifest == "" {
-		return ""
-	}
-
-	var shallowCopy struct {
-		Kind     string `json:"kind"`
-		Metadata struct {
-			Name string `json:"name"`
-		} `json:"metadata"`
-	}
-
-	if err := json.Unmarshal([]byte(r.Manifest), &shallowCopy); err != nil {
-		return ""
-	}
-	if shallowCopy.Kind == "" || shallowCopy.Metadata.Name == "" {
-		return ""
-	}
-	return path.Join(shallowCopy.Kind, shallowCopy.Metadata.Name)
 }
