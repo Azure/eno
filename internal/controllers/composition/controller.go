@@ -36,6 +36,9 @@ const (
 	EnoCleanupFinalizer                 = "eno.azure.io/cleanup"
 	MissingInputStatus                  = "MissingInputs"
 	MismatchedInputsStatus              = "MismatchedInputs"
+	NotReadyStatus                      = "NotReady"
+	ReconcilingStatus                   = "Reconciling"
+	LogSampleCap                        = 50
 )
 
 type compositionController struct {
@@ -150,10 +153,6 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 		logger = logger.WithValues("synthesizerName", synth.Name, "synthesizerGeneration", synth.Generation)
 	}
 	ctx = logr.NewContext(ctx, logger)
-
-	// Log which resources are still not ready so stuck rollouts can be diagnosed via logs/Kusto
-	// without persisting the (volatile) per-resource list into status conditions.
-	c.logNotReadyResources(ctx, comp)
 
 	// Write the simplified status
 	modified, err := c.reconcileSimplifiedStatus(ctx, synth, comp)
@@ -275,6 +274,8 @@ func (c *compositionController) reconcileSimplifiedStatus(ctx context.Context, s
 			logger.Info("composition is missing required inputs", "missingInputs", inputs.Missing(synth, comp), "expectedInputs", inputs.Expected(synth))
 		case MismatchedInputsStatus:
 			logger.Info("composition has inputs that are out of lockstep", "mismatchedInputs", inputs.Mismatched(synth, comp, comp.Status.InputRevisions), "synthesizerGeneration", synth.Generation, "compositionGeneration", comp.Generation)
+		case NotReadyStatus, ReconcilingStatus:
+			c.logNotReadyResources(ctx, comp)
 		}
 	}
 
@@ -288,26 +289,17 @@ func (c *compositionController) reconcileSimplifiedStatus(ctx context.Context, s
 	return true, nil
 }
 
-// logSampleCap bounds how many resource identifiers are included per list in a single
-// not-ready log line, so very large compositions can't produce an oversized log entry.
-const logSampleCap = 100
-
-// logNotReadyResources queries the composition's resource slices and logs the identifiers
-// (Kind/Name) of resources that have not yet been applied/reconciled or become ready. The
-// detail lives only in logs (for Kusto querying), not in status conditions, to avoid a status
-// write storm on busy underlays. It only emits when at least one resource is still outstanding.
+// logNotReadyResources queries the composition's resource slices and logs the identifiers (Kind/Name) of resources that have not yet been applied/reconciled or become ready.
 func (c *compositionController) logNotReadyResources(ctx context.Context, comp *apiv1.Composition) {
 	logger := logr.FromContextOrDiscard(ctx)
 	if comp.Status.CurrentSynthesis == nil {
 		return
 	}
 
-	var notApplied, notReady []string
+	var notReady []string
 	for _, ref := range comp.Status.CurrentSynthesis.ResourceSlices {
 		slice := &apiv1.ResourceSlice{}
-		slice.Name = ref.Name
-		slice.Namespace = comp.Namespace
-		if err := c.client.Get(ctx, client.ObjectKeyFromObject(slice), slice); err != nil {
+		if err := c.client.Get(ctx, client.ObjectKey{Namespace: comp.Namespace, Name: ref.Name}, slice); err != nil {
 			logger.V(1).Info("could not get resource slice while logging not-ready resources", "resourceSliceName", ref.Name, "error", err.Error())
 			continue
 		}
@@ -323,41 +315,33 @@ func (c *compositionController) logNotReadyResources(ctx context.Context, comp *
 			if i < len(slice.Status.Resources) {
 				state = &slice.Status.Resources[i]
 			}
-			if state == nil || !state.Reconciled {
-				notApplied = append(notApplied, id)
-			}
-			if state == nil || state.Ready == nil {
+			// A resource is "not ready" until it has been both reconciled (applied) and become
+			// ready. Per-resource detail (why it isn't ready) is available from the
+			// reconciliationController's "resource is not ready" log line.
+			if state == nil || !state.Reconciled || state.Ready == nil {
 				notReady = append(notReady, id)
 			}
 		}
 	}
 
-	if len(notApplied) == 0 && len(notReady) == 0 {
+	if len(notReady) == 0 {
 		return
 	}
 
 	// Canonical order so the logged set is stable across reconciles (and hashable if we ever
 	// dedupe these lines by content).
-	sort.Strings(notApplied)
 	sort.Strings(notReady)
 
 	// Bound the payload so a composition with thousands of resources can't emit a log line that
-	// exceeds the logging backend's row-size limit; the overflow counts preserve the signal.
-	notAppliedOverflow := 0
-	if len(notApplied) > logSampleCap {
-		notAppliedOverflow = len(notApplied) - logSampleCap
-		notApplied = notApplied[:logSampleCap]
-	}
+	// exceeds the logging backend's row-size limit; the overflow count preserves the signal.
 	notReadyOverflow := 0
-	if len(notReady) > logSampleCap {
-		notReadyOverflow = len(notReady) - logSampleCap
-		notReady = notReady[:logSampleCap]
+	if len(notReady) > LogSampleCap {
+		notReadyOverflow = len(notReady) - LogSampleCap
+		notReady = notReady[:LogSampleCap]
 	}
 
 	logger.Info("composition has resources that are not yet ready",
 		"observedGeneration", comp.Status.CurrentSynthesis.ObservedCompositionGeneration,
-		"notApplied", notApplied,
-		"notAppliedOverflow", notAppliedOverflow,
 		"notReady", notReady,
 		"notReadyOverflow", notReadyOverflow,
 	)

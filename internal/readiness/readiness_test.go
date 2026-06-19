@@ -290,3 +290,43 @@ func mustParse(expr string) *Check {
 	}
 	return check
 }
+
+func mustParseNamed(name, expr string) *Check {
+	check := mustParse(expr)
+	check.Name = name
+	return check
+}
+
+func TestUnsatisfied(t *testing.T) {
+	resource := &unstructured.Unstructured{
+		Object: map[string]any{
+			"conditions": []map[string]any{
+				{"type": "Ready", "status": "True", "reason": "AllGood"},
+			},
+		},
+	}
+
+	passing := mustParseNamed("ready", "self.conditions.filter(item, item.type == 'Ready' && item.status == 'True')")
+	failing := mustParseNamed("available", "self.conditions.filter(item, item.type == 'Available' && item.status == 'True')")
+
+	t.Run("all satisfied returns nil", func(t *testing.T) {
+		got := Checks{passing}.Unsatisfied(context.Background(), &apiv1.Composition{}, resource)
+		assert.Nil(t, got)
+	})
+
+	t.Run("returns names of failing checks", func(t *testing.T) {
+		got := Checks{passing, failing}.Unsatisfied(context.Background(), &apiv1.Composition{}, resource)
+		assert.Equal(t, []string{"available"}, got)
+	})
+
+	t.Run("unnamed check falls back to default", func(t *testing.T) {
+		unnamed := mustParse("self.conditions.filter(item, item.type == 'Missing' && item.status == 'True')")
+		got := Checks{unnamed}.Unsatisfied(context.Background(), &apiv1.Composition{}, resource)
+		assert.Equal(t, []string{"default"}, got)
+	})
+
+	t.Run("nil resource means every check is unsatisfied", func(t *testing.T) {
+		got := Checks{passing, failing}.Unsatisfied(context.Background(), &apiv1.Composition{}, nil)
+		assert.Equal(t, []string{"ready", "available"}, got)
+	})
+}

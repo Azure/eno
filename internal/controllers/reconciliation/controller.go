@@ -247,13 +247,6 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 	return snap, current, ready, modified, err
 }
 
-// logResourceNotReady emits a single log line explaining why a resource has not yet become
-// ready. It surfaces which readiness checks are still failing and the resource's reported
-// status conditions (including any custom conditions), so stuck rollouts can be diagnosed
-// from logs/Kusto without inspecting the live cluster.
-//
-// To avoid log spam on the hot path (not-ready resources are requeued every readiness poll
-// interval), it only logs when the not-ready reason changes since the last observation.
 func logResourceNotReady(ctx context.Context, logger logr.Logger, res *resource.Resource, current *unstructured.Unstructured) {
 	if current == nil {
 		if res.ObserveNotReadyReason("resource-does-not-exist") {
@@ -263,42 +256,16 @@ func logResourceNotReady(ctx context.Context, logger logr.Logger, res *resource.
 	}
 
 	unmetReadinessChecks := res.ReadinessChecks.Unsatisfied(ctx, &apiv1.Composition{}, current)
-	conditions := summarizeConditions(current)
 
 	// Only log on a transition (when the reason changes) to keep this off the hot path.
-	reason := fmt.Sprintf("checks=%v|conditions=%v", unmetReadinessChecks, conditions)
+	reason := fmt.Sprintf("checks=%v", unmetReadinessChecks)
 	if !res.ObserveNotReadyReason(reason) {
 		return
 	}
 
 	logger.Info("resource is not ready",
 		"unmetReadinessChecks", unmetReadinessChecks,
-		"conditions", conditions,
 	)
-}
-
-// summarizeConditions returns a compact, log-friendly representation of the resource's
-// status.conditions, preserving the fields most useful for diagnosing readiness
-// (type/status/reason/message). It returns nil when the resource reports no conditions.
-func summarizeConditions(current *unstructured.Unstructured) []string {
-	conditions, found, err := unstructured.NestedSlice(current.Object, "status", "conditions")
-	if err != nil || !found {
-		return nil
-	}
-
-	var summaries []string
-	for _, raw := range conditions {
-		cond, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		condType, _ := cond["type"].(string)
-		condStatus, _ := cond["status"].(string)
-		reason, _ := cond["reason"].(string)
-		message, _ := cond["message"].(string)
-		summaries = append(summaries, fmt.Sprintf("type=%s status=%s reason=%s message=%s", condType, condStatus, reason, message))
-	}
-	return summaries
 }
 
 func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composition, prev *resource.Resource, res *resource.Snapshot, current *unstructured.Unstructured) (bool, error) {
