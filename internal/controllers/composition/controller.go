@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"sort"
 	"time"
 
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
@@ -35,6 +36,9 @@ const (
 	EnoCleanupFinalizer                 = "eno.azure.io/cleanup"
 	MissingInputStatus                  = "MissingInputs"
 	MismatchedInputsStatus              = "MismatchedInputs"
+	NotReadyStatus                      = "NotReady"
+	ReconcilingStatus                   = "Reconciling"
+	LogSampleCap                        = 50
 )
 
 type compositionController struct {
@@ -270,6 +274,8 @@ func (c *compositionController) reconcileSimplifiedStatus(ctx context.Context, s
 			logger.Info("composition is missing required inputs", "missingInputs", inputs.Missing(synth, comp), "expectedInputs", inputs.Expected(synth))
 		case MismatchedInputsStatus:
 			logger.Info("composition has inputs that are out of lockstep", "mismatchedInputs", inputs.Mismatched(synth, comp, comp.Status.InputRevisions), "synthesizerGeneration", synth.Generation, "compositionGeneration", comp.Generation)
+		case NotReadyStatus, ReconcilingStatus:
+			c.logNotReadyResources(ctx, comp)
 		}
 	}
 
@@ -281,6 +287,69 @@ func (c *compositionController) reconcileSimplifiedStatus(ctx context.Context, s
 	}
 	logger.Info("sucessfully updated status for composition")
 	return true, nil
+}
+
+// logNotReadyResources queries the composition's resource slices and logs the identifiers (Kind/Name) of resources that have not yet been applied/reconciled or become ready.
+func (c *compositionController) logNotReadyResources(ctx context.Context, comp *apiv1.Composition) {
+	logger := logr.FromContextOrDiscard(ctx)
+	if comp.Status.CurrentSynthesis == nil {
+		return
+	}
+
+	var notReady []string
+	for _, ref := range comp.Status.CurrentSynthesis.ResourceSlices {
+		slice := &apiv1.ResourceSlice{}
+		if err := c.client.Get(ctx, client.ObjectKey{Namespace: comp.Namespace, Name: ref.Name}, slice); err != nil {
+			logger.V(1).Info("could not get resource slice while logging not-ready resources", "resourceSliceName", ref.Name, "error", err.Error())
+			continue
+		}
+
+		// Status.Resources is index-aligned with Spec.Resources, so IdentifierAt(i) names the
+		// resource whose state lives at slice.Status.Resources[i].
+		for i := range slice.Spec.Resources {
+			// Tombstones (manifests marked for deletion) have no meaningful readiness
+			// semantics, so they should not be reported as not-ready.
+			if slice.Spec.Resources[i].Deleted {
+				continue
+			}
+			id := slice.IdentifierAt(i)
+			if id == "" {
+				continue
+			}
+			var state *apiv1.ResourceState
+			if i < len(slice.Status.Resources) {
+				state = &slice.Status.Resources[i]
+			}
+			// A resource is "not ready" until it has been both reconciled (applied) and become
+			// ready. Per-resource detail (why it isn't ready) is available from the
+			// reconciliationController's "resource is not ready" log line.
+			if state == nil || !state.Reconciled || state.Ready == nil {
+				notReady = append(notReady, id)
+			}
+		}
+	}
+
+	if len(notReady) == 0 {
+		return
+	}
+
+	// Canonical order so the logged set is stable across reconciles (and hashable if we ever
+	// dedupe these lines by content).
+	sort.Strings(notReady)
+
+	// Bound the payload so a composition with thousands of resources can't emit a log line that
+	// exceeds the logging backend's row-size limit; the overflow count preserves the signal.
+	notReadyOverflow := 0
+	if len(notReady) > LogSampleCap {
+		notReadyOverflow = len(notReady) - LogSampleCap
+		notReady = notReady[:LogSampleCap]
+	}
+
+	logger.Info("composition has resources that are not yet ready",
+		"observedGeneration", comp.Status.CurrentSynthesis.ObservedCompositionGeneration,
+		"notReady", notReady,
+		"notReadyOverflow", notReadyOverflow,
+	)
 }
 
 // shouldForceRemoveFinalizer returns true if and only if the composition has the
@@ -415,11 +484,11 @@ func buildSimplifiedStatus(synth *apiv1.Synthesizer, comp *apiv1.Composition) *a
 		return status
 	}
 	if syn := comp.Status.CurrentSynthesis; syn.Reconciled != nil {
-		status.Status = "NotReady"
+		status.Status = NotReadyStatus
 		return status
 	}
 	if syn := comp.Status.CurrentSynthesis; syn != nil && syn.Reconciled == nil {
-		status.Status = "Reconciling"
+		status.Status = ReconcilingStatus
 		if current != nil {
 			// Preserve any reconciliation error written by the resource slice controller
 			status.Error = current.Error

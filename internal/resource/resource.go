@@ -72,6 +72,7 @@ type Resource struct {
 	overrides          []*mutation.Op
 	overrideParseError error
 	latestKnownState   atomic.Pointer[apiv1.ResourceState]
+	lastNotReadyReason atomic.Pointer[string]
 }
 
 // FromSlice constructs a resource out of the given resource slice.
@@ -283,6 +284,20 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 }
 
 func (r *Resource) State() *apiv1.ResourceState { return r.latestKnownState.Load() }
+
+// ObserveNotReadyReason records the latest reason a resource is not ready and reports whether
+// it differs from the previously observed reason. It lets callers log not-ready diagnostics
+// only on transitions (when the reason changes) instead of on every readiness poll.
+func (r *Resource) ObserveNotReadyReason(reason string) (changed bool) {
+	prev := r.lastNotReadyReason.Swap(&reason)
+	return prev == nil || *prev != reason
+}
+
+// ResetNotReadyReason clears any recorded not-ready reason so that the next not-ready
+// transition is logged again (e.g. after the resource has become ready).
+func (r *Resource) ResetNotReadyReason() {
+	r.lastNotReadyReason.Store(nil)
+}
 
 // Less returns true when r < than.
 // Used to establish determinstic ordering for conflicting resources.

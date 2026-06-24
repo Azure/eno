@@ -220,7 +220,10 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, &apiv1.Composition{}, current)
 		if ok {
 			ready = &readiness.ReadyTime
+			resource.ResetNotReadyReason()
 			logger.Info("resource is ready", "readyTime", ready)
+		} else {
+			logResourceNotReady(ctx, logger, resource, current)
 		}
 	} else {
 		ready = status.Ready
@@ -242,6 +245,58 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		logger.Error(err, "failed to reconcile resource snapshot")
 	}
 	return snap, current, ready, modified, err
+}
+
+func logResourceNotReady(ctx context.Context, logger logr.Logger, res *resource.Resource, current *unstructured.Unstructured) {
+	if current == nil {
+		if res.ObserveNotReadyReason("resource-does-not-exist") {
+			logger.Info("resource is not ready because it does not exist yet")
+		}
+		return
+	}
+
+	unmetReadinessChecks := res.ReadinessChecks.Unsatisfied(ctx, &apiv1.Composition{}, current)
+	conditions := summarizeConditions(current)
+
+	// Only log on a transition (when the reason changes) to keep this off the hot path.
+	reason := fmt.Sprintf("checks=%v|conditions=%v", unmetReadinessChecks, conditions)
+	if !res.ObserveNotReadyReason(reason) {
+		return
+	}
+
+	logger.Info("resource is not ready",
+		"unmetReadinessChecks", unmetReadinessChecks,
+		"conditions", conditions,
+	)
+}
+
+// summarizeConditions returns the live resource's status.conditions (type/status/reason/message)
+// so the not-ready log explains why the resource isn't ready (e.g. a Deployment's
+// "MinimumReplicasUnavailable"). It returns nil when the resource reports no conditions.
+func summarizeConditions(current *unstructured.Unstructured) []map[string]string {
+	conditions, found, err := unstructured.NestedSlice(current.Object, "status", "conditions")
+	if err != nil || !found {
+		return nil
+	}
+
+	var summaries []map[string]string
+	for _, raw := range conditions {
+		cond, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		condType, _ := cond["type"].(string)
+		condStatus, _ := cond["status"].(string)
+		reason, _ := cond["reason"].(string)
+		message, _ := cond["message"].(string)
+		summaries = append(summaries, map[string]string{
+			"type":    condType,
+			"status":  condStatus,
+			"reason":  reason,
+			"message": message,
+		})
+	}
+	return summaries
 }
 
 func (c *Controller) reconcileSnapshot(ctx context.Context, comp *apiv1.Composition, prev *resource.Resource, res *resource.Snapshot, current *unstructured.Unstructured) (bool, error) {

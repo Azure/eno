@@ -108,6 +108,22 @@ func (r Checks) EvalOptionally(ctx context.Context, comp *apiv1.Composition, res
 	return r.Eval(ctx, comp, resource)
 }
 
+// Unsatisfied returns the names of the checks that are not currently passing.
+// It's used to explain why a resource has not yet become ready.
+func (r Checks) Unsatisfied(ctx context.Context, comp *apiv1.Composition, resource *unstructured.Unstructured) []string {
+	var names []string
+	for _, check := range r {
+		if _, ok := check.Eval(ctx, comp, resource); !ok {
+			name := check.Name
+			if name == "" {
+				name = "default"
+			}
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 type Status struct {
 	ReadyTime   metav1.Time
 	PreciseTime bool // true when time came from a condition, not the controller's metav1.Now
