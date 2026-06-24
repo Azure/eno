@@ -307,6 +307,11 @@ func (c *compositionController) logNotReadyResources(ctx context.Context, comp *
 		// Status.Resources is index-aligned with Spec.Resources, so IdentifierAt(i) names the
 		// resource whose state lives at slice.Status.Resources[i].
 		for i := range slice.Spec.Resources {
+			// Tombstones (manifests marked for deletion) have no meaningful readiness
+			// semantics, so they should not be reported as not-ready.
+			if slice.Spec.Resources[i].Deleted {
+				continue
+			}
 			id := slice.IdentifierAt(i)
 			if id == "" {
 				continue
@@ -479,11 +484,11 @@ func buildSimplifiedStatus(synth *apiv1.Synthesizer, comp *apiv1.Composition) *a
 		return status
 	}
 	if syn := comp.Status.CurrentSynthesis; syn.Reconciled != nil {
-		status.Status = "NotReady"
+		status.Status = NotReadyStatus
 		return status
 	}
 	if syn := comp.Status.CurrentSynthesis; syn != nil && syn.Reconciled == nil {
-		status.Status = "Reconciling"
+		status.Status = ReconcilingStatus
 		if current != nil {
 			// Preserve any reconciliation error written by the resource slice controller
 			status.Error = current.Error

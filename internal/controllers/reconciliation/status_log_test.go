@@ -1,6 +1,7 @@
 package reconciliation
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -60,4 +61,24 @@ func TestSummarizeConditions(t *testing.T) {
 			{"type": "Progressing", "status": "True", "reason": "", "message": ""},
 		}, got)
 	})
+}
+
+// TestSummarizeConditionsReasonStable guards the de-dup gate in logResourceNotReady: the
+// reason string built from summarizeConditions must be identical across repeated calls on the
+// same input, otherwise transition-only logging would spam on every readiness poll.
+func TestSummarizeConditionsReasonStable(t *testing.T) {
+	u := &unstructured.Unstructured{Object: map[string]any{
+		"status": map[string]any{
+			"conditions": []any{
+				map[string]any{"type": "Available", "status": "False", "reason": "MinReplicas", "message": "down"},
+				map[string]any{"type": "Progressing", "status": "True", "reason": "NewRS", "message": "ok"},
+			},
+		},
+	}}
+
+	first := fmt.Sprintf("conditions=%v", summarizeConditions(u))
+	for i := 0; i < 100; i++ {
+		got := fmt.Sprintf("conditions=%v", summarizeConditions(u))
+		assert.Equal(t, first, got, "reason string must be stable across calls")
+	}
 }
