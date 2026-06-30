@@ -938,7 +938,7 @@ func TestSymphonyNoDependencyVariationsReconcileNormally(t *testing.T) {
 
 	require.NoError(t, NewController(mgr.Manager))
 	require.NoError(t, scheduling.NewController(mgr.Manager, 100, 2*time.Second, 0))
-	require.NoError(t, composition.NewController(mgr.Manager, time.Minute))
+	require.NoError(t, composition.NewController(mgr.Manager, time.Minute, "eno-system"))
 	mgr.Start(t)
 
 	// Create synthesizers
@@ -999,7 +999,7 @@ func TestSymphonyDependencyVariationsReconcileInOrder(t *testing.T) {
 
 	require.NoError(t, NewController(mgr.Manager))
 	require.NoError(t, scheduling.NewController(mgr.Manager, 100, 2*time.Second, 0))
-	require.NoError(t, composition.NewController(mgr.Manager, time.Minute))
+	require.NoError(t, composition.NewController(mgr.Manager, time.Minute, "eno-system"))
 	mgr.Start(t)
 
 	// Create synthesizers
