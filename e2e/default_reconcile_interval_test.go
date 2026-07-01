@@ -20,12 +20,14 @@ import (
 )
 
 // TestDefaultReconcileIntervalRecreatesDeletedResources validates the
-// eno.azure.io/use-default-reconcile-interval annotation.
+// eno.azure.io/use-default-reconcile-interval annotation applied at the Composition level.
 //
 // A synthesizer emits a ServiceAccount, ClusterRole, RoleBinding and Deployment.
-// All four carry eno.azure.io/use-default-reconcile-interval: "true". Only the
-// Deployment additionally sets an explicit eno.azure.io/reconcile-interval; the
-// other three rely purely on the default interval opt-in.
+// The eno.azure.io/use-default-reconcile-interval: "true" annotation is set once on
+// the Composition (not on the individual resources) so it cascades to every resource
+// it manages - this matches the integration case where we can't ask partner teams to
+// annotate their own manifests. Only the Deployment additionally sets an explicit
+// eno.azure.io/reconcile-interval; the other three rely purely on the cascaded default.
 //
 // After the composition is Ready, the four live resources are deleted out-of-band
 // (simulating a customer deleting a resource they can see). Without a reconcile
@@ -52,22 +54,20 @@ func TestDefaultReconcileIntervalRecreatesDeletedResources(t *testing.T) {
 
 	const useDefault = "eno.azure.io/use-default-reconcile-interval"
 
-	// ServiceAccount - opts into the default reconcile interval, no explicit interval.
+	// ServiceAccount - inherits the default reconcile interval from the Composition, no explicit interval.
 	sa := &corev1.ServiceAccount{
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ServiceAccount"},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        saName,
-			Namespace:   "default",
-			Annotations: map[string]string{useDefault: "true"},
+			Name:      saName,
+			Namespace: "default",
 		},
 	}
 
-	// ClusterRole (cluster-scoped) - opts into the default reconcile interval.
+	// ClusterRole (cluster-scoped) - inherits the default reconcile interval from the Composition.
 	clusterRole := &rbacv1.ClusterRole{
 		TypeMeta: metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRole"},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        clusterRoleName,
-			Annotations: map[string]string{useDefault: "true"},
+			Name: clusterRoleName,
 		},
 		Rules: []rbacv1.PolicyRule{{
 			APIGroups: []string{""},
@@ -76,13 +76,12 @@ func TestDefaultReconcileIntervalRecreatesDeletedResources(t *testing.T) {
 		}},
 	}
 
-	// RoleBinding - opts into the default reconcile interval, binds the ClusterRole to the ServiceAccount.
+	// RoleBinding - inherits the default reconcile interval from the Composition, binds the ClusterRole to the ServiceAccount.
 	roleBinding := &rbacv1.RoleBinding{
 		TypeMeta: metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "RoleBinding"},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        roleBindingName,
-			Namespace:   "default",
-			Annotations: map[string]string{useDefault: "true"},
+			Name:      roleBindingName,
+			Namespace: "default",
 		},
 		RoleRef: rbacv1.RoleRef{
 			APIGroup: "rbac.authorization.k8s.io",
@@ -96,7 +95,7 @@ func TestDefaultReconcileIntervalRecreatesDeletedResources(t *testing.T) {
 		}},
 	}
 
-	// Deployment - opts into the default reconcile interval AND sets an explicit interval.
+	// Deployment - inherits the default reconcile interval from the Composition AND sets an explicit interval.
 	replicas := int32(1)
 	deploy := &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
@@ -104,7 +103,6 @@ func TestDefaultReconcileIntervalRecreatesDeletedResources(t *testing.T) {
 			Name:      deployName,
 			Namespace: "default",
 			Annotations: map[string]string{
-				useDefault:                        "true",
 				"eno.azure.io/reconcile-interval": "10s",
 			},
 		},
@@ -132,6 +130,9 @@ func TestDefaultReconcileIntervalRecreatesDeletedResources(t *testing.T) {
 		fw.WithCommand(fw.ToCommand(sa, clusterRole, roleBinding, deploy)))
 	comp := fw.NewComposition(compName, "default",
 		fw.WithSynthesizerRefs(apiv1.SynthesizerRef{Name: synthName}))
+	// Opt every managed resource into the default reconcile interval by annotating the
+	// Composition once; the annotation cascades to all resources that don't set it themselves.
+	comp.Annotations = map[string]string{useDefault: "true"}
 	compKey := types.NamespacedName{Name: compName, Namespace: "default"}
 
 	// managed captures the resources Eno should manage together with a live handle
