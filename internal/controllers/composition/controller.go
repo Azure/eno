@@ -10,6 +10,7 @@ import (
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,17 +40,32 @@ const (
 	NotReadyStatus                      = "NotReady"
 	ReconcilingStatus                   = "Reconciling"
 	LogSampleCap                        = 50
+	synthesisIDLabelKey                 = "eno.azure.io/synthesis-uuid"
 )
 
+// podCompletionGracePeriod is how long after a synthesizer pod is observed
+// terminal we wait before treating its in-flight synthesis as abandoned, giving
+// a late-but-successful executor status write time to propagate. It is a var so
+// tests can shorten it.
+var podCompletionGracePeriod = 5 * time.Second
+
+// inFlightPollInterval bounds how often the composition controller re-checks an
+// in-flight synthesis's pod phase. It lets the fast-cancel path observe a
+// terminal pod promptly without watching Pods, while podTimeout remains the
+// upper bound for genuinely hung pods. It is a var so tests can shorten it.
+var inFlightPollInterval = 5 * time.Second
+
 type compositionController struct {
-	client     client.Client
-	podTimeout time.Duration
+	client                client.Client
+	podTimeout            time.Duration
+	synthesisPodNamespace string
 }
 
-func NewController(mgr ctrl.Manager, podTimeout time.Duration) error {
+func NewController(mgr ctrl.Manager, podTimeout time.Duration, synthesisPodNamespace string) error {
 	c := &compositionController{
-		client:     mgr.GetClient(),
-		podTimeout: podTimeout,
+		client:                mgr.GetClient(),
+		podTimeout:            podTimeout,
+		synthesisPodNamespace: synthesisPodNamespace,
 	}
 	depPredicate := predicate.TypedFuncs[*apiv1.Composition]{
 		CreateFunc: func(e event.TypedCreateEvent[*apiv1.Composition]) bool { return false },
@@ -166,9 +182,52 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Enforce the synthesis timeout period
 	if syn := comp.Status.InFlightSynthesis; syn != nil && syn.Canceled == nil && syn.Initialized != nil {
+		// If the synthesizer pod already terminated because of various reasons in skipSynthesis, we
+		// don't want to wait for the full cancellation, we want to fail fast and cancel early
+		pod, terminal, err := c.terminalInFlightPod(ctx, comp)
+		if err != nil {
+			logger.Error(err, "failed to check synthesis pod phase")
+			return ctrl.Result{}, err
+		}
+
+		if terminal {
+			if grace := time.Until(podTerminationTime(pod).Add(podCompletionGracePeriod)); grace > 0 {
+				return ctrl.Result{RequeueAfter: grace}, nil
+			}
+
+			// A successful executor write bumps resourceVersion, so Status.Update() will conflict and we requeue. If the synthesis already advanced/cancelled do nothing
+			if comp.Status.InFlightSynthesis == nil || comp.Status.InFlightSynthesis.UUID != syn.UUID ||
+				comp.Status.InFlightSynthesis.Canceled != nil {
+				return ctrl.Result{}, nil
+			}
+
+			comp.Status.InFlightSynthesis.Canceled = ptr.To(metav1.Now())
+			if err := c.client.Status().Update(ctx, comp); err != nil {
+				if errors.IsConflict(err) {
+					return ctrl.Result{Requeue: true}, nil
+				}
+				logger.Error(err, "failed to cancel synthesis after pod terminated without advancing status")
+				return ctrl.Result{}, err
+			}
+			logger.Info("synthesis pod terminated without advancing status - cancelling for retry",
+				"podPhase", string(pod.Status.Phase),
+				"podName", pod.Name,
+				"synthesisUUID", syn.UUID,
+				"compositionGeneration", comp.Generation,
+			)
+			return ctrl.Result{}, nil
+		}
+
+		// No terminal pod yet. Poll on a short interval (capped by the remaining
+		// timeout) so a terminal pod is noticed promptly without watching Pods,
+		// while podTimeout remains the backstop for genuinely hung pods.
 		delta := time.Until(syn.Initialized.Time.Add(c.podTimeout))
 		if delta > 0 {
-			return ctrl.Result{RequeueAfter: delta}, nil
+			next := inFlightPollInterval
+			if delta < next {
+				next = delta
+			}
+			return ctrl.Result{RequeueAfter: next}, nil
 		}
 		syn.Canceled = ptr.To(metav1.Now())
 		if err := c.client.Status().Update(ctx, comp); err != nil {
@@ -555,4 +614,48 @@ func (c *compositionController) clearDependencyStatus(ctx context.Context, comp 
 		return ctrl.Result{}, fmt.Errorf("clearing dependency failed: %w", err)
 	}
 	return ctrl.Result{}, nil
+}
+
+func (c *compositionController) terminalInFlightPod(ctx context.Context, comp *apiv1.Composition) (*corev1.Pod, bool, error) {
+	syn := comp.Status.InFlightSynthesis
+	if syn == nil || syn.UUID == "" {
+		return nil, false, nil
+	}
+
+	var pods corev1.PodList
+	err := c.client.List(ctx, &pods,
+		client.InNamespace(c.synthesisPodNamespace),
+		client.MatchingLabels{synthesisIDLabelKey: syn.UUID})
+	if err != nil {
+		return nil, false, fmt.Errorf("error listing synthesizer pods: %w", err)
+	}
+
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+			return pod, true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+// podTerminationTime returns the time the pod actually finished running: the
+// latest container termination timestamp. This is the correct anchor for the
+// completion grace period ("how long after the pod finished do we wait"). It
+// falls back to CreationTimestamp when no terminated state is recorded, which
+// shouldn't happen for a pod already observed in a terminal phase.
+func podTerminationTime(pod *corev1.Pod) time.Time {
+	var latest time.Time
+	for _, cs := range pod.Status.ContainerStatuses {
+		if term := cs.State.Terminated; term != nil && term.FinishedAt.Time.After(latest) {
+			latest = term.FinishedAt.Time
+		}
+	}
+	if latest.IsZero() {
+		return pod.CreationTimestamp.Time
+	}
+	return latest
 }
