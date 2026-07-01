@@ -427,6 +427,71 @@ func TestReconcileInterval(t *testing.T) {
 	})
 }
 
+// TestUseDefaultReconcileInterval proves that resources which opt into the default reconcile
+// interval (without specifying an explicit one) are periodically reconciled and converge when
+// modified from outside of Eno.
+func TestUseDefaultReconcileInterval(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.SchemeBuilder.AddToScheme(scheme)
+	testv1.SchemeBuilder.AddToScheme(scheme)
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "test-obj",
+					"namespace": "default",
+					"annotations": map[string]string{
+						"eno.azure.io/use-default-reconcile-interval": "true",
+					},
+				},
+				"data": map[string]string{"foo": "bar"},
+			},
+		}}
+		return output, nil
+	})
+
+	// Test subject with a short default reconcile interval so the test converges quickly.
+	setupTestSubjectForOptions(t, mgr, Options{
+		Manager:                  mgr.Manager,
+		Timeout:                  time.Minute,
+		ReadinessPollInterval:    time.Hour,
+		DefaultReconcileInterval: 100 * time.Millisecond,
+		DisableServerSideApply:   mgr.NoSsaSupport,
+	})
+	mgr.Start(t)
+	writeGenericComposition(t, upstream)
+
+	// Wait for resource to be created
+	obj := &corev1.ConfigMap{}
+	testutil.Eventually(t, func() bool {
+		obj.SetName("test-obj")
+		obj.SetNamespace("default")
+		err := downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+		return err == nil
+	})
+
+	// Update the object from outside of Eno
+	obj.Data["foo"] = "baz"
+	require.NoError(t, downstream.Update(ctx, obj))
+
+	// The object should eventually converge with the desired state because the default
+	// reconcile interval keeps requeueing it even though no explicit interval was set.
+	testutil.Eventually(t, func() bool {
+		err := downstream.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+		return err == nil && obj.Data["foo"] == "bar"
+	})
+}
+
 // TestReconcileCacheRace covers a race condition in which a work item remains in the queue after the
 // corresponding (version of the) manifest has been removed from cache.
 func TestReconcileCacheRace(t *testing.T) {
