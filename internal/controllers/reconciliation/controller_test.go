@@ -23,11 +23,12 @@ import (
 
 func TestRequeue(t *testing.T) {
 	tests := []struct {
-		name           string
-		resource       *resource.Snapshot
-		ready          *metav1.Time
-		minReconcile   time.Duration
-		expectedResult time.Duration
+		name             string
+		resource         *resource.Snapshot
+		ready            *metav1.Time
+		minReconcile     time.Duration
+		defaultReconcile time.Duration
+		expectedResult   time.Duration
 	}{
 		{
 			name: "resource is not ready, requeue after readiness poll interval",
@@ -65,14 +66,59 @@ func TestRequeue(t *testing.T) {
 			minReconcile:   10 * time.Second,
 			expectedResult: 15 * time.Second,
 		},
+		{
+			name: "opts into default reconcile interval without an explicit interval",
+			resource: &resource.Snapshot{
+				ReconcileInterval:           nil,
+				UseDefaultReconcileInterval: true,
+			},
+			ready:            &metav1.Time{},
+			minReconcile:     1 * time.Second,
+			defaultReconcile: 15 * time.Second,
+			expectedResult:   15 * time.Second,
+		},
+		{
+			name: "explicit reconcile interval wins over the default opt-in",
+			resource: &resource.Snapshot{
+				ReconcileInterval:           &metav1.Duration{Duration: 15 * time.Second},
+				UseDefaultReconcileInterval: true,
+			},
+			ready:            &metav1.Time{},
+			minReconcile:     1 * time.Second,
+			defaultReconcile: 5 * time.Second,
+			expectedResult:   15 * time.Second,
+		},
+		{
+			name: "default reconcile interval below minReconcileInterval is floored",
+			resource: &resource.Snapshot{
+				ReconcileInterval:           nil,
+				UseDefaultReconcileInterval: true,
+			},
+			ready:            &metav1.Time{},
+			minReconcile:     10 * time.Second,
+			defaultReconcile: 5 * time.Second,
+			expectedResult:   10 * time.Second,
+		},
+		{
+			name: "no opt-in and no explicit interval does not requeue",
+			resource: &resource.Snapshot{
+				ReconcileInterval:           nil,
+				UseDefaultReconcileInterval: false,
+			},
+			ready:            &metav1.Time{},
+			minReconcile:     10 * time.Second,
+			defaultReconcile: 15 * time.Second,
+			expectedResult:   0,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			logger := logr.Discard()
 			c := &Controller{
-				readinessPollInterval: 10 * time.Second,
-				minReconcileInterval:  tt.minReconcile,
+				readinessPollInterval:    10 * time.Second,
+				minReconcileInterval:     tt.minReconcile,
+				defaultReconcileInterval: tt.defaultReconcile,
 			}
 			if tt.resource.Resource == nil {
 				tt.resource.Resource = &resource.Resource{}
