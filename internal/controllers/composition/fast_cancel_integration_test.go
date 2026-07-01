@@ -5,6 +5,7 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/manager"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -13,6 +14,22 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+// newSynthPodForCache builds a synthesizer pod the way the pod lifecycle
+// controller does, including the manager label. That label is required for the
+// pod to be admitted into the controller's namespace-and-label-scoped cache, so
+// terminalInFlightPod (a cached List) can see it.
+func newSynthPodForCache(name, uuid string) *corev1.Pod {
+	pod := &corev1.Pod{}
+	pod.Name = name
+	pod.Namespace = "default"
+	pod.Labels = map[string]string{
+		synthesisIDLabelKey:     uuid,
+		manager.ManagerLabelKey: manager.ManagerLabelValue,
+	}
+	pod.Spec.Containers = []corev1.Container{{Name: "synth", Image: "test-image"}}
+	return pod
+}
 
 // TestIntegrationFastCancelAbandonedSynthesis proves, against a real manager and
 // informer cache, that an in-flight synthesis whose pod has terminated without
@@ -37,6 +54,7 @@ func TestIntegrationFastCancelAbandonedSynthesis(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t, testutil.WithPodNamespace("default"))
 	cli := mgr.GetClient()
+	apiReader := mgr.GetAPIReader() // uncached: avoids read-after-write cache lag
 
 	require.NoError(t, NewController(mgr.Manager, time.Hour, "default"))
 	mgr.Start(t)
@@ -57,7 +75,7 @@ func TestIntegrationFastCancelAbandonedSynthesis(t *testing.T) {
 
 	// Drive the composition into the dangling in-flight state.
 	require.NoError(t, retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		if err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp); err != nil {
+		if err := apiReader.Get(ctx, client.ObjectKeyFromObject(comp), comp); err != nil {
 			return err
 		}
 		comp.Status.InFlightSynthesis = &apiv1.Synthesis{
@@ -69,14 +87,10 @@ func TestIntegrationFastCancelAbandonedSynthesis(t *testing.T) {
 
 	// Create a terminal pod that never advanced the status (simulates the
 	// executor's skipSynthesis early return: exit 0, no status write).
-	pod := &corev1.Pod{}
-	pod.Name = "synthesis-abandoned"
-	pod.Namespace = "default"
-	pod.Labels = map[string]string{synthesisIDLabelKey: uuid}
-	pod.Spec.Containers = []corev1.Container{{Name: "synth", Image: "test-image"}}
+	pod := newSynthPodForCache("synthesis-abandoned", uuid)
 	require.NoError(t, cli.Create(ctx, pod))
 	require.NoError(t, retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		if err := cli.Get(ctx, client.ObjectKeyFromObject(pod), pod); err != nil {
+		if err := apiReader.Get(ctx, client.ObjectKeyFromObject(pod), pod); err != nil {
 			return err
 		}
 		pod.Status.Phase = corev1.PodSucceeded
@@ -86,7 +100,7 @@ func TestIntegrationFastCancelAbandonedSynthesis(t *testing.T) {
 	// The fast path must cancel the abandoned synthesis far sooner than the 1h
 	// podTimeout.
 	testutil.Eventually(t, func() bool {
-		if err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp); err != nil {
+		if err := apiReader.Get(ctx, client.ObjectKeyFromObject(comp), comp); err != nil {
 			return false
 		}
 		return comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.Canceled != nil
@@ -108,6 +122,7 @@ func TestIntegrationFastCancelLeavesSuccessAlone(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t, testutil.WithPodNamespace("default"))
 	cli := mgr.GetClient()
+	apiReader := mgr.GetAPIReader()
 
 	require.NoError(t, NewController(mgr.Manager, time.Hour, "default"))
 	mgr.Start(t)
@@ -129,7 +144,7 @@ func TestIntegrationFastCancelLeavesSuccessAlone(t *testing.T) {
 	// Advanced/successful state: no in-flight synthesis, current synthesis matches
 	// the pod's UUID.
 	require.NoError(t, retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		if err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp); err != nil {
+		if err := apiReader.Get(ctx, client.ObjectKeyFromObject(comp), comp); err != nil {
 			return err
 		}
 		comp.Status.CurrentSynthesis = &apiv1.Synthesis{
@@ -141,14 +156,10 @@ func TestIntegrationFastCancelLeavesSuccessAlone(t *testing.T) {
 		return cli.Status().Update(ctx, comp)
 	}))
 
-	pod := &corev1.Pod{}
-	pod.Name = "synthesis-succeeded"
-	pod.Namespace = "default"
-	pod.Labels = map[string]string{synthesisIDLabelKey: uuid}
-	pod.Spec.Containers = []corev1.Container{{Name: "synth", Image: "test-image"}}
+	pod := newSynthPodForCache("synthesis-succeeded", uuid)
 	require.NoError(t, cli.Create(ctx, pod))
 	require.NoError(t, retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		if err := cli.Get(ctx, client.ObjectKeyFromObject(pod), pod); err != nil {
+		if err := apiReader.Get(ctx, client.ObjectKeyFromObject(pod), pod); err != nil {
 			return err
 		}
 		pod.Status.Phase = corev1.PodSucceeded
@@ -158,7 +169,7 @@ func TestIntegrationFastCancelLeavesSuccessAlone(t *testing.T) {
 	// Give the controller time to reconcile a few poll intervals, then assert the
 	// completed synthesis was never disturbed.
 	time.Sleep(time.Second)
-	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	require.NoError(t, apiReader.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 	require.Nil(t, comp.Status.InFlightSynthesis, "no in-flight synthesis should be created")
 	require.NotNil(t, comp.Status.CurrentSynthesis)
 	require.Equal(t, uuid, comp.Status.CurrentSynthesis.UUID)

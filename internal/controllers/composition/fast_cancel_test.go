@@ -69,6 +69,19 @@ func newFastCancelController(cli client.Client) *compositionController {
 	}
 }
 
+// pinFastCancelTimers sets the package-level fast-path timers for the duration of
+// a test and restores them afterwards. Tests that assert grace/poll behavior use
+// this so they don't depend on the ambient (possibly integration-mutated) value.
+func pinFastCancelTimers(t *testing.T, grace, poll time.Duration) {
+	origGrace, origPoll := podCompletionGracePeriod, inFlightPollInterval
+	podCompletionGracePeriod = grace
+	inFlightPollInterval = poll
+	t.Cleanup(func() {
+		podCompletionGracePeriod = origGrace
+		inFlightPollInterval = origPoll
+	})
+}
+
 // --- terminalInFlightPod unit matrix ---
 
 func TestTerminalInFlightPod(t *testing.T) {
@@ -190,6 +203,7 @@ func TestFastCancelAbandonedSynthesis(t *testing.T) {
 // Case 2: a terminal pod still within the grace period requeues instead of
 // cancelling, giving a late successful status write time to propagate.
 func TestFastCancelWithinGraceRequeues(t *testing.T) {
+	pinFastCancelTimers(t, time.Minute, inFlightPollInterval) // grace must be long enough that a now-created pod is within it
 	ctx := testutil.NewContext(t)
 	comp := newInFlightComp("uuid-1", time.Now())
 	pod := newSynthPod("synthesis-1", "uuid-1", corev1.PodSucceeded, time.Now()) // created now -> within grace
@@ -322,6 +336,7 @@ func TestFastCancelConflictRequeues(t *testing.T) {
 // --- Functional progression: grace gate releases into a cancel ---
 
 func TestFastCancelGraceThenCancel(t *testing.T) {
+	pinFastCancelTimers(t, time.Minute, inFlightPollInterval) // grace must be long enough that a now-created pod is within it
 	ctx := testutil.NewContext(t)
 	comp := newInFlightComp("uuid-1", time.Now())
 	pod := newSynthPod("synthesis-1", "uuid-1", corev1.PodSucceeded, time.Now()) // within grace
