@@ -61,6 +61,22 @@ func newSynthPod(name, uuid string, phase corev1.PodPhase, created time.Time) *c
 	return pod
 }
 
+// newTerminatedSynthPod builds a Succeeded synthesizer pod whose container
+// terminated at finishedAt, so tests can exercise the termination-time grace
+// anchor independently of CreationTimestamp.
+func newTerminatedSynthPod(name, uuid string, created, finishedAt time.Time) *corev1.Pod {
+	pod := newSynthPod(name, uuid, corev1.PodSucceeded, created)
+	pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		Name: "synth",
+		State: corev1.ContainerState{
+			Terminated: &corev1.ContainerStateTerminated{
+				FinishedAt: metav1.NewTime(finishedAt),
+			},
+		},
+	}}
+	return pod
+}
+
 func newFastCancelController(cli client.Client) *compositionController {
 	return &compositionController{
 		client:                cli,
@@ -218,6 +234,50 @@ func TestFastCancelWithinGraceRequeues(t *testing.T) {
 
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 	assert.Nil(t, comp.Status.InFlightSynthesis.Canceled, "should not cancel while within grace period")
+}
+
+// Case 2b: the grace window is measured from when the pod *terminated*, not when
+// it was created. A pod created long ago but finished just now must still be
+// within grace (the old creation-time anchor would have cancelled immediately).
+func TestFastCancelGraceUsesTerminationTime(t *testing.T) {
+	pinFastCancelTimers(t, time.Minute, inFlightPollInterval)
+	ctx := testutil.NewContext(t)
+	comp := newInFlightComp("uuid-1", time.Now())
+	pod := newTerminatedSynthPod("synthesis-1", "uuid-1", time.Now().Add(-time.Hour), time.Now()) // created long ago, finished now
+
+	cli := testutil.NewClient(t, comp, newTestSynth(), pod)
+	c := newFastCancelController(cli)
+
+	res, err := c.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(comp)})
+	require.NoError(t, err)
+	assert.Greater(t, res.RequeueAfter, time.Duration(0), "grace must be measured from termination, not creation")
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	assert.Nil(t, comp.Status.InFlightSynthesis.Canceled, "should not cancel while within the post-termination grace window")
+}
+
+// TestPodTerminationTime covers the grace anchor helper directly.
+func TestPodTerminationTime(t *testing.T) {
+	created := time.Now().Add(-time.Hour)
+	finished := time.Now().Add(-time.Minute)
+
+	// No terminated state -> falls back to CreationTimestamp.
+	assert.WithinDuration(t, created,
+		podTerminationTime(newSynthPod("p", "u", corev1.PodSucceeded, created)), time.Second)
+
+	// Single terminated container -> uses its FinishedAt.
+	assert.WithinDuration(t, finished,
+		podTerminationTime(newTerminatedSynthPod("p", "u", created, finished)), time.Second)
+
+	// Multiple terminated containers -> uses the latest FinishedAt.
+	multi := newTerminatedSynthPod("p", "u", created, finished)
+	multi.Status.ContainerStatuses = append(multi.Status.ContainerStatuses, corev1.ContainerStatus{
+		Name: "c2",
+		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+			FinishedAt: metav1.NewTime(finished.Add(30 * time.Second)),
+		}},
+	})
+	assert.WithinDuration(t, finished.Add(30*time.Second), podTerminationTime(multi), time.Second)
 }
 
 // Case 3: when the synthesis has already advanced (InFlightSynthesis cleared by a

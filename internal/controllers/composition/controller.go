@@ -191,7 +191,7 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 
 		if terminal {
-			if grace := time.Until(pod.CreationTimestamp.Time.Add(podCompletionGracePeriod)); grace > 0 {
+			if grace := time.Until(podTerminationTime(pod).Add(podCompletionGracePeriod)); grace > 0 {
 				return ctrl.Result{RequeueAfter: grace}, nil
 			}
 
@@ -640,4 +640,22 @@ func (c *compositionController) terminalInFlightPod(ctx context.Context, comp *a
 		}
 	}
 	return nil, false, nil
+}
+
+// podTerminationTime returns the time the pod actually finished running: the
+// latest container termination timestamp. This is the correct anchor for the
+// completion grace period ("how long after the pod finished do we wait"). It
+// falls back to CreationTimestamp when no terminated state is recorded, which
+// shouldn't happen for a pod already observed in a terminal phase.
+func podTerminationTime(pod *corev1.Pod) time.Time {
+	var latest time.Time
+	for _, cs := range pod.Status.ContainerStatuses {
+		if term := cs.State.Terminated; term != nil && term.FinishedAt.Time.After(latest) {
+			latest = term.FinishedAt.Time
+		}
+	}
+	if latest.IsZero() {
+		return pod.CreationTimestamp.Time
+	}
+	return latest
 }
