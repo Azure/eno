@@ -99,7 +99,7 @@ func pinFastCancelTimers(t *testing.T, grace, poll time.Duration) {
 	})
 }
 
-// --- terminalInFlightPod unit matrix ---
+// --- succeededInFlightPod unit matrix ---
 
 func TestTerminalInFlightPod(t *testing.T) {
 	const uuid = "uuid-1"
@@ -187,7 +187,7 @@ func TestTerminalInFlightPod(t *testing.T) {
 			comp := &apiv1.Composition{}
 			comp.Status.InFlightSynthesis = tc.inFlight
 
-			pod, terminal, err := c.terminalInFlightPod(ctx, comp)
+			pod, terminal, err := c.succeededInFlightPod(ctx, comp)
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantTerminal, terminal)
 			if tc.wantTerminal {

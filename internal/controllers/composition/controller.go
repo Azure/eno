@@ -183,7 +183,7 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 	if syn := comp.Status.InFlightSynthesis; syn != nil && syn.Canceled == nil && syn.Initialized != nil {
 		// If the synthesizer pod already terminated because of various reasons in skipSynthesis, we
 		// don't want to wait for the full cancellation, we want to fail fast and cancel early
-		pod, terminal, err := c.terminalInFlightPod(ctx, comp)
+		pod, terminal, err := c.succeededInFlightPod(ctx, comp)
 		if err != nil {
 			logger.Error(err, "failed to check synthesis pod phase")
 			return ctrl.Result{}, err
@@ -615,7 +615,7 @@ func (c *compositionController) clearDependencyStatus(ctx context.Context, comp 
 	return ctrl.Result{}, nil
 }
 
-func (c *compositionController) terminalInFlightPod(ctx context.Context, comp *apiv1.Composition) (*corev1.Pod, bool, error) {
+func (c *compositionController) succeededInFlightPod(ctx context.Context, comp *apiv1.Composition) (*corev1.Pod, bool, error) {
 	syn := comp.Status.InFlightSynthesis
 	if syn == nil || syn.UUID == "" {
 		return nil, false, nil

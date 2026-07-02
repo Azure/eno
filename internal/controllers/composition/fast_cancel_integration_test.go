@@ -18,7 +18,7 @@ import (
 // newSynthPodForCache builds a synthesizer pod the way the pod lifecycle
 // controller does, including the manager label. That label is required for the
 // pod to be admitted into the controller's namespace-and-label-scoped cache, so
-// terminalInFlightPod (a cached List) can see it.
+// succeededInFlightPod (a cached List) can see it.
 func newSynthPodForCache(name, uuid string) *corev1.Pod {
 	pod := &corev1.Pod{}
 	pod.Name = name
