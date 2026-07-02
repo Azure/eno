@@ -43,8 +43,9 @@ func init() {
 // - The resource slices cached by the informer do not have the configured manifests since they are held by the reconstitution cache anyway
 
 const (
-	ManagerLabelKey   = "app.kubernetes.io/managed-by"
-	ManagerLabelValue = "eno"
+	ManagerLabelKey     = "app.kubernetes.io/managed-by"
+	ManagerLabelValue   = "eno"
+	SynthesisIDLabelKey = "eno.azure.io/synthesis-uuid"
 )
 
 func init() {

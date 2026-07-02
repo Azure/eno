@@ -24,8 +24,8 @@ func newSynthPodForCache(name, uuid string) *corev1.Pod {
 	pod.Name = name
 	pod.Namespace = "default"
 	pod.Labels = map[string]string{
-		synthesisIDLabelKey:     uuid,
-		manager.ManagerLabelKey: manager.ManagerLabelValue,
+		manager.SynthesisIDLabelKey: uuid,
+		manager.ManagerLabelKey:     manager.ManagerLabelValue,
 	}
 	pod.Spec.Containers = []corev1.Container{{Name: "synth", Image: "test-image"}}
 	return pod

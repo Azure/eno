@@ -15,7 +15,6 @@ import (
 const (
 	compositionNameLabelKey      = "eno.azure.io/composition-name"
 	compositionNamespaceLabelKey = "eno.azure.io/composition-namespace"
-	synthesisIDLabelKey          = "eno.azure.io/synthesis-uuid"
 	synthesizerNameLabelKey      = "eno.azure.io/synthesizer-name"
 )
 
@@ -26,7 +25,7 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 	pod.Labels = map[string]string{
 		compositionNameLabelKey:      comp.Name,
 		compositionNamespaceLabelKey: comp.Namespace,
-		synthesisIDLabelKey:          comp.Status.InFlightSynthesis.UUID,
+		manager.SynthesisIDLabelKey:  comp.Status.InFlightSynthesis.UUID,
 		synthesizerNameLabelKey:      comp.Spec.Synthesizer.Name,
 		manager.ManagerLabelKey:      manager.ManagerLabelValue,
 	}

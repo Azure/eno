@@ -40,7 +40,6 @@ const (
 	NotReadyStatus                      = "NotReady"
 	ReconcilingStatus                   = "Reconciling"
 	LogSampleCap                        = 50
-	synthesisIDLabelKey                 = "eno.azure.io/synthesis-uuid"
 )
 
 // podCompletionGracePeriod is how long after a synthesizer pod is observed
@@ -625,7 +624,7 @@ func (c *compositionController) terminalInFlightPod(ctx context.Context, comp *a
 	var pods corev1.PodList
 	err := c.client.List(ctx, &pods,
 		client.InNamespace(c.synthesisPodNamespace),
-		client.MatchingLabels{synthesisIDLabelKey: syn.UUID})
+		client.MatchingLabels{manager.SynthesisIDLabelKey: syn.UUID})
 	if err != nil {
 		return nil, false, fmt.Errorf("error listing synthesizer pods: %w", err)
 	}
@@ -635,7 +634,7 @@ func (c *compositionController) terminalInFlightPod(ctx context.Context, comp *a
 		if pod.DeletionTimestamp != nil {
 			continue
 		}
-		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+		if pod.Status.Phase == corev1.PodSucceeded {
 			return pod, true, nil
 		}
 	}

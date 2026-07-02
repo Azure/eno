@@ -7,6 +7,7 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/manager"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -53,7 +54,7 @@ func newSynthPod(name, uuid string, phase corev1.PodPhase, created time.Time) *c
 	pod := &corev1.Pod{}
 	pod.Name = name
 	pod.Namespace = testPodNamespace
-	pod.Labels = map[string]string{synthesisIDLabelKey: uuid}
+	pod.Labels = map[string]string{manager.SynthesisIDLabelKey: uuid}
 	pod.Status.Phase = phase
 	if !created.IsZero() {
 		pod.CreationTimestamp = metav1.NewTime(created)
