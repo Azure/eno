@@ -139,10 +139,14 @@ func TestTerminalInFlightPod(t *testing.T) {
 			wantTerminal: true,
 		},
 		{
+			// Under RestartPolicy: OnFailure a failed executor is restarted (pod stays
+			// Running); a Failed phase only happens on eviction/deadline, which the
+			// podTimeout backstop handles. Only a Succeeded pod (the skipSynthesis
+			// early-return) triggers fast-cancel.
 			name:         "pod failed",
 			inFlight:     &apiv1.Synthesis{UUID: uuid},
 			pods:         []client.Object{newSynthPod("p", uuid, corev1.PodFailed, time.Time{})},
-			wantTerminal: true,
+			wantTerminal: false,
 		},
 		{
 			name:     "terminal but being deleted",
