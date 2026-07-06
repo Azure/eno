@@ -126,7 +126,7 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 
 		// A new synthesis has replaced the previous
-		if syn.UUID != pod.Labels[synthesisIDLabelKey] {
+		if syn.UUID != pod.Labels[manager.SynthesisIDLabelKey] {
 			logger = logger.WithValues("reason", "Superseded")
 			return ctrl.Result{}, p.deletePod(ctx, pod, getSynthesizerName(pod), reasonSuperseded, logger)
 		}
@@ -135,7 +135,7 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// In-flight synthesis being swapped to current == synthesis completed
-	if syn := comp.Status.CurrentSynthesis; syn != nil && syn.UUID == pod.Labels[synthesisIDLabelKey] {
+	if syn := comp.Status.CurrentSynthesis; syn != nil && syn.UUID == pod.Labels[manager.SynthesisIDLabelKey] {
 		logger = logger.WithValues("reason", "Success")
 		return ctrl.Result{}, p.deletePod(ctx, pod, getSynthesizerName(pod), reasonSuccess, logger)
 	}

@@ -150,7 +150,7 @@ func runController() error {
 		return fmt.Errorf("constructing synthesis scheduling controller: %w", err)
 	}
 
-	err = composition.NewController(mgr, podTimeout)
+	err = composition.NewController(mgr, podTimeout, synconf.PodNamespace)
 	if err != nil {
 		return fmt.Errorf("constructing composition controller: %w", err)
 	}

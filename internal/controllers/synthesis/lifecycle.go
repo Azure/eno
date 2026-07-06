@@ -124,7 +124,7 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 	// another tick of this loop before the pod write hits the informer.
 	pods := &corev1.PodList{}
 	err = c.noCacheReader.List(ctx, pods, client.InNamespace(c.config.PodNamespace), client.MatchingLabels{
-		synthesisIDLabelKey: comp.Status.InFlightSynthesis.UUID,
+		manager.SynthesisIDLabelKey: comp.Status.InFlightSynthesis.UUID,
 	})
 	if err != nil {
 		logger.Error(err, fmt.Sprintf("Error while listing Pods in Namespace[%s], SynthesisUUID[%s]",
