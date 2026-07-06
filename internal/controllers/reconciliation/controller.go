@@ -41,27 +41,29 @@ type Options struct {
 	MigratingFieldManagers []string
 	MigratingFields        []string
 
-	Timeout               time.Duration
-	ReadinessPollInterval time.Duration
-	MinReconcileInterval  time.Duration
+	Timeout                  time.Duration
+	ReadinessPollInterval    time.Duration
+	MinReconcileInterval     time.Duration
+	DefaultReconcileInterval time.Duration
 
 	MaxConcurrentReconciles int
 }
 
 type Controller struct {
-	client                  client.Client
-	writeBuffer             *flowcontrol.ResourceSliceWriteBuffer
-	resourceClient          *resource.Cache
-	resourceFilter          cel.Program
-	timeout                 time.Duration
-	readinessPollInterval   time.Duration
-	upstreamClient          client.Client
-	minReconcileInterval    time.Duration
-	disableSSA              bool
-	failOpen                bool
-	migratingFieldManagers  []string
-	migratingFields         []string
-	maxConcurrentReconciles int
+	client                   client.Client
+	writeBuffer              *flowcontrol.ResourceSliceWriteBuffer
+	resourceClient           *resource.Cache
+	resourceFilter           cel.Program
+	timeout                  time.Duration
+	readinessPollInterval    time.Duration
+	upstreamClient           client.Client
+	minReconcileInterval     time.Duration
+	defaultReconcileInterval time.Duration
+	disableSSA               bool
+	failOpen                 bool
+	migratingFieldManagers   []string
+	migratingFields          []string
+	maxConcurrentReconciles  int
 }
 
 func New(mgr ctrl.Manager, opts Options) error {
@@ -78,19 +80,20 @@ func New(mgr ctrl.Manager, opts Options) error {
 	}
 
 	c := &Controller{
-		client:                  opts.Manager.GetClient(),
-		writeBuffer:             opts.WriteBuffer,
-		resourceClient:          cache,
-		resourceFilter:          opts.ResourceFilter,
-		timeout:                 opts.Timeout,
-		readinessPollInterval:   opts.ReadinessPollInterval,
-		upstreamClient:          upstreamClient,
-		minReconcileInterval:    opts.MinReconcileInterval,
-		disableSSA:              opts.DisableServerSideApply,
-		failOpen:                opts.FailOpen,
-		migratingFieldManagers:  opts.MigratingFieldManagers,
-		migratingFields:         opts.MigratingFields,
-		maxConcurrentReconciles: opts.MaxConcurrentReconciles,
+		client:                   opts.Manager.GetClient(),
+		writeBuffer:              opts.WriteBuffer,
+		resourceClient:           cache,
+		resourceFilter:           opts.ResourceFilter,
+		timeout:                  opts.Timeout,
+		readinessPollInterval:    opts.ReadinessPollInterval,
+		upstreamClient:           upstreamClient,
+		minReconcileInterval:     opts.MinReconcileInterval,
+		defaultReconcileInterval: opts.DefaultReconcileInterval,
+		disableSSA:               opts.DisableServerSideApply,
+		failOpen:                 opts.FailOpen,
+		migratingFieldManagers:   opts.MigratingFieldManagers,
+		migratingFields:          opts.MigratingFields,
+		maxConcurrentReconciles:  opts.MaxConcurrentReconciles,
 	}
 
 	reconciliationMaxConcurrent.Set(float64(opts.MaxConcurrentReconciles))
@@ -533,11 +536,24 @@ func (c *Controller) requeue(logger logr.Logger, resource *resource.Snapshot, re
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
 	}
 
-	if resource == nil || (resource.Deleted() && !resource.Disable) || resource.ReconcileInterval == nil {
+	if resource == nil || (resource.Deleted() && !resource.Disable) {
 		return ctrl.Result{}, nil
 	}
 
-	interval := resource.ReconcileInterval.Duration
+	// Determine the reconcile interval. An explicit eno.azure.io/reconcile-interval always
+	// wins. When it's absent but the resource opts in via eno.azure.io/use-default-reconcile-interval,
+	// fall back to the controller's default interval so drift (e.g. an accidental deletion of a
+	// customer-visible resource) is corrected without waiting for the next synthesis.
+	var interval time.Duration
+	switch {
+	case resource.ReconcileInterval != nil:
+		interval = resource.ReconcileInterval.Duration
+	case resource.UseDefaultReconcileInterval:
+		interval = c.defaultReconcileInterval
+	default:
+		return ctrl.Result{}, nil
+	}
+
 	if interval < c.minReconcileInterval {
 		logger.V(1).Info("reconcile interval is too small - using default", "latency", interval, "default", c.minReconcileInterval)
 		interval = c.minReconcileInterval

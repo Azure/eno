@@ -91,6 +91,7 @@ spec:
         - --leader-election
         - --leader-election-id=reconciler
         - --disable-ssa=$DISABLE_SSA
+        - --default-reconcile-interval=10s
         env:
           - name: POD_NAMESPACE
             valueFrom:

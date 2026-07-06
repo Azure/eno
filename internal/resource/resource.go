@@ -371,6 +371,9 @@ func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Compos
 		snap.ReconcileInterval = &metav1.Duration{Duration: reconcileInterval}
 	}
 
+	const useDefaultReconcileIntervalKey = "eno.azure.io/use-default-reconcile-interval"
+	snap.UseDefaultReconcileInterval = cascadeAnnotation(comp, copy, useDefaultReconcileIntervalKey) == "true"
+
 	// Remove any eno.azure.io annotations and labels
 	copy.SetAnnotations(pruneMetadata(copy.GetAnnotations()))
 	copy.SetLabels(pruneMetadata(copy.GetLabels()))
@@ -383,12 +386,13 @@ func (r *Resource) SnapshotWithOverrides(ctx context.Context, comp *apiv1.Compos
 type Snapshot struct {
 	*Resource
 
-	ReconcileInterval  *metav1.Duration
-	Disable            bool
-	DisableUpdates     bool
-	Replace            bool
-	Orphan             bool
-	ForegroundDeletion bool
+	ReconcileInterval           *metav1.Duration
+	UseDefaultReconcileInterval bool
+	Disable                     bool
+	DisableUpdates              bool
+	Replace                     bool
+	Orphan                      bool
+	ForegroundDeletion          bool
 
 	parsed         *unstructured.Unstructured
 	overrideStatus string

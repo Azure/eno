@@ -108,6 +108,40 @@ var newResourceTests = []struct {
 		},
 	},
 	{
+		Name: "use default reconcile interval opt-in",
+		Manifest: `{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "foo",
+				"annotations": {
+					"eno.azure.io/use-default-reconcile-interval": "true"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Snapshot) {
+			assert.True(t, r.UseDefaultReconcileInterval)
+			assert.Nil(t, r.ReconcileInterval)
+		},
+	},
+	{
+		Name: "explicit reconcile interval leaves default opt-in off",
+		Manifest: `{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "foo",
+				"annotations": {
+					"eno.azure.io/reconcile-interval": "10s"
+				}
+			}
+		}`,
+		Assert: func(t *testing.T, r *Snapshot) {
+			assert.False(t, r.UseDefaultReconcileInterval)
+			assert.Equal(t, time.Second*10, r.ReconcileInterval.Duration)
+		},
+	},
+	{
 		Name: "zero-readiness-group",
 		Manifest: `{
 			"apiVersion": "v1",
