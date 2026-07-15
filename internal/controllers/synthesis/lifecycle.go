@@ -103,6 +103,16 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
+	namespaceUnavailable, err := compositionNamespaceUnavailable(ctx, c.client, comp.Namespace)
+	if err != nil {
+		logger.Error(err, "failed to get composition namespace", "compositionNamespace", comp.Namespace)
+		return ctrl.Result{}, err
+	}
+	if namespaceUnavailable {
+		logger.Info("refusing to create synthesizer pod because the composition namespace is terminating or missing", "compositionNamespace", comp.Namespace)
+		return ctrl.Result{}, nil
+	}
+
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "compositionGeneration", comp.Generation, "synthesisUUID", comp.Status.InFlightSynthesis.UUID,
 		"operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	ctx = logr.NewContext(ctx, logger)

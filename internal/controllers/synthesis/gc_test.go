@@ -12,8 +12,34 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+func TestPodGCTerminatingCompositionNamespace(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	now := metav1.Now()
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name:              "terminating",
+		DeletionTimestamp: &now,
+		Finalizers:        []string{"test-finalizer"},
+	}}
+	synth := &apiv1.Synthesizer{ObjectMeta: metav1.ObjectMeta{Name: "test-synth"}}
+	comp := &apiv1.Composition{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-comp", Namespace: ns.Name},
+		Spec:       apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{Name: synth.Name}},
+		Status:     apiv1.CompositionStatus{InFlightSynthesis: &apiv1.Synthesis{UUID: "test-synthesis"}},
+	}
+	pod := newPod(minimalTestConfig, comp, synth)
+	pod.GenerateName = ""
+	pod.Name = "test-pod"
+	cli := testutil.NewClient(t, ns, synth, comp, pod)
+	p := &podGarbageCollector{client: cli}
+
+	_, err := p.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(pod)})
+	require.NoError(t, err)
+	assert.True(t, errors.IsNotFound(cli.Get(ctx, client.ObjectKeyFromObject(pod), pod)))
+}
 
 func TestPodGCMissingSynthesis(t *testing.T) {
 	ctx := testutil.NewContext(t)
