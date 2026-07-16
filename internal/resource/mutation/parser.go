@@ -52,24 +52,24 @@ var pathExprLexer = lexer.MustSimple([]lexer.SimpleRule{
 var parser = participle.MustBuild[pathExprAST](participle.Lexer(pathExprLexer))
 
 type pathExprAST struct {
-	Sections []*section `@@*`
+	Sections []*section `parser:"@@*"`
 }
 
 type section struct {
-	Field *string `"."* (@Ident`
-	Index *index  `| "[" @@ "]")`
+	Field *string `parser:"\".\"* (@Ident"`
+	Index *index  `parser:"| \"[\" @@ \"]\")"`
 }
 
 type index struct {
-	Wildcard bool          `@"*"`
-	Element  *int          `| @Int`
-	Key      *string       `| @String`
-	Matcher  *indexMatcher `| @@`
+	Wildcard bool          `parser:"@\"*\""`
+	Element  *int          `parser:"| @Int"`
+	Key      *string       `parser:"| @String"`
+	Matcher  *indexMatcher `parser:"| @@"`
 }
 
 type indexMatcher struct {
-	Key   string `@Ident "="`
-	Value string `@String`
+	Key   string `parser:"@Ident \"=\""`
+	Value string `parser:"@String"`
 }
 
 func (p *PathExpr) String() string { return p.expr }
