@@ -11,9 +11,12 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/controllers/composition"
@@ -22,6 +25,41 @@ import (
 	"github.com/Azure/eno/internal/testutil"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 )
+
+func TestTerminatingCompositionNamespaceDoesNotCreatePod(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	require.NoError(t, apiv1.SchemeBuilder.AddToScheme(scheme))
+	require.NoError(t, corev1.SchemeBuilder.AddToScheme(scheme))
+
+	now := metav1.Now()
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name:              "terminating",
+		DeletionTimestamp: &now,
+		Finalizers:        []string{"test-finalizer"},
+	}}
+	syn := &apiv1.Synthesizer{ObjectMeta: metav1.ObjectMeta{Name: "test-synth"}}
+	comp := &apiv1.Composition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "test-comp",
+			Namespace:  ns.Name,
+			Finalizers: []string{"eno.azure.io/cleanup"},
+		},
+		Spec: apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{Name: syn.Name}},
+		Status: apiv1.CompositionStatus{
+			InFlightSynthesis: &apiv1.Synthesis{UUID: "test-synthesis"},
+		},
+	}
+	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns, syn, comp).Build()
+	c := &podLifecycleController{config: minimalTestConfig, client: cli, noCacheReader: cli}
+
+	_, err := c.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(comp)})
+	require.NoError(t, err)
+
+	pods := &corev1.PodList{}
+	require.NoError(t, cli.List(ctx, pods, client.InNamespace(minimalTestConfig.PodNamespace)))
+	assert.Empty(t, pods.Items)
+}
 
 // TestCompositionDeletion proves that a composition's status is eventually updated to reflect its deletion.
 // This is necessary to unblock finalizer removal, since we don't synthesize deleted compositions.

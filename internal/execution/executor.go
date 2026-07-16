@@ -10,6 +10,7 @@ import (
 	"github.com/Azure/eno/internal/resource"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -100,6 +101,10 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 	if err == nil {
 		logger.Info("writing resource slices")
 		sliceRefs, err = e.writeSlices(ctx, comp, output)
+		if errors.IsForbidden(err) && errors.HasStatusCause(err, corev1.NamespaceTerminatingCause) {
+			logger.Info("composition namespace is terminating - abandoning synthesis")
+			return nil
+		}
 		if err != nil {
 			logger.Error(err, "failed to write resource slices")
 			return err

@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -18,6 +19,7 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 func TestBasics(t *testing.T) {
@@ -106,6 +108,70 @@ func TestBasics(t *testing.T) {
 	// No-op since the synthesis is already complete
 	err = e.Synthesize(ctx, env)
 	require.NoError(t, err)
+}
+
+func TestNamespaceTerminationWhileWritingSlicesIsAbandoned(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	require.NoError(t, apiv1.SchemeBuilder.AddToScheme(scheme))
+
+	syn := &apiv1.Synthesizer{ObjectMeta: metav1.ObjectMeta{Name: "test-synth"}}
+	comp := &apiv1.Composition{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-comp", Namespace: "terminating"},
+		Spec:       apiv1.CompositionSpec{Synthesizer: apiv1.SynthesizerRef{Name: syn.Name}},
+		Status:     apiv1.CompositionStatus{InFlightSynthesis: &apiv1.Synthesis{UUID: "test-uuid"}},
+	}
+	resourceSliceCreates := 0
+	cli := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(syn, comp).
+		WithStatusSubresource(&apiv1.ResourceSlice{}, &apiv1.Composition{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Create: func(ctx context.Context, writer client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				if _, ok := obj.(*apiv1.ResourceSlice); !ok {
+					return writer.Create(ctx, obj, opts...)
+				}
+				resourceSliceCreates++
+				return &errors.StatusError{ErrStatus: metav1.Status{
+					Status:  metav1.StatusFailure,
+					Reason:  metav1.StatusReasonForbidden,
+					Message: "unable to create new content because the namespace is being terminated",
+					Details: &metav1.StatusDetails{Causes: []metav1.StatusCause{{Type: corev1.NamespaceTerminatingCause}}},
+				}}
+			},
+		}).
+		Build()
+
+	e := &Executor{
+		Reader: cli,
+		Writer: cli,
+		Handler: func(context.Context, *apiv1.Synthesizer, *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+			return &krmv1.ResourceList{
+				Items: []*unstructured.Unstructured{{Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "test-output",
+						"namespace": "default",
+					},
+				}}},
+			}, nil
+		},
+	}
+	err := e.Synthesize(ctx, &Env{
+		CompositionName:      comp.Name,
+		CompositionNamespace: comp.Namespace,
+		SynthesisUUID:        comp.Status.InFlightSynthesis.UUID,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, resourceSliceCreates)
+
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	assert.NotNil(t, comp.Status.InFlightSynthesis)
+	assert.Nil(t, comp.Status.CurrentSynthesis)
+	slices := &apiv1.ResourceSliceList{}
+	require.NoError(t, cli.List(ctx, slices, client.InNamespace(comp.Namespace)))
+	assert.Empty(t, slices.Items)
 }
 
 func TestWithInputs(t *testing.T) {

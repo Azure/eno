@@ -23,14 +23,15 @@ type podGarbageCollector struct {
 type terminalReason string
 
 const (
-	reasonSuccess            terminalReason = "success"
-	reasonTimeout            terminalReason = "timeout"
-	reasonSuperseded         terminalReason = "superseded"
-	reasonOrphaned           terminalReason = "orphaned"
-	reasonImageChanged       terminalReason = "image_changed"
-	reasonCompositionDeleted terminalReason = "composition_deleted"
-	reasonSynthesizerDeleted terminalReason = "synthesizer_deleted"
-	reasonKubeletTimeout     terminalReason = "kubelet_timeout"
+	reasonSuccess              terminalReason = "success"
+	reasonTimeout              terminalReason = "timeout"
+	reasonSuperseded           terminalReason = "superseded"
+	reasonOrphaned             terminalReason = "orphaned"
+	reasonImageChanged         terminalReason = "image_changed"
+	reasonCompositionDeleted   terminalReason = "composition_deleted"
+	reasonNamespaceTerminating terminalReason = "namespace_terminating"
+	reasonSynthesizerDeleted   terminalReason = "synthesizer_deleted"
+	reasonKubeletTimeout       terminalReason = "kubelet_timeout"
 )
 
 func NewPodGC(mgr ctrl.Manager, creationTimeout time.Duration) error {
@@ -90,6 +91,16 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 	if err != nil {
 		logger.Error(err, "failed to get composition resource")
 		return ctrl.Result{}, err
+	}
+
+	namespaceUnavailable, err := compositionNamespaceUnavailable(ctx, p.client, comp.Namespace)
+	if err != nil {
+		logger.Error(err, "failed to get composition namespace")
+		return ctrl.Result{}, err
+	}
+	if namespaceUnavailable {
+		logger = logger.WithValues("reason", "NamespaceTerminating")
+		return ctrl.Result{}, p.deletePod(ctx, pod, getSynthesizerName(pod), reasonNamespaceTerminating, logger)
 	}
 
 	// GC pods from missing synthesizers
