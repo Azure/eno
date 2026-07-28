@@ -84,14 +84,17 @@ schedule. No manual action is needed — opening a PR will trigger it.
 
 The pipeline:
 
-1. Creates a Kind cluster and deploys Eno into it.
+1. Creates a Kind cluster (pinned to Kubernetes 1.35, which serves the GA DRA
+   `ResourceSlice` API alongside Eno's CRD) and deploys Eno into it.
 2. The **"Run E2E tests"** output test names, pass/fail status, and log lines so you can
    follow progress directly in the GitHub Actions log.
 3. If any test fails, a **"Dump diagnostics"** step runs automatically and
    prints the following to the job output:
    - Controller and Reconciler pod logs 
    - Kubernetes events
-   - Full YAML of all Compositions, Synthesizers, and ResourceSlices
+   - Full YAML of all Compositions, Synthesizers, and Eno ResourceSlices
+     (queried as `resourceslices.eno.azure.io` to avoid ambiguity with the
+     cluster-scoped DRA `ResourceSlice` in `resource.k8s.io`)
    - Pods across all namespaces
 
 ## Adding a New Test

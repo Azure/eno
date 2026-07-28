@@ -32,6 +32,8 @@ jobs:
 
       - name: Create Kind cluster
         uses: helm/kind-action@v1
+        with:
+          node_image: kindest/node:v1.35.0
 
       - name: Wait for apiserver
         run: |
@@ -69,5 +71,5 @@ jobs:
           echo "=== Events ===" && kubectl get events --sort-by=.lastTimestamp || true
           echo "=== Compositions ===" && kubectl get compositions -A -o yaml || true
           echo "=== Synthesizers ===" && kubectl get synthesizers -o yaml || true
-          echo "=== ResourceSlices ===" && kubectl get resourceslices -A -o yaml || true
+          echo "=== ResourceSlices ===" && kubectl get resourceslices.eno.azure.io -A -o yaml || true
           echo "=== Pods ===" && kubectl get pods -A -o wide || true
