@@ -9,12 +9,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/manager"
 )
 
 type WatchController struct {
 	mgr            ctrl.Manager
 	client         client.Client
+	buffer         *flowcontrol.CompositionInputRevisionWriteBuffer
 	refControllers map[apiv1.ResourceRef]*KindWatchController
 }
 
@@ -26,6 +28,7 @@ func NewController(mgr ctrl.Manager) error {
 		Complete(&WatchController{
 			mgr:            mgr,
 			client:         mgr.GetClient(),
+			buffer:         flowcontrol.NewCompositionInputRevisionWriteBufferForManager(mgr),
 			refControllers: map[apiv1.ResourceRef]*KindWatchController{},
 		})
 	if err != nil {

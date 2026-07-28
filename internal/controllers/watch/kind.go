@@ -10,6 +10,7 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/go-logr/logr"
 	"golang.org/x/time/rate"
@@ -17,7 +18,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -36,6 +36,7 @@ func SetKindWatchRateLimit(rps int) {
 
 type KindWatchController struct {
 	client client.Client
+	buffer *flowcontrol.CompositionInputRevisionWriteBuffer
 	gvk    schema.GroupVersionKind
 	cancel context.CancelFunc
 }
@@ -45,6 +46,7 @@ func NewKindWatchController(ctx context.Context, parent *WatchController, resour
 
 	k := &KindWatchController{
 		client: parent.mgr.GetClient(),
+		buffer: parent.buffer,
 		gvk: schema.GroupVersionKind{
 			Group:   resource.Group,
 			Version: resource.Version,
@@ -219,10 +221,7 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 				logger.Error(err, "failed to list compositions for synthesizer", "synthesizerName", synth.Name)
 				return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 			}
-			modified, err := k.updateCompositions(ctx, logger, &synth, meta, list, isDeleted)
-			if modified || err != nil {
-				return ctrl.Result{}, err
-			}
+			k.updateCompositions(logger, &synth, meta, list, isDeleted)
 		}
 
 		list := &apiv1.CompositionList{}
@@ -233,61 +232,42 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 			logger.Error(err, "failed to list compositions by binding", "synthesizerName", synth.Name)
 			return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 		}
-		modified, err := k.updateCompositions(ctx, logger, &synth, meta, list, isDeleted)
-		if modified || err != nil {
-			return ctrl.Result{}, err
-		}
+		k.updateCompositions(logger, &synth, meta, list, isDeleted)
 	}
 
 	logger.Info("finished reconciling watched resource")
 	return ctrl.Result{}, nil
 }
 
-func (k *KindWatchController) updateCompositions(ctx context.Context, logger logr.Logger, synth *apiv1.Synthesizer, meta *metav1.PartialObjectMetadata, list *apiv1.CompositionList, isDeleted bool) (bool, error) {
-	for _, comp := range list.Items {
+// updateCompositions enqueues an input-revision change for every composition bound to the
+// watched resource. Writes are coalesced per composition by the write buffer, so multiple
+// inputs changing for the same composition in a short window collapse into a single
+// Status().Update instead of one write per input.
+func (k *KindWatchController) updateCompositions(logger logr.Logger, synth *apiv1.Synthesizer, meta *metav1.PartialObjectMetadata, list *apiv1.CompositionList, isDeleted bool) {
+	for i := range list.Items {
+		comp := list.Items[i]
 		key := findRefKey(&comp, synth, meta)
 		if key == "" {
 			continue
 		}
 
 		compKey := client.ObjectKeyFromObject(&comp)
-		var modified bool
 
-		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-			// Re-fetch composition to get the latest version
-			if err := k.client.Get(ctx, compKey, &comp); err != nil {
-				return err
+		if isDeleted {
+			// Only remove InputRevisions for optional refs.
+			// Required refs should trigger MissingInputs status instead - the
+			// composition controller handles that case.
+			if isOptionalRef(synth, key) {
+				k.buffer.RemoveInputRevisionAsync(compKey, key)
+				logger.V(1).Info("buffered input revision removal", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key)
 			}
-
-			if isDeleted {
-				// Only remove InputRevisions for optional refs
-				// Required refs should trigger MissingInputs status instead
-				if isOptionalRef(synth, key) {
-					modified = removeInputRevision(&comp, key)
-				}
-				// For required refs, do nothing - the composition controller will handle MissingInputs
-			} else {
-				revs := apiv1.NewInputRevisions(meta, key)
-				modified = setInputRevisions(&comp, revs)
-			}
-
-			if !modified {
-				return nil
-			}
-
-			return k.client.Status().Update(ctx, &comp)
-		})
-		if err != nil {
-			return false, fmt.Errorf("updating input revisions: %w", err)
+			continue
 		}
 
-		if modified {
-			logger.V(1).Info("noticed input resource change", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key)
-			return true, nil // wait for requeue
-		}
+		revs := apiv1.NewInputRevisions(meta, key)
+		k.buffer.PatchInputRevisionAsync(compKey, revs)
+		logger.V(1).Info("buffered input resource change", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key)
 	}
-
-	return false, nil
 }
 
 func findRefKey(comp *apiv1.Composition, synth *apiv1.Synthesizer, meta *metav1.PartialObjectMetadata) string {
