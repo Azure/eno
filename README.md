@@ -19,6 +19,26 @@ Just print JSON objects to stdout and Eno will handle the rest.
 - [Reconciliation](./docs/reconciliation.md)
 - [Symphony](./docs/symphony.md)
 
+### ResourceSlice naming
+
+Eno's namespaced `ResourceSlice` CRD (`eno.azure.io/v1`) shares its plural
+name with Kubernetes' cluster-scoped DRA `ResourceSlice`
+(`resource.k8s.io/v1`, GA since 1.34 and served by default on every cluster,
+including AKS GPU node pools). The two are unrelated and cannot collide at
+the API server since they live in different groups, but an unqualified
+`kubectl get resourceslices` may resolve to the DRA hardware inventory
+instead of Eno's synthesis output. Always qualify the group when inspecting
+Eno's resource slices:
+
+```bash
+kubectl get resourceslices.eno.azure.io -A
+```
+
+Eno's CRD intentionally defines no short name, to avoid adding another
+ambiguous alias. Renaming the CRD was considered and rejected — the group
+qualification already provides isolation, and a rename would be a breaking
+API change for no benefit.
+
 ## Getting Started
 
 ### 1. Install Eno
