@@ -21,14 +21,19 @@ type WatchController struct {
 }
 
 func NewController(mgr ctrl.Manager) error {
-	err := ctrl.NewControllerManagedBy(mgr).
+	buffer, err := flowcontrol.NewCompositionInputRevisionWriteBufferForManager(mgr)
+	if err != nil {
+		return err
+	}
+
+	err = ctrl.NewControllerManagedBy(mgr).
 		Named("watchControllerController").
 		Watches(&apiv1.Synthesizer{}, manager.SingleEventHandler()).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "watchController")).
 		Complete(&WatchController{
 			mgr:            mgr,
 			client:         mgr.GetClient(),
-			buffer:         flowcontrol.NewCompositionInputRevisionWriteBufferForManager(mgr),
+			buffer:         buffer,
 			refControllers: map[apiv1.ResourceRef]*KindWatchController{},
 		})
 	if err != nil {

@@ -25,7 +25,7 @@ type inputRevisionOp struct {
 
 // CompositionInputRevisionWriteBuffer reduces load on etcd/apiserver by collecting
 // input-revision updates for each Composition over a short window and applying them
-// in a single Status().Update per Composition.
+// in a single scoped status patch per Composition.
 //
 // Multiple input kinds are watched by independent KindWatchControllers, so a burst of
 // input changes affecting the same Composition would otherwise produce one status write
@@ -47,10 +47,12 @@ type CompositionInputRevisionWriteBuffer struct {
 	queue  workqueue.TypedRateLimitingInterface[types.NamespacedName]
 }
 
-func NewCompositionInputRevisionWriteBufferForManager(mgr ctrl.Manager) *CompositionInputRevisionWriteBuffer {
+func NewCompositionInputRevisionWriteBufferForManager(mgr ctrl.Manager) (*CompositionInputRevisionWriteBuffer, error) {
 	r := NewCompositionInputRevisionWriteBuffer(mgr.GetClient())
-	mgr.Add(r)
-	return r
+	if err := mgr.Add(r); err != nil {
+		return nil, err
+	}
+	return r, nil
 }
 
 func NewCompositionInputRevisionWriteBuffer(cli client.Client) *CompositionInputRevisionWriteBuffer {
@@ -59,6 +61,7 @@ func NewCompositionInputRevisionWriteBuffer(cli client.Client) *CompositionInput
 		workqueue.TypedRateLimitingQueueConfig[types.NamespacedName]{
 			Name: "compositionInputRevisionWriteBuffer",
 		})
+	setInputRevisionBufferLenSource(q.Len)
 	return &CompositionInputRevisionWriteBuffer{
 		client:        cli,
 		state:         make(map[types.NamespacedName]map[string]inputRevisionOp),
@@ -124,25 +127,19 @@ func (w *CompositionInputRevisionWriteBuffer) processQueueItem(ctx context.Conte
 	w.mut.Lock()
 	// Mark not-queued up front (under the same lock that guards state) so that any
 	// update enqueued from here on re-queues the composition instead of being stranded.
-	w.queued[comp] = false
+	delete(w.queued, comp)
 	insertionTime := w.insertionTime[comp]
 	ops := w.state[comp]
 	delete(w.state, comp)
 	w.mut.Unlock()
 
 	if len(ops) == 0 {
-		w.queue.Forget(comp)
-		w.mut.Lock()
-		delete(w.insertionTime, comp)
-		w.mut.Unlock()
+		w.settle(comp)
 		return true
 	}
 
 	if w.updateComposition(ctx, insertionTime, comp, ops) {
-		w.queue.Forget(comp)
-		w.mut.Lock()
-		delete(w.insertionTime, comp)
-		w.mut.Unlock()
+		w.settle(comp)
 		return true
 	}
 
@@ -167,9 +164,28 @@ func (w *CompositionInputRevisionWriteBuffer) processQueueItem(ctx context.Conte
 	return true
 }
 
-// updateComposition applies all pending per-key ops to the composition in a single
-// Status().Update. Returns true when the work is done (including no-op and composition-deleted),
-// false when it should be retried.
+// settle is called after a flush succeeds (including a no-op flush, where there was
+// nothing to do). If a producer enqueued new ops for comp while the flush was in flight,
+// enqueue has already set w.queued[comp] and re-added it to the queue - in that case we
+// leave the rate limiter alone so a composition under sustained churn keeps backing off
+// exponentially instead of resetting to the fast path on every flush, and we keep
+// insertionTime so the next flush reports an accurate latency instead of the zero time.
+// Only once a flush finds nothing pending do we Forget (reset to the fast path) and clear
+// insertionTime, since the composition is genuinely idle.
+func (w *CompositionInputRevisionWriteBuffer) settle(comp types.NamespacedName) {
+	w.mut.Lock()
+	defer w.mut.Unlock()
+	if w.queued[comp] {
+		return
+	}
+	w.queue.Forget(comp)
+	delete(w.insertionTime, comp)
+}
+
+// updateComposition applies all pending per-key ops to the composition via a merge patch
+// scoped to whatever fields we actually changed (status.inputRevisions). Returns true when
+// the work is done (including no-op and composition-deleted), false when it should be
+// retried.
 func (w *CompositionInputRevisionWriteBuffer) updateComposition(ctx context.Context, insertionTime time.Time, comp types.NamespacedName, ops map[string]inputRevisionOp) (success bool) {
 	logger := logr.FromContextOrDiscard(ctx)
 
@@ -181,8 +197,11 @@ func (w *CompositionInputRevisionWriteBuffer) updateComposition(ctx context.Cont
 	}
 	if err != nil {
 		logger.Error(err, "unable to get composition")
+		inputRevisionBufferFlushErrors.WithLabelValues("get").Inc()
 		return false
 	}
+
+	original := obj.DeepCopy()
 
 	modified := false
 	for key, op := range ops {
@@ -200,7 +219,12 @@ func (w *CompositionInputRevisionWriteBuffer) updateComposition(ctx context.Cont
 		return true
 	}
 
-	err = w.client.Status().Update(ctx, obj)
+	// client.MergeFrom diffs against the unmodified copy, so the resulting patch only
+	// contains status.inputRevisions - the one field we mutated - and applies cleanly
+	// even if status.inputRevisions didn't exist yet. Unlike a full Status().Update, a
+	// concurrent writer to another status field (e.g. currentSynthesis) is never
+	// clobbered and never causes a conflict here.
+	err = w.client.Status().Patch(ctx, obj, client.MergeFrom(original))
 	if k8serrors.IsNotFound(err) {
 		logger.V(1).Info("composition deleted - dropping buffered input revision updates")
 		return true
@@ -211,9 +235,11 @@ func (w *CompositionInputRevisionWriteBuffer) updateComposition(ctx context.Cont
 	}
 	if err != nil {
 		logger.Error(err, "unable to update composition input revisions")
+		inputRevisionBufferFlushErrors.WithLabelValues("patch").Inc()
 		return false
 	}
 
+	inputRevisionBufferFlushes.Inc()
 	logger.V(1).Info("flushed input revision updates to composition", "keyCount", len(ops), "latencyMs", time.Since(insertionTime).Abs().Milliseconds())
 	return true
 }
@@ -246,3 +272,4 @@ func removeInputRevision(comp *apiv1.Composition, key string) bool {
 	}
 	return false
 }
+

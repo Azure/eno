@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/rand"
 	"path"
-	"reflect"
 	"slices"
 	"time"
 
@@ -301,27 +300,3 @@ func isOptionalRef(synth *apiv1.Synthesizer, key string) bool {
 	return false
 }
 
-func removeInputRevision(comp *apiv1.Composition, key string) bool {
-	for i, ir := range comp.Status.InputRevisions {
-		if ir.Key == key {
-			comp.Status.InputRevisions = append(comp.Status.InputRevisions[:i], comp.Status.InputRevisions[i+1:]...)
-			return true
-		}
-	}
-	return false
-}
-
-func setInputRevisions(comp *apiv1.Composition, revs *apiv1.InputRevisions) bool {
-	for i, ir := range comp.Status.InputRevisions {
-		if ir.Key != revs.Key {
-			continue
-		}
-		if reflect.DeepEqual(ir, *revs) {
-			return false
-		}
-		comp.Status.InputRevisions[i] = *revs
-		return true
-	}
-	comp.Status.InputRevisions = append(comp.Status.InputRevisions, *revs)
-	return true
-}
