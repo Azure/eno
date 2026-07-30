@@ -56,11 +56,9 @@ func TestInputRevisionBufferFlushErrorsLabels(t *testing.T) {
 
 	inputRevisionBufferFlushErrors.WithLabelValues("get").Inc()
 	inputRevisionBufferFlushErrors.WithLabelValues("get").Inc()
-	inputRevisionBufferFlushErrors.WithLabelValues("marshal").Inc()
 	inputRevisionBufferFlushErrors.WithLabelValues("patch").Inc()
 
 	assert.Equal(t, 2.0, prometheustestutil.ToFloat64(inputRevisionBufferFlushErrors.WithLabelValues("get")))
-	assert.Equal(t, 1.0, prometheustestutil.ToFloat64(inputRevisionBufferFlushErrors.WithLabelValues("marshal")))
 	assert.Equal(t, 1.0, prometheustestutil.ToFloat64(inputRevisionBufferFlushErrors.WithLabelValues("patch")))
 	// Untouched labels stay at zero.
 	assert.Equal(t, 0.0, prometheustestutil.ToFloat64(inputRevisionBufferFlushErrors.WithLabelValues("other")))

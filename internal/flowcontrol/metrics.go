@@ -68,7 +68,7 @@ var (
 	// constructed. atomic.Pointer makes the swap safe against the scrape goroutine.
 	inputRevisionBufferLenFn atomic.Pointer[func() int]
 
-	// Errors hit while flushing input-revision patches, partitioned by op (get/patch/marshal).
+	// Errors hit while flushing input-revision patches, partitioned by op (get/patch).
 	// These silently retry today, so without this counter they're invisible.
 	inputRevisionBufferFlushErrors = prometheus.NewCounterVec(
 		prometheus.CounterOpts{

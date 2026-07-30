@@ -2,7 +2,6 @@ package flowcontrol
 
 import (
 	"context"
-	"encoding/json"
 	"reflect"
 	"sync"
 	"time"
@@ -183,8 +182,8 @@ func (w *CompositionInputRevisionWriteBuffer) settle(comp types.NamespacedName) 
 	delete(w.insertionTime, comp)
 }
 
-// updateComposition applies all pending per-key ops to the composition via a JSON patch
-// scoped to status.inputRevisions. Returns true when the work is done (including no-op and
+// updateComposition applies all pending per-key ops to the composition via a merge patch
+// carrying an optimistic lock. Returns true when the work is done (including no-op and
 // composition-deleted), false when it should be retried.
 func (w *CompositionInputRevisionWriteBuffer) updateComposition(ctx context.Context, insertionTime time.Time, comp types.NamespacedName, ops map[string]inputRevisionOp) (success bool) {
 	logger := logr.FromContextOrDiscard(ctx)
@@ -201,9 +200,7 @@ func (w *CompositionInputRevisionWriteBuffer) updateComposition(ctx context.Cont
 		return false
 	}
 
-	// Snapshot before mutating obj in place - not a slice alias, since setInputRevisions
-	// may overwrite obj.Status.InputRevisions' backing array.
-	before := append([]apiv1.InputRevisions(nil), obj.Status.InputRevisions...)
+	original := obj.DeepCopy()
 
 	modified := false
 	for key, op := range ops {
@@ -221,20 +218,11 @@ func (w *CompositionInputRevisionWriteBuffer) updateComposition(ctx context.Cont
 		return true
 	}
 
-	// Scoped to status.inputRevisions with a test op against the value we just read: a
-	// concurrent writer to another status field (e.g. currentSynthesis) neither conflicts
-	// nor gets clobbered, while a concurrent writer to inputRevisions itself - the pruning
-	// controller, or another flush racing ahead of our (possibly stale) cached read - fails
-	// the test op, so we retry against a fresh read instead of silently overwriting it.
-	patch := buildInputRevisionPatch(before, obj.Status.InputRevisions)
-	patchJson, err := json.Marshal(&patch)
-	if err != nil {
-		logger.Error(err, "unable to encode input revision patch")
-		inputRevisionBufferFlushErrors.WithLabelValues("marshal").Inc()
-		return false
-	}
-
-	err = w.client.Status().Patch(ctx, obj, client.RawPatch(types.JSONPatchType, patchJson))
+	// A merge patch with an optimistic lock (resourceVersion) merges into whatever is
+	// currently stored, handling an absent status and an emptied list correctly, and still
+	// conflicts (and retries) against a concurrent writer, whether to inputRevisions itself
+	// (e.g. pruning.go) or, more conservatively, to an unrelated status field.
+	err = w.client.Status().Patch(ctx, obj, client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{}))
 	if k8serrors.IsNotFound(err) {
 		logger.V(1).Info("composition deleted - dropping buffered input revision updates")
 		return true
@@ -252,22 +240,6 @@ func (w *CompositionInputRevisionWriteBuffer) updateComposition(ctx context.Cont
 	inputRevisionBufferFlushes.Inc()
 	logger.V(1).Info("flushed input revision updates to composition", "keyCount", len(ops), "latencyMs", time.Since(insertionTime).Abs().Milliseconds())
 	return true
-}
-
-// buildInputRevisionPatch returns a JSON patch scoped to status.inputRevisions: a test op
-// asserting the value is still what we read, followed by an add (path not yet present) or
-// replace (path present) with the new value. reuses the jsonPatch type from writebuffer.go.
-func buildInputRevisionPatch(before, after []apiv1.InputRevisions) []*jsonPatch {
-	if len(before) == 0 {
-		return []*jsonPatch{
-			{Op: "test", Path: "/status/inputRevisions", Value: nil},
-			{Op: "add", Path: "/status/inputRevisions", Value: after},
-		}
-	}
-	return []*jsonPatch{
-		{Op: "test", Path: "/status/inputRevisions", Value: before},
-		{Op: "replace", Path: "/status/inputRevisions", Value: after},
-	}
 }
 
 // setInputRevisions sets or replaces the revision for revs.Key on the composition.
