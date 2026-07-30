@@ -299,4 +299,3 @@ func isOptionalRef(synth *apiv1.Synthesizer, key string) bool {
 	}
 	return false
 }
-

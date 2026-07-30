@@ -2,12 +2,18 @@ package flowcontrol
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"math/rand/v2"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -543,3 +549,216 @@ func TestInputRevisionWriteBufferPatchDoesNotConflictWithUnrelatedStatusWrite(t 
 	assert.Equal(t, "concurrent-write", comp.Status.CurrentSynthesis.UUID, "unrelated status field must be preserved")
 }
 
+// TestInputRevisionWriteBufferDoesNotResurrectConcurrentlyPrunedKey proves the test op
+// protects against a second writer to status.inputRevisions itself (e.g. the pruning
+// controller in internal/controllers/watch/pruning.go), unlike an unlocked merge patch,
+// which would silently resurrect whatever the buffer's stale read still had for the key
+// the pruner just removed.
+func TestInputRevisionWriteBufferDoesNotResurrectConcurrentlyPrunedKey(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	raced := false
+	cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			err := c.Get(ctx, key, obj, opts...)
+			if _, ok := obj.(*apiv1.Composition); ok && !raced && err == nil {
+				raced = true
+				// Simulate the pruning controller's own Get -> mutate -> Status().Update
+				// removing "baz", interleaved between our Get and our Patch.
+				pruned := &apiv1.Composition{}
+				require.NoError(t, c.Get(ctx, key, pruned))
+				pruned.Status.InputRevisions = []apiv1.InputRevisions{{Key: "bar", ResourceVersion: "1"}}
+				require.NoError(t, c.Status().Update(ctx, pruned))
+			}
+			return err
+		},
+	})
+	w := NewCompositionInputRevisionWriteBuffer(cli)
+
+	comp := newTestComposition(t, cli, "test-comp-1")
+	nsn := client.ObjectKeyFromObject(comp)
+	comp.Status.InputRevisions = []apiv1.InputRevisions{
+		{Key: "bar", ResourceVersion: "1"},
+		{Key: "baz", ResourceVersion: "1"},
+	}
+	require.NoError(t, cli.Status().Update(ctx, comp))
+
+	// The buffer flushes an update to an unrelated key based on its now-stale read, which
+	// still includes "baz".
+	w.PatchInputRevisionAsync(nsn, &apiv1.InputRevisions{Key: "foo", ResourceVersion: "1"})
+	w.processQueueItem(ctx) // first attempt: test op fails against the pruner's write, retries
+	w.processQueueItem(ctx) // retry against a fresh read: succeeds
+
+	require.NoError(t, cli.Get(ctx, nsn, comp))
+	assert.ElementsMatch(t, []string{"bar", "foo"}, inputRevisionKeys(comp), "the pruned key must not be resurrected")
+	assert.Empty(t, w.state)
+}
+
+// TestInputRevisionWriteBufferStaleCacheReadDoesNotRevertPreviousFlush simulates the
+// flush-N / flush-N+1 sequence where the informer cache backing w.client.Get lags behind
+// flush N's own write: flush N+1 (for a different key) reads a stale pre-flush-N snapshot.
+// A JSON merge patch would blindly replace the whole array with that stale view, reverting
+// flush N's key; the test op here must instead fail and force a retry against a fresh read.
+func TestInputRevisionWriteBufferStaleCacheReadDoesNotRevertPreviousFlush(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	var stale *apiv1.Composition
+	returnStale := false
+	cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if returnStale {
+				if comp, ok := obj.(*apiv1.Composition); ok {
+					returnStale = false // the buffer's retry then reads a fresh value
+					stale.DeepCopyInto(comp)
+					return nil
+				}
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+	})
+	w := NewCompositionInputRevisionWriteBuffer(cli)
+
+	comp := newTestComposition(t, cli, "test-comp-1")
+	nsn := client.ObjectKeyFromObject(comp)
+	comp.Status.InputRevisions = []apiv1.InputRevisions{
+		{Key: "A", ResourceVersion: "1"},
+		{Key: "B", ResourceVersion: "1"},
+	}
+	require.NoError(t, cli.Status().Update(ctx, comp))
+	stale = comp.DeepCopy() // the pre-flush-N snapshot an informer cache would still be serving
+
+	// Flush N: patch A to rv2.
+	w.PatchInputRevisionAsync(nsn, &apiv1.InputRevisions{Key: "A", ResourceVersion: "2"})
+	w.processQueueItem(ctx)
+
+	require.NoError(t, cli.Get(ctx, nsn, comp))
+	require.Equal(t, "2", revisionFor(comp, "A"), "flush N must have applied")
+
+	// Flush N+1: patch B to rv2, but the buffer's next Get returns the stale pre-flush-N
+	// snapshot, as if the informer cache had not caught up with flush N's write yet.
+	returnStale = true
+	w.PatchInputRevisionAsync(nsn, &apiv1.InputRevisions{Key: "B", ResourceVersion: "2"})
+	w.processQueueItem(ctx) // first attempt against the stale read: test op fails, retries
+	w.processQueueItem(ctx) // retry against a fresh read: succeeds
+
+	require.NoError(t, cli.Get(ctx, nsn, comp))
+	assert.Equal(t, "2", revisionFor(comp, "A"), "A must not revert to rv1")
+	assert.Equal(t, "2", revisionFor(comp, "B"), "B must be updated")
+}
+
+// TestInputRevisionWriteBufferPatchConflictIsRetried proves the k8serrors.IsConflict branch
+// in updateComposition is live: a 409 from the patch call is logged as a conflict and the
+// buffered update is retried rather than dropped.
+func TestInputRevisionWriteBufferPatchConflictIsRetried(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	failNext := true
+	cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
+		SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+			if failNext {
+				failNext = false
+				return k8serrors.NewConflict(schema.GroupResource{Group: "eno.azure.io", Resource: "compositions"}, obj.GetName(), errors.New("simulated conflict"))
+			}
+			return c.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+		},
+	})
+	w := NewCompositionInputRevisionWriteBuffer(cli)
+
+	comp := newTestComposition(t, cli, "test-comp-1")
+	nsn := client.ObjectKeyFromObject(comp)
+
+	w.PatchInputRevisionAsync(nsn, &apiv1.InputRevisions{Key: "foo", ResourceVersion: "1"})
+	w.processQueueItem(ctx) // rejected with a conflict, buffered update is kept for retry
+	w.processQueueItem(ctx) // retry succeeds
+
+	require.NoError(t, cli.Get(ctx, nsn, comp))
+	require.Len(t, comp.Status.InputRevisions, 1)
+	assert.Equal(t, "foo", comp.Status.InputRevisions[0].Key)
+}
+
+func revisionFor(comp *apiv1.Composition, key string) string {
+	for _, ir := range comp.Status.InputRevisions {
+		if ir.Key == key {
+			return ir.ResourceVersion
+		}
+	}
+	return ""
+}
+
+// TestInputRevisionWriteBufferConcurrentWrites drives many goroutines that concurrently call
+// PatchInputRevisionAsync/RemoveInputRevisionAsync while the buffer's real Start loop flushes
+// in the background, and asserts every composition converges to the expected final state.
+// Each (composition, key) pair is owned by exactly one goroutine, so there's no ambiguity
+// about which write should win - this isolates the assertion from scheduling nondeterminism
+// while still exercising the buffer's locking, coalescing, and workqueue under genuine
+// concurrency (run with -race).
+func TestInputRevisionWriteBufferConcurrentWrites(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+	w := NewCompositionInputRevisionWriteBuffer(cli)
+	go w.Start(ctx)
+
+	const compCount = 6
+	const keysPerComp = 4
+	const iterations = 40
+
+	nsns := make([]client.ObjectKey, compCount)
+	for i := range nsns {
+		comp := newTestComposition(t, cli, fmt.Sprintf("test-comp-%d", i))
+		nsns[i] = client.ObjectKeyFromObject(comp)
+	}
+
+	type finalState struct {
+		revision string
+		removed  bool
+	}
+	var mu sync.Mutex
+	want := make(map[client.ObjectKey]map[string]finalState, compCount)
+	for _, nsn := range nsns {
+		want[nsn] = make(map[string]finalState, keysPerComp)
+	}
+
+	var wg sync.WaitGroup
+	for c := 0; c < compCount; c++ {
+		for k := 0; k < keysPerComp; k++ {
+			nsn, key := nsns[c], fmt.Sprintf("key-%d", k)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				var last finalState
+				for i := 0; i < iterations; i++ {
+					if rand.IntN(4) == 0 {
+						w.RemoveInputRevisionAsync(nsn, key)
+						last = finalState{removed: true}
+					} else {
+						rv := strconv.Itoa(i)
+						w.PatchInputRevisionAsync(nsn, &apiv1.InputRevisions{Key: key, ResourceVersion: rv})
+						last = finalState{revision: rv}
+					}
+					time.Sleep(time.Duration(rand.IntN(2)) * time.Millisecond)
+				}
+				mu.Lock()
+				want[nsn][key] = last
+				mu.Unlock()
+			}()
+		}
+	}
+	wg.Wait()
+
+	// Wait for the buffer to fully drain before asserting the final state.
+	testutil.Eventually(t, func() bool {
+		w.mut.Lock()
+		defer w.mut.Unlock()
+		return len(w.state) == 0 && w.queue.Len() == 0
+	})
+
+	for _, nsn := range nsns {
+		comp := &apiv1.Composition{}
+		require.NoError(t, cli.Get(ctx, nsn, comp))
+		for key, exp := range want[nsn] {
+			rv := revisionFor(comp, key)
+			if exp.removed {
+				assert.Empty(t, rv, "key %s on %s should have been removed", key, nsn.Name)
+			} else {
+				assert.Equal(t, exp.revision, rv, "key %s on %s has wrong final revision", key, nsn.Name)
+			}
+		}
+	}
+}
