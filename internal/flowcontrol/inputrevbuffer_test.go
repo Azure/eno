@@ -2,6 +2,7 @@ package flowcontrol
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"strconv"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -491,6 +494,121 @@ func TestInputRevisionWriteBufferBackoffStaysBaseForIsolatedComposition(t *testi
 	w.processQueueItem(ctx)
 
 	assert.Equal(t, 0, w.queue.NumRequeues(nsn), "an isolated update should reset the rate limit to the fast path")
+}
+
+func TestInputRevisionWriteBufferRequeuesFailedFlushWithoutClobberingNewerUpdates(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	var w *CompositionInputRevisionWriteBuffer
+	var nsn client.ObjectKey
+	patchCalls := 0
+	cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
+		SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+			patchCalls++
+			if patchCalls == 1 {
+				w.PatchInputRevisionAsync(nsn, &apiv1.InputRevisions{Key: "foo", ResourceVersion: "2"})
+				w.PatchInputRevisionAsync(nsn, &apiv1.InputRevisions{Key: "baz", ResourceVersion: "1"})
+				return errors.New("transient patch failure")
+			}
+			return c.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+		},
+	})
+	w = NewCompositionInputRevisionWriteBuffer(cli)
+
+	comp := newTestComposition(t, cli, "test-comp-1")
+	nsn = client.ObjectKeyFromObject(comp)
+	w.PatchInputRevisionAsync(nsn, &apiv1.InputRevisions{Key: "foo", ResourceVersion: "1"})
+	w.PatchInputRevisionAsync(nsn, &apiv1.InputRevisions{Key: "bar", ResourceVersion: "1"})
+
+	w.processQueueItem(ctx)
+
+	w.mut.Lock()
+	pending := w.state[nsn]
+	queued := w.queued[nsn]
+	w.mut.Unlock()
+	require.Len(t, pending, 3)
+	assert.Equal(t, "2", pending["foo"].revs.ResourceVersion, "the newer update must win")
+	assert.Equal(t, "1", pending["bar"].revs.ResourceVersion, "the failed update must be restored")
+	assert.Equal(t, "1", pending["baz"].revs.ResourceVersion, "the concurrent update must be preserved")
+	assert.True(t, queued, "the composition must remain queued after a failed flush")
+	assert.Greater(t, w.queue.NumRequeues(nsn), 0)
+
+	w.processQueueItem(ctx)
+
+	require.NoError(t, cli.Get(ctx, nsn, comp))
+	assert.Equal(t, "2", revisionFor(comp, "foo"))
+	assert.Equal(t, "1", revisionFor(comp, "bar"))
+	assert.Equal(t, "1", revisionFor(comp, "baz"))
+	assert.Empty(t, w.state)
+	assert.False(t, w.queued[nsn])
+	assert.Equal(t, 2, patchCalls)
+}
+
+func TestInputRevisionWriteBufferPatchErrors(t *testing.T) {
+	resource := schema.GroupResource{Group: apiv1.SchemeGroupVersion.Group, Resource: "compositions"}
+	tests := []struct {
+		name      string
+		patchErr  error
+		wantRetry bool
+	}{
+		{
+			name:     "not found drops update",
+			patchErr: k8serrors.NewNotFound(resource, "test-comp-1"),
+		},
+		{
+			name:      "conflict retries update",
+			patchErr:  k8serrors.NewConflict(resource, "test-comp-1", errors.New("conflict")),
+			wantRetry: true,
+		},
+		{
+			name:      "generic error retries update",
+			patchErr:  errors.New("transient patch failure"),
+			wantRetry: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := testutil.NewContext(t)
+			patchCalls := 0
+			cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
+				SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					patchCalls++
+					if patchCalls == 1 {
+						return tt.patchErr
+					}
+					return c.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+				},
+			})
+			w := NewCompositionInputRevisionWriteBuffer(cli)
+
+			comp := newTestComposition(t, cli, "test-comp-1")
+			nsn := client.ObjectKeyFromObject(comp)
+			w.PatchInputRevisionAsync(nsn, &apiv1.InputRevisions{Key: "foo", ResourceVersion: "1"})
+			w.processQueueItem(ctx)
+
+			if !tt.wantRetry {
+				assert.Empty(t, w.state)
+				assert.False(t, w.queued[nsn])
+				assert.Equal(t, 0, w.queue.NumRequeues(nsn))
+				assert.Equal(t, 1, patchCalls)
+				require.NoError(t, cli.Get(ctx, nsn, comp))
+				assert.Empty(t, comp.Status.InputRevisions)
+				return
+			}
+
+			require.Len(t, w.state[nsn], 1)
+			assert.True(t, w.queued[nsn])
+			assert.Greater(t, w.queue.NumRequeues(nsn), 0)
+
+			w.processQueueItem(ctx)
+
+			require.NoError(t, cli.Get(ctx, nsn, comp))
+			assert.Equal(t, "1", revisionFor(comp, "foo"))
+			assert.Empty(t, w.state)
+			assert.False(t, w.queued[nsn])
+			assert.Equal(t, 2, patchCalls)
+		})
+	}
 }
 
 // TestInputRevisionWriteBufferRetriesAfterConflictWithUnrelatedStatusWrite asserts a concurrent write to an unrelated status field conflicts, retries, and is preserved rather than clobbered.
