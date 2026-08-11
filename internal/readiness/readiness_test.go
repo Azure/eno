@@ -280,7 +280,7 @@ func TestTimeouts(t *testing.T) {
 	check := mustParse("self.filter(item, item == 0)")
 	set := make([]int64, 10000000)
 	_, _, err := check.program.ContextEval(ctx, map[string]any{"self": set})
-	require.EqualError(t, err, "operation interrupted")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
 func mustParse(expr string) *Check {
