@@ -2,7 +2,7 @@ module github.com/Azure/eno
 
 go 1.25.0
 
-toolchain go1.25.12
+toolchain go1.25.13
 
 require (
 	github.com/Azure/go-workflow v0.1.13
