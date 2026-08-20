@@ -1,0 +1,99 @@
+apiVersion: stress.eno.azure.io/v1alpha1
+kind: StressTestPlan
+metadata:
+  name: missing-input-fanout
+spec:
+  run:
+    namespacePrefix: 6a
+    namespaceCount: 150
+    completionStage: PreSynthesis
+    concurrency: 50
+    batchSize: 150
+    timeout: 90m
+    clientQPS: 200
+    clientBurst: 400
+    labels:
+      eno.azure.io/stress-test: "true"
+    variables:
+      synthesizerImage: ruinanliuacr.azurecr.io/eno-stress-synthesizer/0.0.2:latest
+  setup:
+    resources:
+      - name: synthesizer
+        count: 20
+        reuse: true
+        scope: cluster
+        templateFile: manifests/synthesizer.yaml
+      - name: symphony
+        scope: namespace
+        forEachNamespace: true
+        dependsOn:
+          - synthesizer
+        templateFile: manifests/symphony.yaml
+      - name: composition
+        count: 20
+        apiVersion: eno.azure.io/v1
+        kind: Composition
+        scope: namespace
+        forEachNamespace: true
+        operation: observe
+        dependsOn:
+          - symphony
+    readiness:
+      - resource: composition
+        condition:
+          status: MissingInputs
+          expectedMissingInputs:
+            - input1
+            - input2
+            - input3
+  test:
+    phases:
+      - name: create-inputs
+        concurrency: 50
+        batchSize: 150
+        resources:
+          - name: input1
+            apiVersion: v1
+            kind: ConfigMap
+            scope: namespace
+            forEachNamespace: true
+            template:
+              data:
+                value: "${namespace}-input1"
+          - name: input2
+            apiVersion: v1
+            kind: ConfigMap
+            scope: namespace
+            forEachNamespace: true
+            template:
+              data:
+                value: "${namespace}-input2"
+          - name: input3
+            apiVersion: v1
+            kind: Secret
+            scope: namespace
+            forEachNamespace: true
+            template:
+              stringData:
+                value: "${namespace}-input3"
+    successCriteria:
+      - compositionsExitMissingInputs: 100%
+      - p95InputToExitMissingInputs: <30s
+      - maxInputToExitMissingInputs: <120s
+  output:
+    apiVersion: v1
+    kind: ConfigMap
+    name: combined-output-${variation}
+    expectedData:
+      input1: "${namespace}-input1"
+      input2: "${namespace}-input2"
+      input3: "${namespace}-input3"
+      combined: "${namespace}-input1-${namespace}-input2-${namespace}-input3"
+  metrics:
+    collect:
+      - enoControllerResources
+      - inputRevisionBuffer
+      - workqueues
+      - apiServerRequests
+      - compositionTransitions
+    reportFile: results/${runID}.json
