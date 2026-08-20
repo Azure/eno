@@ -2,6 +2,7 @@ package flowcontrol
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"sync"
 	"time"
@@ -15,6 +16,8 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 )
+
+const DefaultCompositionInputRevisionWriteBufferWorkers = 1
 
 // inputRevisionOp is a single pending mutation to one input-revision key of a composition.
 // When remove is true the key should be dropped; otherwise revs is written (last-write-wins).
@@ -32,7 +35,8 @@ type inputRevisionOp struct {
 // per change. Coalescing them per Composition (last-write-wins per input key) collapses
 // those into a single mutating request while preserving the latest revision for every key.
 type CompositionInputRevisionWriteBuffer struct {
-	client client.Client
+	client  client.Client
+	workers int
 
 	// queue items are per-composition.
 	// the state map collects multiple per-key updates per composition to be dispatched together.
@@ -48,7 +52,14 @@ type CompositionInputRevisionWriteBuffer struct {
 }
 
 func NewCompositionInputRevisionWriteBufferForManager(mgr ctrl.Manager) (*CompositionInputRevisionWriteBuffer, error) {
-	r := NewCompositionInputRevisionWriteBuffer(mgr.GetClient())
+	return NewCompositionInputRevisionWriteBufferForManagerWithWorkers(mgr, DefaultCompositionInputRevisionWriteBufferWorkers)
+}
+
+func NewCompositionInputRevisionWriteBufferForManagerWithWorkers(mgr ctrl.Manager, workers int) (*CompositionInputRevisionWriteBuffer, error) {
+	if workers < 1 {
+		return nil, fmt.Errorf("input revision buffer worker count must be positive")
+	}
+	r := newCompositionInputRevisionWriteBuffer(mgr.GetClient(), workers)
 	if err := mgr.Add(r); err != nil {
 		return nil, err
 	}
@@ -56,14 +67,20 @@ func NewCompositionInputRevisionWriteBufferForManager(mgr ctrl.Manager) (*Compos
 }
 
 func NewCompositionInputRevisionWriteBuffer(cli client.Client) *CompositionInputRevisionWriteBuffer {
+	return newCompositionInputRevisionWriteBuffer(cli, DefaultCompositionInputRevisionWriteBufferWorkers)
+}
+
+func newCompositionInputRevisionWriteBuffer(cli client.Client, workers int) *CompositionInputRevisionWriteBuffer {
 	q := workqueue.NewTypedRateLimitingQueueWithConfig(
 		workqueue.NewTypedItemExponentialFailureRateLimiter[types.NamespacedName](time.Millisecond*100, 8*time.Second),
 		workqueue.TypedRateLimitingQueueConfig[types.NamespacedName]{
 			Name: "compositionInputRevisionWriteBuffer",
 		})
 	setInputRevisionBufferLenSource(q.Len)
+	inputRevisionBufferWorkers.Set(float64(workers))
 	return &CompositionInputRevisionWriteBuffer{
 		client:        cli,
+		workers:       workers,
 		state:         make(map[types.NamespacedName]map[string]inputRevisionOp),
 		insertionTime: make(map[types.NamespacedName]time.Time),
 		queued:        make(map[types.NamespacedName]bool),
@@ -109,8 +126,17 @@ func (w *CompositionInputRevisionWriteBuffer) Start(ctx context.Context) error {
 		<-ctx.Done()
 		w.queue.ShutDown()
 	}()
-	for w.processQueueItem(ctx) {
+
+	var workers sync.WaitGroup
+	workers.Add(w.workers)
+	for range w.workers {
+		go func() {
+			defer workers.Done()
+			for w.processQueueItem(ctx) {
+			}
+		}()
 	}
+	workers.Wait()
 	return nil
 }
 
@@ -120,6 +146,8 @@ func (w *CompositionInputRevisionWriteBuffer) processQueueItem(ctx context.Conte
 		return false
 	}
 	defer w.queue.Done(comp)
+	inputRevisionBufferWorkersActive.Inc()
+	defer inputRevisionBufferWorkersActive.Dec()
 
 	logger := logr.FromContextOrDiscard(ctx).WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "controller", "compositionInputRevisionWriteBuffer")
 	ctx = logr.NewContext(ctx, logger)

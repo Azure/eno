@@ -18,6 +18,7 @@ import (
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -38,6 +39,7 @@ const (
 	NotReadyStatus                      = "NotReady"
 	ReconcilingStatus                   = "Reconciling"
 	LogSampleCap                        = 50
+	DefaultMaxConcurrentReconciles      = 1
 )
 
 // podCompletionGracePeriod is how long after a synthesizer pod is observed
@@ -59,6 +61,14 @@ type compositionController struct {
 }
 
 func NewController(mgr ctrl.Manager, podTimeout time.Duration, synthesisPodNamespace string) error {
+	return NewControllerWithWorkers(mgr, podTimeout, synthesisPodNamespace, DefaultMaxConcurrentReconciles)
+}
+
+func NewControllerWithWorkers(mgr ctrl.Manager, podTimeout time.Duration, synthesisPodNamespace string, workers int) error {
+	if workers < 1 {
+		return fmt.Errorf("composition controller worker count must be positive")
+	}
+	mgr.GetLogger().Info("configured composition controller", "maxConcurrentReconciles", workers)
 	c := &compositionController{
 		client:                mgr.GetClient(),
 		podTimeout:            podTimeout,
@@ -76,9 +86,11 @@ func NewController(mgr ctrl.Manager, podTimeout time.Duration, synthesisPodNames
 		GenericFunc: func(e event.TypedGenericEvent[*apiv1.Composition]) bool { return false },
 	}
 	return ctrl.NewControllerManagedBy(mgr).
+		Named("compositionController").
 		For(&apiv1.Composition{}).
 		WatchesRawSource(source.Kind(mgr.GetCache(), &apiv1.Synthesizer{}, c.newSynthEventHandler())).
 		WatchesRawSource(source.Kind(mgr.GetCache(), &apiv1.Composition{}, c.newDependencyEventHandler(), depPredicate)).
+		WithOptions(controller.Options{MaxConcurrentReconciles: workers}).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "compositionController")).
 		Complete(c)
 }
