@@ -16,8 +16,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
+
+const DefaultMaxConcurrentReconciles = 1
 
 type symphonyController struct {
 	client        client.Client
@@ -25,9 +28,19 @@ type symphonyController struct {
 }
 
 func NewController(mgr ctrl.Manager) error {
+	return NewControllerWithWorkers(mgr, DefaultMaxConcurrentReconciles)
+}
+
+func NewControllerWithWorkers(mgr ctrl.Manager, workers int) error {
+	if workers < 1 {
+		return fmt.Errorf("symphony controller worker count must be positive")
+	}
+	mgr.GetLogger().Info("configured symphony controller", "maxConcurrentReconciles", workers)
 	return ctrl.NewControllerManagedBy(mgr).
+		Named("symphonyController").
 		For(&apiv1.Symphony{}).
 		Owns(&apiv1.Composition{}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: workers}).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "symphonyController")).
 		Complete(&symphonyController{
 			client:        mgr.GetClient(),

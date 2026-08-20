@@ -21,7 +21,11 @@ type WatchController struct {
 }
 
 func NewController(mgr ctrl.Manager) error {
-	buffer, err := flowcontrol.NewCompositionInputRevisionWriteBufferForManager(mgr)
+	return NewControllerWithInputBufferWorkers(mgr, flowcontrol.DefaultCompositionInputRevisionWriteBufferWorkers)
+}
+
+func NewControllerWithInputBufferWorkers(mgr ctrl.Manager, inputBufferWorkers int) error {
+	buffer, err := flowcontrol.NewCompositionInputRevisionWriteBufferForManagerWithWorkers(mgr, inputBufferWorkers)
 	if err != nil {
 		return err
 	}
