@@ -92,6 +92,7 @@ func newCompositionInputRevisionWriteBuffer(cli client.Client, workers int) *Com
 // The update is coalesced last-write-wins per input key and eventually flushed, or dropped
 // only if the composition is deleted.
 func (w *CompositionInputRevisionWriteBuffer) PatchInputRevisionAsync(comp types.NamespacedName, revs *apiv1.InputRevisions) {
+	revs = revs.DeepCopy()
 	w.enqueue(comp, revs.Key, inputRevisionOp{revs: revs})
 }
 

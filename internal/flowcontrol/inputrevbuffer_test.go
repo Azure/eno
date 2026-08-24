@@ -98,6 +98,29 @@ func TestInputRevisionWriteBufferLastWriteWinsPerKey(t *testing.T) {
 	assert.Equal(t, "3", comp.Status.InputRevisions[0].ResourceVersion)
 }
 
+func TestInputRevisionWriteBufferSnapshotsEnqueuedRevision(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+	w := NewCompositionInputRevisionWriteBuffer(cli)
+
+	comp := newTestComposition(t, cli, "test-comp-1")
+	nsn := client.ObjectKeyFromObject(comp)
+	revision := 1
+	revs := &apiv1.InputRevisions{Key: "foo", ResourceVersion: "1", Revision: &revision}
+
+	w.PatchInputRevisionAsync(nsn, revs)
+	revs.Key = "changed"
+	revs.ResourceVersion = "2"
+	*revs.Revision = 2
+	w.processQueueItem(ctx)
+
+	require.NoError(t, cli.Get(ctx, nsn, comp))
+	require.Len(t, comp.Status.InputRevisions, 1)
+	assert.Equal(t, "foo", comp.Status.InputRevisions[0].Key)
+	assert.Equal(t, "1", comp.Status.InputRevisions[0].ResourceVersion)
+	assert.Equal(t, 1, *comp.Status.InputRevisions[0].Revision)
+}
+
 func TestInputRevisionWriteBufferRemove(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
