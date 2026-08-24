@@ -28,6 +28,7 @@ import (
 
 	"github.com/Azure/eno/internal/config"
 	"github.com/Azure/eno/internal/execution"
+	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/manager"
 )
 
@@ -60,6 +61,9 @@ func runController() error {
 		synthesizerPodAnnotations string
 		concurrencyLimit          int
 		inputRateLimit            int
+		inputBufferWorkers        int
+		compositionWorkers        int
+		symphonyWorkers           int
 		podTimeout                time.Duration
 		containerCreationTimeout  time.Duration
 		statusLogFreq             time.Duration
@@ -86,8 +90,20 @@ func runController() error {
 	flag.IntVar(&concurrencyLimit, "concurrency-limit", 10, "Upper bound on active syntheses. This effectively limits the number of running synthesizer pods spawned by Eno.")
 	flag.DurationVar(&selfHealingGracePeriod, "self-healing-grace-period", time.Minute*5, "How long before the self-healing controllers are allowed to start the resynthesis process.")
 	flag.IntVar(&inputRateLimit, "input-qps", 10, "Writes-per-second limit for input controllers")
+	flag.IntVar(&inputBufferWorkers, "input-buffer-workers", flowcontrol.DefaultCompositionInputRevisionWriteBufferWorkers, "Maximum number of workers flushing Composition input revisions")
+	flag.IntVar(&compositionWorkers, "composition-workers", composition.DefaultMaxConcurrentReconciles, "Maximum number of concurrent Composition reconciles")
+	flag.IntVar(&symphonyWorkers, "symphony-workers", symphony.DefaultMaxConcurrentReconciles, "Maximum number of concurrent Symphony reconciles")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
+	if inputBufferWorkers < 1 {
+		return fmt.Errorf("--input-buffer-workers must be positive")
+	}
+	if compositionWorkers < 1 {
+		return fmt.Errorf("--composition-workers must be positive")
+	}
+	if symphonyWorkers < 1 {
+		return fmt.Errorf("--symphony-workers must be positive")
+	}
 	watch.SetKindWatchRateLimit(inputRateLimit)
 
 	synconf.NodeAffinityKey, synconf.NodeAffinityValue = config.ParseKeyValue(nodeAffinity)
@@ -113,6 +129,7 @@ func runController() error {
 	}
 	enoBuildVersion = os.Getenv("ENO_BUILD_VERSION")
 	logger := logging.NewLoggerWithBuild(zl, enoBuildVersion)
+	logger.Info("configured input revision processing", "maxConcurrentWorkers", inputBufferWorkers, "inputQPS", inputRateLimit)
 
 	mgrOpts.Rest.UserAgent = "eno-controller"
 	mgr, err := manager.New(logger, mgrOpts)
@@ -140,7 +157,7 @@ func runController() error {
 		return fmt.Errorf("constructing resource slice cleanup controller: %w", err)
 	}
 
-	err = watch.NewController(mgr)
+	err = watch.NewControllerWithInputBufferWorkers(mgr, inputBufferWorkers)
 	if err != nil {
 		return fmt.Errorf("constructing watch controller: %w", err)
 	}
@@ -150,7 +167,7 @@ func runController() error {
 		return fmt.Errorf("constructing synthesis scheduling controller: %w", err)
 	}
 
-	err = composition.NewController(mgr, podTimeout, synconf.PodNamespace)
+	err = composition.NewControllerWithWorkers(mgr, podTimeout, synconf.PodNamespace, compositionWorkers)
 	if err != nil {
 		return fmt.Errorf("constructing composition controller: %w", err)
 	}
@@ -165,7 +182,7 @@ func runController() error {
 		return fmt.Errorf("constructing synthesizer status logger: %w", err)
 	}
 
-	err = symphony.NewController(mgr)
+	err = symphony.NewControllerWithWorkers(mgr, symphonyWorkers)
 	if err != nil {
 		return fmt.Errorf("constructing symphony controller: %w", err)
 	}

@@ -84,11 +84,26 @@ var (
 			Help: "Count of successful flushes of composition input revision updates",
 		},
 	)
+
+	inputRevisionBufferWorkers = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "eno_input_revision_write_buffer_workers",
+			Help: "Configured maximum number of composition input revision write buffer workers",
+		},
+	)
+
+	inputRevisionBufferWorkersActive = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "eno_input_revision_write_buffer_workers_active",
+			Help: "Number of composition input revision write buffer workers currently processing an item",
+		},
+	)
 )
 
 func init() {
 	metrics.Registry.MustRegister(sliceStatusUpdates, writeBufferDepth, writeBufferStatusUpdateErrors,
-		inputRevisionBufferDepth, inputRevisionBufferFlushErrors, inputRevisionBufferFlushes)
+		inputRevisionBufferDepth, inputRevisionBufferFlushErrors, inputRevisionBufferFlushes,
+		inputRevisionBufferWorkers, inputRevisionBufferWorkersActive)
 }
 
 // setWriteBufferLenSource installs the queue.Len reader used by the depth gauge.

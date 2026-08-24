@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -95,6 +96,29 @@ func TestInputRevisionWriteBufferLastWriteWinsPerKey(t *testing.T) {
 	require.NoError(t, cli.Get(ctx, nsn, comp))
 	require.Len(t, comp.Status.InputRevisions, 1)
 	assert.Equal(t, "3", comp.Status.InputRevisions[0].ResourceVersion)
+}
+
+func TestInputRevisionWriteBufferSnapshotsEnqueuedRevision(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+	w := NewCompositionInputRevisionWriteBuffer(cli)
+
+	comp := newTestComposition(t, cli, "test-comp-1")
+	nsn := client.ObjectKeyFromObject(comp)
+	revision := 1
+	revs := &apiv1.InputRevisions{Key: "foo", ResourceVersion: "1", Revision: &revision}
+
+	w.PatchInputRevisionAsync(nsn, revs)
+	revs.Key = "changed"
+	revs.ResourceVersion = "2"
+	*revs.Revision = 2
+	w.processQueueItem(ctx)
+
+	require.NoError(t, cli.Get(ctx, nsn, comp))
+	require.Len(t, comp.Status.InputRevisions, 1)
+	assert.Equal(t, "foo", comp.Status.InputRevisions[0].Key)
+	assert.Equal(t, "1", comp.Status.InputRevisions[0].ResourceVersion)
+	assert.Equal(t, 1, *comp.Status.InputRevisions[0].Revision)
 }
 
 func TestInputRevisionWriteBufferRemove(t *testing.T) {
@@ -760,6 +784,44 @@ func TestInputRevisionWriteBufferConcurrentWrites(t *testing.T) {
 			assert.Equal(t, rv, revisionFor(comp, key), "key %s on %s", key, nsn.Name)
 		}
 	}
+}
+
+func TestInputRevisionWriteBufferUsesConfiguredWorkers(t *testing.T) {
+	ctx, cancel := context.WithCancel(testutil.NewContext(t))
+	release := make(chan struct{})
+	var active, maxActive atomic.Int32
+	cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
+		SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+			current := active.Add(1)
+			defer active.Add(-1)
+			for current > maxActive.Load() && !maxActive.CompareAndSwap(maxActive.Load(), current) {
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-release:
+			}
+			return c.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+		},
+	})
+	w := newCompositionInputRevisionWriteBuffer(cli, 4)
+
+	for i := 0; i < 4; i++ {
+		comp := newTestComposition(t, cli, fmt.Sprintf("parallel-comp-%d", i))
+		w.PatchInputRevisionAsync(client.ObjectKeyFromObject(comp), &apiv1.InputRevisions{Key: "foo", ResourceVersion: "1"})
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- w.Start(ctx) }()
+	testutil.Eventually(t, func() bool { return maxActive.Load() == 4 })
+	close(release)
+	testutil.Eventually(t, func() bool {
+		w.mut.Lock()
+		defer w.mut.Unlock()
+		return len(w.state) == 0 && w.queue.Len() == 0
+	})
+	cancel()
+	require.NoError(t, <-done)
 }
 
 // TestInputRevisionWriteBufferIntegrationStorageEdgeCases runs against a real apiserver
