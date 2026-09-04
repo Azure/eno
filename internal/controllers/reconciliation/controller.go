@@ -192,7 +192,7 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	deleted := markResourceAsDeleted(current, snap, failingOpen)
 
 	// For tombstones, confirmed deletion is the terminal readiness state. Explicit readiness checks cannot be evaluated after the target object has disappeared
-	if snap.Deleted() && deleted && ready == nil {
+	if snap != nil && snap.Deleted() && deleted && ready == nil {
 		now := metav1.Now()
 		ready = &now
 		logger.Info("resource deletion is complete", "ready", ready)
