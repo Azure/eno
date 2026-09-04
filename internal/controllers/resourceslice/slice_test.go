@@ -18,7 +18,7 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 )
 
-func testAggregation(t *testing.T, ready bool, reconciled bool) {
+func testAggregation(t *testing.T, ready bool, reconciled bool, deleted bool) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
 
@@ -32,7 +32,7 @@ func testAggregation(t *testing.T, ready bool, reconciled bool) {
 	slice.Name = "test-slice-1"
 	slice.Namespace = "default"
 	slice.Spec.Resources = []apiv1.Manifest{{Manifest: "{}"}}
-	slice.Status.Resources = []apiv1.ResourceState{{Ready: readyTime, Reconciled: reconciled}}
+	slice.Status.Resources = []apiv1.ResourceState{{Ready: readyTime, Reconciled: reconciled, Deleted: deleted}}
 	require.NoError(t, cli.Create(ctx, slice))
 	require.NoError(t, cli.Status().Update(ctx, slice))
 
@@ -58,19 +58,27 @@ func testAggregation(t *testing.T, ready bool, reconciled bool) {
 }
 
 func TestAggregationHappyPath(t *testing.T) {
-	testAggregation(t, true, true)
+	testAggregation(t, true, true, false)
 }
 
 func TestAggregationNegative(t *testing.T) {
-	testAggregation(t, false, false)
+	testAggregation(t, false, false, false)
 }
 
 func TestAggregationReadyNotReconciled(t *testing.T) {
-	testAggregation(t, true, false)
+	testAggregation(t, true, false, false)
 }
 
 func TestAggregationReconciledNotReady(t *testing.T) {
-	testAggregation(t, false, true)
+	testAggregation(t, false, true, false)
+}
+
+func TestAggregationDeletedReady(t *testing.T) {
+	testAggregation(t, true, true, true)
+}
+
+func TestAggregationDeletedNotReady(t *testing.T) {
+	testAggregation(t, false, true, true)
 }
 
 func TestStaleStatus(t *testing.T) {

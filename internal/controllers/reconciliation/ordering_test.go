@@ -59,8 +59,8 @@ func TestReadinessGroups(t *testing.T) {
 						"name":      "test-obj-1",
 						"namespace": "default",
 						// Explicit readiness-group: ConfigMap now defaults into the reserved
-					// [-100,-81] range; this test wants the legacy group-0 behavior.
-					"annotations": map[string]string{
+						// [-100,-81] range; this test wants the legacy group-0 behavior.
+						"annotations": map[string]string{
 							"eno.azure.io/readiness-group": "0",
 						},
 					},
@@ -161,6 +161,127 @@ func TestReadinessGroups(t *testing.T) {
 		err := upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		return errors.IsNotFound(err)
 	})
+}
+
+func TestTombstoneBlocksLaterReadinessGroupUntilDeletionCompletes(t *testing.T) {
+	const readinessExpression = "self.spec.type == 'ExternalName'"
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, synth *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		if synth.Spec.Image == "delete" {
+			output.Items = []*unstructured.Unstructured{{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "after-service-deletion",
+						"namespace": "default",
+						"annotations": map[string]any{
+							"eno.azure.io/readiness-group": "0",
+						},
+					},
+				},
+			}}
+			return output, nil
+		}
+
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Service",
+				"metadata": map[string]any{
+					"name":       "test-service",
+					"namespace":  "default",
+					"finalizers": []any{"eno.azure.io/test"},
+					"annotations": map[string]any{
+						"eno.azure.io/readiness":         readinessExpression,
+						"eno.azure.io/readiness-group":   "-1",
+						"eno.azure.io/deletion-strategy": "foreground",
+					},
+				},
+				"spec": map[string]any{
+					"type":         "ExternalName",
+					"externalName": "example.com",
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubjectForOptions(t, mgr, Options{
+		Manager:                mgr.Manager,
+		Timeout:                time.Minute,
+		ReadinessPollInterval:  10 * time.Millisecond,
+		DisableServerSideApply: mgr.NoSsaSupport,
+	})
+	mgr.Start(t)
+	synth, comp := writeGenericComposition(t, upstream)
+	waitForReadiness(t, mgr, comp, synth, nil)
+	firstSynthesisUUID := comp.Status.CurrentSynthesis.UUID
+
+	setImage(t, upstream, synth, "delete")
+
+	service := &corev1.Service{}
+	service.Name = "test-service"
+	service.Namespace = "default"
+	testutil.Eventually(t, func() bool {
+		err := downstream.Get(ctx, client.ObjectKeyFromObject(service), service)
+		return err == nil && service.DeletionTimestamp != nil
+	})
+
+	testutil.Eventually(t, func() bool {
+		slices, err := mgr.GetCurrentResourceSlices(ctx)
+		if err != nil {
+			t.Log(err)
+			return false
+		}
+		for _, slice := range slices {
+			for i, manifest := range slice.Spec.Resources {
+				if !manifest.Deleted || len(slice.Status.Resources) <= i {
+					continue
+				}
+				obj := &unstructured.Unstructured{}
+				if err := obj.UnmarshalJSON([]byte(manifest.Manifest)); err != nil {
+					return false
+				}
+				if obj.GetKind() == "Service" && obj.GetName() == "test-service" {
+					state := slice.Status.Resources[i]
+					return state.Reconciled && !state.Deleted && state.Ready == nil
+				}
+			}
+		}
+		return false
+	})
+
+	blocked := &corev1.ConfigMap{}
+	blocked.Name = "after-service-deletion"
+	blocked.Namespace = "default"
+	require.True(t, errors.IsNotFound(downstream.Get(ctx, client.ObjectKeyFromObject(blocked), blocked)))
+
+	require.NoError(t, retry.RetryOnConflict(testutil.Backoff, func() error {
+		if err := downstream.Get(ctx, client.ObjectKeyFromObject(service), service); err != nil {
+			return err
+		}
+		service.Finalizers = nil
+		return downstream.Update(ctx, service)
+	}))
+
+	testutil.Eventually(t, func() bool {
+		service := &corev1.Service{}
+		service.Name = "test-service"
+		service.Namespace = "default"
+		return errors.IsNotFound(downstream.Get(ctx, client.ObjectKeyFromObject(service), service))
+	})
+	testutil.Eventually(t, func() bool {
+		return downstream.Get(ctx, client.ObjectKeyFromObject(blocked), blocked) == nil
+	})
+	waitForReadiness(t, mgr, comp, synth, &firstSynthesisUUID)
 }
 
 func TestCRDOrdering(t *testing.T) {

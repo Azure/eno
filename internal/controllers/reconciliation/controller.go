@@ -191,6 +191,13 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 
 	deleted := markResourceAsDeleted(current, snap, failingOpen)
 
+	// For tombstones, confirmed deletion is the terminal readiness state. Explicit readiness checks cannot be evaluated after the target object has disappeared
+	if snap.Deleted() && deleted && ready == nil {
+		now := metav1.Now()
+		ready = &now
+		logger.Info("resource deletion is complete", "ready", ready)
+	}
+
 	c.writeBuffer.PatchStatusAsync(ctx, &resource.ManifestRef, patchResourceState(deleted, ready))
 	return c.requeue(logger, snap, ready)
 }
@@ -213,31 +220,39 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		return nil, nil, nil, false, err
 	}
 
-	// Evaluate resource readiness
-	// - Readiness checks are skipped when this version of the resource's desired state has already become ready
-	// - Readiness checks are skipped when the resource hasn't changed since the last check
-	// - Readiness defaults to true if no checks are given
-	logger.Info("evaluating resource readiness")
-	status := resource.State()
-	if status == nil || status.Ready == nil {
-		readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, &apiv1.Composition{}, current)
-		if ok {
-			ready = &readiness.ReadyTime
-			resource.ResetNotReadyReason()
-			logger.Info("resource is ready", "readyTime", ready)
-		} else {
-			logResourceNotReady(ctx, logger, resource, current)
-		}
-	} else {
-		ready = status.Ready
-	}
-
 	logger.Info("creating resource snapshot")
 	snap, err = resource.Snapshot(ctx, comp, current)
 	if err != nil {
 		logger.Error(err, "failed to create resource snapshot")
 		return nil, nil, nil, false, fmt.Errorf("failed to create resource snapshot: %w", err)
 	}
+
+	status := resource.State()
+	if snap.Deleted() {
+		// The desired state is deletion. Normal object readiness expressions should no longer apply
+		if status != nil {
+			ready = status.Ready
+		}
+	} else {
+		// Evaluate resource readiness
+		// - Readiness checks are skipped when this version of the resource's desired state has already become ready
+		// - Readiness checks are skipped when the resource hasn't changed since the last check
+		// - Readiness defaults to true if no checks are given
+		logger.Info("evaluating resource readiness")
+		if status == nil || status.Ready == nil {
+			readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, &apiv1.Composition{}, current)
+			if ok {
+				ready = &readiness.ReadyTime
+				resource.ResetNotReadyReason()
+				logger.Info("resource is ready", "readyTime", ready)
+			} else {
+				logResourceNotReady(ctx, logger, resource, current)
+			}
+		} else {
+			ready = status.Ready
+		}
+	}
+
 	if status := snap.OverrideStatus(); len(status) > 0 {
 		logger = logger.WithValues("overrideStatus", status)
 		ctx = logr.NewContext(ctx, logger)
@@ -530,7 +545,7 @@ func (c *Controller) getCurrent(ctx context.Context, resource *resource.Resource
 }
 
 func (c *Controller) requeue(logger logr.Logger, resource *resource.Snapshot, ready *metav1.Time) (ctrl.Result, error) {
-	pendingForegroundDeletion := (resource != nil && resource.Deleted() && !resource.Disable && resource.ForegroundDeletion)
+	pendingForegroundDeletion := resource != nil && resource.Deleted() && !resource.Disable && resource.ForegroundDeletion
 
 	if ready == nil || pendingForegroundDeletion {
 		return ctrl.Result{RequeueAfter: wait.Jitter(c.readinessPollInterval, 0.1)}, nil
