@@ -1,0 +1,24 @@
+apiVersion: eno.azure.io/v1
+kind: Synthesizer
+metadata:
+  name: eno-stress-missing-inputs-${resourceIndex}
+spec:
+  image: "${synthesizerImage}"
+  command:
+    - /bin/synthesize
+  refs:
+    - key: input1
+      resource:
+        group: ""
+        version: v1
+        kind: ConfigMap
+    - key: input2
+      resource:
+        group: ""
+        version: v1
+        kind: ConfigMap
+    - key: input3
+      resource:
+        group: ""
+        version: v1
+        kind: Secret
