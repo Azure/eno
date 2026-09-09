@@ -1,6 +1,7 @@
 package reconciliation
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -22,6 +23,10 @@ import (
 )
 
 func TestRequeue(t *testing.T) {
+	tombstone := newTombstoneSnapshot(t, false)
+	foregroundTombstone := newTombstoneSnapshot(t, true)
+	now := metav1.Now()
+
 	tests := []struct {
 		name             string
 		resource         *resource.Snapshot
@@ -40,13 +45,25 @@ func TestRequeue(t *testing.T) {
 			expectedResult: 10 * time.Second,
 		},
 		{
-			name: "resource is deleted, no requeue",
-			resource: &resource.Snapshot{
-				ReconcileInterval: nil,
-			},
-			ready:          &metav1.Time{},
+			name:           "completed tombstone does not requeue",
+			resource:       tombstone,
+			ready:          &now,
 			minReconcile:   10 * time.Second,
 			expectedResult: 0,
+		},
+		{
+			name:           "incomplete tombstone requeues",
+			resource:       tombstone,
+			ready:          nil,
+			minReconcile:   10 * time.Second,
+			expectedResult: 10 * time.Second,
+		},
+		{
+			name:           "foreground tombstone requeues while deletion is pending",
+			resource:       foregroundTombstone,
+			ready:          &now,
+			minReconcile:   10 * time.Second,
+			expectedResult: 10 * time.Second,
 		},
 		{
 			name: "resource has reconcile interval less than minReconcileInterval",
@@ -129,6 +146,31 @@ func TestRequeue(t *testing.T) {
 			assert.InDelta(t, tt.expectedResult, result.RequeueAfter, float64(2*time.Second))
 		})
 	}
+}
+
+func newTombstoneSnapshot(t *testing.T, foreground bool) *resource.Snapshot {
+	t.Helper()
+
+	deletionStrategy := ""
+	if foreground {
+		deletionStrategy = `"annotations":{"eno.azure.io/deletion-strategy":"foreground"},`
+	}
+	slice := &apiv1.ResourceSlice{
+		Spec: apiv1.ResourceSliceSpec{
+			Resources: []apiv1.Manifest{{
+				Deleted: true,
+				Manifest: fmt.Sprintf(
+					`{"apiVersion":"v1","kind":"ConfigMap","metadata":{%s"name":"test","namespace":"default"}}`,
+					deletionStrategy,
+				),
+			}},
+		},
+	}
+	res, err := resource.FromSlice(context.Background(), &apiv1.Composition{}, slice, 0)
+	require.NoError(t, err)
+	snapshot, err := res.Snapshot(context.Background(), &apiv1.Composition{}, nil)
+	require.NoError(t, err)
+	return snapshot
 }
 
 func TestBuildNonStrategicPatch_NilPrevious(t *testing.T) {

@@ -3,6 +3,7 @@ package reconciliation
 import (
 	"context"
 	"testing"
+	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	testv1 "github.com/Azure/eno/internal/controllers/reconciliation/fixtures/v1"
@@ -11,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -105,6 +107,98 @@ func TestResourceReadiness(t *testing.T) {
 		err = upstream.Get(ctx, client.ObjectKeyFromObject(comp), comp)
 		return err == nil && comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Ready == nil
 	})
+}
+
+func TestTombstonedServiceWithReadinessBecomesReadyAfterDeletion(t *testing.T) {
+	const readinessExpression = "self.spec.type == 'ExternalName' || (self.spec.clusterIP != '' && (self.spec.type != 'LoadBalancer' || size(self.spec.externalIPs) > 0 || size(self.status.loadBalancer.ingress) > 0))"
+
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	upstream := mgr.GetClient()
+	downstream := mgr.DownstreamClient
+
+	registerControllers(t, mgr)
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, synth *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		output := &krmv1.ResourceList{}
+		if synth.Spec.Image == "delete" {
+			return output, nil
+		}
+
+		output.Items = []*unstructured.Unstructured{{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Service",
+				"metadata": map[string]any{
+					"name":      "test-service",
+					"namespace": "default",
+					"annotations": map[string]any{
+						"eno.azure.io/readiness": readinessExpression,
+					},
+				},
+				"spec": map[string]any{
+					"type":         "ExternalName",
+					"externalName": "example.com",
+				},
+			},
+		}}
+		return output, nil
+	})
+
+	setupTestSubjectForOptions(t, mgr, Options{
+		Manager:                mgr.Manager,
+		Timeout:                time.Minute,
+		ReadinessPollInterval:  10 * time.Millisecond,
+		DisableServerSideApply: mgr.NoSsaSupport,
+	})
+	mgr.Start(t)
+	synth, comp := writeGenericComposition(t, upstream)
+	waitForReadiness(t, mgr, comp, synth, nil)
+	firstSynthesisUUID := comp.Status.CurrentSynthesis.UUID
+
+	service := &corev1.Service{}
+	service.Name = "test-service"
+	service.Namespace = "default"
+	require.NoError(t, downstream.Get(ctx, client.ObjectKeyFromObject(service), service))
+
+	setImage(t, upstream, synth, "delete")
+
+	testutil.Eventually(t, func() bool {
+		service := &corev1.Service{}
+		service.Name = "test-service"
+		service.Namespace = "default"
+		return apierrors.IsNotFound(downstream.Get(ctx, client.ObjectKeyFromObject(service), service))
+	})
+
+	testutil.Eventually(t, func() bool {
+		slices, err := mgr.GetCurrentResourceSlices(ctx)
+		if err != nil {
+			t.Log(err)
+			return false
+		}
+		for _, slice := range slices {
+			for i, manifest := range slice.Spec.Resources {
+				obj := &unstructured.Unstructured{}
+				if err := obj.UnmarshalJSON([]byte(manifest.Manifest)); err != nil {
+					t.Log(err)
+					return false
+				}
+				if obj.GetKind() != "Service" || obj.GetName() != "test-service" {
+					continue
+				}
+				if !manifest.Deleted || obj.GetAnnotations()["eno.azure.io/readiness"] != readinessExpression {
+					return false
+				}
+				if len(slice.Status.Resources) <= i {
+					return false
+				}
+				state := slice.Status.Resources[i]
+				return state.Reconciled && state.Deleted && state.Ready != nil
+			}
+		}
+		return false
+	})
+
+	waitForReadiness(t, mgr, comp, synth, &firstSynthesisUUID)
 }
 
 // TestReconcileStatus proves that reconciliation and deletion status are written to resource slices as expected.
