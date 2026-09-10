@@ -280,6 +280,11 @@ spec:
                       was written
                     format: date-time
                     type: string
+                  tombstoneRecoveryRequired:
+                    description: |-
+                      TombstoneRecoveryRequired indicates that historical deletion information may be incomplete.
+                      It does not block synthesis or reconciliation at this stage
+                    type: boolean
                   uuid:
                     description: |-
                       A random UUID scoped to this particular synthesis operation.
@@ -410,6 +415,11 @@ spec:
                       was written
                     format: date-time
                     type: string
+                  tombstoneRecoveryRequired:
+                    description: |-
+                      TombstoneRecoveryRequired indicates that historical deletion information may be incomplete.
+                      It does not block synthesis or reconciliation at this stage
+                    type: boolean
                   uuid:
                     description: |-
                       A random UUID scoped to this particular synthesis operation.
@@ -533,6 +543,11 @@ spec:
                       was written
                     format: date-time
                     type: string
+                  tombstoneRecoveryRequired:
+                    description: |-
+                      TombstoneRecoveryRequired indicates that historical deletion information may be incomplete.
+                      It does not block synthesis or reconciliation at this stage
+                    type: boolean
                   uuid:
                     description: |-
                       A random UUID scoped to this particular synthesis operation.

@@ -50,6 +50,13 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	snapshot := statusSnapshot{Reconciled: true, Ready: true}
 
 	for _, ref := range comp.Status.CurrentSynthesis.ResourceSlices {
+		if ref == nil || ref.Name == "" {
+			logger.Info("current synthesis contains a resoruce slice reference without a name")
+			if comp.DeletionTimestamp != nil {
+				continue
+			}
+			return s.requestResynthesis(ctx, comp)
+		}
 		slice := &apiv1.ResourceSlice{}
 		slice.Name = ref.Name
 		slice.Namespace = comp.Namespace
@@ -148,13 +155,7 @@ func (s *sliceController) handleMissingSlice(ctx context.Context, comp *apiv1.Co
 
 	// Resynthesis is required
 	logger.Info("resource slice is missing - resynthesizing")
-	comp.ForceResynthesis()
-	err = s.client.Update(ctx, comp)
-	if err != nil {
-		logger.Error(err, "failed to update composition")
-		return ctrl.Result{}, fmt.Errorf("updating composition pending resynthesis: %w", err)
-	}
-	return ctrl.Result{}, nil
+	return s.requestResynthesis(ctx, comp)
 }
 
 func processCompositionTransition(ctx context.Context, comp *apiv1.Composition, snapshot statusSnapshot) (modified bool) {
@@ -236,4 +237,20 @@ func (s *statusSnapshot) GetReady(comp *apiv1.Composition, logger logr.Logger) *
 
 	logger.V(1).Info("composition became ready")
 	return s.ReadyTime
+}
+
+func (s *sliceController) requestResynthesis(ctx context.Context, comp *apiv1.Composition) (ctrl.Result, error) {
+	logger := logr.FromContextOrDiscard(ctx)
+
+	if comp.ShouldIgnoreSideEffects() || comp.Status.InFlightSynthesis != nil || comp.ShouldForceResynthesis() {
+		return ctrl.Result{}, nil
+	}
+
+	comp.ForceResynthesis()
+	if err := s.client.Update(ctx, comp); err != nil {
+		return ctrl.Result{}, fmt.Errorf("requesting resynthesis for empty or missing resource slice referneces: %w", err)
+	}
+
+	logger.Info("sucessfully requested resynthesis for empty or missing resource slice references")
+	return ctrl.Result{}, nil
 }

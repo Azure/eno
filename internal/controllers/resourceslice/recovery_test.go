@@ -1,0 +1,373 @@
+package resourceslice
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/testutil"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/workqueue"
+	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+)
+
+func recoverySliceComposition(refs []*apiv1.ResourceSliceRef) *apiv1.Composition {
+	return &apiv1.Composition{
+		ObjectMeta: metav1.ObjectMeta{Name: "comp", Namespace: "default", UID: "comp-uid"},
+		Status: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{
+			UUID: "current", Synthesized: ptr.To(metav1.NewTime(time.Now().Add(-time.Minute))),
+			ResourceSlices: refs, TombstoneRecoveryRequired: true,
+		}},
+	}
+}
+
+func TestRecoverySliceRequestsResynthesis(t *testing.T) {
+	for _, refCase := range []struct {
+		name string
+		ref  *apiv1.ResourceSliceRef
+	}{
+		{name: "nil"},
+		{name: "empty", ref: &apiv1.ResourceSliceRef{}},
+		{name: "missing", ref: &apiv1.ResourceSliceRef{Name: "missing"}},
+	} {
+		for _, mode := range []string{"normal", "ignore side effects", "in flight", "already requested"} {
+			t.Run(refCase.name+"/"+mode, func(t *testing.T) {
+				ctx := testutil.NewContext(t)
+				comp := recoverySliceComposition([]*apiv1.ResourceSliceRef{refCase.ref})
+				switch mode {
+				case "ignore side effects":
+					comp.EnableIgnoreSideEffects()
+				case "in flight":
+					comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "inflight"}
+				case "already requested":
+					comp.ForceResynthesis()
+				}
+				updates := 0
+				sliceReads := 0
+				cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
+					Get: func(ctx context.Context, cli client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						require.NotEmpty(t, key.Name)
+						if _, ok := obj.(*apiv1.ResourceSlice); ok {
+							sliceReads++
+						}
+						return cli.Get(ctx, key, obj, opts...)
+					},
+					Update: func(ctx context.Context, cli client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+						updates++
+						return cli.Update(ctx, obj, opts...)
+					},
+				}, comp)
+				require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+				before := comp.DeepCopy()
+				c := &sliceController{client: cli}
+				req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(comp)}
+				for i := 0; i < 2; i++ {
+					result, err := c.Reconcile(ctx, req)
+					require.NoError(t, err)
+					assert.Zero(t, result)
+				}
+				require.NoError(t, cli.Get(ctx, req.NamespacedName, comp))
+				assert.Equal(t, mode == "normal" || mode == "already requested", comp.ShouldForceResynthesis())
+				wantUpdates := 0
+				if mode == "normal" {
+					wantUpdates = 1
+				}
+				assert.Equal(t, wantUpdates, updates)
+				assert.Equal(t, before.Status, comp.Status)
+				if refCase.name != "missing" {
+					assert.Zero(t, sliceReads)
+				}
+			})
+		}
+	}
+}
+
+func TestRecoverySliceRequestRetry(t *testing.T) {
+	for _, failure := range []struct {
+		name string
+		err  error
+	}{
+		{name: "conflict", err: apierrors.NewConflict(schema.GroupResource{Group: apiv1.SchemeGroupVersion.Group, Resource: "compositions"}, "comp", errors.New("conflict"))},
+		{name: "forbidden", err: apierrors.NewForbidden(schema.GroupResource{Group: apiv1.SchemeGroupVersion.Group, Resource: "compositions"}, "comp", errors.New("forbidden"))},
+		{name: "other", err: errors.New("write unavailable")},
+	} {
+		t.Run(failure.name, func(t *testing.T) {
+			ctx := testutil.NewContext(t)
+			comp := recoverySliceComposition([]*apiv1.ResourceSliceRef{nil})
+			updates := 0
+			cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
+				Update: func(ctx context.Context, cli client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+					updates++
+					if updates == 1 {
+						return failure.err
+					}
+					return cli.Update(ctx, obj, opts...)
+				},
+			}, comp)
+			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+			before := comp.DeepCopy()
+			c := &sliceController{client: cli}
+			req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(comp)}
+			_, err := c.Reconcile(ctx, req)
+			require.ErrorIs(t, err, failure.err)
+			require.NoError(t, cli.Get(ctx, req.NamespacedName, comp))
+			assert.False(t, comp.ShouldForceResynthesis())
+			assert.Equal(t, before.Status, comp.Status)
+			_, err = c.Reconcile(ctx, req)
+			require.NoError(t, err)
+			require.NoError(t, cli.Get(ctx, req.NamespacedName, comp))
+			assert.True(t, comp.ShouldForceResynthesis())
+			_, err = c.Reconcile(ctx, req)
+			require.NoError(t, err)
+			assert.Equal(t, 2, updates)
+		})
+	}
+}
+
+func TestRecoverySliceDeletingMalformedReferences(t *testing.T) {
+	now := metav1.NewTime(time.Now().Truncate(time.Second))
+	for _, test := range []struct {
+		name       string
+		states     []apiv1.ResourceState
+		reconciled bool
+		ready      bool
+	}{
+		{name: "status not yet written"},
+		{name: "not deleted", states: []apiv1.ResourceState{{Reconciled: true}}},
+		{name: "deleted", states: []apiv1.ResourceState{{Reconciled: true, Deleted: true}}, reconciled: true},
+		{name: "deleted and ready", states: []apiv1.ResourceState{{Reconciled: true, Deleted: true, Ready: &now}}, reconciled: true, ready: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := testutil.NewContext(t)
+			comp := recoverySliceComposition([]*apiv1.ResourceSliceRef{nil, {}, {Name: "available"}, nil})
+			comp.Finalizers = []string{"eno.azure.io/cleanup"}
+			comp.DeletionTimestamp = &now
+			slice := &apiv1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{Name: "available", Namespace: comp.Namespace},
+				Spec:       apiv1.ResourceSliceSpec{Resources: []apiv1.Manifest{{Manifest: "{}"}}},
+				Status:     apiv1.ResourceSliceStatus{Resources: test.states},
+			}
+			cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
+				Get: func(ctx context.Context, cli client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					require.NotEmpty(t, key.Name)
+					return cli.Get(ctx, key, obj, opts...)
+				},
+				Update: func(context.Context, client.WithWatch, client.Object, ...client.UpdateOption) error {
+					t.Fatal("deleting composition must not request resynthesis")
+					return nil
+				},
+			}, comp, slice)
+			c := &sliceController{client: cli}
+			_, err := c.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(comp)})
+			require.NoError(t, err)
+			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+			assert.False(t, comp.ShouldForceResynthesis())
+			assert.Equal(t, test.reconciled, comp.Status.CurrentSynthesis.Reconciled != nil)
+			assert.Equal(t, test.ready, comp.Status.CurrentSynthesis.Ready != nil)
+			assert.True(t, comp.Status.CurrentSynthesis.TombstoneRecoveryRequired)
+		})
+	}
+}
+
+func TestRecoverySliceReadiness(t *testing.T) {
+	for _, flag := range []bool{false, true} {
+		name := "unflagged"
+		if flag {
+			name = "flagged"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := testutil.NewContext(t)
+			comp := recoverySliceComposition([]*apiv1.ResourceSliceRef{{Name: "available"}})
+			comp.Status.CurrentSynthesis.TombstoneRecoveryRequired = flag
+			comp.Status.PreviousSynthesis = &apiv1.Synthesis{UUID: "previous", TombstoneRecoveryRequired: flag}
+			previous := comp.Status.PreviousSynthesis.DeepCopy()
+			slice := &apiv1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{Name: "available", Namespace: comp.Namespace},
+				Spec:       apiv1.ResourceSliceSpec{Resources: []apiv1.Manifest{{Manifest: "{}"}}},
+			}
+			cli := testutil.NewClient(t, comp, slice)
+			c := &sliceController{client: cli}
+			req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(comp)}
+			_, err := c.Reconcile(ctx, req)
+			require.NoError(t, err)
+			require.NoError(t, cli.Get(ctx, req.NamespacedName, comp))
+			assert.Nil(t, comp.Status.CurrentSynthesis.Reconciled)
+			assert.Nil(t, comp.Status.CurrentSynthesis.Ready)
+
+			slice.Status.Resources = []apiv1.ResourceState{{Reconciled: true}}
+			require.NoError(t, cli.Status().Update(ctx, slice))
+			_, err = c.Reconcile(ctx, req)
+			require.NoError(t, err)
+			require.NoError(t, cli.Get(ctx, req.NamespacedName, comp))
+			assert.NotNil(t, comp.Status.CurrentSynthesis.Reconciled)
+			assert.Nil(t, comp.Status.CurrentSynthesis.Ready)
+
+			now := metav1.NewTime(time.Now().Truncate(time.Second))
+			slice.Status.Resources[0].Ready = &now
+			require.NoError(t, cli.Status().Update(ctx, slice))
+			_, err = c.Reconcile(ctx, req)
+			require.NoError(t, err)
+			require.NoError(t, cli.Get(ctx, req.NamespacedName, comp))
+			assert.NotNil(t, comp.Status.CurrentSynthesis.Reconciled)
+			require.NotNil(t, comp.Status.CurrentSynthesis.Ready)
+			assert.True(t, now.Equal(comp.Status.CurrentSynthesis.Ready))
+			assert.Equal(t, flag, comp.Status.CurrentSynthesis.TombstoneRecoveryRequired)
+			assert.Equal(t, previous, comp.Status.PreviousSynthesis)
+			assert.False(t, comp.ShouldForceResynthesis())
+		})
+	}
+}
+
+func TestRecoveryCleanupEvents(t *testing.T) {
+	makeComp := func(suffix string) *apiv1.Composition {
+		synthesis := func(name string) *apiv1.Synthesis {
+			return &apiv1.Synthesis{ResourceSlices: []*apiv1.ResourceSliceRef{nil, {}, {Name: name + suffix}, {Name: "shared"}}}
+		}
+		return &apiv1.Composition{
+			ObjectMeta: metav1.ObjectMeta{Name: "comp", Namespace: "default"},
+			Status: apiv1.CompositionStatus{
+				InFlightSynthesis: synthesis("inflight"), CurrentSynthesis: synthesis("current"), PreviousSynthesis: synthesis("previous"),
+			},
+		}
+	}
+	for _, name := range []string{"create", "update", "delete", "unknown delete", "nil syntheses"} {
+		t.Run(name, func(t *testing.T) {
+			ctx := testutil.NewContext(t)
+			queue := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[reconcile.Request]())
+			t.Cleanup(queue.ShutDown)
+			handler := (&cleanupController{}).newCompEventHandler()
+			old, next := makeComp("-old"), makeComp("-new")
+			before := next.DeepCopy()
+			var want []string
+			switch name {
+			case "create":
+				handler.Create(ctx, event.TypedCreateEvent[*apiv1.Composition]{Object: next}, queue)
+				want = []string{"inflight-new", "current-new", "previous-new", "shared"}
+			case "update":
+				handler.Update(ctx, event.TypedUpdateEvent[*apiv1.Composition]{ObjectOld: old, ObjectNew: next}, queue)
+				want = []string{"inflight-new", "current-new", "previous-new", "inflight-old", "current-old", "previous-old", "shared"}
+			case "delete":
+				handler.Delete(ctx, event.TypedDeleteEvent[*apiv1.Composition]{Object: next}, queue)
+				want = []string{"inflight-new", "current-new", "previous-new", "shared"}
+			case "unknown delete":
+				handler.Delete(ctx, event.TypedDeleteEvent[*apiv1.Composition]{Object: next, DeleteStateUnknown: true}, queue)
+			case "nil syntheses":
+				handler.Create(ctx, event.TypedCreateEvent[*apiv1.Composition]{Object: &apiv1.Composition{}}, queue)
+			}
+			var got []string
+			for queue.Len() > 0 {
+				req, shutdown := queue.Get()
+				require.False(t, shutdown)
+				assert.NotEmpty(t, req.Name)
+				assert.Equal(t, "default", req.Namespace)
+				got = append(got, req.Name)
+				queue.Done(req)
+			}
+			assert.ElementsMatch(t, want, got)
+			assert.Equal(t, before, next)
+		})
+	}
+}
+
+func TestRecoveryCleanupReferences(t *testing.T) {
+	for _, location := range []string{"current", "previous", "inflight", "unreferenced"} {
+		t.Run(location, func(t *testing.T) {
+			ctx := testutil.NewContext(t)
+			comp := recoverySliceComposition([]*apiv1.ResourceSliceRef{nil, {}, {Name: "other"}})
+			comp.Status.PreviousSynthesis = &apiv1.Synthesis{ResourceSlices: []*apiv1.ResourceSliceRef{nil, {}, {Name: "older"}}}
+			switch location {
+			case "current":
+				comp.Status.CurrentSynthesis.ResourceSlices = append(comp.Status.CurrentSynthesis.ResourceSlices, &apiv1.ResourceSliceRef{Name: "target"})
+			case "previous":
+				comp.Status.PreviousSynthesis.ResourceSlices = append(comp.Status.PreviousSynthesis.ResourceSlices, &apiv1.ResourceSliceRef{Name: "target"})
+			case "inflight":
+				comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "producing"}
+			}
+			slice := &apiv1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "target", Namespace: comp.Namespace, UID: "slice-uid",
+					CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute)),
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: apiv1.SchemeGroupVersion.String(), Kind: "Composition", Name: comp.Name, UID: comp.UID, Controller: ptr.To(true),
+					}},
+				},
+				Spec: apiv1.ResourceSliceSpec{SynthesisUUID: "producing"},
+			}
+			cli := testutil.NewClient(t, comp, slice)
+			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+			before := comp.DeepCopy()
+			c := &cleanupController{client: cli, noCacheReader: cli}
+			req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(slice)}
+			_, err := c.Reconcile(ctx, req)
+			require.NoError(t, err)
+			err = cli.Get(ctx, req.NamespacedName, slice)
+			if location == "unreferenced" {
+				assert.True(t, apierrors.IsNotFound(err))
+			} else {
+				require.NoError(t, err)
+			}
+			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+			assert.Equal(t, before.Status, comp.Status)
+		})
+	}
+}
+
+func TestRecoveryCleanupFinalizers(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		current    bool
+		previous   bool
+		reconciled bool
+		keep       bool
+	}{
+		{name: "current unreconciled", current: true, keep: true},
+		{name: "current reconciled", current: true, reconciled: true},
+		{name: "previous only", previous: true},
+		{name: "unreferenced"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := testutil.NewContext(t)
+			comp := recoverySliceComposition([]*apiv1.ResourceSliceRef{nil, {}, {Name: "other"}})
+			comp.Status.PreviousSynthesis = &apiv1.Synthesis{ResourceSlices: []*apiv1.ResourceSliceRef{nil, {}}}
+			if test.current {
+				comp.Status.CurrentSynthesis.ResourceSlices = append(comp.Status.CurrentSynthesis.ResourceSlices, &apiv1.ResourceSliceRef{Name: "target"})
+			}
+			if test.previous {
+				comp.Status.PreviousSynthesis.ResourceSlices = append(comp.Status.PreviousSynthesis.ResourceSlices, &apiv1.ResourceSliceRef{Name: "target"})
+			}
+			if test.reconciled {
+				comp.Status.CurrentSynthesis.Reconciled = ptr.To(metav1.Now())
+			}
+			slice := &apiv1.ResourceSlice{ObjectMeta: metav1.ObjectMeta{
+				Name: "target", Namespace: comp.Namespace,
+				Finalizers: []string{"eno.azure.io/cleanup"}, DeletionTimestamp: ptr.To(metav1.Now()),
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion: apiv1.SchemeGroupVersion.String(), Kind: "Composition", Name: comp.Name, UID: comp.UID, Controller: ptr.To(true),
+				}},
+			}}
+			cli := testutil.NewClient(t, comp, slice)
+			c := &cleanupController{client: cli, noCacheReader: cli}
+			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: slice.Name, Namespace: slice.Namespace}}
+			_, err := c.Reconcile(ctx, req)
+			require.NoError(t, err)
+			err = cli.Get(ctx, req.NamespacedName, slice)
+			if test.keep {
+				require.NoError(t, err)
+				assert.Equal(t, []string{"eno.azure.io/cleanup"}, slice.Finalizers)
+			} else {
+				assert.True(t, apierrors.IsNotFound(err), "slice should disappear when its last finalizer is released: %v", err)
+			}
+		})
+	}
+}

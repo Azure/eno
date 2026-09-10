@@ -170,6 +170,10 @@ type Synthesis struct {
 	// Deferred is true when this synthesis was caused by a change to either the synthesizer
 	// or an input with a ref that sets `Defer == true`.
 	Deferred bool `json:"deferred,omitempty"`
+
+	// TombstoneRecoveryRequired indicates that historical deletion information may be incomplete.
+	// It does not block synthesis or reconciliation at this stage
+	TombstoneRecoveryRequired bool `json:"tombstoneRecoveryRequired,omitempty"`
 }
 
 type Result struct {

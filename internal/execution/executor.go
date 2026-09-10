@@ -76,6 +76,8 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 
 	logger.Info("executing synthesizer")
 	var sliceRefs []*apiv1.ResourceSliceRef
+	var recoveryRequired bool
+
 	output, err := e.Handler(ctx, syn, input)
 	if err != nil {
 		logger.Error(err, "unable to execute synthesizer")
@@ -85,7 +87,7 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 			Severity: krmv1.ResultSeverityError,
 		}}}
 
-		if err := e.updateComposition(ctx, env, comp, syn, sliceRefs, revs, output); err != nil {
+		if err := e.updateComposition(ctx, env, comp, syn, sliceRefs, recoveryRequired, revs, output); err != nil {
 			logger.Error(err, "unable to update composition with synthesizer error")
 			return err
 		}
@@ -100,7 +102,7 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 	}
 	if err == nil {
 		logger.Info("writing resource slices")
-		sliceRefs, err = e.writeSlices(ctx, comp, output)
+		sliceRefs, recoveryRequired, err = e.writeSlices(ctx, comp, output)
 		if errors.IsForbidden(err) && errors.HasStatusCause(err, corev1.NamespaceTerminatingCause) {
 			logger.Info("composition namespace is terminating - abandoning synthesis")
 			return nil
@@ -112,7 +114,7 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 	}
 
 	logger.Info("updating composition status")
-	if err := e.updateComposition(ctx, env, comp, syn, sliceRefs, revs, output); err != nil {
+	if err := e.updateComposition(ctx, env, comp, syn, sliceRefs, recoveryRequired, revs, output); err != nil {
 		logger.Error(err, "failed to update composition status after synthesis")
 		return err
 	}
@@ -200,19 +202,19 @@ func (e *Executor) preflightValidateResources(rl *krmv1.ResourceList) error {
 	return nil
 }
 
-func (e *Executor) writeSlices(ctx context.Context, comp *apiv1.Composition, rl *krmv1.ResourceList) ([]*apiv1.ResourceSliceRef, error) {
+func (e *Executor) writeSlices(ctx context.Context, comp *apiv1.Composition, rl *krmv1.ResourceList) ([]*apiv1.ResourceSliceRef, bool, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
-	previous, err := e.fetchPreviousSlices(ctx, comp)
+	previous, recoveryRequired, err := e.fetchCurrentSynthesisResSlices(ctx, comp)
 	if err != nil {
 		logger.Error(err, "failed to fetch previous resource slices")
-		return nil, err
+		return nil, false, err
 	}
 
 	slices, err := resource.Slice(comp, previous, rl.Items, maxSliceJsonBytes)
 	if err != nil {
 		logger.Error(err, "failed to slice resources", "maxSliceBytes", maxSliceJsonBytes, "resourceCount", len(rl.Items))
-		return nil, err
+		return nil, false, err
 	}
 
 	sliceRefs := make([]*apiv1.ResourceSliceRef, len(slices))
@@ -222,44 +224,62 @@ func (e *Executor) writeSlices(ctx context.Context, comp *apiv1.Composition, rl 
 		err = e.writeResourceSlice(ctx, slice)
 		if err != nil {
 			logger.Error(err, "failed to write resource slice", "sliceIndex", i)
-			return nil, fmt.Errorf("creating resource slice %d: %w", i, err)
+			return nil, false, fmt.Errorf("creating resource slice %d: %w", i, err)
 		}
 
 		logger.V(1).Info("wrote resource slice", "resourceSliceName", slice.Name, "latency", time.Since(start).Milliseconds())
 		sliceRefs[i] = &apiv1.ResourceSliceRef{Name: slice.Name}
 	}
 
-	return sliceRefs, nil
+	return sliceRefs, recoveryRequired, nil
 }
 
 // fetchPreviousSlices retrieves the previous slices from the composition's current synthesis status.
 // This function runs before the updateComposition function, which will later swap the current synthesis
 // to become the previous synthesis. Therefore, the resourceslice retrieved from the current synthesis is
 // actually the "previous" resource slices after the update is complete.
-func (e *Executor) fetchPreviousSlices(ctx context.Context, comp *apiv1.Composition) ([]*apiv1.ResourceSlice, error) {
-	if comp.Status.CurrentSynthesis == nil {
-		return nil, nil // nothing to fetch
+func (e *Executor) fetchCurrentSynthesisResSlices(ctx context.Context, comp *apiv1.Composition) ([]*apiv1.ResourceSlice, bool, error) {
+	logger := logr.FromContextOrDiscard(ctx).WithValues(
+		"compositionName", comp.Name,
+		"compositionNamespace", comp.Namespace,
+	)
+	current := comp.Status.CurrentSynthesis
+	if current == nil {
+		logger.Info("no current synthesis - no historical synthesisl tombstone recovery maybe required")
+		return nil, true, nil
 	}
-	logger := logr.FromContextOrDiscard(ctx)
 
+	recoveryRequired := current.TombstoneRecoveryRequired
+	logger = logger.WithValues("currentSynthesisUUID", current.UUID)
 	slices := []*apiv1.ResourceSlice{}
-	for _, ref := range comp.Status.CurrentSynthesis.ResourceSlices {
+
+	for index, ref := range current.ResourceSlices {
+		if ref == nil || ref.Name == "" {
+			recoveryRequired = true
+			logger.Info("Current Synthesis ResourceSlices has no name; skipping",
+				"referencesIndex", index)
+			continue
+		}
+
 		slice := &apiv1.ResourceSlice{}
-		slice.Name = ref.Name
-		slice.Namespace = comp.Namespace
-		err := e.Reader.Get(ctx, client.ObjectKeyFromObject(slice), slice)
+		err := e.Reader.Get(ctx, client.ObjectKey{
+			Namespace: comp.Namespace,
+			Name:      ref.Name,
+		}, slice)
 		if errors.IsNotFound(err) {
-			logger.Error(nil, "resource slice referenced by composition was not found - skipping", "resourceSliceName", slice.Name)
+			recoveryRequired = true
+			logger.Error(err, "Current Synthesis REsourceSlice NotFound, skipping",
+				"resourceSliceName", ref.Name)
 			continue
 		}
 		if err != nil {
-			logger.Error(err, "failed to fetch current resource slice", "resourceSliceName", slice.Name)
-			return nil, fmt.Errorf("fetching current resource slice %q: %w", slice.Name, err)
+			return nil, false, fmt.Errorf("reading current synthesis ResourceSlice [%q] failed [%w]",
+				ref.Name, err)
 		}
 		slices = append(slices, slice)
 	}
 
-	return slices, nil
+	return slices, recoveryRequired, nil
 }
 
 func (e *Executor) writeResourceSlice(ctx context.Context, slice *apiv1.ResourceSlice) error {
@@ -279,7 +299,8 @@ func (e *Executor) writeResourceSlice(ctx context.Context, slice *apiv1.Resource
 	})
 }
 
-func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *apiv1.Composition, syn *apiv1.Synthesizer, refs []*apiv1.ResourceSliceRef, revs []apiv1.InputRevisions, rl *krmv1.ResourceList) error {
+func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *apiv1.Composition, syn *apiv1.Synthesizer, refs []*apiv1.ResourceSliceRef, recoveryRequired bool,
+	revs []apiv1.InputRevisions, rl *krmv1.ResourceList) error {
 	logger := logr.FromContextOrDiscard(ctx)
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		comp := &apiv1.Composition{}
@@ -310,6 +331,7 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 
 		// Swap pending->current->previous syntheses
 		if findResultError(rl) == nil {
+			comp.Status.InFlightSynthesis.TombstoneRecoveryRequired = recoveryRequired
 			comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis
 			comp.Status.CurrentSynthesis = comp.Status.InFlightSynthesis
 			comp.Status.InFlightSynthesis = nil

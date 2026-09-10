@@ -92,7 +92,7 @@ func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// The reconciliation controller assumes that the previous synthesis will be loaded first
 	logger.Info("populating cache with previous synthesis")
-	filled, err := r.populateCache(ctx, comp, comp.Status.PreviousSynthesis)
+	filled, err := r.populateCache(ctx, comp, comp.Status.PreviousSynthesis, true)
 	if err != nil {
 		logger.Error(err, "failed to process previous state")
 		return ctrl.Result{}, err
@@ -103,7 +103,7 @@ func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	logger.Info("populating cache with current synthesis")
-	filled, err = r.populateCache(ctx, comp, comp.Status.CurrentSynthesis)
+	filled, err = r.populateCache(ctx, comp, comp.Status.CurrentSynthesis, false)
 	if err != nil {
 		logger.Error(err, "failed to process current state")
 		return ctrl.Result{}, err
@@ -120,43 +120,77 @@ func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) 
 	return ctrl.Result{}, nil
 }
 
-func (r *reconstitutionSource) populateCache(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis) (bool, error) {
+func (r *reconstitutionSource) populateCache(ctx context.Context, comp *apiv1.Composition, synthesis *apiv1.Synthesis, isPreviousSynthesis bool) (bool, error) {
 	if synthesis == nil || synthesis.Synthesized == nil {
 		// synthesis is still in progress
 		return false, nil
 	}
 
-	// The informers cache an abbreviated representation of the resource slices to save memory
-	// We can use them for status but not for spec
-	slices := make([]apiv1.ResourceSlice, len(synthesis.ResourceSlices))
+	logger := logr.FromContextOrDiscard(ctx).WithValues(
+		"synthesisUUID", synthesis.UUID,
+		"isPreviousSynthesis", isPreviousSynthesis,
+	)
+
+	cachedSlices := make([]apiv1.ResourceSlice, 0, len(synthesis.ResourceSlices))
 	for i, ref := range synthesis.ResourceSlices {
-		slice := apiv1.ResourceSlice{}
-		slice.Name = ref.Name
-		slice.Namespace = comp.Namespace
-		err := r.client.Get(ctx, client.ObjectKeyFromObject(&slice), &slice)
-		if err != nil {
-			return false, client.IgnoreNotFound(fmt.Errorf("unable to get resource slice (cached): %w", err))
+		if ref == nil || ref.Name == "" {
+			if !isPreviousSynthesis {
+				return false, fmt.Errorf("current synthesis resource slices reference %d has no name", i)
+			}
+
+			logger.Info("previousSYnthesis slice references has no name; skipping", "referenceIndex", i)
+			continue
 		}
-		slices[i] = slice
+
+		key := client.ObjectKey{
+			Namespace: comp.Namespace,
+			Name:      ref.Name,
+		}
+
+		slice := apiv1.ResourceSlice{}
+		err := r.client.Get(ctx, key, &slice)
+		if isPreviousSynthesis && errors.IsNotFound(err) {
+			// Check if this is an informer cache miss
+			err = r.nonCachedReader.Get(ctx, key, &slice)
+			if errors.IsNotFound(err) {
+				logger.Error(err, "previous synthesis slice missing; skipping", "resourcesliceName", ref.Name)
+				continue
+			}
+
+			if err == nil {
+				// Do not advance the status ahead of the informer
+				slice.Status = apiv1.ResourceSliceStatus{}
+			}
+		}
+
+		if err != nil {
+			return false, client.IgnoreNotFound(fmt.Errorf("reading resource slice: %q, %w", ref.Name, err))
+		}
+
+		cachedSlices = append(cachedSlices, slice)
 	}
 
-	if r.cache.Visit(ctx, comp, synthesis.UUID, slices) {
+	if r.cache.Visit(ctx, comp, synthesis.UUID, cachedSlices) {
 		return false, nil
 	}
 
-	// Get the full resource slices to populate the cache
-	// But don't use the status since it might be ahead of the informer
-	for i, ref := range synthesis.ResourceSlices {
+	fullSlices := make([]apiv1.ResourceSlice, 0, len(cachedSlices))
+	for _, cached := range cachedSlices {
 		slice := apiv1.ResourceSlice{}
-		slice.Name = ref.Name
-		slice.Namespace = comp.Namespace
-		err := r.nonCachedReader.Get(ctx, client.ObjectKeyFromObject(&slice), &slice)
-		if err != nil {
-			return false, client.IgnoreNotFound(fmt.Errorf("unable to get resource slice (no cache): %w", err))
+		err := r.nonCachedReader.Get(ctx, client.ObjectKey{
+			Namespace: cached.Namespace,
+			Name:      cached.Name,
+		}, &slice)
+		if isPreviousSynthesis && errors.IsNotFound(err) {
+			logger.Error(err, "Previous Synthesis slice disappeared while loading. skipping", "resourceSliceName", cached.Name)
+			continue
 		}
-		slices[i] = slice
+		if err != nil {
+			return false, client.IgnoreNotFound(fmt.Errorf("unable to get resource slice %q: %w", cached.Name, err))
+		}
+		fullSlices = append(fullSlices, slice)
 	}
 
-	r.cache.Fill(ctx, comp, synthesis.UUID, slices)
+	r.cache.Fill(ctx, comp, synthesis.UUID, fullSlices)
 	return true, nil
 }
