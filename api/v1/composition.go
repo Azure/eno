@@ -170,6 +170,13 @@ type Synthesis struct {
 	// Deferred is true when this synthesis was caused by a change to either the synthesizer
 	// or an input with a ref that sets `Defer == true`.
 	Deferred bool `json:"deferred,omitempty"`
+
+	// TombstoneRecoveryRequired indicates that resources may exist outside the available synthesis history.
+	// It is set when there is no current synthesis, or a historical ResourceSlice reference is nameless
+	// or points to a missing slice. Even a first synthesis may encounter resources left by a prior incarnation whose inventory was lost.
+	// The flag is carried forward because subsequent syntheses cannot account for those unknown resources.
+	// It does not block synthesis or reconciliation, and successful syntheses do not clear it.
+	TombstoneRecoveryRequired bool `json:"tombstoneRecoveryRequired,omitempty"`
 }
 
 type Result struct {

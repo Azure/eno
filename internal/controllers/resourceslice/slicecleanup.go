@@ -51,6 +51,9 @@ func (c *cleanupController) newCompEventHandler() handler.TypedEventHandler[*api
 				continue
 			}
 			for _, ref := range syn.ResourceSlices {
+				if ref == nil || ref.Name == "" { // skip resource slices without name
+					continue
+				}
 				q.Add(reconcile.Request{NamespacedName: types.NamespacedName{Name: ref.Name, Namespace: c.Namespace}})
 			}
 		}
@@ -150,7 +153,7 @@ func (c *cleanupController) shouldDelete(ctx context.Context, reader client.Read
 			continue
 		}
 		idx := slices.IndexFunc(syn.ResourceSlices, func(ref *apiv1.ResourceSliceRef) bool {
-			return ref.Name == slice.Name
+			return ref != nil && ref.Name == slice.Name
 		})
 		if idx != -1 {
 			return false, nil
@@ -188,7 +191,7 @@ func (c *cleanupController) removeFinalizer(ctx context.Context, slice *apiv1.Re
 	syn := comp.Status.CurrentSynthesis
 	if syn != nil && syn.Reconciled == nil {
 		idx := slices.IndexFunc(syn.ResourceSlices, func(ref *apiv1.ResourceSliceRef) bool {
-			return ref.Name == slice.Name
+			return ref != nil && ref.Name == slice.Name
 		})
 		if idx != -1 {
 			return ctrl.Result{}, err // slice is needed for cleanup
