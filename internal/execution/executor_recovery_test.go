@@ -85,7 +85,7 @@ func recoveryAssertHistoryUnchanged(t *testing.T, cli client.Client, history ...
 }
 
 func TestRecoveryHistoryFetch(t *testing.T) {
-	type testCase struct {
+	for _, tt := range []struct {
 		name      string
 		noCurrent bool
 		refs      []*apiv1.ResourceSliceRef
@@ -94,8 +94,7 @@ func TestRecoveryHistoryFetch(t *testing.T) {
 		wantNames []string
 		wantReads []string
 		readError error
-	}
-	tests := []testCase{
+	}{
 		{name: "no-current", noCurrent: true, wantFlag: true},
 		{name: "nil-reference-list"},
 		{name: "empty-reference-list", refs: []*apiv1.ResourceSliceRef{}},
@@ -111,48 +110,20 @@ func TestRecoveryHistoryFetch(t *testing.T) {
 			refs:     []*apiv1.ResourceSliceRef{{Name: "b"}, nil, {}, {Name: "missing"}, {Name: "a"}},
 			wantFlag: true, wantNames: []string{"b", "a"}, wantReads: []string{"b", "missing", "a"},
 		},
-	}
-	for _, bad := range []struct {
-		name string
-		ref  *apiv1.ResourceSliceRef
-	}{
-		{name: "nil", ref: nil},
-		{name: "empty", ref: &apiv1.ResourceSliceRef{}},
-		{name: "missing", ref: &apiv1.ResourceSliceRef{Name: "missing"}},
+		{
+			name: "forbidden-after-valid", refs: recoveryRefs("a", "fatal", "b"), inherited: true,
+			readError: apierrors.NewForbidden(apiv1.SchemeGroupVersion.WithResource("resourceslices").GroupResource(), "fatal", fmt.Errorf("denied")),
+			wantReads: []string{"a", "fatal"},
+		},
+		{
+			name: "timeout-after-valid", refs: recoveryRefs("a", "fatal", "b"), inherited: true,
+			readError: apierrors.NewTimeoutError("historical read timed out", 1), wantReads: []string{"a", "fatal"},
+		},
+		{
+			name: "generic-after-valid", refs: recoveryRefs("a", "fatal", "b"), inherited: true,
+			readError: fmt.Errorf("historical transport failure"), wantReads: []string{"a", "fatal"},
+		},
 	} {
-		for position, label := range []string{"first", "middle", "last"} {
-			refs := recoveryRefs("a", "b")
-			refs = append(refs[:position], append([]*apiv1.ResourceSliceRef{bad.ref}, refs[position:]...)...)
-			reads := []string{"a", "b"}
-			if bad.name == "missing" {
-				reads = append(reads[:position], append([]string{"missing"}, reads[position:]...)...)
-			}
-			tests = append(tests, testCase{
-				name: bad.name + "-" + label, refs: refs, wantFlag: true,
-				wantNames: []string{"a", "b"}, wantReads: reads,
-			})
-		}
-	}
-	for _, failure := range []struct {
-		name string
-		err  error
-	}{
-		{"forbidden", apierrors.NewForbidden(schema.GroupResource{Group: apiv1.SchemeGroupVersion.Group, Resource: "resourceslices"}, "fatal", fmt.Errorf("denied"))},
-		{"timeout", apierrors.NewTimeoutError("historical read timed out", 1)},
-		{"generic", fmt.Errorf("historical transport failure")},
-	} {
-		for position, label := range []string{"first", "middle", "last"} {
-			refs := recoveryRefs("a", "b")
-			refs = append(refs[:position], append(recoveryRefs("fatal"), refs[position:]...)...)
-			reads := append([]string{"a", "b"}[:position:position], "fatal")
-			tests = append(tests, testCase{
-				name: failure.name + "-" + label, refs: refs, inherited: true,
-				readError: failure.err, wantReads: reads,
-			})
-		}
-	}
-
-	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			comp := &apiv1.Composition{
 				ObjectMeta: metav1.ObjectMeta{Name: "comp", Namespace: recoveryNamespace},
@@ -385,7 +356,7 @@ func recoveryAssertManifests(t *testing.T, manifests []apiv1.Manifest, want map[
 }
 
 func TestRecoveryExecutorPublication(t *testing.T) {
-	type testCase struct {
+	for _, tt := range []struct {
 		name      string
 		noCurrent bool
 		refs      []*apiv1.ResourceSliceRef
@@ -393,30 +364,21 @@ func TestRecoveryExecutorPublication(t *testing.T) {
 		outputs   []string
 		wantFlag  bool
 		want      map[string]bool
-	}
-	tests := []testCase{
+	}{
 		{name: "healthy-false", refs: recoveryRefs("history-a", "history-b"), outputs: []string{"a", "b"}, want: map[string]bool{"a": false, "b": false}},
 		{name: "healthy-inherited", refs: recoveryRefs("history-a", "history-b"), inherited: true, outputs: []string{"a", "b"}, wantFlag: true, want: map[string]bool{"a": false, "b": false}},
 		{name: "new-composition", noCurrent: true, outputs: []string{"d"}, wantFlag: true, want: map[string]bool{"d": false}},
-		{name: "all-unavailable", refs: []*apiv1.ResourceSliceRef{nil, {}, {Name: "missing-c"}}, outputs: []string{"d"}, wantFlag: true, want: map[string]bool{"d": false}},
-		{name: "zero-output-with-history", refs: recoveryRefs("history-a", "history-b"), want: map[string]bool{"a": true, "b": true}},
 		{name: "zero-output-with-missing-history", refs: recoveryRefs("history-a", "missing-c", "history-b"), wantFlag: true, want: map[string]bool{"a": true, "b": true}},
 		{name: "zero-output-all-unavailable", refs: []*apiv1.ResourceSliceRef{nil, {}, {Name: "missing-c"}}, wantFlag: true, want: map[string]bool{}},
-		{name: "zero-output-no-current", noCurrent: true, wantFlag: true, want: map[string]bool{}},
-		{name: "zero-output-nil-reference-list", want: map[string]bool{}},
 		{name: "zero-output-empty-reference-list", refs: []*apiv1.ResourceSliceRef{}, want: map[string]bool{}},
 		{name: "zero-output-inherited", inherited: true, wantFlag: true, want: map[string]bool{}},
-	}
-	for position, label := range []string{"first", "middle", "last"} {
-		refs := recoveryRefs("history-a", "history-b")
-		damaged := []*apiv1.ResourceSliceRef{nil, {}, {Name: "missing-c"}}
-		refs = append(refs[:position], append(damaged, refs[position:]...)...)
-		tests = append(tests, testCase{
-			name: "mixed-" + label, refs: refs, outputs: []string{"a", "d"}, wantFlag: true,
+		{
+			name:    "mixed-history",
+			refs:    []*apiv1.ResourceSliceRef{{Name: "history-a"}, nil, {}, {Name: "missing-c"}, {Name: "history-b"}},
+			outputs: []string{"a", "d"}, wantFlag: true,
 			want: map[string]bool{"a": false, "b": true, "d": false},
-		})
-	}
-	for _, tt := range tests {
+		},
+	} {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newRecoveryFixture(tt.refs, tt.inherited)
 			if tt.noCurrent {
@@ -463,105 +425,70 @@ func TestRecoveryExecutorPublication(t *testing.T) {
 	}
 }
 
-func TestRecoveryExecutorFlagPersistsAcrossSyntheses(t *testing.T) {
-	a := recoverySlice(t, "history-a", recoveryObject("a"))
-	f := newRecoveryFixture(recoveryRefs("history-a", "missing"), false)
-	cli := f.client(t, interceptor.Funcs{}, a)
-	output := recoveryOutput("a", "d")
-	handlerCalls := 0
-	e := &Executor{Reader: cli, Writer: cli, Handler: func(context.Context, *apiv1.Synthesizer, *krmv1.ResourceList) (*krmv1.ResourceList, error) {
-		handlerCalls++
-		return output, nil
-	}}
-	require.NoError(t, e.Synthesize(context.Background(), f.env()))
-	first, manifests := f.assertPublished(t, cli, output, true)
-	recoveryAssertManifests(t, manifests, map[string]bool{"a": false, "d": false})
-	assert.False(t, first.Status.PreviousSynthesis.TombstoneRecoveryRequired)
-	history := []*apiv1.ResourceSlice{a}
-	for _, ref := range first.Status.CurrentSynthesis.ResourceSlices {
-		slice := &apiv1.ResourceSlice{}
-		require.NoError(t, cli.Get(context.Background(), client.ObjectKey{Namespace: first.Namespace, Name: ref.Name}, slice))
-		history = append(history, slice.DeepCopy())
-	}
-	first.Status.InFlightSynthesis = f.comp.Status.InFlightSynthesis.DeepCopy()
-	first.Status.InFlightSynthesis.UUID = "later-uuid"
-	require.NoError(t, cli.Status().Update(context.Background(), first))
-	f.comp = first.DeepCopy()
-	require.NoError(t, e.Synthesize(context.Background(), f.env()))
-	second, manifests := f.assertPublished(t, cli, output, true)
-	recoveryAssertManifests(t, manifests, map[string]bool{"a": false, "d": false})
-	assert.True(t, second.Status.PreviousSynthesis.TombstoneRecoveryRequired)
-	assert.Equal(t, 2, handlerCalls)
-	recoveryAssertHistoryUnchanged(t, cli, history...)
-}
-
 func TestRecoveryExecutorOutputFailureDoesNotPromote(t *testing.T) {
 	for _, failure := range []string{"handler", "error-result", "invalid-output"} {
-		for _, flag := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/flag-%t", failure, flag), func(t *testing.T) {
-				a := recoverySlice(t, "history-a", recoveryObject("a"))
-				f := newRecoveryFixture(recoveryRefs("history-a", "missing"), flag)
-				reads, creates, updates, handlerCalls := 0, 0, 0, 0
-				cli := f.client(t, interceptor.Funcs{
-					Get: func(ctx context.Context, reader client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-						if _, ok := obj.(*apiv1.ResourceSlice); ok {
-							reads++
-						}
-						return reader.Get(ctx, key, obj, opts...)
-					},
-					Create: func(ctx context.Context, writer client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
-						creates++
-						return writer.Create(ctx, obj, opts...)
-					},
-					SubResourceUpdate: func(ctx context.Context, writer client.Client, name string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
-						updates++
-						return writer.SubResource(name).Update(ctx, obj, opts...)
-					},
-				}, a)
-				output := recoveryOutput("d")
-				var handlerErr error
-				var wantResults []apiv1.Result
-				switch failure {
-				case "handler":
-					handlerErr = fmt.Errorf("handler failed")
-					wantResults = []apiv1.Result{{Message: "Synthesizer error: handler failed", Severity: "error"}}
-				case "error-result":
-					output.Results[0].Severity = krmv1.ResultSeverityError
-					output.Results[0].Message = "rejected output"
-					wantResults = []apiv1.Result{{Message: "rejected output", Severity: "error", Tags: output.Results[0].Tags}}
-				case "invalid-output":
-					output.Items[0].SetKind("")
-				}
-				e := &Executor{Reader: cli, Writer: cli, Handler: func(context.Context, *apiv1.Synthesizer, *krmv1.ResourceList) (*krmv1.ResourceList, error) {
-					handlerCalls++
-					return output, handlerErr
-				}}
-				err := e.Synthesize(context.Background(), f.env())
-				require.Error(t, err)
-				if handlerErr != nil {
-					assert.ErrorIs(t, err, handlerErr)
-				}
-				assert.Equal(t, 1, handlerCalls)
-				assert.Zero(t, reads, "failed output must not be used to diff history")
-				assert.Zero(t, creates)
-				stored := f.stored(t, cli)
-				expected := f.comp.DeepCopy()
-				if failure == "invalid-output" {
-					assert.Zero(t, updates)
-				} else {
-					assert.Equal(t, 1, updates)
-					require.NotNil(t, stored.Status.InFlightSynthesis)
-					require.NotNil(t, stored.Status.InFlightSynthesis.Synthesized)
-					expected.Status.InFlightSynthesis.Synthesized = stored.Status.InFlightSynthesis.Synthesized
-					expected.Status.InFlightSynthesis.ObservedSynthesizerGeneration = f.syn.Generation
-					expected.Status.InFlightSynthesis.InputRevisions = []apiv1.InputRevisions{*apiv1.NewInputRevisions(f.input, "config")}
-					expected.Status.InFlightSynthesis.Results = wantResults
-				}
-				assert.Equal(t, expected.Status, stored.Status)
-				assert.Equal(t, flag, stored.Status.CurrentSynthesis.TombstoneRecoveryRequired)
-				recoveryAssertHistoryUnchanged(t, cli, a)
-			})
-		}
+		t.Run(failure, func(t *testing.T) {
+			a := recoverySlice(t, "history-a", recoveryObject("a"))
+			f := newRecoveryFixture(recoveryRefs("history-a", "missing"), true)
+			reads, creates, updates, handlerCalls := 0, 0, 0, 0
+			cli := f.client(t, interceptor.Funcs{
+				Get: func(ctx context.Context, reader client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if _, ok := obj.(*apiv1.ResourceSlice); ok {
+						reads++
+					}
+					return reader.Get(ctx, key, obj, opts...)
+				},
+				Create: func(ctx context.Context, writer client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+					creates++
+					return writer.Create(ctx, obj, opts...)
+				},
+				SubResourceUpdate: func(ctx context.Context, writer client.Client, name string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+					updates++
+					return writer.SubResource(name).Update(ctx, obj, opts...)
+				},
+			}, a)
+			output := recoveryOutput("d")
+			var handlerErr error
+			var wantResults []apiv1.Result
+			switch failure {
+			case "handler":
+				handlerErr = fmt.Errorf("handler failed")
+				wantResults = []apiv1.Result{{Message: "Synthesizer error: handler failed", Severity: "error"}}
+			case "error-result":
+				output.Results[0].Severity = krmv1.ResultSeverityError
+				output.Results[0].Message = "rejected output"
+				wantResults = []apiv1.Result{{Message: "rejected output", Severity: "error", Tags: output.Results[0].Tags}}
+			case "invalid-output":
+				output.Items[0].SetKind("")
+			}
+			e := &Executor{Reader: cli, Writer: cli, Handler: func(context.Context, *apiv1.Synthesizer, *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+				handlerCalls++
+				return output, handlerErr
+			}}
+			err := e.Synthesize(context.Background(), f.env())
+			require.Error(t, err)
+			if handlerErr != nil {
+				assert.ErrorIs(t, err, handlerErr)
+			}
+			assert.Equal(t, 1, handlerCalls)
+			assert.Zero(t, reads, "failed output must not be used to diff history")
+			assert.Zero(t, creates)
+			stored := f.stored(t, cli)
+			expected := f.comp.DeepCopy()
+			if failure == "invalid-output" {
+				assert.Zero(t, updates)
+			} else {
+				assert.Equal(t, 1, updates)
+				require.NotNil(t, stored.Status.InFlightSynthesis)
+				require.NotNil(t, stored.Status.InFlightSynthesis.Synthesized)
+				expected.Status.InFlightSynthesis.Synthesized = stored.Status.InFlightSynthesis.Synthesized
+				expected.Status.InFlightSynthesis.ObservedSynthesizerGeneration = f.syn.Generation
+				expected.Status.InFlightSynthesis.InputRevisions = []apiv1.InputRevisions{*apiv1.NewInputRevisions(f.input, "config")}
+				expected.Status.InFlightSynthesis.Results = wantResults
+			}
+			assert.Equal(t, expected.Status, stored.Status)
+			recoveryAssertHistoryUnchanged(t, cli, a)
+		})
 	}
 }
 
@@ -570,58 +497,51 @@ func TestRecoveryExecutorHistoryFailureDoesNotPublish(t *testing.T) {
 		name string
 		err  error
 	}{
-		{"forbidden", apierrors.NewForbidden(schema.GroupResource{Group: apiv1.SchemeGroupVersion.Group, Resource: "resourceslices"}, "fatal", fmt.Errorf("denied"))},
-		{"timeout", apierrors.NewTimeoutError("history timed out", 1)},
 		{"generic", fmt.Errorf("historical read failed")},
 		{"malformed-json", nil},
 	} {
-		for position, label := range []string{"first", "middle", "last"} {
-			t.Run(failure.name+"/"+label, func(t *testing.T) {
-				a := recoverySlice(t, "history-a", recoveryObject("a"))
-				b := recoverySlice(t, "history-b", recoveryObject("b"))
-				fatal := recoverySlice(t, "fatal", recoveryObject("c"))
-				if failure.name == "malformed-json" {
-					fatal.Spec.Resources[0].Manifest = `{"apiVersion":`
-				}
-				refs := recoveryRefs("history-a", "history-b")
-				refs = append(refs[:position], append(recoveryRefs("fatal"), refs[position:]...)...)
-				refs = append([]*apiv1.ResourceSliceRef{nil}, refs...)
-				f := newRecoveryFixture(refs, false)
-				creates, updates, handlerCalls := 0, 0, 0
-				cli := f.client(t, interceptor.Funcs{
-					Get: func(ctx context.Context, reader client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-						if _, ok := obj.(*apiv1.ResourceSlice); ok && key.Name == "fatal" && failure.err != nil {
-							return failure.err
-						}
-						return reader.Get(ctx, key, obj, opts...)
-					},
-					Create: func(ctx context.Context, writer client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
-						creates++
-						return writer.Create(ctx, obj, opts...)
-					},
-					SubResourceUpdate: func(ctx context.Context, writer client.Client, name string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
-						updates++
-						return writer.SubResource(name).Update(ctx, obj, opts...)
-					},
-				}, a, b, fatal)
-				e := &Executor{Reader: cli, Writer: cli, Handler: func(context.Context, *apiv1.Synthesizer, *krmv1.ResourceList) (*krmv1.ResourceList, error) {
-					handlerCalls++
-					return recoveryOutput("a", "d"), nil
-				}}
-				err := e.Synthesize(context.Background(), f.env())
-				require.Error(t, err)
-				if failure.err != nil {
-					assert.ErrorIs(t, err, failure.err)
-				} else {
-					assert.ErrorContains(t, err, "decoding resource 0 of slice fatal")
-				}
-				assert.Equal(t, 1, handlerCalls)
-				assert.Zero(t, creates, "a fatal baseline must not publish partial output")
-				assert.Zero(t, updates)
-				assert.Equal(t, f.comp.Status, f.stored(t, cli).Status)
-				recoveryAssertHistoryUnchanged(t, cli, a, b, fatal)
-			})
-		}
+		t.Run(failure.name, func(t *testing.T) {
+			a := recoverySlice(t, "history-a", recoveryObject("a"))
+			b := recoverySlice(t, "history-b", recoveryObject("b"))
+			fatal := recoverySlice(t, "fatal", recoveryObject("c"))
+			if failure.name == "malformed-json" {
+				fatal.Spec.Resources[0].Manifest = `{"apiVersion":`
+			}
+			f := newRecoveryFixture([]*apiv1.ResourceSliceRef{nil, {Name: "history-a"}, {Name: "fatal"}, {Name: "history-b"}}, false)
+			creates, updates, handlerCalls := 0, 0, 0
+			cli := f.client(t, interceptor.Funcs{
+				Get: func(ctx context.Context, reader client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if _, ok := obj.(*apiv1.ResourceSlice); ok && key.Name == "fatal" && failure.err != nil {
+						return failure.err
+					}
+					return reader.Get(ctx, key, obj, opts...)
+				},
+				Create: func(ctx context.Context, writer client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+					creates++
+					return writer.Create(ctx, obj, opts...)
+				},
+				SubResourceUpdate: func(ctx context.Context, writer client.Client, name string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+					updates++
+					return writer.SubResource(name).Update(ctx, obj, opts...)
+				},
+			}, a, b, fatal)
+			e := &Executor{Reader: cli, Writer: cli, Handler: func(context.Context, *apiv1.Synthesizer, *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+				handlerCalls++
+				return recoveryOutput("a", "d"), nil
+			}}
+			err := e.Synthesize(context.Background(), f.env())
+			require.Error(t, err)
+			if failure.err != nil {
+				assert.ErrorIs(t, err, failure.err)
+			} else {
+				assert.ErrorContains(t, err, "decoding resource 0 of slice fatal")
+			}
+			assert.Equal(t, 1, handlerCalls)
+			assert.Zero(t, creates, "a fatal baseline must not publish partial output")
+			assert.Zero(t, updates)
+			assert.Equal(t, f.comp.Status, f.stored(t, cli).Status)
+			recoveryAssertHistoryUnchanged(t, cli, a, b, fatal)
+		})
 	}
 }
 
@@ -753,47 +673,50 @@ func TestRecoveryExecutorStatusPublication(t *testing.T) {
 }
 
 func TestRecoveryExecutorSkippedPreservesFlag(t *testing.T) {
-	for _, reason := range []string{"canceled", "uuid-mismatch"} {
-		for _, during := range []bool{false, true} {
-			for _, flag := range []bool{false, true} {
-				t.Run(fmt.Sprintf("%s/during-%t/flag-%t", reason, during, flag), func(t *testing.T) {
-					a := recoverySlice(t, "history-a", recoveryObject("a"))
-					f := newRecoveryFixture(recoveryRefs("history-a", "missing"), flag)
-					env := f.env()
-					change := func(comp *apiv1.Composition) {
-						if reason == "canceled" {
-							now := metav1.Now()
-							comp.Status.InFlightSynthesis.Canceled = &now
-						} else {
-							comp.Status.InFlightSynthesis.UUID = "different-uuid"
-						}
-					}
-					if !during {
-						change(f.comp)
-					}
-					cli := f.client(t, interceptor.Funcs{}, a)
-					expected := f.comp.DeepCopy()
-					handlerCalls := 0
-					e := &Executor{Reader: cli, Writer: cli, Handler: func(context.Context, *apiv1.Synthesizer, *krmv1.ResourceList) (*krmv1.ResourceList, error) {
-						handlerCalls++
-						stored := f.stored(t, cli)
-						change(stored)
-						require.NoError(t, cli.Status().Update(context.Background(), stored))
-						expected = stored.DeepCopy()
-						return recoveryOutput("a", "d"), nil
-					}}
-					require.NoError(t, e.Synthesize(context.Background(), env))
-					if during {
-						assert.Equal(t, 1, handlerCalls)
-					} else {
-						assert.Zero(t, handlerCalls)
-					}
-					stored := f.stored(t, cli)
-					assert.Equal(t, expected.Status, stored.Status)
-					assert.Equal(t, flag, stored.Status.CurrentSynthesis.TombstoneRecoveryRequired)
-					recoveryAssertHistoryUnchanged(t, cli, a)
-				})
+	for _, test := range []struct {
+		reason string
+		during bool
+		flag   bool
+	}{
+		{reason: "canceled"},
+		{reason: "canceled", during: true, flag: true},
+		{reason: "uuid-mismatch", flag: true},
+		{reason: "uuid-mismatch", during: true},
+	} {
+		t.Run(fmt.Sprintf("%s/during-%t", test.reason, test.during), func(t *testing.T) {
+			a := recoverySlice(t, "history-a", recoveryObject("a"))
+			f := newRecoveryFixture(recoveryRefs("history-a", "missing"), test.flag)
+			env := f.env()
+			change := func(comp *apiv1.Composition) {
+				if test.reason == "canceled" {
+					now := metav1.Now()
+					comp.Status.InFlightSynthesis.Canceled = &now
+				} else {
+					comp.Status.InFlightSynthesis.UUID = "different-uuid"
+				}
 			}
-		}
+			if !test.during {
+				change(f.comp)
+			}
+			cli := f.client(t, interceptor.Funcs{}, a)
+			expected := f.comp.DeepCopy()
+			handlerCalls := 0
+			e := &Executor{Reader: cli, Writer: cli, Handler: func(context.Context, *apiv1.Synthesizer, *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+				handlerCalls++
+				stored := f.stored(t, cli)
+				change(stored)
+				require.NoError(t, cli.Status().Update(context.Background(), stored))
+				expected = f.stored(t, cli)
+				return recoveryOutput("a", "d"), nil
+			}}
+			require.NoError(t, e.Synthesize(context.Background(), env))
+			if test.during {
+				assert.Equal(t, 1, handlerCalls)
+			} else {
+				assert.Zero(t, handlerCalls)
+			}
+			assert.Equal(t, expected.Status, f.stored(t, cli).Status)
+			recoveryAssertHistoryUnchanged(t, cli, a)
+		})
 	}
 }

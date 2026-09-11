@@ -135,10 +135,11 @@ func (r *reconstitutionSource) populateCache(ctx context.Context, comp *apiv1.Co
 	for i, ref := range synthesis.ResourceSlices {
 		if ref == nil || ref.Name == "" {
 			if !isPreviousSynthesis {
-				return false, fmt.Errorf("current synthesis resource slices reference %d has no name", i)
+				logger.V(1).Info("current synthesis slice reference has no name; waiting for resynthesis", "referenceIndex", i)
+				return false, nil
 			}
 
-			logger.Info("previousSYnthesis slice references has no name; skipping", "referenceIndex", i)
+			logger.V(1).Info("previous synthesis slice reference has no name; skipping", "referenceIndex", i)
 			continue
 		}
 
@@ -153,7 +154,7 @@ func (r *reconstitutionSource) populateCache(ctx context.Context, comp *apiv1.Co
 			// Check if this is an informer cache miss
 			err = r.nonCachedReader.Get(ctx, key, &slice)
 			if errors.IsNotFound(err) {
-				logger.Error(err, "previous synthesis slice missing; skipping", "resourcesliceName", ref.Name)
+				logger.V(1).Info("previous synthesis slice missing; skipping", "resourceSliceName", ref.Name)
 				continue
 			}
 
@@ -182,7 +183,7 @@ func (r *reconstitutionSource) populateCache(ctx context.Context, comp *apiv1.Co
 			Name:      cached.Name,
 		}, &slice)
 		if isPreviousSynthesis && errors.IsNotFound(err) {
-			logger.Error(err, "Previous Synthesis slice disappeared while loading. skipping", "resourceSliceName", cached.Name)
+			logger.V(1).Info("previous synthesis slice disappeared while loading; skipping", "resourceSliceName", cached.Name)
 			continue
 		}
 		if err != nil {

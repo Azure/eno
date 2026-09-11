@@ -52,7 +52,7 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	for _, ref := range comp.Status.CurrentSynthesis.ResourceSlices {
 		if ref == nil || ref.Name == "" {
-			logger.Info("current synthesis contains a resoruce slice reference without a name")
+			logger.Info("current synthesis contains a resource slice reference without a name")
 			if comp.DeletionTimestamp != nil {
 				continue
 			}
@@ -249,9 +249,9 @@ func (s *sliceController) requestResynthesis(ctx context.Context, comp *apiv1.Co
 
 	comp.ForceResynthesis()
 	if err := s.client.Update(ctx, comp); err != nil {
-		return ctrl.Result{}, fmt.Errorf("requesting resynthesis for empty or missing resource slice referneces: %w", err)
+		return ctrl.Result{}, fmt.Errorf("requesting resynthesis for empty or missing resource slice references: %w", err)
 	}
 
-	logger.Info("sucessfully requested resynthesis for empty or missing resource slice references")
+	logger.Info("successfully requested resynthesis for empty or missing resource slice references")
 	return ctrl.Result{}, nil
 }

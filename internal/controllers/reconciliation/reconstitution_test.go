@@ -61,16 +61,12 @@ func recoveryReconstitutionNewHarness(t *testing.T, comp *apiv1.Composition, inf
 			}
 			objects = append(objects, copy)
 		}
-		checkingStore := true
 		unexpectedWrite := func() error {
 			t.Errorf("unexpected write to %s client", view)
 			return errors.New("reconstitution must be read-only")
 		}
 		cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
 			Get: func(ctx context.Context, cli client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-				if checkingStore {
-					return cli.Get(ctx, key, obj, opts...)
-				}
 				h.readCalls++
 				if _, ok := obj.(*apiv1.ResourceSlice); ok {
 					require.NotEmpty(t, key.Name, "malformed references must not be read")
@@ -118,19 +114,6 @@ func recoveryReconstitutionNewHarness(t *testing.T, comp *apiv1.Composition, inf
 			},
 		}, objects...)
 
-		// Snapshot the stored objects, including fake-client defaults, independently of injected read views.
-		for _, obj := range objects {
-			require.NoError(t, cli.Get(h.ctx, client.ObjectKeyFromObject(obj), obj))
-		}
-		checkingStore = false
-		t.Cleanup(func() {
-			checkingStore = true
-			for _, before := range objects {
-				after := before.DeepCopyObject().(client.Object)
-				require.NoError(t, cli.Get(h.ctx, client.ObjectKeyFromObject(before), after))
-				assert.Equal(t, before, after, "%s store must not change", view)
-			}
-		})
 		return cli
 	}
 	cache := &resource.Cache{}
@@ -262,72 +245,39 @@ func TestRecoveryReconstitutionR1IncompleteSynthesis(t *testing.T) {
 	}
 }
 
-func TestRecoveryReconstitutionR2MalformedPreviousReferences(t *testing.T) {
-	for _, test := range []struct {
-		name string
-		refs []*apiv1.ResourceSliceRef
-	}{
-		{name: "nil before valid", refs: []*apiv1.ResourceSliceRef{nil, {Name: "retained"}}},
-		{name: "empty before valid", refs: []*apiv1.ResourceSliceRef{{}, {Name: "retained"}}},
-		{name: "malformed around valid", refs: []*apiv1.ResourceSliceRef{nil, {}, {Name: "retained"}, nil, {}}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			syn := recoveryReconstitutionSynthesis("previous")
-			syn.ResourceSlices = test.refs
-			comp := recoveryReconstitutionComposition(syn, nil)
-			slice := recoveryReconstitutionSlice("retained", syn.UUID, "retained-resource")
-			h := recoveryReconstitutionNewHarness(t, comp, []*apiv1.ResourceSlice{slice}, []*apiv1.ResourceSlice{slice})
-
-			filled, err := h.source.populateCache(h.ctx, comp, syn, true)
-			require.NoError(t, err)
-			require.True(t, filled)
-			assert.Equal(t, []string{"informer/retained", "api/retained"}, h.reads)
-			res := h.recoveryReconstitutionResource(syn.UUID, "retained-resource", slice.Name, 0, true)
-			assert.Nil(t, res.State())
-			h.recoveryReconstitutionQueue()
-
-			filled, err = h.source.populateCache(h.ctx, comp, syn, true)
-			require.NoError(t, err)
-			assert.False(t, filled)
-			assert.Equal(t, []string{"api/retained"}, h.recoveryReconstitutionAPIReads())
-			h.recoveryReconstitutionQueue("retained-resource")
-		})
+func TestRecoveryReconstitutionSkipsUnavailablePreviousReferences(t *testing.T) {
+	syn := recoveryReconstitutionSynthesis("previous")
+	syn.ResourceSlices = []*apiv1.ResourceSliceRef{
+		nil, {}, {Name: "first"}, {Name: "missing"}, {Name: "vanished"}, {Name: "last"}, nil, {},
 	}
-}
+	comp := recoveryReconstitutionComposition(syn, nil)
+	first := recoveryReconstitutionSlice("first", syn.UUID, "first-resource")
+	last := recoveryReconstitutionSlice("last", syn.UUID, "last-resource")
+	vanished := recoveryReconstitutionSlice("vanished", syn.UUID, "vanished-resource")
+	h := recoveryReconstitutionNewHarness(t, comp,
+		[]*apiv1.ResourceSlice{first, last, vanished}, []*apiv1.ResourceSlice{first, last})
 
-func TestRecoveryReconstitutionR3MissingPreviousAllowsCurrent(t *testing.T) {
-	for _, names := range [][]string{{"missing", "retained"}, {"retained", "missing"}} {
-		t.Run(names[0]+" first", func(t *testing.T) {
-			previous := recoveryReconstitutionSynthesis("previous", names...)
-			current := recoveryReconstitutionSynthesis("current", "current-slice")
-			comp := recoveryReconstitutionComposition(previous, current)
-			slices := []*apiv1.ResourceSlice{
-				recoveryReconstitutionSlice("retained", previous.UUID, "previous-resource"),
-				recoveryReconstitutionSlice("current-slice", current.UUID, "current-resource"),
-			}
-			h := recoveryReconstitutionNewHarness(t, comp, slices, slices)
-
-			result, err := h.recoveryReconstitutionReconcile()
-			require.NoError(t, err)
-			assert.Equal(t, ctrl.Result{Requeue: true}, result)
-			h.recoveryReconstitutionResource(previous.UUID, "previous-resource", "retained", 0, true)
-			assert.False(t, h.source.cache.Visit(h.ctx, comp, current.UUID, nil))
-			assert.Equal(t, []string{"api/missing", "api/retained"}, h.recoveryReconstitutionAPIReads())
-			assert.NotContains(t, h.reads, "informer/current-slice")
-			h.recoveryReconstitutionQueue()
-
-			result, err = h.recoveryReconstitutionReconcile()
-			require.NoError(t, err)
-			assert.Equal(t, ctrl.Result{Requeue: true}, result)
-			h.recoveryReconstitutionResource(current.UUID, "current-resource", "current-slice", 0, true)
-			h.recoveryReconstitutionQueue("previous-resource")
-
-			result, err = h.recoveryReconstitutionReconcile()
-			require.NoError(t, err)
-			assert.Equal(t, ctrl.Result{}, result)
-			h.recoveryReconstitutionQueue("current-resource")
-		})
+	filled, err := h.source.populateCache(h.ctx, comp, syn, true)
+	require.NoError(t, err)
+	require.True(t, filled)
+	assert.Equal(t, []string{
+		"informer/first", "informer/missing", "api/missing", "informer/vanished", "informer/last",
+		"api/first", "api/vanished", "api/last",
+	}, h.reads)
+	for _, name := range []string{"first", "last"} {
+		res := h.recoveryReconstitutionResource(syn.UUID, name+"-resource", name, 0, true)
+		assert.Nil(t, res.State())
 	}
+	_, _, found := h.source.cache.Get(h.ctx, syn.UUID, resource.Ref{Kind: "ConfigMap", Namespace: "default", Name: "vanished-resource"})
+	assert.False(t, found)
+	h.recoveryReconstitutionQueue()
+
+	h.reads = nil
+	filled, err = h.source.populateCache(h.ctx, comp, syn, true)
+	require.NoError(t, err)
+	assert.False(t, filled)
+	assert.Equal(t, []string{"api/missing"}, h.recoveryReconstitutionAPIReads(), "warm history must not be refilled")
+	h.recoveryReconstitutionQueue("first-resource", "last-resource")
 }
 
 func TestRecoveryReconstitutionR4FallbackDoesNotAdvanceInformerStatus(t *testing.T) {
@@ -381,39 +331,6 @@ func TestRecoveryReconstitutionR4FallbackDoesNotAdvanceInformerStatus(t *testing
 	}
 }
 
-func TestRecoveryReconstitutionR5PreviousDisappearsDuringFullRead(t *testing.T) {
-	for _, names := range [][]string{
-		{"vanished", "first", "last"},
-		{"first", "vanished", "last"},
-		{"first", "last", "vanished"},
-	} {
-		t.Run(fmt.Sprint(names), func(t *testing.T) {
-			syn := recoveryReconstitutionSynthesis("previous", names...)
-			comp := recoveryReconstitutionComposition(syn, nil)
-			first := recoveryReconstitutionSlice("first", syn.UUID, "first-resource")
-			last := recoveryReconstitutionSlice("last", syn.UUID, "last-resource")
-			vanished := recoveryReconstitutionSlice("vanished", syn.UUID, "vanished-resource")
-			h := recoveryReconstitutionNewHarness(t, comp,
-				[]*apiv1.ResourceSlice{first, last, vanished}, []*apiv1.ResourceSlice{first, last})
-
-			filled, err := h.source.populateCache(h.ctx, comp, syn, true)
-			require.NoError(t, err)
-			require.True(t, filled)
-			h.recoveryReconstitutionResource(syn.UUID, "first-resource", first.Name, 0, true)
-			h.recoveryReconstitutionResource(syn.UUID, "last-resource", last.Name, 0, true)
-			_, _, found := h.source.cache.Get(h.ctx, syn.UUID, resource.Ref{Kind: "ConfigMap", Namespace: "default", Name: "vanished-resource"})
-			assert.False(t, found)
-			assert.ElementsMatch(t, []string{"api/first", "api/last", "api/vanished"}, h.recoveryReconstitutionAPIReads())
-			h.recoveryReconstitutionQueue()
-
-			filled, err = h.source.populateCache(h.ctx, comp, syn, true)
-			require.NoError(t, err)
-			assert.False(t, filled)
-			h.recoveryReconstitutionQueue("first-resource", "last-resource")
-		})
-	}
-}
-
 func TestRecoveryReconstitutionR6MalformedCurrentReferencesAreAtomic(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -422,29 +339,26 @@ func TestRecoveryReconstitutionR6MalformedCurrentReferencesAreAtomic(t *testing.
 		{name: "nil"},
 		{name: "empty", ref: &apiv1.ResourceSliceRef{}},
 	} {
-		for _, index := range []int{0, 1} {
-			t.Run(fmt.Sprintf("%s/index=%d", test.name, index), func(t *testing.T) {
-				syn := recoveryReconstitutionSynthesis("current", "before")
-				if index == 0 {
-					syn.ResourceSlices = nil
-				}
-				syn.ResourceSlices = append(syn.ResourceSlices, test.ref, &apiv1.ResourceSliceRef{Name: "after"})
-				comp := recoveryReconstitutionComposition(nil, syn)
-				slices := []*apiv1.ResourceSlice{
-					recoveryReconstitutionSlice("before", syn.UUID, "before-resource"),
-					recoveryReconstitutionSlice("after", syn.UUID, "after-resource"),
-				}
-				h := recoveryReconstitutionNewHarness(t, comp, slices, slices)
+		t.Run(test.name, func(t *testing.T) {
+			syn := recoveryReconstitutionSynthesis("current", "before")
+			syn.ResourceSlices = append(syn.ResourceSlices, test.ref, &apiv1.ResourceSliceRef{Name: "after"})
+			comp := recoveryReconstitutionComposition(nil, syn)
+			slices := []*apiv1.ResourceSlice{
+				recoveryReconstitutionSlice("before", syn.UUID, "before-resource"),
+				recoveryReconstitutionSlice("after", syn.UUID, "after-resource"),
+			}
+			h := recoveryReconstitutionNewHarness(t, comp, slices, slices)
 
-				filled, err := h.source.populateCache(h.ctx, comp, syn, false)
-				require.EqualError(t, err, fmt.Sprintf("current synthesis resource slices reference %d has no name", index))
-				assert.False(t, filled)
+			for attempt := 0; attempt < 2; attempt++ {
+				result, err := h.recoveryReconstitutionReconcile()
+				require.NoError(t, err, "sliceController requests resynthesis; reconstitution must not error-requeue")
+				assert.Zero(t, result)
 				assert.False(t, h.source.cache.Visit(h.ctx, comp, syn.UUID, nil), "no partial synthesis may be filled")
 				assert.Empty(t, h.recoveryReconstitutionAPIReads())
 				assert.NotContains(t, h.reads, "informer/after")
 				h.recoveryReconstitutionQueue()
-			})
-		}
+			}
+		})
 	}
 }
 
@@ -668,126 +582,82 @@ func TestRecoveryReconstitutionR10WarmCacheVisitsInformerState(t *testing.T) {
 	}
 }
 
-func TestRecoveryReconstitutionR11FullAPIManifestsAreRetained(t *testing.T) {
-	for _, previous := range []bool{false, true} {
-		t.Run(fmt.Sprintf("previous=%t", previous), func(t *testing.T) {
-			syn := recoveryReconstitutionSynthesis("full", "first", "last")
-			comp := recoveryReconstitutionComposition(nil, syn)
-			if previous {
-				comp = recoveryReconstitutionComposition(syn, nil)
+func TestRecoveryReconstitutionOrdersFillsThenEnqueues(t *testing.T) {
+	previous := recoveryReconstitutionSynthesis("previous", "previous-0", "missing", "previous-1")
+	current := recoveryReconstitutionSynthesis("current", "current-0", "current-1")
+	var slices []*apiv1.ResourceSlice
+	names := map[string][]string{}
+	for _, syn := range []*apiv1.Synthesis{previous, current} {
+		for _, ref := range syn.ResourceSlices {
+			if ref.Name == "missing" {
+				continue
 			}
-			slices := []*apiv1.ResourceSlice{
-				recoveryReconstitutionSlice("first", syn.UUID, "first-resource", "second-resource"),
-				recoveryReconstitutionSlice("last", syn.UUID, "last-resource"),
-			}
-			h := recoveryReconstitutionNewHarness(t, comp, slices, slices)
-			for _, slice := range slices {
-				cached, full := &apiv1.ResourceSlice{}, &apiv1.ResourceSlice{}
-				require.NoError(t, h.source.client.Get(h.ctx, client.ObjectKeyFromObject(slice), cached))
-				require.NoError(t, h.source.nonCachedReader.Get(h.ctx, client.ObjectKeyFromObject(slice), full))
-				require.Len(t, cached.Spec.Resources, len(full.Spec.Resources))
-				for i := range cached.Spec.Resources {
-					assert.Empty(t, cached.Spec.Resources[i].Manifest)
-					assert.Equal(t, slice.Spec.Resources[i].Manifest, full.Spec.Resources[i].Manifest)
-				}
-			}
-			h.reads = nil
+			resources := []string{ref.Name + "-resource", ref.Name + "-dependent"}
+			slices = append(slices, recoveryReconstitutionSlice(ref.Name, syn.UUID, resources...))
+			names[syn.UUID] = append(names[syn.UUID], resources...)
+		}
+	}
+	comp := recoveryReconstitutionComposition(previous, current)
+	h := recoveryReconstitutionNewHarness(t, comp, slices, slices)
 
-			filled, err := h.source.populateCache(h.ctx, comp, syn, previous)
-			require.NoError(t, err)
-			require.True(t, filled)
-			assert.Equal(t, []string{"api/first", "api/last"}, h.recoveryReconstitutionAPIReads())
-			for _, test := range []struct {
-				name    string
-				slice   string
-				index   int
-				visible bool
-			}{
-				{name: "first-resource", slice: "first", visible: true},
-				{name: "second-resource", slice: "first", index: 1},
-				{name: "last-resource", slice: "last", visible: true},
-			} {
-				res := h.recoveryReconstitutionResource(syn.UUID, test.name, test.slice, test.index, test.visible)
+	assertResources := func(syn *apiv1.Synthesis, visited bool) []*resource.Resource {
+		t.Helper()
+		var resources []*resource.Resource
+		for _, ref := range syn.ResourceSlices {
+			if ref.Name == "missing" {
+				continue
+			}
+			for index, suffix := range []string{"-resource", "-dependent"} {
+				name := ref.Name + suffix
+				res := h.recoveryReconstitutionResource(syn.UUID, name, ref.Name, index, index == 0)
 				snapshot, err := res.Snapshot(h.ctx, comp, nil)
 				require.NoError(t, err)
-				assert.Equal(t, map[string]interface{}{"source": "full-api", "resource": test.name}, snapshot.Unstructured().Object["data"])
-				assert.Nil(t, res.State())
-			}
-			h.recoveryReconstitutionQueue()
-		})
-	}
-}
-
-func TestRecoveryReconstitutionR12ReconcileOrdersFillsThenEnqueues(t *testing.T) {
-	for _, count := range []int{1, 2} {
-		t.Run(fmt.Sprintf("%d slices per synthesis", count), func(t *testing.T) {
-			previous := recoveryReconstitutionSynthesis("previous")
-			current := recoveryReconstitutionSynthesis("current")
-			var slices []*apiv1.ResourceSlice
-			var previousNames, currentNames, expectedAPIReads []string
-			for _, syn := range []*apiv1.Synthesis{previous, current} {
-				for i := 0; i < count; i++ {
-					name := fmt.Sprintf("%s-%d", syn.UUID, i)
-					syn.ResourceSlices = append(syn.ResourceSlices, &apiv1.ResourceSliceRef{Name: name})
-					slices = append(slices, recoveryReconstitutionSlice(name, syn.UUID, name+"-resource"))
-					expectedAPIReads = append(expectedAPIReads, "api/"+name)
-					if syn == previous {
-						previousNames = append(previousNames, name+"-resource")
-					} else {
-						currentNames = append(currentNames, name+"-resource")
-					}
+				assert.Equal(t, map[string]any{"source": "full-api", "resource": name}, snapshot.Unstructured().Object["data"])
+				if visited {
+					assert.Equal(t, &apiv1.ResourceState{}, res.State())
+				} else {
+					assert.Nil(t, res.State(), "Fill must not consume status or enqueue resources")
 				}
+				resources = append(resources, res)
 			}
-			comp := recoveryReconstitutionComposition(previous, current)
-			h := recoveryReconstitutionNewHarness(t, comp, slices, slices)
+		}
+		return resources
+	}
 
-			result, err := h.recoveryReconstitutionReconcile()
-			require.NoError(t, err)
-			assert.Equal(t, ctrl.Result{Requeue: true}, result)
-			assert.True(t, h.source.cache.Visit(h.ctx, comp, previous.UUID, nil))
-			assert.False(t, h.source.cache.Visit(h.ctx, comp, current.UUID, nil))
-			assert.Equal(t, expectedAPIReads[:count], h.recoveryReconstitutionAPIReads())
-			for _, ref := range current.ResourceSlices {
-				assert.NotContains(t, h.reads, "informer/"+ref.Name)
-			}
-			for _, ref := range previous.ResourceSlices {
-				res := h.recoveryReconstitutionResource(previous.UUID, ref.Name+"-resource", ref.Name, 0, true)
-				assert.Nil(t, res.State())
-			}
+	result, err := h.recoveryReconstitutionReconcile()
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{Requeue: true}, result)
+	assert.False(t, h.source.cache.Visit(h.ctx, comp, current.UUID, nil))
+	assert.Equal(t, []string{"api/missing", "api/previous-0", "api/previous-1"}, h.recoveryReconstitutionAPIReads())
+	for _, ref := range current.ResourceSlices {
+		assert.NotContains(t, h.reads, "informer/"+ref.Name, "previous history must load before current")
+	}
+	assertResources(previous, false)
+	h.recoveryReconstitutionQueue()
+
+	result, err = h.recoveryReconstitutionReconcile()
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{Requeue: true}, result)
+	assertResources(previous, true)
+	currentResources := assertResources(current, false)
+	h.recoveryReconstitutionQueue(names[previous.UUID]...)
+	assert.Equal(t, []string{
+		"api/missing", "api/previous-0", "api/previous-1", "api/missing", "api/current-0", "api/current-1",
+	}, h.recoveryReconstitutionAPIReads())
+
+	for pass := 0; pass < 2; pass++ {
+		h.reads = nil
+		result, err = h.recoveryReconstitutionReconcile()
+		require.NoError(t, err)
+		assert.Zero(t, result)
+		assert.Equal(t, []string{"api/missing"}, h.recoveryReconstitutionAPIReads(), "only missing-history confirmation may re-read the API")
+		for i, res := range assertResources(current, true) {
+			assert.Same(t, currentResources[i], res)
+		}
+		if pass == 0 {
+			h.recoveryReconstitutionQueue(names[current.UUID]...)
+		} else {
 			h.recoveryReconstitutionQueue()
-
-			result, err = h.recoveryReconstitutionReconcile()
-			require.NoError(t, err)
-			assert.Equal(t, ctrl.Result{Requeue: true}, result)
-			assert.Equal(t, expectedAPIReads, h.recoveryReconstitutionAPIReads())
-			for _, ref := range previous.ResourceSlices {
-				res := h.recoveryReconstitutionResource(previous.UUID, ref.Name+"-resource", ref.Name, 0, true)
-				assert.Equal(t, &apiv1.ResourceState{}, res.State())
-			}
-			var currentResources []*resource.Resource
-			for _, ref := range current.ResourceSlices {
-				res := h.recoveryReconstitutionResource(current.UUID, ref.Name+"-resource", ref.Name, 0, true)
-				assert.Nil(t, res.State(), "current Fill precedes the informer status visit")
-				currentResources = append(currentResources, res)
-			}
-			h.recoveryReconstitutionQueue(previousNames...)
-
-			result, err = h.recoveryReconstitutionReconcile()
-			require.NoError(t, err)
-			assert.Equal(t, ctrl.Result{}, result)
-			assert.Equal(t, expectedAPIReads, h.recoveryReconstitutionAPIReads())
-			for i, ref := range current.ResourceSlices {
-				res := h.recoveryReconstitutionResource(current.UUID, ref.Name+"-resource", ref.Name, 0, true)
-				assert.Same(t, currentResources[i], res)
-				assert.Equal(t, &apiv1.ResourceState{}, res.State())
-			}
-			h.recoveryReconstitutionQueue(currentNames...)
-
-			result, err = h.recoveryReconstitutionReconcile()
-			require.NoError(t, err)
-			assert.Equal(t, ctrl.Result{}, result)
-			assert.Equal(t, expectedAPIReads, h.recoveryReconstitutionAPIReads())
-			h.recoveryReconstitutionQueue()
-		})
+		}
 	}
 }

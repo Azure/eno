@@ -234,10 +234,7 @@ func (e *Executor) writeSlices(ctx context.Context, comp *apiv1.Composition, rl 
 	return sliceRefs, recoveryRequired, nil
 }
 
-// fetchPreviousSlices retrieves the previous slices from the composition's current synthesis status.
-// This function runs before the updateComposition function, which will later swap the current synthesis
-// to become the previous synthesis. Therefore, the resourceslice retrieved from the current synthesis is
-// actually the "previous" resource slices after the update is complete.
+// fetchCurrentSynthesisResSlices retrieves available history from the current synthesis and reports whether tombstone recovery is required. Publication moves this synthesis to previous.
 func (e *Executor) fetchCurrentSynthesisResSlices(ctx context.Context, comp *apiv1.Composition) ([]*apiv1.ResourceSlice, bool, error) {
 	logger := logr.FromContextOrDiscard(ctx).WithValues(
 		"compositionName", comp.Name,
@@ -245,7 +242,7 @@ func (e *Executor) fetchCurrentSynthesisResSlices(ctx context.Context, comp *api
 	)
 	current := comp.Status.CurrentSynthesis
 	if current == nil {
-		logger.Info("no current synthesis - no historical synthesisl tombstone recovery maybe required")
+		logger.Info("no current synthesis; resources outside recorded history may require tombstone recovery")
 		return nil, true, nil
 	}
 
@@ -256,8 +253,8 @@ func (e *Executor) fetchCurrentSynthesisResSlices(ctx context.Context, comp *api
 	for index, ref := range current.ResourceSlices {
 		if ref == nil || ref.Name == "" {
 			recoveryRequired = true
-			logger.Info("Current Synthesis ResourceSlices has no name; skipping",
-				"referencesIndex", index)
+			logger.Info("current synthesis slice reference has no name; skipping",
+				"referenceIndex", index)
 			continue
 		}
 
@@ -268,7 +265,7 @@ func (e *Executor) fetchCurrentSynthesisResSlices(ctx context.Context, comp *api
 		}, slice)
 		if errors.IsNotFound(err) {
 			recoveryRequired = true
-			logger.Error(err, "Current Synthesis REsourceSlice NotFound, skipping",
+			logger.Info("current synthesis slice missing; skipping",
 				"resourceSliceName", ref.Name)
 			continue
 		}

@@ -282,8 +282,12 @@ spec:
                     type: string
                   tombstoneRecoveryRequired:
                     description: |-
-                      TombstoneRecoveryRequired indicates that historical deletion information may be incomplete.
-                      It does not block synthesis or reconciliation at this stage
+                      TombstoneRecoveryRequired indicates that resources may exist outside the available synthesis history.
+                      It is set when there is no current synthesis, or a historical ResourceSlice reference is nameless
+                      or points to a missing slice.
+                      Even a first synthesis may encounter resources left by a prior incarnation whose inventory was lost.
+                      The flag is carried forward because subsequent syntheses cannot account for those unknown resources.
+                      It does not block synthesis or reconciliation, and successful syntheses do not clear it.
                     type: boolean
                   uuid:
                     description: |-
@@ -417,8 +421,12 @@ spec:
                     type: string
                   tombstoneRecoveryRequired:
                     description: |-
-                      TombstoneRecoveryRequired indicates that historical deletion information may be incomplete.
-                      It does not block synthesis or reconciliation at this stage
+                      TombstoneRecoveryRequired indicates that resources may exist outside the available synthesis history.
+                      It is set when there is no current synthesis, or a historical ResourceSlice reference is nameless
+                      or points to a missing slice.
+                      Even a first synthesis may encounter resources left by a prior incarnation whose inventory was lost.
+                      The flag is carried forward because subsequent syntheses cannot account for those unknown resources.
+                      It does not block synthesis or reconciliation, and successful syntheses do not clear it.
                     type: boolean
                   uuid:
                     description: |-
@@ -545,8 +553,12 @@ spec:
                     type: string
                   tombstoneRecoveryRequired:
                     description: |-
-                      TombstoneRecoveryRequired indicates that historical deletion information may be incomplete.
-                      It does not block synthesis or reconciliation at this stage
+                      TombstoneRecoveryRequired indicates that resources may exist outside the available synthesis history.
+                      It is set when there is no current synthesis, or a historical ResourceSlice reference is nameless
+                      or points to a missing slice.
+                      Even a first synthesis may encounter resources left by a prior incarnation whose inventory was lost.
+                      The flag is carried forward because subsequent syntheses cannot account for those unknown resources.
+                      It does not block synthesis or reconciliation, and successful syntheses do not clear it.
                     type: boolean
                   uuid:
                     description: |-
