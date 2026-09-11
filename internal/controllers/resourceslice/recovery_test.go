@@ -70,7 +70,7 @@ func TestRecoverySliceRequestsResynthesis(t *testing.T) {
 				}, comp)
 				require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 				before := comp.DeepCopy()
-				c := &sliceController{client: cli}
+				c := &sliceController{client: cli, apiReader: cli}
 				req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(comp)}
 				for i := 0; i < 2; i++ {
 					result, err := c.Reconcile(ctx, req)
@@ -117,7 +117,7 @@ func TestRecoverySliceRequestRetry(t *testing.T) {
 			}, comp)
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 			before := comp.DeepCopy()
-			c := &sliceController{client: cli}
+			c := &sliceController{client: cli, apiReader: cli}
 			req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(comp)}
 			_, err := c.Reconcile(ctx, req)
 			require.ErrorIs(t, err, failure.err)
@@ -132,6 +132,108 @@ func TestRecoverySliceRequestRetry(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, 2, updates)
 		})
+	}
+}
+
+func TestRecoverySliceConfirmsMissingViaAPI(t *testing.T) {
+	for _, apiCase := range []struct {
+		name   string
+		exists bool
+		err    error
+	}{
+		{name: "missing"},
+		{name: "exists", exists: true},
+		{name: "forbidden", err: apierrors.NewForbidden(
+			schema.GroupResource{Group: apiv1.SchemeGroupVersion.Group, Resource: "resourceslices"},
+			"missing", errors.New("access denied"))},
+		{name: "unavailable", err: errors.New("API unavailable")},
+	} {
+		for _, cacheCase := range []struct {
+			name   string
+			exists bool
+		}{
+			{name: "metadata cached", exists: true},
+			{name: "metadata not cached"},
+		} {
+			t.Run(apiCase.name+"/"+cacheCase.name, func(t *testing.T) {
+				ctx := testutil.NewContext(t)
+				comp := recoverySliceComposition([]*apiv1.ResourceSliceRef{{Name: "missing"}})
+				sliceKey := client.ObjectKey{Namespace: comp.Namespace, Name: "missing"}
+				objects := []client.Object{comp}
+				if apiCase.exists {
+					objects = append(objects, &apiv1.ResourceSlice{ObjectMeta: metav1.ObjectMeta{
+						Name: sliceKey.Name, Namespace: sliceKey.Namespace,
+					}})
+				}
+
+				apiReads, updates := 0, 0
+				api := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
+					Get: func(ctx context.Context, cli client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						if _, ok := obj.(*metav1.PartialObjectMetadata); ok {
+							apiReads++
+							require.Equal(t, sliceKey, key)
+							require.Equal(t, apiv1.SchemeGroupVersion.WithKind("ResourceSlice"), obj.GetObjectKind().GroupVersionKind())
+							if apiCase.err != nil {
+								return apiCase.err
+							}
+						}
+						return cli.Get(ctx, key, obj, opts...)
+					},
+					Update: func(ctx context.Context, cli client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+						updates++
+						return cli.Update(ctx, obj, opts...)
+					},
+				}, objects...)
+				require.NoError(t, api.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+				before := comp.DeepCopy()
+
+				sliceReads, metadataCacheReads := 0, 0
+				cached := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
+					Get: func(ctx context.Context, _ client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						switch obj.(type) {
+						case *apiv1.ResourceSlice:
+							sliceReads++
+							require.Equal(t, sliceKey, key)
+							return apierrors.NewNotFound(apiv1.SchemeGroupVersion.WithResource("resourceslices").GroupResource(), key.Name)
+						case *metav1.PartialObjectMetadata:
+							metadataCacheReads++
+							if !cacheCase.exists {
+								return apierrors.NewNotFound(apiv1.SchemeGroupVersion.WithResource("resourceslices").GroupResource(), key.Name)
+							}
+							obj.SetName(key.Name)
+							obj.SetNamespace(key.Namespace)
+							return nil
+						default:
+							return api.Get(ctx, key, obj, opts...)
+						}
+					},
+					Update: func(ctx context.Context, _ client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+						return api.Update(ctx, obj, opts...)
+					},
+				})
+
+				c := &sliceController{client: cached, apiReader: api}
+				result, err := c.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(comp)})
+				if apiCase.err != nil {
+					require.ErrorIs(t, err, apiCase.err)
+				} else {
+					require.NoError(t, err)
+				}
+				assert.Zero(t, result)
+				require.NoError(t, api.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+				wantRecovery := !apiCase.exists && apiCase.err == nil
+				assert.Equal(t, wantRecovery, comp.ShouldForceResynthesis())
+				assert.Equal(t, before.Status, comp.Status)
+				wantUpdates := 0
+				if wantRecovery {
+					wantUpdates = 1
+				}
+				assert.Equal(t, wantUpdates, updates)
+				assert.Equal(t, 1, sliceReads)
+				assert.Equal(t, 1, apiReads)
+				assert.Zero(t, metadataCacheReads, "metadata confirmation must bypass the informer cache")
+			})
+		}
 	}
 }
 
@@ -168,7 +270,7 @@ func TestRecoverySliceDeletingMalformedReferences(t *testing.T) {
 					return nil
 				},
 			}, comp, slice)
-			c := &sliceController{client: cli}
+			c := &sliceController{client: cli, apiReader: cli}
 			_, err := c.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(comp)})
 			require.NoError(t, err)
 			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
@@ -197,7 +299,7 @@ func TestRecoverySliceReadiness(t *testing.T) {
 				Spec:       apiv1.ResourceSliceSpec{Resources: []apiv1.Manifest{{Manifest: "{}"}}},
 			}
 			cli := testutil.NewClient(t, comp, slice)
-			c := &sliceController{client: cli}
+			c := &sliceController{client: cli, apiReader: cli}
 			req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(comp)}
 			_, err := c.Reconcile(ctx, req)
 			require.NoError(t, err)

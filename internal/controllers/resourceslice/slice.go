@@ -19,7 +19,8 @@ import (
 // This consists of aggregating their status into the composition, and replacing missing slices.
 // Deletion of slices is handled by a separate controller to handle cases where the related composition no longer exists.
 type sliceController struct {
-	client client.Client
+	client    client.Client
+	apiReader client.Reader
 }
 
 func NewController(mgr ctrl.Manager) error {
@@ -27,7 +28,7 @@ func NewController(mgr ctrl.Manager) error {
 		For(&apiv1.Composition{}).
 		Owns(&apiv1.ResourceSlice{}).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "sliceController")).
-		Complete(&sliceController{client: mgr.GetClient()})
+		Complete(&sliceController{client: mgr.GetClient(), apiReader: mgr.GetAPIReader()})
 }
 
 func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -137,13 +138,13 @@ func (s *sliceController) handleMissingSlice(ctx context.Context, comp *apiv1.Co
 		}
 	}
 
-	// Be absolutely sure the slice is missing
+	// Confirm against the API: metadata has a separate informer cache that can lag deletion.
 	meta := &metav1.PartialObjectMetadata{}
 	meta.Kind = "ResourceSlice"
 	meta.APIVersion = apiv1.SchemeGroupVersion.String()
 	meta.Name = sliceName
 	meta.Namespace = comp.Namespace
-	err := s.client.Get(ctx, client.ObjectKeyFromObject(meta), meta)
+	err := s.apiReader.Get(ctx, client.ObjectKeyFromObject(meta), meta)
 	if err == nil {
 		logger.Info("resource slice is not missing!", "resourceSliceName", sliceName)
 		return ctrl.Result{}, nil

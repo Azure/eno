@@ -363,7 +363,8 @@ func TestRecoveryIntegrationAvailableHistoryFieldOwnership(t *testing.T) {
 
 func recoveryIntegrationControllers(t *testing.T, mgr *testutil.Manager, disableSSA bool, handler execution.SynthesizerHandle) {
 	t.Helper()
-	registerControllers(t, mgr)
+	// Recovery tests require one synthesis and should not race the timeout/retry path.
+	registerControllersWithPodTimeout(t, mgr, time.Minute)
 	testutil.WithFakeExecutor(t, mgr, handler)
 	downstream := rest.CopyConfig(mgr.DownstreamRestConfig)
 	downstream.QPS = 200
