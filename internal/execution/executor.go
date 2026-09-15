@@ -87,7 +87,7 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 			Severity: krmv1.ResultSeverityError,
 		}}}
 
-		if err := e.updateComposition(ctx, env, comp, syn, sliceRefs, recoveryRequired, revs, output); err != nil {
+		if err := e.updateComposition(ctx, env, comp, syn, sliceRefs, false, revs, output); err != nil {
 			logger.Error(err, "unable to update composition with synthesizer error")
 			return err
 		}
