@@ -127,7 +127,12 @@ func recoveryReconstitutionNewHarness(t *testing.T, comp *apiv1.Composition, inf
 }
 
 func recoveryReconstitutionSynthesis(uuid string, names ...string) *apiv1.Synthesis {
-	syn := &apiv1.Synthesis{UUID: uuid, Synthesized: recoveryReconstitutionTime()}
+	syn := &apiv1.Synthesis{
+		UUID: uuid, Synthesized: recoveryReconstitutionTime(),
+		TombstoneRecoveryFinished: &apiv1.TombstoneRecoveryStatus{
+			Status: true, Reason: "NotNeeded", SynthesisUUID: uuid,
+		},
+	}
 	for _, name := range names {
 		syn.ResourceSlices = append(syn.ResourceSlices, &apiv1.ResourceSliceRef{Name: name})
 	}
@@ -211,6 +216,64 @@ func (h *recoveryReconstitutionHarness) recoveryReconstitutionAPIReads() []strin
 		}
 	}
 	return reads
+}
+
+func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		finished    *apiv1.TombstoneRecoveryStatus
+		notRequired bool
+		deleting    bool
+		allow       bool
+	}{
+		{name: "missing"},
+		{name: "missing-even-when-not-required", notRequired: true},
+		{name: "unfinished", finished: &apiv1.TombstoneRecoveryStatus{SynthesisUUID: "current", Reason: "InventoryGetError"}},
+		{name: "wrong-uuid", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "old", Reason: "NotNeeded"}},
+		{name: "completed", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "current", Reason: "FinishedTombstoneRecovery"}, allow: true},
+		{name: "skipped", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "current", Reason: "InventoryNotFound"}, allow: true},
+		{name: "disabled", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "current", Reason: "BackupOperatorNotEnabled"}, allow: true},
+		{name: "deleting-missing", deleting: true, allow: true},
+		{name: "deleting-unfinished", finished: &apiv1.TombstoneRecoveryStatus{SynthesisUUID: "current", Reason: "InventoryGetError"}, deleting: true, allow: true},
+		{name: "deleting-old-uuid", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "old", Reason: "NotNeeded"}, deleting: true, allow: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			previous := recoveryReconstitutionSynthesis("previous", "previous-slice")
+			current := recoveryReconstitutionSynthesis("current", "current-slice")
+			current.TombstoneRecoveryRequired = !tc.notRequired
+			current.TombstoneRecoveryFinished = tc.finished
+			comp := recoveryReconstitutionComposition(previous, current)
+			if tc.deleting {
+				comp.DeletionTimestamp = recoveryReconstitutionTime()
+				comp.Finalizers = []string{"eno.azure.io/cleanup"}
+			}
+			slices := []*apiv1.ResourceSlice{
+				recoveryReconstitutionSlice("previous-slice", "previous", "previous-resource"),
+				recoveryReconstitutionSlice("current-slice", "current", "current-resource"),
+			}
+			h := recoveryReconstitutionNewHarness(t, comp, slices, slices)
+			result, err := h.recoveryReconstitutionReconcile()
+			require.NoError(t, err)
+			if !tc.allow {
+				assert.Zero(t, result)
+				assert.Empty(t, h.reads, "unfinished preparation must not load either synthesis")
+				assert.False(t, h.source.cache.Visit(h.ctx, comp, previous.UUID, nil))
+				assert.False(t, h.source.cache.Visit(h.ctx, comp, current.UUID, nil))
+				h.recoveryReconstitutionQueue()
+				return
+			}
+
+			for range 10 {
+				_, err = h.recoveryReconstitutionReconcile()
+				require.NoError(t, err)
+				if h.queue.Len() == 2 {
+					break
+				}
+			}
+			h.recoveryReconstitutionResource(current.UUID, "current-resource", "current-slice", 0, true)
+			h.recoveryReconstitutionQueue("previous-resource", "current-resource")
+		})
+	}
 }
 
 func TestRecoveryReconstitutionR1IncompleteSynthesis(t *testing.T) {
