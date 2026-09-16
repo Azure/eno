@@ -1172,6 +1172,9 @@ func TestOverrideVPAMinMax(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
+	// Cached reads can mistake pre-update defaults for a completed reconciliation.
+	downstream, err := client.New(mgr.DownstreamRestConfig, client.Options{Scheme: mgr.GetScheme()})
+	require.NoError(t, err)
 
 	registerControllers(t, mgr)
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
@@ -1218,7 +1221,7 @@ func TestOverrideVPAMinMax(t *testing.T) {
 
 	// === Case 1: Annotation OFF, no changes — defaults preserved ===
 	testutil.Eventually(t, func() bool {
-		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+		if err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
 			return false
 		}
 		return cm.Data["min-cpu"] == "100m" && cm.Data["min-memory"] == "128Mi" &&
@@ -1226,20 +1229,20 @@ func TestOverrideVPAMinMax(t *testing.T) {
 	})
 
 	// === Case 2: Annotation OFF, customer changes values — Eno reverts ===
-	err := retry.RetryOnConflict(testutil.Backoff, func() error {
-		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		if err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
 			return err
 		}
 		cm.Data["min-cpu"] = "500m"
 		cm.Data["min-memory"] = "1Gi"
 		cm.Data["max-cpu"] = "16"
 		cm.Data["max-memory"] = "32Gi"
-		return mgr.DownstreamClient.Update(ctx, cm)
+		return downstream.Update(ctx, cm)
 	})
 	require.NoError(t, err)
 
 	testutil.Eventually(t, func() bool {
-		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+		if err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
 			return false
 		}
 		return cm.Data["min-cpu"] == "100m" && cm.Data["min-memory"] == "128Mi" &&
@@ -1248,21 +1251,21 @@ func TestOverrideVPAMinMax(t *testing.T) {
 
 	// === Case 3: Annotation ON (min only), no value changes — defaults preserved ===
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
-		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+		if err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
 			return err
 		}
 		if cm.Annotations == nil {
 			cm.Annotations = map[string]string{}
 		}
 		cm.Annotations["allow-override-min"] = "true"
-		return mgr.DownstreamClient.Update(ctx, cm)
+		return downstream.Update(ctx, cm)
 	})
 	require.NoError(t, err)
 
 	// valueExpression reads self.data['min-cpu'] from live = "100m" (same as default), so no visible change
 	time.Sleep(100 * time.Millisecond)
 	testutil.Eventually(t, func() bool {
-		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+		if err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
 			return false
 		}
 		return cm.Data["min-cpu"] == "100m" && cm.Data["min-memory"] == "128Mi" &&
@@ -1271,19 +1274,19 @@ func TestOverrideVPAMinMax(t *testing.T) {
 
 	// === Case 4: Annotation ON (min), customer changes min values — preserved ===
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
-		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+		if err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
 			return err
 		}
 		cm.Annotations["allow-override-min"] = "true"
 		cm.Data["min-cpu"] = "500m"
 		cm.Data["min-memory"] = "1Gi"
-		return mgr.DownstreamClient.Update(ctx, cm)
+		return downstream.Update(ctx, cm)
 	})
 	require.NoError(t, err)
 
 	time.Sleep(100 * time.Millisecond)
 	testutil.Eventually(t, func() bool {
-		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+		if err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
 			return false
 		}
 		return cm.Data["min-cpu"] == "500m" && cm.Data["min-memory"] == "1Gi" &&
@@ -1292,19 +1295,19 @@ func TestOverrideVPAMinMax(t *testing.T) {
 
 	// === Case 4b: Annotation ON (max), customer changes max values — preserved ===
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
-		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+		if err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
 			return err
 		}
 		cm.Annotations["allow-override-max"] = "true"
 		cm.Data["max-cpu"] = "16"
 		cm.Data["max-memory"] = "32Gi"
-		return mgr.DownstreamClient.Update(ctx, cm)
+		return downstream.Update(ctx, cm)
 	})
 	require.NoError(t, err)
 
 	time.Sleep(100 * time.Millisecond)
 	testutil.Eventually(t, func() bool {
-		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+		if err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
 			return false
 		}
 		return cm.Data["min-cpu"] == "500m" && cm.Data["min-memory"] == "1Gi" &&
@@ -1313,17 +1316,19 @@ func TestOverrideVPAMinMax(t *testing.T) {
 
 	// === Cleanup: Remove both annotations — Eno reverts everything ===
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
-		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+		if err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
 			return err
 		}
 		delete(cm.Annotations, "allow-override-min")
 		delete(cm.Annotations, "allow-override-max")
-		return mgr.DownstreamClient.Update(ctx, cm)
+		return downstream.Update(ctx, cm)
 	})
 	require.NoError(t, err)
 
 	testutil.Eventually(t, func() bool {
-		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		if err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+			return false
+		}
 		return cm.Data["min-cpu"] == "100m" && cm.Data["min-memory"] == "128Mi" &&
 			cm.Data["max-cpu"] == "2" && cm.Data["max-memory"] == "4Gi"
 	})
@@ -1338,6 +1343,9 @@ func TestOverrideVPAUpdateMode(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
 	upstream := mgr.GetClient()
+	// Cached reads can mistake pre-update defaults for a completed reconciliation.
+	downstream, err := client.New(mgr.DownstreamRestConfig, client.Options{Scheme: mgr.GetScheme()})
+	require.NoError(t, err)
 
 	registerControllers(t, mgr)
 	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
@@ -1378,73 +1386,83 @@ func TestOverrideVPAUpdateMode(t *testing.T) {
 
 	// === Case 1: Annotation OFF, no changes — default "Auto" ===
 	testutil.Eventually(t, func() bool {
-		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		if err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+			return false
+		}
 		return cm.Data["update-mode"] == "Auto"
 	})
 
 	// === Case 2: Annotation OFF, customer changes to "Off" — Eno reverts ===
-	err := retry.RetryOnConflict(testutil.Backoff, func() error {
-		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+	err = retry.RetryOnConflict(testutil.Backoff, func() error {
+		if err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
 			return err
 		}
 		cm.Data["update-mode"] = "Off"
-		return mgr.DownstreamClient.Update(ctx, cm)
+		return downstream.Update(ctx, cm)
 	})
 	require.NoError(t, err)
 
 	testutil.Eventually(t, func() bool {
-		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		if err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+			return false
+		}
 		return cm.Data["update-mode"] == "Auto"
 	})
 
 	// === Case 3: Annotation ON, no value changes — default preserved ===
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
-		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+		if err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
 			return err
 		}
 		if cm.Annotations == nil {
 			cm.Annotations = map[string]string{}
 		}
 		cm.Annotations["allow-override-update-mode"] = "true"
-		return mgr.DownstreamClient.Update(ctx, cm)
+		return downstream.Update(ctx, cm)
 	})
 	require.NoError(t, err)
 
 	time.Sleep(100 * time.Millisecond)
 	testutil.Eventually(t, func() bool {
-		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		if err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+			return false
+		}
 		return cm.Data["update-mode"] == "Auto"
 	})
 
 	// === Case 4: Annotation ON, customer changes to "Off" — preserved ===
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
-		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+		if err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
 			return err
 		}
 		cm.Annotations["allow-override-update-mode"] = "true"
 		cm.Data["update-mode"] = "Off"
-		return mgr.DownstreamClient.Update(ctx, cm)
+		return downstream.Update(ctx, cm)
 	})
 	require.NoError(t, err)
 
 	time.Sleep(100 * time.Millisecond)
 	testutil.Eventually(t, func() bool {
-		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		if err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+			return false
+		}
 		return cm.Data["update-mode"] == "Off"
 	})
 
 	// === Cleanup: Remove annotation — Eno reverts ===
 	err = retry.RetryOnConflict(testutil.Backoff, func() error {
-		if err := mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+		if err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
 			return err
 		}
 		delete(cm.Annotations, "allow-override-update-mode")
-		return mgr.DownstreamClient.Update(ctx, cm)
+		return downstream.Update(ctx, cm)
 	})
 	require.NoError(t, err)
 
 	testutil.Eventually(t, func() bool {
-		mgr.DownstreamClient.Get(ctx, client.ObjectKeyFromObject(cm), cm)
+		if err := downstream.Get(ctx, client.ObjectKeyFromObject(cm), cm); err != nil {
+			return false
+		}
 		return cm.Data["update-mode"] == "Auto"
 	})
 }

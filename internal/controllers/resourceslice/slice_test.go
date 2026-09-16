@@ -47,7 +47,7 @@ func testAggregation(t *testing.T, ready bool, reconciled bool, deleted bool) {
 	require.NoError(t, cli.Create(ctx, comp))
 	require.NoError(t, cli.Status().Update(ctx, comp))
 
-	a := &sliceController{client: cli}
+	a := &sliceController{client: cli, apiReader: cli}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	_, err := a.Reconcile(ctx, req)
 	require.NoError(t, err)
@@ -104,7 +104,7 @@ func TestStaleStatus(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, comp))
 	require.NoError(t, cli.Status().Update(ctx, comp))
 
-	a := &sliceController{client: cli}
+	a := &sliceController{client: cli, apiReader: cli}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	_, err := a.Reconcile(ctx, req)
 	require.NoError(t, err)
@@ -139,7 +139,7 @@ func TestCleanupSafety(t *testing.T) {
 	require.NoError(t, cli.Status().Update(ctx, comp))
 	require.NoError(t, cli.Delete(ctx, comp))
 
-	a := &sliceController{client: cli}
+	a := &sliceController{client: cli, apiReader: cli}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	_, err := a.Reconcile(ctx, req)
 	require.NoError(t, err)
@@ -177,7 +177,7 @@ func TestReadyTimeAggregation(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, comp))
 	require.NoError(t, cli.Status().Update(ctx, comp))
 
-	a := &sliceController{client: cli}
+	a := &sliceController{client: cli, apiReader: cli}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	_, err := a.Reconcile(ctx, req)
 	require.NoError(t, err)
@@ -215,7 +215,7 @@ func TestReconciliationErrorAggregation(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, comp))
 	require.NoError(t, cli.Status().Update(ctx, comp))
 
-	a := &sliceController{client: cli}
+	a := &sliceController{client: cli, apiReader: cli}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	_, err := a.Reconcile(ctx, req)
 	require.NoError(t, err)
@@ -250,7 +250,7 @@ func TestReconciliationErrorReset(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, comp))
 	require.NoError(t, cli.Status().Update(ctx, comp))
 
-	a := &sliceController{client: cli}
+	a := &sliceController{client: cli, apiReader: cli}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	_, err := a.Reconcile(ctx, req)
 	require.NoError(t, err)
@@ -285,7 +285,7 @@ func TestReconciliationErrorNotReconciling(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, comp))
 	require.NoError(t, cli.Status().Update(ctx, comp))
 
-	a := &sliceController{client: cli}
+	a := &sliceController{client: cli, apiReader: cli}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	_, err := a.Reconcile(ctx, req)
 	require.NoError(t, err)
@@ -309,7 +309,7 @@ func TestNoSlices(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, comp))
 	require.NoError(t, cli.Status().Update(ctx, comp))
 
-	a := &sliceController{client: cli}
+	a := &sliceController{client: cli, apiReader: cli}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	_, err := a.Reconcile(ctx, req)
 	require.NoError(t, err)
@@ -334,7 +334,7 @@ func TestMissingNewSlice(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, comp))
 	require.NoError(t, cli.Status().Update(ctx, comp))
 
-	a := &sliceController{client: cli}
+	a := &sliceController{client: cli, apiReader: cli}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	_, err := a.Reconcile(ctx, req)
 	require.NoError(t, err)
@@ -359,7 +359,7 @@ func TestMissingOldSlice(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, comp))
 	require.NoError(t, cli.Status().Update(ctx, comp))
 
-	a := &sliceController{client: cli}
+	a := &sliceController{client: cli, apiReader: cli}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	_, err := a.Reconcile(ctx, req)
 	require.NoError(t, err)
@@ -392,7 +392,7 @@ func TestMissingOldSliceIgnoreSideEffects(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, comp))
 	require.NoError(t, cli.Status().Update(ctx, comp))
 
-	a := &sliceController{client: cli}
+	a := &sliceController{client: cli, apiReader: cli}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	_, err := a.Reconcile(ctx, req)
 	require.NoError(t, err)
@@ -420,7 +420,7 @@ func TestMissingSliceWhileDeleting(t *testing.T) {
 	require.NoError(t, cli.Status().Update(ctx, comp))
 	require.NoError(t, cli.Delete(ctx, comp))
 
-	a := &sliceController{client: cli}
+	a := &sliceController{client: cli, apiReader: cli}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	_, err := a.Reconcile(ctx, req)
 	require.NoError(t, err)
@@ -448,7 +448,7 @@ func TestMissingSliceStaleCache(t *testing.T) {
 	slice.Namespace = comp.Namespace
 	require.NoError(t, cli.Create(ctx, slice))
 
-	a := &sliceController{client: cli}
+	a := &sliceController{client: cli, apiReader: cli}
 	_, err := a.handleMissingSlice(ctx, comp, slice.Name)
 	require.NoError(t, err) // this would error on update since the composition doesn't exist
 }
@@ -480,7 +480,7 @@ func TestOrphanedOnPurpose(t *testing.T) {
 	require.NoError(t, cli.Status().Update(ctx, comp))
 	require.NoError(t, cli.Delete(ctx, comp))
 
-	a := &sliceController{client: cli}
+	a := &sliceController{client: cli, apiReader: cli}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: comp.Namespace, Name: comp.Name}}
 	_, err := a.Reconcile(ctx, req)
 	require.NoError(t, err)

@@ -24,6 +24,10 @@ import (
 )
 
 func registerControllers(t *testing.T, mgr *testutil.Manager) {
+	registerControllersWithPodTimeout(t, mgr, time.Second)
+}
+
+func registerControllersWithPodTimeout(t *testing.T, mgr *testutil.Manager, podTimeout time.Duration) {
 	require.NoError(t, synthesis.NewPodLifecycleController(mgr.Manager, defaultConf))
 	require.NoError(t, synthesis.NewPodGC(mgr.Manager, time.Second))
 	require.NoError(t, scheduling.NewController(mgr.Manager, 10, time.Millisecond, time.Second))
@@ -31,7 +35,7 @@ func registerControllers(t *testing.T, mgr *testutil.Manager) {
 	require.NoError(t, watch.NewController(mgr.Manager))
 	require.NoError(t, resourceslice.NewController(mgr.Manager))
 	require.NoError(t, resourceslice.NewCleanupController(mgr.Manager))
-	require.NoError(t, composition.NewController(mgr.Manager, time.Second, "default"))
+	require.NoError(t, composition.NewController(mgr.Manager, podTimeout, "default"))
 	require.NoError(t, logging.NewCompositionStatusLogger(mgr.Manager, time.Second*10))
 	require.NoError(t, symphony.NewController(mgr.Manager))
 }

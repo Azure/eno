@@ -366,6 +366,10 @@ func (c *compositionController) logNotReadyResources(ctx context.Context, comp *
 
 	var notReady []string
 	for _, ref := range comp.Status.CurrentSynthesis.ResourceSlices {
+		if ref == nil || ref.Name == "" {
+			logger.Info("skipping resource slice reference without a name while logging not-ready resources")
+			continue
+		}
 		slice := &apiv1.ResourceSlice{}
 		if err := c.client.Get(ctx, client.ObjectKey{Namespace: comp.Namespace, Name: ref.Name}, slice); err != nil {
 			logger.V(1).Info("could not get resource slice while logging not-ready resources", "resourceSliceName", ref.Name, "error", err.Error())
