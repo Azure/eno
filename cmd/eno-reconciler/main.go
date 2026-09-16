@@ -62,6 +62,7 @@ func run() error {
 	flag.StringVar(&compositionSelector, "composition-label-selector", labels.Everything().String(), "Optional label selector for compositions to be reconciled")
 	flag.StringVar(&compositionNamespace, "composition-namespace", metav1.NamespaceAll, "Optional namespace to limit compositions that will be reconciled")
 	flag.StringVar(&resourceFilter, "resource-filter", "", "Optional CEL filter expression for resources within compositions to be reconciled")
+	flag.BoolVar(&recOpts.EnableBackupOperator, "enable-backup-operator", false, "Recover missing tombstones and record inventory in downstream kube-system ConfigMaps")
 	flag.DurationVar(&namespaceCreationGracePeriod, "ns-creation-grace-period", time.Second, "A namespace is assumed to be missing if it doesn't exist once one of its resources has existed for this long")
 	flag.BoolVar(&namespaceCleanup, "namespace-cleanup", true, "Clean up orphaned resources caused by namespace force-deletions")
 	flag.BoolVar(&recOpts.FailOpen, "fail-open", false, "Report that resources are reconciled once they've been seen, even if reconciliation failed. Overridden by individual resources with 'eno.azure.io/fail-open: true|false'")
@@ -92,6 +93,8 @@ func run() error {
 	} else {
 		mgrOpts.CompositionSelector = labels.Everything()
 	}
+	recOpts.CompositionNamespace = mgrOpts.CompositionNamespace
+	recOpts.CompositionSelector = mgrOpts.CompositionSelector
 
 	if resourceFilter != "" {
 		var err error
@@ -163,6 +166,7 @@ func run() error {
 		"compositionLabelSelector", compositionSelector,
 		"compositionNamespace", compositionNamespace,
 		"resourceFilter", resourceFilter,
+		"enableBackupOperator", recOpts.EnableBackupOperator,
 		"namespaceCreationGracePeriod", namespaceCreationGracePeriod,
 		"namespaceCleanup", namespaceCleanup,
 		"failOpen", recOpts.FailOpen,

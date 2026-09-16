@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -24,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/controllers/backup"
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/Azure/eno/internal/resource"
@@ -31,10 +33,15 @@ import (
 )
 
 type Options struct {
-	Manager        ctrl.Manager
-	WriteBuffer    *flowcontrol.ResourceSliceWriteBuffer
-	Downstream     *rest.Config
-	ResourceFilter cel.Program
+	Manager              ctrl.Manager
+	WriteBuffer          *flowcontrol.ResourceSliceWriteBuffer
+	Downstream           *rest.Config
+	ResourceFilter       cel.Program
+	EnableBackupOperator bool
+
+	// Match the manager's cache scope when evaluating saved inventory ownership.
+	CompositionNamespace string
+	CompositionSelector  labels.Selector
 
 	DisableServerSideApply bool
 	FailOpen               bool
@@ -71,6 +78,13 @@ func New(mgr ctrl.Manager, opts Options) error {
 		Scheme: runtime.NewScheme(), // empty scheme since we shouldn't rely on compile-time types
 	})
 	if err != nil {
+		return err
+	}
+
+	if err := backup.NewController(mgr, backup.Options{
+		Enabled: opts.EnableBackupOperator, Downstream: opts.Downstream, ResourceFilter: opts.ResourceFilter,
+		CompositionNamespace: opts.CompositionNamespace, CompositionSelector: opts.CompositionSelector,
+	}); err != nil {
 		return err
 	}
 

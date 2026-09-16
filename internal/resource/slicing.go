@@ -10,6 +10,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
+// MaxSliceJSONBytes is the maximum sum of manifest bytes used when packing ResourceSlices.
+const MaxSliceJSONBytes = 1024 * 512
+
 // Slice builds a new set of resource slices by merging a new set of resources onto an old set of slices.
 // - New and updated resources are partitioned across slices per maxJsonBytes
 // - Removed resources are converted into "tombstones" i.e. manifests with Deleted == true
@@ -44,7 +47,7 @@ func Slice(comp *apiv1.Composition, previous []*apiv1.ResourceSlice, outputs []*
 			}
 
 			// We don't need a tombstone once the deleted resource has been reconciled
-			if _, ok := refs[newResourceRef(obj)]; ok || ((res.Deleted || slice.DeletionTimestamp != nil) && slice.Status.Resources != nil && slice.Status.Resources[i].Reconciled) {
+			if _, ok := refs[newResourceRef(obj)]; ok || ((res.Deleted || slice.DeletionTimestamp != nil) && i < len(slice.Status.Resources) && slice.Status.Resources[i].Reconciled) {
 				continue // still exists or has already been deleted
 			}
 
