@@ -8,6 +8,7 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/controllers/backup"
 	"github.com/Azure/eno/internal/execution"
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/testutil"
@@ -388,6 +389,7 @@ func recoveryIntegrationControllers(t *testing.T, mgr *testutil.Manager, disable
 	testutil.WithFakeExecutor(t, mgr, handler)
 	downstream := rest.CopyConfig(mgr.DownstreamRestConfig)
 	downstream.QPS = 200
+	require.NoError(t, backup.NewController(mgr.Manager, backup.Options{Downstream: downstream}))
 	require.NoError(t, New(mgr.Manager, Options{
 		Manager: mgr.Manager, Downstream: downstream,
 		Timeout: time.Minute, ReadinessPollInterval: time.Hour,
