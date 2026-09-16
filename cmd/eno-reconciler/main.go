@@ -15,6 +15,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/Azure/eno/internal/cel"
+	"github.com/Azure/eno/internal/controllers/backup"
 	"github.com/Azure/eno/internal/controllers/liveness"
 	"github.com/Azure/eno/internal/controllers/reconciliation"
 	"github.com/Azure/eno/internal/flowcontrol"
@@ -49,7 +50,8 @@ func run() error {
 			Rest: ctrl.GetConfigOrDie(),
 		}
 
-		recOpts = reconciliation.Options{}
+		recOpts    = reconciliation.Options{}
+		backupOpts = backup.Options{}
 	)
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.StringVar(&remoteKubeconfigFile, "remote-kubeconfig", "", "Path to the kubeconfig of the apiserver where the resources will be reconciled. The config from the environment is used if this is not provided")
@@ -62,6 +64,7 @@ func run() error {
 	flag.StringVar(&compositionSelector, "composition-label-selector", labels.Everything().String(), "Optional label selector for compositions to be reconciled")
 	flag.StringVar(&compositionNamespace, "composition-namespace", metav1.NamespaceAll, "Optional namespace to limit compositions that will be reconciled")
 	flag.StringVar(&resourceFilter, "resource-filter", "", "Optional CEL filter expression for resources within compositions to be reconciled")
+	flag.BoolVar(&backupOpts.Enabled, "enable-backup-operator", false, "Recover missing tombstones and record inventory in downstream kube-system ConfigMaps")
 	flag.DurationVar(&namespaceCreationGracePeriod, "ns-creation-grace-period", time.Second, "A namespace is assumed to be missing if it doesn't exist once one of its resources has existed for this long")
 	flag.BoolVar(&namespaceCleanup, "namespace-cleanup", true, "Clean up orphaned resources caused by namespace force-deletions")
 	flag.BoolVar(&recOpts.FailOpen, "fail-open", false, "Report that resources are reconciled once they've been seen, even if reconciliation failed. Overridden by individual resources with 'eno.azure.io/fail-open: true|false'")
@@ -92,6 +95,8 @@ func run() error {
 	} else {
 		mgrOpts.CompositionSelector = labels.Everything()
 	}
+	backupOpts.CompositionNamespace = mgrOpts.CompositionNamespace
+	backupOpts.CompositionSelector = mgrOpts.CompositionSelector
 
 	if resourceFilter != "" {
 		var err error
@@ -146,6 +151,13 @@ func run() error {
 		}
 	}
 
+	backupOpts.Downstream = remoteConfig
+	backupOpts.ResourceFilter = recOpts.ResourceFilter
+	// Disabled backup still acknowledges recovery so reconstitution can proceed.
+	if err := backup.NewController(mgr, backupOpts); err != nil {
+		return fmt.Errorf("constructing backup controller: %w", err)
+	}
+
 	err = reconciliation.New(mgr, recOpts)
 	if err != nil {
 		return fmt.Errorf("constructing reconciliation controller: %w", err)
@@ -163,6 +175,7 @@ func run() error {
 		"compositionLabelSelector", compositionSelector,
 		"compositionNamespace", compositionNamespace,
 		"resourceFilter", resourceFilter,
+		"enableBackupOperator", backupOpts.Enabled,
 		"namespaceCreationGracePeriod", namespaceCreationGracePeriod,
 		"namespaceCleanup", namespaceCleanup,
 		"failOpen", recOpts.FailOpen,

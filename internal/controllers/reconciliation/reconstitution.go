@@ -90,6 +90,12 @@ func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) 
 		"operationOrigin", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	ctx = logr.NewContext(ctx, logger)
 
+	// Normal syntheses wait for recovery; deletion proceeds even with an unfinished or old-UUID decision.
+	if syn := comp.Status.CurrentSynthesis; comp.DeletionTimestamp == nil && syn != nil && syn.Synthesized != nil && !syn.TombstoneRecoveryComplete() {
+		logger.Info("waiting for tombstone recovery preparation", "synthesisUUID", syn.UUID)
+		return ctrl.Result{}, nil
+	}
+
 	// The reconciliation controller assumes that the previous synthesis will be loaded first
 	logger.Info("populating cache with previous synthesis")
 	filled, err := r.populateCache(ctx, comp, comp.Status.PreviousSynthesis, true)

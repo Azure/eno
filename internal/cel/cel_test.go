@@ -22,6 +22,41 @@ func TestEvalCompositionBasics(t *testing.T) {
 	assert.Equal(t, "test-comp", val.Value())
 }
 
+func TestMayMatchComposition(t *testing.T) {
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Labels = map[string]string{"owner": "eno"}
+	matches, err := MayMatchComposition(t.Context(), nil, comp)
+	require.NoError(t, err)
+	assert.True(t, matches)
+
+	for _, tc := range []struct {
+		name    string
+		expr    string
+		matches bool
+		wantErr bool
+	}{
+		{name: "owner", expr: `composition.metadata.labels["owner"] == "eno"`, matches: true},
+		{name: "other-owner", expr: `composition.metadata.labels["owner"] == "other"`},
+		{name: "unknown-resource", expr: `composition.metadata.labels["owner"] == "eno" && self.kind == "ConfigMap"`, matches: true},
+		{name: "non-owner-with-unknown-resource", expr: `composition.metadata.labels["owner"] == "other" && self.kind == "ConfigMap"`},
+		{name: "unknown-field-ownership", expr: `composition.metadata.labels["owner"] == "eno" && pathManagedByEno`, matches: true},
+		{name: "non-boolean", expr: `composition.metadata.name`, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prgm, err := Parse(tc.expr)
+			require.NoError(t, err)
+			matches, err := MayMatchComposition(t.Context(), prgm, comp)
+			if tc.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tc.matches, matches)
+		})
+	}
+}
+
 func TestEvalIntTypeCoersion(t *testing.T) {
 	p, err := Parse("int(composition.metadata.name) > 100")
 	require.NoError(t, err)
