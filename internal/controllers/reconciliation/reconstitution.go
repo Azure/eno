@@ -135,11 +135,11 @@ func (r *reconstitutionSource) populateCache(ctx context.Context, comp *apiv1.Co
 	for i, ref := range synthesis.ResourceSlices {
 		if ref == nil || ref.Name == "" {
 			if !isPreviousSynthesis {
-				logger.V(1).Info("current synthesis has an invalid resource slice reference; waiting for resynthesis", "referenceIndex", i)
+				logger.Info("current synthesis has an invalid resource slice reference; waiting for resynthesis", "referenceIndex", i)
 				return false, nil
 			}
 
-			logger.V(1).Info("previous synthesis has an invalid resource slice reference; skipping", "referenceIndex", i)
+			logger.Info("previous synthesis has an invalid resource slice reference; skipping", "referenceIndex", i)
 			continue
 		}
 
