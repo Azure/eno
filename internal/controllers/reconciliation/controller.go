@@ -36,6 +36,7 @@ type Options struct {
 	Downstream     *rest.Config
 	ResourceFilter cel.Program
 
+	EnableBackupOperator   bool
 	DisableServerSideApply bool
 	FailOpen               bool
 	MigratingFieldManagers []string
@@ -74,7 +75,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 		return err
 	}
 
-	src, cache, err := newReconstitutionSource(mgr, opts.ResourceFilter)
+	src, cache, err := newReconstitutionSource(mgr, opts.ResourceFilter, opts.EnableBackupOperator)
 	if err != nil {
 		return err
 	}
