@@ -16,6 +16,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -52,7 +53,7 @@ type operation struct {
 	uid           types.UID
 	synthesisUUID string
 	lineage       string
-	inventory     *inventorySnapshot
+	inventory     []inventoryResource
 	recordingDone bool
 }
 
@@ -205,7 +206,10 @@ func (c *backupController) filterCompositionByResourceFilter(ctx context.Context
 	if comp.UID != cached.UID || !reflect.DeepEqual(comp.Labels, cached.Labels) || !reflect.DeepEqual(comp.Annotations, cached.Annotations) {
 		return nil, fmt.Errorf("%w: composition routing changed", errSuperseded)
 	}
-	matches, err := c.ownsComposition(ctx, comp)
+	if comp.DeletionTimestamp != nil || comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil {
+		return comp, nil
+	}
+	matches, err := c.matchesComposition(ctx, comp)
 	if err != nil {
 		return nil, err
 	}
@@ -217,14 +221,62 @@ func (c *backupController) filterCompositionByResourceFilter(ctx context.Context
 	return comp, nil
 }
 
-func (c *backupController) ownsComposition(ctx context.Context, comp *apiv1.Composition) (bool, error) {
+func (c *backupController) matchesComposition(ctx context.Context, comp *apiv1.Composition) (bool, error) {
 	if c.compositionNamespace != "" && c.compositionNamespace != comp.Namespace {
 		return false, nil
 	}
 	if c.compositionSelector != nil && !c.compositionSelector.Matches(labels.Set(comp.Labels)) {
 		return false, nil
 	}
-	return enocel.MayMatchComposition(ctx, c.resourceFilter, comp)
+	if c.resourceFilter == nil {
+		return true, nil
+	}
+	slices, err := c.loadCurrent(ctx, comp)
+	if err != nil {
+		return false, err
+	}
+	var representative *unstructured.Unstructured
+	for _, slice := range slices {
+		if len(slice.Spec.Resources) == 0 {
+			continue
+		}
+		representative, _, err = parseInventoryManifest(slice.Spec.Resources[0].Manifest)
+		if err != nil {
+			return false, fmt.Errorf("reading resource filter input from ResourceSlice %q: %w", slice.Name, err)
+		}
+		break
+	}
+	if representative == nil {
+		_, inventory, err := c.readInventories(ctx, comp)
+		if err != nil {
+			return false, err
+		}
+		if inventory != nil {
+			resources, err := decodeInventorySnapshot(comp, *inventory)
+			if err != nil {
+				return false, err
+			}
+			if len(resources) > 0 {
+				representative = resources[0].object()
+			}
+		}
+	}
+	if representative == nil {
+		// With no resources or history, only Composition metadata can select this empty Composition.
+		representative = &unstructured.Unstructured{Object: map[string]any{"metadata": map[string]any{}}}
+	}
+	// Every resource in a Composition is reconciled by the same reconciler.
+	delete(representative.Object, "status")
+	representative.SetCreationTimestamp(metav1.Time{})
+	result, err := enocel.Eval(ctx, c.resourceFilter, comp, representative, nil)
+	if err != nil {
+		return false, fmt.Errorf("evaluating resource filter: %w", err)
+	}
+	matches, ok := result.Value().(bool)
+	if !ok {
+		return false, fmt.Errorf("resource filter must return a boolean, got %T", result.Value())
+	}
+	return matches, nil
 }
 
 func (c *backupController) current(ctx context.Context, expected *apiv1.Composition, requireReady bool) (*apiv1.Composition, error) {
@@ -280,6 +332,10 @@ func (c *backupController) prepare(ctx context.Context, comp *apiv1.Composition,
 	if op.inventory == nil {
 		logger.Info("reading downstream inventory", "lineage", inventoryLineage(comp))
 		_, snapshot, readErr := c.readInventories(ctx, comp)
+		var resources []inventoryResource
+		if readErr == nil && snapshot != nil {
+			resources, readErr = decodeInventorySnapshot(comp, *snapshot)
+		}
 		var err error
 		comp, err = c.current(ctx, comp, false)
 		if err != nil {
@@ -297,14 +353,14 @@ func (c *backupController) prepare(ctx context.Context, comp *apiv1.Composition,
 			logger.Info("no downstream inventory found", "lineage", inventoryLineage(comp))
 			return c.finishRecovery(ctx, comp, reasonInventoryNotFound, "", nil)
 		}
-		op.inventory = snapshot
+		op.inventory = resources
 	}
 
 	slices, err := c.loadCurrent(ctx, comp)
 	if err != nil {
 		return ctrl.Result{}, c.preparationError(ctx, comp, reasonSliceReadError, err)
 	}
-	tombstones, err := missingTombstones(ctx, comp, slices, op.inventory, c.resourceFilter)
+	tombstones, err := missingTombstones(slices, op.inventory)
 	if err != nil {
 		return ctrl.Result{}, c.preparationError(ctx, comp, reasonSliceReadError, err)
 	}
@@ -400,13 +456,13 @@ func (c *backupController) finishRecovery(ctx context.Context, comp *apiv1.Compo
 	return ctrl.Result{Requeue: true}, nil
 }
 
-func (c *backupController) readInventories(ctx context.Context, comp *apiv1.Composition) ([]corev1.ConfigMap, *inventorySnapshot, error) {
+func (c *backupController) readInventories(ctx context.Context, comp *apiv1.Composition) ([]corev1.ConfigMap, *corev1.ConfigMap, error) {
 	list := &corev1.ConfigMapList{}
 	if err := c.downstream.List(ctx, list, client.InNamespace(inventoryNamespace),
 		client.MatchingLabels{inventoryLineageLabel: inventoryLineage(comp)}); err != nil {
 		return nil, nil, fmt.Errorf("listing downstream inventory ConfigMaps: %w", err)
 	}
-	snapshot, err := selectInventory(comp, list.Items)
+	snapshot, err := selectInventory(list.Items)
 	return list.Items, snapshot, err
 }
 
@@ -422,55 +478,57 @@ func (c *backupController) record(ctx context.Context, comp *apiv1.Composition) 
 		return err
 	}
 	syn := comp.Status.CurrentSynthesis
-	if latest != nil && latest.Data.Synthesized.After(syn.Synthesized.Time) {
-		logger.Info("retaining newer inventory instead of recording an older synthesis", "inventoryConfigMap", latest.Object.Name)
-		return nil
-	}
-	if latest != nil && latest.Data.Synthesized.Equal(syn.Synthesized) && latest.Data.SynthesisUUID != syn.UUID {
-		return fmt.Errorf("inventory timestamp is ambiguous with synthesis %q", latest.Data.SynthesisUUID)
-	}
 	slices, err := c.loadCurrent(ctx, comp)
 	if err != nil {
 		return err
 	}
 	if latest != nil {
-		missing, err := missingTombstones(ctx, comp, slices, latest, c.resourceFilter)
+		resources, err := decodeInventorySnapshot(comp, *latest)
+		if err != nil {
+			return err
+		}
+		synthesized, err := inventorySynthesized(latest)
+		if err != nil {
+			return err
+		}
+		if synthesized.After(syn.Synthesized.Time) {
+			logger.Info("retaining newer inventory instead of recording an older synthesis", "inventoryConfigMap", latest.Name)
+			return nil
+		}
+		missing, err := missingTombstones(slices, resources)
 		if err != nil {
 			return err
 		}
 		if len(missing) > 0 {
-			logger.Info("retaining inventory with unresolved historical identities", "inventoryConfigMap", latest.Object.Name, "unresolvedCount", len(missing))
+			logger.Info("retaining inventory with unresolved historical identities", "inventoryConfigMap", latest.Name, "unresolvedCount", len(missing))
 			return nil
 		}
 	}
-	snapshot, err := makeInventory(ctx, comp, slices, c.resourceFilter)
+	snapshot, err := makeInventory(comp, slices)
 	if err != nil {
 		return err
 	}
-	logger = logger.WithValues("inventoryConfigMap", snapshot.Object.Name)
+	logger = logger.WithValues("inventoryConfigMap", snapshot.Name)
 	ctx = logr.NewContext(ctx, logger)
 	comp, err = c.current(ctx, comp, true)
 	if err != nil {
 		return err
 	}
-	var persisted *inventorySnapshot
-	for _, item := range items {
-		if item.Name == snapshot.Object.Name {
-			persisted, err = decodeInventory(comp, item)
-			if err != nil {
-				return err
-			}
-			break
+	persisted := snapshot.DeepCopy()
+	if err := c.downstream.Create(ctx, persisted); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("creating inventory ConfigMap %q: %w", snapshot.Name, err)
+		}
+		if err := c.downstream.Get(ctx, client.ObjectKeyFromObject(snapshot), persisted); err != nil {
+			return fmt.Errorf("reading existing inventory ConfigMap %q: %w", snapshot.Name, err)
 		}
 	}
-	if persisted == nil {
-		persisted, err = c.createInventory(ctx, comp, snapshot)
-		if err != nil {
-			return err
-		}
+	matches, err := inventoriesMatch(comp, persisted, snapshot)
+	if err != nil {
+		return err
 	}
-	if !inventoriesMatch(persisted, snapshot) {
-		return fmt.Errorf("existing inventory ConfigMap %q does not match the intended snapshot", snapshot.Object.Name)
+	if !matches {
+		return fmt.Errorf("existing inventory ConfigMap %q does not match the intended snapshot", snapshot.Name)
 	}
 	logger.Info("inventory snapshot persisted")
 	comp, err = c.current(ctx, comp, true)
@@ -487,12 +545,22 @@ func (c *backupController) record(ctx context.Context, comp *apiv1.Composition) 
 		logger.Info("cleared tombstone recovery requirement after inventory persistence")
 	}
 
+	synthesized, err := inventorySynthesized(snapshot)
+	if err != nil {
+		return err
+	}
 	for _, item := range items {
-		old, err := decodeInventory(comp, item)
+		if item.Name == snapshot.Name {
+			continue
+		}
+		if err := validateInventoryIdentity(comp, &item); err != nil {
+			return fmt.Errorf("validating superseded inventory ConfigMap %q: %w", item.Name, err)
+		}
+		oldTime, err := inventorySynthesized(&item)
 		if err != nil {
 			return err
 		}
-		if !old.Data.Synthesized.Before(&snapshot.Data.Synthesized) {
+		if oldTime.After(synthesized) {
 			continue
 		}
 		comp, err = c.current(ctx, comp, true)
@@ -507,20 +575,6 @@ func (c *backupController) record(ctx context.Context, comp *apiv1.Composition) 
 		logger.Info("superseded inventory cleaned up", "operation", "inventoryCleanup", "deletedInventoryConfigMap", item.Name)
 	}
 	return nil
-}
-
-func (c *backupController) createInventory(ctx context.Context, comp *apiv1.Composition, snapshot *inventorySnapshot) (*inventorySnapshot, error) {
-	if err := c.downstream.Create(ctx, &snapshot.Object); err != nil {
-		if !apierrors.IsAlreadyExists(err) {
-			return nil, fmt.Errorf("creating inventory ConfigMap %q: %w", snapshot.Object.Name, err)
-		}
-		existing := corev1.ConfigMap{}
-		if err := c.downstream.Get(ctx, client.ObjectKeyFromObject(&snapshot.Object), &existing); err != nil {
-			return nil, fmt.Errorf("reading existing inventory ConfigMap %q: %w", snapshot.Object.Name, err)
-		}
-		return decodeInventory(comp, existing)
-	}
-	return snapshot, nil
 }
 
 type statusPatch struct {

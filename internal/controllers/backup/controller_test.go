@@ -26,6 +26,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
+const controllerTestAddonFilter = `has(composition.metadata.labels) && composition.metadata.labels != null && 'aks.azure.com/component-type' in composition.metadata.labels ? composition.metadata.labels['aks.azure.com/component-type'] == 'addon' && (!has(self.metadata.labels) || self.metadata.labels == null || !('eno.azure.io/overlaymgr-component-type' in self.metadata.labels)) : has(self.metadata.labels) && self.metadata.labels != null && 'eno.azure.io/overlaymgr-component-type' in self.metadata.labels && self.metadata.labels['eno.azure.io/overlaymgr-component-type'] == 'addon'`
+
 type controllerTestFixture struct {
 	t          *testing.T
 	upstream   client.WithWatch
@@ -140,40 +142,29 @@ func (f *controllerTestFixture) assertInventory(sequence int, names ...string) {
 	f.t.Helper()
 	items := f.inventories()
 	require.Len(f.t, items, 1)
-	var data inventory
-	require.NoError(f.t, json.Unmarshal([]byte(items[0].Data["inventory.json"]), &data))
-	assert.Equal(f.t, controllerTestUUID(sequence), data.SynthesisUUID)
+	data, err := decodeInventorySnapshot(f.composition(), items[0])
+	require.NoError(f.t, err)
+	assert.Equal(f.t, controllerTestUUID(sequence), items[0].Annotations[inventorySynthesisUUIDAnnotation])
 	want := []inventoryResource{}
 	for _, name := range names {
 		want = append(want, controllerTestResource(name))
 	}
-	assert.ElementsMatch(f.t, want, data.Resources)
+	assert.ElementsMatch(f.t, want, data)
 }
 
 func (f *controllerTestFixture) history(names ...string) *corev1.ConfigMap {
 	f.t.Helper()
 	comp := f.composition()
-	owner := metav1.GetControllerOf(comp)
-	require.NotNil(f.t, owner)
-	data := inventory{
-		FormatVersion: 1, CompositionNamespace: comp.Namespace, SynthesizerName: comp.Spec.Synthesizer.Name,
-		SynthesisUUID: controllerTestUUID(1), Synthesized: metav1.NewTime(comp.Status.CurrentSynthesis.Synthesized.Add(-time.Minute)),
-		Resources: []inventoryResource{},
-		SourceComposition: &inventorySourceComposition{
-			Name: comp.Name, UID: comp.UID, Labels: comp.Labels, Annotations: comp.Annotations,
-			Symphony: &inventorySourceSymphony{Name: owner.Name, UID: owner.UID},
-		},
-	}
+	comp.Status.CurrentSynthesis.UUID = controllerTestUUID(1)
+	synthesized := metav1.NewTime(comp.Status.CurrentSynthesis.Synthesized.Add(-time.Minute))
+	comp.Status.CurrentSynthesis.Synthesized = &synthesized
+	slice := apiv1.ResourceSlice{}
 	for _, name := range names {
-		data.Resources = append(data.Resources, controllerTestResource(name))
+		slice.Spec.Resources = append(slice.Spec.Resources, inventoryTestManifest(f.t, controllerTestResource(name)))
 	}
-	item := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: inventoryName(comp, data.SynthesisUUID), Namespace: "kube-system", UID: "history-uid",
-			Labels: map[string]string{"eno.azure.io/inventory-lineage": inventoryLineage(comp)},
-		},
-		Data: map[string]string{"inventory.json": inventoryTestJSON(f.t, data)},
-	}
+	item, err := makeInventory(comp, []apiv1.ResourceSlice{slice})
+	require.NoError(f.t, err)
+	item.UID = "history-uid"
 	require.NoError(f.t, f.downstream.Create(f.t.Context(), item))
 	return item
 }
@@ -283,70 +274,81 @@ func TestBackupControllerRecoveryRetry(t *testing.T) {
 }
 
 func TestBackupControllerRotation(t *testing.T) {
-	f := newControllerTestFixture(t, false, "desired")
-	old := f.history("desired")
-	var events []string
-	lists := 0
-	expectedNew := ""
-	f.controller.downstream = interceptor.NewClient(f.downstream, interceptor.Funcs{
-		List: func(ctx context.Context, cli client.WithWatch, obj client.ObjectList, opts ...client.ListOption) error {
-			lists++
-			return cli.List(ctx, obj, opts...)
-		},
-		Create: func(ctx context.Context, cli client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
-			err := cli.Create(ctx, obj, opts...)
-			if err == nil {
-				events = append(events, "created:"+obj.GetName())
+	for _, equalTime := range []bool{false, true} {
+		t.Run(fmt.Sprintf("equal-timestamps-%t", equalTime), func(t *testing.T) {
+			f := newControllerTestFixture(t, false, "desired")
+			old := f.history("desired")
+			if equalTime {
+				old.Annotations[inventorySynthesizedAnnotation] = f.composition().Status.CurrentSynthesis.Synthesized.Format(time.RFC3339)
+				require.NoError(t, f.downstream.Update(t.Context(), old))
 			}
-			return err
-		},
-		Delete: func(ctx context.Context, cli client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
-			require.NoError(t, cli.Get(ctx, types.NamespacedName{Namespace: "kube-system", Name: expectedNew}, &corev1.ConfigMap{}),
-				"the replacement must exist before deleting history")
-			options := (&client.DeleteOptions{}).ApplyOptions(opts)
-			require.NotNil(t, options.Preconditions)
-			require.NotNil(t, options.Preconditions.UID)
-			require.NotNil(t, options.Preconditions.ResourceVersion)
-			require.Equal(t, obj.GetUID(), *options.Preconditions.UID)
-			require.Equal(t, obj.GetResourceVersion(), *options.Preconditions.ResourceVersion)
-			err := cli.Delete(ctx, obj, opts...)
-			if err == nil {
-				events = append(events, "deleted:"+obj.GetName())
+			var events []string
+			lists := 0
+			expectedNew := ""
+			f.controller.downstream = interceptor.NewClient(f.downstream, interceptor.Funcs{
+				List: func(ctx context.Context, cli client.WithWatch, obj client.ObjectList, opts ...client.ListOption) error {
+					lists++
+					return cli.List(ctx, obj, opts...)
+				},
+				Create: func(ctx context.Context, cli client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+					err := cli.Create(ctx, obj, opts...)
+					if err == nil {
+						events = append(events, "created:"+obj.GetName())
+					}
+					return err
+				},
+				Delete: func(ctx context.Context, cli client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+					require.NoError(t, cli.Get(ctx, types.NamespacedName{Namespace: "kube-system", Name: expectedNew}, &corev1.ConfigMap{}),
+						"the replacement must exist before deleting history")
+					options := (&client.DeleteOptions{}).ApplyOptions(opts)
+					require.NotNil(t, options.Preconditions)
+					require.NotNil(t, options.Preconditions.UID)
+					require.NotNil(t, options.Preconditions.ResourceVersion)
+					require.Equal(t, obj.GetUID(), *options.Preconditions.UID)
+					require.Equal(t, obj.GetResourceVersion(), *options.Preconditions.ResourceVersion)
+					err := cli.Delete(ctx, obj, opts...)
+					if err == nil {
+						events = append(events, "deleted:"+obj.GetName())
+					}
+					return err
+				},
+			})
+			for _, sequence := range []int{2, 3} {
+				if sequence == 3 {
+					comp := f.composition()
+					comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis.DeepCopy()
+					slice := f.slice("desired").DeepCopy()
+					slice.Name, slice.UID, slice.ResourceVersion = "desired-next", "", ""
+					slice.Spec.SynthesisUUID = controllerTestUUID(sequence)
+					require.NoError(t, f.upstream.Create(t.Context(), slice))
+					when := metav1.NewTime(comp.Status.CurrentSynthesis.Synthesized.Add(time.Minute))
+					if equalTime {
+						when = *comp.Status.CurrentSynthesis.Synthesized
+					}
+					comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+						UUID: controllerTestUUID(sequence), Synthesized: &when,
+						ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
+					}
+					require.NoError(t, f.upstream.Status().Update(t.Context(), comp))
+				}
+				beforeLists := lists
+				f.finish("NotNeeded")
+				assert.Equal(t, beforeLists, lists, "NotNeeded preparation must not discover inventory")
+				expectedNew = inventoryName(f.composition(), controllerTestUUID(sequence))
+				f.ready()
+				require.NoError(t, f.reconcile())
+				f.assertInventory(sequence, "desired")
+				require.Equal(t, []string{"created:" + expectedNew, "deleted:" + old.Name}, events)
+				events = nil
+				item := f.inventories()[0]
+				old = &item
 			}
-			return err
-		},
-	})
-	for _, sequence := range []int{2, 3} {
-		if sequence == 3 {
-			comp := f.composition()
-			comp.Status.PreviousSynthesis = comp.Status.CurrentSynthesis.DeepCopy()
-			slice := f.slice("desired").DeepCopy()
-			slice.Name, slice.UID, slice.ResourceVersion = "desired-next", "", ""
-			slice.Spec.SynthesisUUID = controllerTestUUID(sequence)
-			require.NoError(t, f.upstream.Create(t.Context(), slice))
-			when := metav1.NewTime(comp.Status.CurrentSynthesis.Synthesized.Add(time.Minute))
-			comp.Status.CurrentSynthesis = &apiv1.Synthesis{
-				UUID: controllerTestUUID(sequence), Synthesized: &when,
-				ResourceSlices: []*apiv1.ResourceSliceRef{{Name: slice.Name}},
-			}
-			require.NoError(t, f.upstream.Status().Update(t.Context(), comp))
-		}
-		beforeLists := lists
-		f.finish("NotNeeded")
-		assert.Equal(t, beforeLists, lists, "NotNeeded preparation must not discover inventory")
-		expectedNew = inventoryName(f.composition(), controllerTestUUID(sequence))
-		f.ready()
-		require.NoError(t, f.reconcile())
-		f.assertInventory(sequence, "desired")
-		require.Equal(t, []string{"created:" + expectedNew, "deleted:" + old.Name}, events)
-		events = nil
-		item := f.inventories()[0]
-		old = &item
+			f.restart()
+			require.NoError(t, f.reconcile())
+			f.assertInventory(3, "desired")
+			assert.Empty(t, events)
+		})
 	}
-	f.restart()
-	require.NoError(t, f.reconcile())
-	f.assertInventory(3, "desired")
-	assert.Empty(t, events)
 }
 
 func TestBackupControllerOutageRecovery(t *testing.T) {
@@ -459,6 +461,15 @@ func TestBackupControllerOwnershipAndDisabled(t *testing.T) {
 				f.controller.resourceFilter = filter
 			}
 			before := f.composition()
+			f.controller.client = interceptor.NewClient(f.upstream, interceptor.Funcs{
+				SubResourcePatch: func(context.Context, client.Client, string, client.Object, client.Patch, ...client.SubResourcePatchOption) error {
+					t.Error("filtered Composition must not receive status writes")
+					return fmt.Errorf("unexpected status patch")
+				},
+			})
+			if mode == "disabled" {
+				f.controller.client = nil
+			}
 			// Any downstream operation is a test failure, including discovery.
 			f.controller.downstream = nil
 			require.NoError(t, f.reconcile())
@@ -467,6 +478,189 @@ func TestBackupControllerOwnershipAndDisabled(t *testing.T) {
 			assert.Empty(t, f.inventories())
 		})
 	}
+}
+
+func TestBackupControllerAddonResourceFilter(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		componentType string
+		overlayType   string
+		matches       bool
+	}{
+		{name: "addon", componentType: "addon", matches: true},
+		{name: "ccp", componentType: "ccp"},
+		{name: "legacy-addon", overlayType: "addon", matches: true},
+		{name: "legacy-ccp", overlayType: "ccp"},
+		{name: "legacy-unlabeled"},
+		{name: "addon-excludes-overlay-managed", componentType: "addon", overlayType: "addon"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newControllerTestFixture(t, false, "desired")
+			comp := f.composition()
+			comp.Labels = map[string]string{}
+			if tc.componentType != "" {
+				comp.Labels["aks.azure.com/component-type"] = tc.componentType
+			}
+			require.NoError(t, f.upstream.Update(t.Context(), comp))
+			slice := f.slice("desired")
+			res := controllerTestResource("desired")
+			if tc.overlayType != "" {
+				res.Labels = map[string]string{"eno.azure.io/overlaymgr-component-type": tc.overlayType}
+			}
+			slice.Spec.Resources[0] = inventoryTestManifest(t, res)
+			require.NoError(t, f.upstream.Update(t.Context(), slice))
+			var err error
+			f.controller.resourceFilter, err = enocel.Parse(controllerTestAddonFilter)
+			require.NoError(t, err)
+			f.controller.downstream = nil
+			statusWrites := 0
+			f.controller.client = interceptor.NewClient(f.upstream, interceptor.Funcs{
+				SubResourcePatch: func(ctx context.Context, cli client.Client, name string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					statusWrites++
+					return cli.SubResource(name).Patch(ctx, obj, patch, opts...)
+				},
+			})
+			before := f.composition()
+			require.NoError(t, f.reconcile())
+			if tc.matches {
+				require.Equal(t, 1, statusWrites)
+				status := f.composition().Status.CurrentSynthesis.TombstoneRecoveryFinished
+				require.NotNil(t, status)
+				assert.True(t, status.Status)
+				assert.Equal(t, reasonNotNeeded, status.Reason)
+			} else {
+				assert.Zero(t, statusWrites)
+				assert.Equal(t, before, f.composition())
+				assert.Empty(t, f.controller.operations)
+			}
+			assert.Equal(t, slice.Spec, f.slice("desired").Spec)
+			assert.Empty(t, f.inventories())
+		})
+	}
+}
+
+func TestBackupControllerEmptyCurrentResourceFilter(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		componentType string
+		inventoryType string
+		matches       bool
+	}{
+		{name: "inventory-addon", inventoryType: "addon", matches: true},
+		{name: "inventory-ccp", inventoryType: "ccp"},
+		{name: "empty-addon", componentType: "addon", matches: true},
+		{name: "empty-ccp", componentType: "ccp"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newControllerTestFixture(t, true)
+			comp := f.composition()
+			comp.Labels = nil
+			if tc.componentType != "" {
+				comp.Labels = map[string]string{"aks.azure.com/component-type": tc.componentType}
+			}
+			require.NoError(t, f.upstream.Update(t.Context(), comp))
+			f.updateStatus(func(syn *apiv1.Synthesis) { syn.ResourceSlices = nil })
+			if tc.inventoryType != "" {
+				item := f.history("removed")
+				res := controllerTestResource("removed")
+				res.Labels = map[string]string{"eno.azure.io/overlaymgr-component-type": tc.inventoryType}
+				item.Data[inventoryDataKey] = inventoryTestJSON(t, []inventoryResource{res})
+				require.NoError(t, f.downstream.Update(t.Context(), item))
+			}
+			var err error
+			f.controller.resourceFilter, err = enocel.Parse(controllerTestAddonFilter)
+			require.NoError(t, err)
+			before, history := f.composition(), f.inventories()
+			if tc.matches {
+				reason := reasonInventoryNotFound
+				if tc.inventoryType != "" {
+					reason = reasonFinished
+				}
+				f.finish(reason)
+				if tc.inventoryType != "" {
+					syn := f.composition().Status.CurrentSynthesis
+					require.Len(t, syn.ResourceSlices, 1)
+					slice := f.slice(syn.ResourceSlices[0].Name)
+					require.Len(t, slice.Spec.Resources, 1)
+					assert.True(t, slice.Spec.Resources[0].Deleted)
+					_, res, err := parseInventoryManifest(slice.Spec.Resources[0].Manifest)
+					require.NoError(t, err)
+					assert.Equal(t, "addon", res.Labels["eno.azure.io/overlaymgr-component-type"])
+				}
+			} else {
+				f.controller.client = interceptor.NewClient(f.upstream, interceptor.Funcs{
+					SubResourcePatch: func(context.Context, client.Client, string, client.Object, client.Patch, ...client.SubResourcePatchOption) error {
+						t.Error("filtered Composition must not receive status writes")
+						return fmt.Errorf("unexpected status patch")
+					},
+				})
+				require.NoError(t, f.reconcile())
+				assert.Equal(t, before, f.composition())
+				assert.Empty(t, f.controller.operations)
+			}
+			assert.Equal(t, history, f.inventories(), "routing and recovery must not rewrite inventory")
+		})
+	}
+}
+
+func TestBackupControllerDeletingSkipsInventory(t *testing.T) {
+	for _, recording := range []bool{false, true} {
+		t.Run(fmt.Sprintf("recording-%t", recording), func(t *testing.T) {
+			f := newControllerTestFixture(t, !recording)
+			history := f.history("removed")
+			if recording {
+				f.finish(reasonNotNeeded)
+				f.ready()
+			}
+			f.updateStatus(func(syn *apiv1.Synthesis) { syn.ResourceSlices = nil })
+			var err error
+			f.controller.resourceFilter, err = enocel.Parse(controllerTestAddonFilter)
+			require.NoError(t, err)
+			require.NoError(t, f.upstream.Delete(t.Context(), f.composition()))
+			before := f.composition()
+			f.controller.downstream = nil
+			f.controller.client = interceptor.NewClient(f.upstream, interceptor.Funcs{
+				SubResourcePatch: func(context.Context, client.Client, string, client.Object, client.Patch, ...client.SubResourcePatchOption) error {
+					t.Error("deleting Composition must not receive backup status writes")
+					return fmt.Errorf("unexpected status patch")
+				},
+			})
+			require.NoError(t, f.reconcile())
+			assert.Equal(t, before, f.composition())
+			assert.Equal(t, []corev1.ConfigMap{*history}, f.inventories())
+			assert.Empty(t, f.controller.operations)
+		})
+	}
+}
+
+func TestBackupControllerRecordingSupersededAfterCreate(t *testing.T) {
+	f := newControllerTestFixture(t, false, "desired")
+	old := f.history("desired")
+	f.finish(reasonNotNeeded)
+	f.ready()
+	var expected *apiv1.Composition
+	f.controller.downstream = interceptor.NewClient(f.downstream, interceptor.Funcs{
+		Create: func(ctx context.Context, cli client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			if err := cli.Create(ctx, obj, opts...); err != nil {
+				return err
+			}
+			f.updateStatus(func(syn *apiv1.Synthesis) {
+				syn.UUID = controllerTestUUID(3)
+				syn.TombstoneRecoveryFinished = nil
+			})
+			expected = f.composition()
+			return nil
+		},
+		Delete: func(context.Context, client.WithWatch, client.Object, ...client.DeleteOption) error {
+			t.Error("superseded recording must not delete history")
+			return fmt.Errorf("unexpected inventory delete")
+		},
+	})
+	require.NoError(t, f.reconcile())
+	require.NotNil(t, expected)
+	assert.Equal(t, expected, f.composition())
+	assert.Len(t, f.inventories(), 2)
+	require.NoError(t, f.downstream.Get(t.Context(), client.ObjectKeyFromObject(old), &corev1.ConfigMap{}))
 }
 
 func TestBackupControllerObsoleteWork(t *testing.T) {
