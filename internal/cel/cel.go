@@ -48,7 +48,32 @@ func Parse(expr string) (cel.Program, error) {
 	if iss != nil && iss.Err() != nil {
 		return nil, iss.Err()
 	}
-	return Env.Program(ast, cel.InterruptCheckFrequency(10))
+	return Env.Program(ast, cel.InterruptCheckFrequency(10), cel.EvalOptions(cel.OptPartialEval))
+}
+
+// MayMatchComposition excludes definite non-owners without requiring resource output.
+// Unknown resource-dependent terms remain eligible under disjoint Composition ownership.
+func MayMatchComposition(ctx context.Context, prgm cel.Program, comp *apiv1.Composition) (bool, error) {
+	if prgm == nil {
+		return true, nil
+	}
+	args, err := cel.PartialVars(map[string]any{"composition": newCompositionMap(comp)},
+		cel.AttributePattern("self"), cel.AttributePattern("pathManagedByEno"))
+	if err != nil {
+		return false, fmt.Errorf("building partial resource filter input: %w", err)
+	}
+	val, _, err := prgm.ContextEval(ctx, args)
+	if err != nil {
+		return false, fmt.Errorf("evaluating composition resource filter: %w", err)
+	}
+	if types.IsUnknown(val) {
+		return true, nil
+	}
+	matches, ok := val.Value().(bool)
+	if !ok {
+		return false, fmt.Errorf("composition resource filter returned %v, expected a boolean", val)
+	}
+	return matches, nil
 }
 
 func Eval(ctx context.Context, prgm cel.Program, comp *apiv1.Composition, self *unstructured.Unstructured, fm FieldMetadata) (ref.Val, error) {
