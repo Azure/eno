@@ -285,14 +285,6 @@ spec:
                       TombstoneRecoveryFinished records the recovery decision for this synthesis.
                       A missing or unfinished decision prevents reconstitution only when backup is enabled and the Composition is not deleting.
                     properties:
-                      inventoryAttempts:
-                        description: |-
-                          InventoryAttempts is retained for compatibility with older recovery status.
-                          The backup operator no longer reads or increments it.
-                        format: int32
-                        maximum: 3
-                        minimum: 0
-                        type: integer
                       message:
                         type: string
                       reason:
@@ -455,14 +447,6 @@ spec:
                       TombstoneRecoveryFinished records the recovery decision for this synthesis.
                       A missing or unfinished decision prevents reconstitution only when backup is enabled and the Composition is not deleting.
                     properties:
-                      inventoryAttempts:
-                        description: |-
-                          InventoryAttempts is retained for compatibility with older recovery status.
-                          The backup operator no longer reads or increments it.
-                        format: int32
-                        maximum: 3
-                        minimum: 0
-                        type: integer
                       message:
                         type: string
                       reason:
@@ -618,14 +602,6 @@ spec:
                       TombstoneRecoveryFinished records the recovery decision for this synthesis.
                       A missing or unfinished decision prevents reconstitution only when backup is enabled and the Composition is not deleting.
                     properties:
-                      inventoryAttempts:
-                        description: |-
-                          InventoryAttempts is retained for compatibility with older recovery status.
-                          The backup operator no longer reads or increments it.
-                        format: int32
-                        maximum: 3
-                        minimum: 0
-                        type: integer
                       message:
                         type: string
                       reason:

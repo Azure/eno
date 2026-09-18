@@ -194,12 +194,6 @@ type TombstoneRecoveryStatus struct {
 
 	// SynthesisUUID prevents a decision from being reused when a synthesis UUID is replaced.
 	SynthesisUUID string `json:"synthesisUUID"`
-
-	// InventoryAttempts is retained for compatibility with older recovery status.
-	// The backup operator no longer reads or increments it.
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=3
-	InventoryAttempts int32 `json:"inventoryAttempts,omitempty"`
 }
 
 func (s *Synthesis) TombstoneRecoveryComplete() bool {

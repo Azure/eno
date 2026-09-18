@@ -478,7 +478,6 @@ func TestBackupControllerOutageRecovery(t *testing.T) {
 		require.NotNil(t, syn.TombstoneRecoveryFinished)
 		assert.False(t, syn.TombstoneRecoveryFinished.Status)
 		assert.Equal(t, "InventoryGetError", syn.TombstoneRecoveryFinished.Reason)
-		assert.Zero(t, syn.TombstoneRecoveryFinished.InventoryAttempts)
 		require.Equal(t, []corev1.ConfigMap{*old}, f.inventories())
 	}
 	offline = false
