@@ -124,8 +124,8 @@ metadata:
 
 ## Sharding
 
-You may reconcile a subset of Compositions and/or resources by optionally passing the following flags to the Eno reconciler:
-- **--composition-namespace**: Only watch compositions in the given namespace.
+The Eno reconciler watches Compositions in one namespace. The following flags control its scope:
+- **--composition-namespace**: Only watch Compositions and ResourceSlices in the given namespace. Defaults to `POD_NAMESPACE`, which should be populated from the pod's `metadata.namespace` through the Downward API. A nonempty value must be supplied through the flag or environment variable; the reconciler does not default to watching all namespaces.
   ```
   --composition-namespace=default
   ```
@@ -142,7 +142,13 @@ You may reconcile a subset of Compositions and/or resources by optionally passin
 The flags stack up and are not mutually exclusive i.e. A resource filter will only be evaluated against resources whose Composition match the label selector, which in turn is only evaluated against Compositions in the selected namespace.
 ## Tombstone Recovery and Inventory
 
-`internal/controllers/backup` provides inventory construction, validation, selection, and missing-tombstone calculation helpers. These helpers do not register controllers, write Kubernetes objects, or gate reconstitution. Normal synthesis and reconciliation behavior is unchanged.
+When backup is enabled, the backup controller processes each eligible Composition in two phases. After synthesis, `tombstoneRecovery` reads the saved downstream inventory and persists missing tombstones only when `TombstoneRecoveryRequired` is true; otherwise the controller records a `NotNeeded` recovery decision without reading inventory. Once the recovery decision is complete and the synthesis is `Ready`, `inventoryUpdate` records a ConfigMap in the downstream cluster whether or not recovery was required. Inventory update trusts that decision and does not decode historical resources or repeat the tombstone diff; it still preserves history when the recorded recovery reason is `InventoryGetError` or `InventoryInvalid`.
+
+Inventory update only writes downstream ConfigMaps; it does not modify Composition status or clear `TombstoneRecoveryRequired`. That flag is computed independently for each synthesis rather than inherited from the preceding synthesis.
+
+Recovery overflow ResourceSlices use the Composition name as their prefix, like normal ResourceSlices, with a deterministic suffix derived from the Composition UID, synthesis UUID, and slice contents so retries reuse the same object. Long Composition names are truncated to keep the complete name within Kubernetes' 253-character limit.
+
+Composition status events advance these phases; successful recovery status writes do not explicitly requeue. Inventory recording waits for a subsequent event so it uses the persisted recovery decision and ResourceSlice references. Superseded work explicitly requeues, and API failures use controller-runtime error retries. Fresh Composition reads occur immediately before ResourceSlice writes and inventory ConfigMap creation/deletion, not between read-only steps. These checks reject missing Compositions, deletion, missing or changed synthesis UUIDs, and loss of readiness before inventory writes; metadata or recovery-status changes within the same synthesis do not invalidate the operation. Status patches rely on atomic UID/resourceVersion/synthesis UUID preconditions without an extra Composition read; rejected patches return errors for retry. Inventory rotation persists and verifies the replacement before deleting every other ConfigMap returned by the list scoped to `kube-system` and the inventory lineage label, regardless of source timestamp. Cleanup trusts this label and uses UID/resourceVersion delete preconditions to reject objects changed since listing.
 
 `makeInventory` returns a `*corev1.ConfigMap` ready for the controller to pass directly to `Create`. `selectInventory` also returns a ConfigMap. `decodeInventorySnapshot` returns only the decoded `[]inventoryResource`, which the controller can pass to `missingTombstones` to calculate the diff against current ResourceSlices; there is no inventory wrapper type.
 

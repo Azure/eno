@@ -15,9 +15,7 @@ import (
 	"github.com/google/cel-go/cel"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
@@ -29,7 +27,6 @@ import (
 )
 
 const (
-	reasonInProgress        = "BackupInProgress"
 	reasonNotNeeded         = "NotNeeded"
 	reasonInventoryNotFound = "InventoryNotFound"
 	reasonInventoryGetError = "InventoryGetError"
@@ -42,30 +39,16 @@ const (
 var errSuperseded = errors.New("backup operation superseded")
 
 type Options struct {
-	Enabled              bool
-	Downstream           *rest.Config
-	ResourceFilter       cel.Program
-	CompositionNamespace string
-	CompositionSelector  labels.Selector
-}
-
-type operation struct {
-	uid           types.UID
-	synthesisUUID string
-	lineage       string
-	inventory     []inventoryResource
-	recordingDone bool
+	Enabled        bool
+	Downstream     *rest.Config
+	ResourceFilter cel.Program
 }
 
 type backupController struct {
-	client               client.Client
-	reader               client.Reader
-	downstream           client.Client
-	resourceFilter       cel.Program
-	enabled              bool
-	operations           map[types.NamespacedName]*operation
-	compositionNamespace string
-	compositionSelector  labels.Selector
+	client         client.Client
+	reader         client.Reader
+	downstream     client.Client
+	resourceFilter cel.Program
 }
 
 type jitteredRateLimiter struct {
@@ -81,13 +64,9 @@ func NewController(mgr ctrl.Manager, opts Options) error {
 		return nil
 	}
 	c := &backupController{
-		client:               mgr.GetClient(),
-		reader:               mgr.GetAPIReader(),
-		resourceFilter:       opts.ResourceFilter,
-		enabled:              opts.Enabled,
-		operations:           map[types.NamespacedName]*operation{},
-		compositionNamespace: opts.CompositionNamespace,
-		compositionSelector:  opts.CompositionSelector,
+		client:         mgr.GetClient(),
+		reader:         mgr.GetAPIReader(),
+		resourceFilter: opts.ResourceFilter,
 	}
 	config := opts.Downstream
 	if config == nil {
@@ -115,74 +94,59 @@ func NewController(mgr ctrl.Manager, opts Options) error {
 }
 
 func (c *backupController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	if !c.enabled {
-		return ctrl.Result{}, nil
-	}
 	logger := logr.FromContextOrDiscard(ctx).WithValues("compositionName", req.Name, "compositionNamespace", req.Namespace)
 	ctx = logr.NewContext(ctx, logger)
-	comp, err := c.filterCompositionByResourceFilter(ctx, req.NamespacedName)
-	if err != nil {
-		return c.result(ctx, ctrl.Result{}, err)
-	}
-	if comp == nil {
-		delete(c.operations, req.NamespacedName)
+	comp := &apiv1.Composition{}
+	err := c.client.Get(ctx, req.NamespacedName, comp)
+	if apierrors.IsNotFound(err) {
 		return ctrl.Result{}, nil
+	}
+	if err != nil {
+		logger.Error(err, "failed to get composition")
+		return ctrl.Result{}, err
 	}
 	// Deletion reuses existing slices and must not wait for backup, even if recovery is unfinished.
 	if comp.DeletionTimestamp != nil {
-		delete(c.operations, req.NamespacedName)
 		logger.Info("composition is deleting; skipping recovery and inventory recording", "compositionUID", comp.UID,
 			"synthesisUUID", comp.Status.GetCurrentSynthesisUUID())
 		return ctrl.Result{}, nil
 	}
 	syn := comp.Status.CurrentSynthesis
 	if syn == nil || syn.Synthesized == nil {
-		delete(c.operations, req.NamespacedName)
 		return ctrl.Result{}, nil
 	}
 	logger = logger.WithValues("compositionUID", comp.UID, "compositionGeneration", comp.Generation, "synthesisUUID", syn.UUID,
 		"synthesizerName", comp.Spec.Synthesizer.Name, "operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	ctx = logr.NewContext(ctx, logger)
+	matches, err := c.matchesComposition(ctx, comp)
+	if err != nil {
+		logger.Error(err, "failed to evaluate composition resource filter")
+		return ctrl.Result{}, err
+	}
+	if !matches {
+		logger.Info("composition is outside the backup resource filter")
+		return ctrl.Result{}, nil
+	}
 	if syn.UUID == "" {
-		return c.result(ctx, ctrl.Result{}, fmt.Errorf("published synthesis has no UUID"))
-	}
-	op := c.operations[req.NamespacedName]
-	lineage := inventoryLineage(comp)
-	if op == nil || op.uid != comp.UID || op.synthesisUUID != syn.UUID || op.lineage != lineage {
-		op = &operation{uid: comp.UID, synthesisUUID: syn.UUID, lineage: lineage}
-		c.operations[req.NamespacedName] = op
+		logger.Error(err, "invalid synthesis")
+		return ctrl.Result{}, fmt.Errorf("published synthesis has no UUID")
 	}
 
+	// Inventory must use the persisted recovery decision and slice references from a subsequent event.
 	if !syn.TombstoneRecoveryComplete() {
-		ctx = logr.NewContext(ctx, logger.WithValues("operation", "recoveryPreparation"))
-		if !syn.TombstoneRecoveryRequired {
-			result, err := c.finishRecovery(ctx, comp, reasonNotNeeded, "", nil)
-			return c.result(ctx, result, err)
+		logger = logger.WithValues("operation", "recoveryPreparation")
+		ctx = logr.NewContext(ctx, logger)
+		if syn.TombstoneRecoveryRequired {
+			err = c.tombstoneRecovery(ctx, comp)
+		} else {
+			err = c.markTombstoneRecoveryFinished(ctx, comp, reasonNotNeeded, "", nil)
 		}
-		result, err := c.prepare(ctx, comp, op)
-		return c.result(ctx, result, err)
+	} else if syn.Ready != nil {
+		logger = logger.WithValues("operation", "inventoryRecording", "inventoryConfigMap", inventoryName(comp, syn.UUID))
+		ctx = logr.NewContext(ctx, logger)
+		err = c.inventoryUpdate(ctx, comp)
 	}
 
-	op.inventory = nil
-	if syn.Ready == nil || op.recordingDone {
-		return ctrl.Result{}, nil
-	}
-	switch syn.TombstoneRecoveryFinished.Reason {
-	case reasonInventoryGetError, reasonInventoryInvalid:
-		logger.Info("inventory recording deferred because historical inventory is unresolved", "operation", "inventoryRecording",
-			"reason", syn.TombstoneRecoveryFinished.Reason)
-		return ctrl.Result{}, nil
-	}
-	ctx = logr.NewContext(ctx, logger.WithValues("operation", "inventoryRecording", "inventoryConfigMap", inventoryName(comp, syn.UUID)))
-	err = c.record(ctx, comp)
-	if err == nil {
-		op.recordingDone = true
-	}
-	return c.result(ctx, ctrl.Result{}, err)
-}
-
-func (c *backupController) result(ctx context.Context, result ctrl.Result, err error) (ctrl.Result, error) {
-	logger := logr.FromContextOrDiscard(ctx)
 	if errors.Is(err, errSuperseded) {
 		logger.Info("abandoning obsolete backup work", "reason", err.Error())
 		return ctrl.Result{Requeue: true}, nil
@@ -190,96 +154,27 @@ func (c *backupController) result(ctx context.Context, result ctrl.Result, err e
 	if err != nil {
 		logger.Error(err, "backup operation failed")
 	}
-	return result, err
-}
-
-func (c *backupController) filterCompositionByResourceFilter(ctx context.Context, key types.NamespacedName) (*apiv1.Composition, error) {
-	cached := &apiv1.Composition{}
-	if err := c.client.Get(ctx, key, cached); err != nil {
-		return nil, client.IgnoreNotFound(err)
-	}
-	comp := &apiv1.Composition{}
-	if err := c.reader.Get(ctx, key, comp); err != nil {
-		return nil, client.IgnoreNotFound(err)
-	}
-	// The cached lookup honors the manager's watch scope; reject a stale routing decision.
-	if comp.UID != cached.UID || !reflect.DeepEqual(comp.Labels, cached.Labels) || !reflect.DeepEqual(comp.Annotations, cached.Annotations) {
-		return nil, fmt.Errorf("%w: composition routing changed", errSuperseded)
-	}
-	if comp.DeletionTimestamp != nil || comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil {
-		return comp, nil
-	}
-	matches, err := c.matchesComposition(ctx, comp)
-	if err != nil {
-		return nil, err
-	}
-
-	if !matches {
-		logr.FromContextOrDiscard(ctx).V(1).Info("composition is outside the backup resource filter")
-		return nil, nil
-	}
-	return comp, nil
+	return ctrl.Result{}, err
 }
 
 func (c *backupController) matchesComposition(ctx context.Context, comp *apiv1.Composition) (bool, error) {
-	if c.compositionNamespace != "" && c.compositionNamespace != comp.Namespace {
-		return false, nil
-	}
-	if c.compositionSelector != nil && !c.compositionSelector.Matches(labels.Set(comp.Labels)) {
-		return false, nil
-	}
 	if c.resourceFilter == nil {
 		return true, nil
 	}
-	slices, err := c.loadCurrent(ctx, comp)
+	// This check uses Composition metadata only; self has no resource labels.
+	self := &unstructured.Unstructured{Object: map[string]any{"metadata": map[string]any{}}}
+	result, err := enocel.Eval(ctx, c.resourceFilter, comp, self, nil)
 	if err != nil {
-		return false, err
-	}
-	var representative *unstructured.Unstructured
-	for _, slice := range slices {
-		if len(slice.Spec.Resources) == 0 {
-			continue
-		}
-		representative, _, err = parseInventoryManifest(slice.Spec.Resources[0].Manifest)
-		if err != nil {
-			return false, fmt.Errorf("reading resource filter input from ResourceSlice %q: %w", slice.Name, err)
-		}
-		break
-	}
-	if representative == nil {
-		_, inventory, err := c.readInventories(ctx, comp)
-		if err != nil {
-			return false, err
-		}
-		if inventory != nil {
-			resources, err := decodeInventorySnapshot(comp, *inventory)
-			if err != nil {
-				return false, err
-			}
-			if len(resources) > 0 {
-				representative = resources[0].object()
-			}
-		}
-	}
-	if representative == nil {
-		// With no resources or history, only Composition metadata can select this empty Composition.
-		representative = &unstructured.Unstructured{Object: map[string]any{"metadata": map[string]any{}}}
-	}
-	// Every resource in a Composition is reconciled by the same reconciler.
-	delete(representative.Object, "status")
-	representative.SetCreationTimestamp(metav1.Time{})
-	result, err := enocel.Eval(ctx, c.resourceFilter, comp, representative, nil)
-	if err != nil {
-		return false, fmt.Errorf("evaluating resource filter: %w", err)
+		return false, fmt.Errorf("evaluating composition resource filter: %w", err)
 	}
 	matches, ok := result.Value().(bool)
 	if !ok {
-		return false, fmt.Errorf("resource filter must return a boolean, got %T", result.Value())
+		return false, fmt.Errorf("resource filter expression must return a boolean, got %T", result.Value())
 	}
 	return matches, nil
 }
 
-func (c *backupController) current(ctx context.Context, expected *apiv1.Composition, requireReady bool) (*apiv1.Composition, error) {
+func (c *backupController) getCurrentComposition(ctx context.Context, expected *apiv1.Composition, requireReady bool) (*apiv1.Composition, error) {
 	comp := &apiv1.Composition{}
 	if err := c.reader.Get(ctx, client.ObjectKeyFromObject(expected), comp); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -292,16 +187,10 @@ func (c *backupController) current(ctx context.Context, expected *apiv1.Composit
 		return nil, fmt.Errorf("%w: composition is deleting", errSuperseded)
 	}
 	syn, old := comp.Status.CurrentSynthesis, expected.Status.CurrentSynthesis
-	if comp.UID != expected.UID || syn == nil || old == nil || syn.UUID != old.UUID ||
-		comp.Spec.Synthesizer.Name != expected.Spec.Synthesizer.Name ||
-		!reflect.DeepEqual(comp.Labels, expected.Labels) || !reflect.DeepEqual(comp.Annotations, expected.Annotations) ||
-		!reflect.DeepEqual(comp.OwnerReferences, expected.OwnerReferences) ||
-		!reflect.DeepEqual(syn.ResourceSlices, old.ResourceSlices) ||
-		!reflect.DeepEqual(syn.TombstoneRecoveryFinished, old.TombstoneRecoveryFinished) ||
-		syn.TombstoneRecoveryRequired != old.TombstoneRecoveryRequired {
+	if syn == nil || old == nil || syn.UUID != old.UUID {
 		logr.FromContextOrDiscard(ctx).Info("observed obsolete backup operation", "originalSynthesisUUID", expected.Status.GetCurrentSynthesisUUID(),
 			"currentSynthesisUUID", comp.Status.GetCurrentSynthesisUUID())
-		return nil, fmt.Errorf("%w: composition or recovery decision changed (current synthesis %q)", errSuperseded, comp.Status.GetCurrentSynthesisUUID())
+		return nil, fmt.Errorf("%w: synthesis changed (current synthesis %q)", errSuperseded, comp.Status.GetCurrentSynthesisUUID())
 	}
 	if requireReady && syn.Ready == nil {
 		return nil, fmt.Errorf("%w: synthesis is no longer eligible for inventory recording", errSuperseded)
@@ -309,7 +198,7 @@ func (c *backupController) current(ctx context.Context, expected *apiv1.Composit
 	return comp, nil
 }
 
-func recoveryStatus(comp *apiv1.Composition) apiv1.TombstoneRecoveryStatus {
+func getOrCreateRecoveryStatus(comp *apiv1.Composition) apiv1.TombstoneRecoveryStatus {
 	syn := comp.Status.CurrentSynthesis
 	if status := syn.TombstoneRecoveryFinished; status != nil && status.SynthesisUUID == syn.UUID {
 		return *status
@@ -317,91 +206,60 @@ func recoveryStatus(comp *apiv1.Composition) apiv1.TombstoneRecoveryStatus {
 	return apiv1.TombstoneRecoveryStatus{SynthesisUUID: syn.UUID}
 }
 
-func (c *backupController) prepare(ctx context.Context, comp *apiv1.Composition, op *operation) (ctrl.Result, error) {
-	logger := logr.FromContextOrDiscard(ctx).WithValues("operation", "recoveryPreparation")
-	ctx = logr.NewContext(ctx, logger)
-	status := recoveryStatus(comp)
-	if status.Reason == "" {
-		status.Reason = reasonInProgress
-		after := comp.DeepCopy()
-		after.Status.CurrentSynthesis.TombstoneRecoveryFinished = &status
-		logger.Info("starting tombstone recovery preparation")
-		return ctrl.Result{Requeue: true}, c.patchStatus(ctx, comp, after)
+func (c *backupController) tombstoneRecovery(ctx context.Context, comp *apiv1.Composition) error {
+	logger := logr.FromContextOrDiscard(ctx)
+	logger.Info("reading downstream inventory", "lineage", inventoryLineage(comp))
+	items, readErr := c.readInventories(ctx, comp)
+	var configMap *corev1.ConfigMap
+	if readErr == nil {
+		configMap, readErr = selectInventory(items)
+	}
+	var resources []inventoryResource
+	if readErr == nil && configMap != nil {
+		resources, readErr = decodeInventorySnapshot(comp, *configMap)
+	}
+	if readErr != nil {
+		logger.Error(readErr, "failed to read downstream inventory")
+		var invalid *invalidInventoryError
+		if errors.As(readErr, &invalid) {
+			return c.markTombstoneRecoveryFinished(ctx, comp, reasonInventoryInvalid, readErr.Error(), nil)
+		}
+		return c.recordTombstoneRecoveryError(ctx, comp, reasonInventoryGetError, readErr)
+	}
+	if configMap == nil {
+		logger.Info("no downstream inventory found", "lineage", inventoryLineage(comp))
+		return c.markTombstoneRecoveryFinished(ctx, comp, reasonInventoryNotFound, "", nil)
 	}
 
-	if op.inventory == nil {
-		logger.Info("reading downstream inventory", "lineage", inventoryLineage(comp))
-		_, snapshot, readErr := c.readInventories(ctx, comp)
-		var resources []inventoryResource
-		if readErr == nil && snapshot != nil {
-			resources, readErr = decodeInventorySnapshot(comp, *snapshot)
-		}
-		var err error
-		comp, err = c.current(ctx, comp, false)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		if readErr != nil {
-			logger.Error(readErr, "failed to read downstream inventory")
-			var invalid *invalidInventoryError
-			if errors.As(readErr, &invalid) {
-				return c.finishRecovery(ctx, comp, reasonInventoryInvalid, readErr.Error(), nil)
-			}
-			return ctrl.Result{}, c.preparationError(ctx, comp, reasonInventoryGetError, readErr)
-		}
-		if snapshot == nil {
-			logger.Info("no downstream inventory found", "lineage", inventoryLineage(comp))
-			return c.finishRecovery(ctx, comp, reasonInventoryNotFound, "", nil)
-		}
-		op.inventory = resources
-	}
-
-	slices, err := c.loadCurrent(ctx, comp)
+	slices, err := c.loadCurrentSynthesisResourceSlices(ctx, comp)
 	if err != nil {
-		return ctrl.Result{}, c.preparationError(ctx, comp, reasonSliceReadError, err)
+		return c.recordTombstoneRecoveryError(ctx, comp, reasonSliceReadError, err)
 	}
-	tombstones, err := missingTombstones(slices, op.inventory)
+	tombstones, err := missingTombstones(slices, resources)
 	if err != nil {
-		return ctrl.Result{}, c.preparationError(ctx, comp, reasonSliceReadError, err)
-	}
-	comp, err = c.current(ctx, comp, false)
-	if err != nil {
-		return ctrl.Result{}, err
+		return c.recordTombstoneRecoveryError(ctx, comp, reasonSliceReadError, err)
 	}
 	refs, err := c.writeTombstones(ctx, comp, slices, tombstones)
 	if err != nil {
-		return ctrl.Result{}, c.preparationError(ctx, comp, reasonSliceWriteError, err)
-	}
-	comp, err = c.current(ctx, comp, false)
-	if err != nil {
-		return ctrl.Result{}, err
+		return c.recordTombstoneRecoveryError(ctx, comp, reasonSliceWriteError, err)
 	}
 	logger.Info("recovery tombstones persisted", "tombstoneCount", len(tombstones), "overflowSliceCount", len(refs))
-	result, err := c.finishRecovery(ctx, comp, reasonFinished, "", refs)
+	err = c.markTombstoneRecoveryFinished(ctx, comp, reasonFinished, "", refs)
 	if err != nil && len(refs) > 0 {
-		return ctrl.Result{}, c.preparationError(ctx, comp, reasonSliceWriteError, err)
+		return c.recordTombstoneRecoveryError(ctx, comp, reasonSliceWriteError, err)
 	}
-	return result, err
+	return err
 }
 
-func (c *backupController) loadCurrent(ctx context.Context, comp *apiv1.Composition) ([]apiv1.ResourceSlice, error) {
+func (c *backupController) loadCurrentSynthesisResourceSlices(ctx context.Context, comp *apiv1.Composition) ([]apiv1.ResourceSlice, error) {
 	var slices []apiv1.ResourceSlice
-	seen := map[string]bool{}
 	for i, ref := range comp.Status.CurrentSynthesis.ResourceSlices {
 		if ref == nil || ref.Name == "" {
 			return nil, fmt.Errorf("current ResourceSlice reference %d has no name", i)
 		}
-		if seen[ref.Name] {
-			return nil, fmt.Errorf("current ResourceSlice reference %q is duplicated", ref.Name)
-		}
-		seen[ref.Name] = true
 		slice := apiv1.ResourceSlice{}
 		if err := c.reader.Get(ctx, types.NamespacedName{Namespace: comp.Namespace, Name: ref.Name}, &slice); err != nil {
 			return nil, fmt.Errorf("reading current ResourceSlice %q: %w", ref.Name, err)
-		}
-		owner := metav1.GetControllerOf(&slice)
-		if owner == nil || owner.UID != comp.UID || owner.Kind != "Composition" || owner.Name != comp.Name {
-			return nil, fmt.Errorf("current ResourceSlice %q is not owned by this Composition", ref.Name)
 		}
 		if slice.DeletionTimestamp != nil {
 			return nil, fmt.Errorf("current ResourceSlice %q is being deleted", ref.Name)
@@ -411,17 +269,13 @@ func (c *backupController) loadCurrent(ctx context.Context, comp *apiv1.Composit
 	return slices, nil
 }
 
-func (c *backupController) preparationError(ctx context.Context, expected *apiv1.Composition, reason string, cause error) error {
+func (c *backupController) recordTombstoneRecoveryError(ctx context.Context, comp *apiv1.Composition, reason string, cause error) error {
 	if errors.Is(cause, errSuperseded) {
 		return cause
 	}
-	comp, err := c.current(ctx, expected, false)
-	if err != nil {
-		return err
-	}
 	logger := logr.FromContextOrDiscard(ctx)
 	logger.Error(cause, "tombstone recovery preparation failed", "reason", reason)
-	status := recoveryStatus(comp)
+	status := getOrCreateRecoveryStatus(comp)
 	status.Status, status.Reason, status.Message = false, reason, cause.Error()
 	after := comp.DeepCopy()
 	after.Status.CurrentSynthesis.TombstoneRecoveryFinished = &status
@@ -432,8 +286,8 @@ func (c *backupController) preparationError(ctx context.Context, expected *apiv1
 	return cause
 }
 
-func (c *backupController) finishRecovery(ctx context.Context, comp *apiv1.Composition, reason, message string, refs []*apiv1.ResourceSliceRef) (ctrl.Result, error) {
-	status := recoveryStatus(comp)
+func (c *backupController) markTombstoneRecoveryFinished(ctx context.Context, comp *apiv1.Composition, reason, message string, refs []*apiv1.ResourceSliceRef) error {
+	status := getOrCreateRecoveryStatus(comp)
 	status.Status, status.Reason, status.Message = true, reason, message
 	after := comp.DeepCopy()
 	after.Status.CurrentSynthesis.TombstoneRecoveryFinished = &status
@@ -450,124 +304,93 @@ func (c *backupController) finishRecovery(ctx context.Context, comp *apiv1.Compo
 		}
 	}
 	if err := c.patchStatus(ctx, comp, after); err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
 	logr.FromContextOrDiscard(ctx).Info("tombstone recovery preparation finished", "operation", "recoveryPreparation", "reason", reason, "message", message)
-	return ctrl.Result{Requeue: true}, nil
+	return nil
 }
 
-func (c *backupController) readInventories(ctx context.Context, comp *apiv1.Composition) ([]corev1.ConfigMap, *corev1.ConfigMap, error) {
+func (c *backupController) readInventories(ctx context.Context, comp *apiv1.Composition) ([]corev1.ConfigMap, error) {
 	list := &corev1.ConfigMapList{}
 	if err := c.downstream.List(ctx, list, client.InNamespace(inventoryNamespace),
 		client.MatchingLabels{inventoryLineageLabel: inventoryLineage(comp)}); err != nil {
-		return nil, nil, fmt.Errorf("listing downstream inventory ConfigMaps: %w", err)
+		return nil, fmt.Errorf("listing downstream inventory ConfigMaps: %w", err)
 	}
-	snapshot, err := selectInventory(list.Items)
-	return list.Items, snapshot, err
+	return list.Items, nil
 }
 
-func (c *backupController) record(ctx context.Context, comp *apiv1.Composition) error {
-	logger := logr.FromContextOrDiscard(ctx).WithValues("operation", "inventoryRecording")
-	ctx = logr.NewContext(ctx, logger)
-	items, latest, err := c.readInventories(ctx, comp)
+func (c *backupController) inventoryUpdate(ctx context.Context, comp *apiv1.Composition) error {
+	logger := logr.FromContextOrDiscard(ctx)
+
+	reason := comp.Status.CurrentSynthesis.TombstoneRecoveryFinished.Reason
+	if reason == reasonInventoryGetError || reason == reasonInventoryInvalid {
+		logger.Info("inventory recording deferred because historical inventory is unresolved",
+			"reason", reason)
+		return nil
+	}
+
+	items, err := c.readInventories(ctx, comp)
 	if err != nil {
 		return err
 	}
-	comp, err = c.current(ctx, comp, true)
+
+	slices, err := c.loadCurrentSynthesisResourceSlices(ctx, comp)
 	if err != nil {
 		return err
 	}
-	syn := comp.Status.CurrentSynthesis
-	slices, err := c.loadCurrent(ctx, comp)
+
+	configMap, err := makeInventory(comp, slices)
 	if err != nil {
 		return err
 	}
-	if latest != nil {
-		resources, err := decodeInventorySnapshot(comp, *latest)
-		if err != nil {
-			return err
-		}
-		synthesized, err := inventorySynthesized(latest)
-		if err != nil {
-			return err
-		}
-		if synthesized.After(syn.Synthesized.Time) {
-			logger.Info("retaining newer inventory instead of recording an older synthesis", "inventoryConfigMap", latest.Name)
-			return nil
-		}
-		missing, err := missingTombstones(slices, resources)
-		if err != nil {
-			return err
-		}
-		if len(missing) > 0 {
-			logger.Info("retaining inventory with unresolved historical identities", "inventoryConfigMap", latest.Name, "unresolvedCount", len(missing))
-			return nil
-		}
+
+	ctx = logr.NewContext(ctx, logger.WithValues("inventoryConfigMap", configMap.Name))
+	if err := c.persistInventory(ctx, comp, configMap); err != nil {
+		return err
 	}
-	snapshot, err := makeInventory(comp, slices)
+	return c.deleteOtherInventories(ctx, comp, configMap, items)
+}
+
+func (c *backupController) persistInventory(ctx context.Context, comp *apiv1.Composition, configMap *corev1.ConfigMap) error {
+	logger := logr.FromContextOrDiscard(ctx)
+
+	comp, err := c.getCurrentComposition(ctx, comp, true)
 	if err != nil {
 		return err
 	}
-	logger = logger.WithValues("inventoryConfigMap", snapshot.Name)
-	ctx = logr.NewContext(ctx, logger)
-	comp, err = c.current(ctx, comp, true)
-	if err != nil {
-		return err
-	}
-	persisted := snapshot.DeepCopy()
+
+	persisted := configMap.DeepCopy()
 	if err := c.downstream.Create(ctx, persisted); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
-			return fmt.Errorf("creating inventory ConfigMap %q: %w", snapshot.Name, err)
+			return fmt.Errorf("creating inventory ConfigMap %q: %w", configMap.Name, err)
 		}
-		if err := c.downstream.Get(ctx, client.ObjectKeyFromObject(snapshot), persisted); err != nil {
-			return fmt.Errorf("reading existing inventory ConfigMap %q: %w", snapshot.Name, err)
+		if err := c.downstream.Get(ctx, client.ObjectKeyFromObject(configMap), persisted); err != nil {
+			return fmt.Errorf("reading existing inventory ConfigMap %q: %w", configMap.Name, err)
 		}
 	}
-	matches, err := inventoriesMatch(comp, persisted, snapshot)
+
+	matches, err := inventoriesMatch(comp, persisted, configMap)
 	if err != nil {
 		return err
 	}
 	if !matches {
-		return fmt.Errorf("existing inventory ConfigMap %q does not match the intended snapshot", snapshot.Name)
-	}
-	logger.Info("inventory snapshot persisted")
-	comp, err = c.current(ctx, comp, true)
-	if err != nil {
-		return err
-	}
-	if comp.Status.CurrentSynthesis.TombstoneRecoveryRequired && comp.Status.CurrentSynthesis.TombstoneRecoveryFinished.Reason == reasonFinished {
-		after := comp.DeepCopy()
-		after.Status.CurrentSynthesis.TombstoneRecoveryRequired = false
-		if err := c.patchStatus(ctx, comp, after); err != nil {
-			return err
-		}
-		comp = after
-		logger.Info("cleared tombstone recovery requirement after inventory persistence")
+		return fmt.Errorf("existing inventory ConfigMap %q does not match the intended snapshot", configMap.Name)
 	}
 
-	synthesized, err := inventorySynthesized(snapshot)
-	if err != nil {
-		return err
-	}
+	logger.Info("inventory snapshot persisted")
+	return nil
+}
+
+func (c *backupController) deleteOtherInventories(ctx context.Context, comp *apiv1.Composition, configMap *corev1.ConfigMap, items []corev1.ConfigMap) error {
+	logger := logr.FromContextOrDiscard(ctx)
 	for _, item := range items {
-		if item.Name == snapshot.Name {
+		if item.Name == configMap.Name {
 			continue
 		}
-		if err := validateInventoryIdentity(comp, &item); err != nil {
-			return fmt.Errorf("validating superseded inventory ConfigMap %q: %w", item.Name, err)
-		}
-		oldTime, err := inventorySynthesized(&item)
-		if err != nil {
+		if _, err := c.getCurrentComposition(ctx, comp, true); err != nil {
 			return err
 		}
-		if oldTime.After(synthesized) {
-			continue
-		}
-		comp, err = c.current(ctx, comp, true)
-		if err != nil {
-			return err
-		}
-		err = c.downstream.Delete(ctx, &item, &client.Preconditions{UID: &item.UID, ResourceVersion: &item.ResourceVersion})
+		err := c.downstream.Delete(ctx, &item, &client.Preconditions{UID: &item.UID, ResourceVersion: &item.ResourceVersion})
 		if err != nil && !apierrors.IsNotFound(err) {
 			logger.Error(err, "failed to clean up superseded inventory", "operation", "inventoryCleanup", "deletedInventoryConfigMap", item.Name)
 			return fmt.Errorf("deleting superseded inventory ConfigMap %q: %w", item.Name, err)
@@ -599,9 +422,6 @@ func (c *backupController) patchStatus(ctx context.Context, before, after *apiv1
 	}
 	if !reflect.DeepEqual(old.ResourceSlices, next.ResourceSlices) {
 		ops = append(ops, statusPatch{Op: "add", Path: "/status/currentSynthesis/resourceSlices", Value: next.ResourceSlices})
-	}
-	if old.TombstoneRecoveryRequired != next.TombstoneRecoveryRequired {
-		ops = append(ops, statusPatch{Op: "add", Path: "/status/currentSynthesis/tombstoneRecoveryRequired", Value: next.TombstoneRecoveryRequired})
 	}
 	if len(ops) == 3 {
 		return nil

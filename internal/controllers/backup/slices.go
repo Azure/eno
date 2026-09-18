@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
@@ -14,6 +15,7 @@ import (
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -49,7 +51,7 @@ func (c *backupController) writeTombstones(ctx context.Context, comp *apiv1.Comp
 		if len(additions[i]) == 0 {
 			continue
 		}
-		if _, err := c.current(ctx, comp, false); err != nil {
+		if _, err := c.getCurrentComposition(ctx, comp, false); err != nil {
 			return nil, err
 		}
 		before := slices[i].DeepCopy()
@@ -72,7 +74,7 @@ func (c *backupController) writeTombstones(ctx context.Context, comp *apiv1.Comp
 		if err != nil {
 			return nil, err
 		}
-		if _, err := c.current(ctx, comp, false); err != nil {
+		if _, err := c.getCurrentComposition(ctx, comp, false); err != nil {
 			return nil, err
 		}
 		if err := c.client.Create(ctx, slice); err != nil {
@@ -103,9 +105,14 @@ func recoverySlice(comp *apiv1.Composition, manifests []apiv1.Manifest) (*apiv1.
 	}
 	opHash := sha256.Sum256([]byte(string(comp.UID) + "/" + comp.Status.CurrentSynthesis.UUID))
 	contentHash := sha256.Sum256(data)
+	suffix := "-" + hex.EncodeToString(opHash[:8]) + "-" + hex.EncodeToString(contentHash[:16])
+	prefix := comp.Name
+	if maxPrefix := validation.DNS1123SubdomainMaxLength - len(suffix); len(prefix) > maxPrefix {
+		prefix = strings.TrimRight(prefix[:maxPrefix], ".-")
+	}
 	return &apiv1.ResourceSlice{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "eno-recovery-" + hex.EncodeToString(opHash[:8]) + "-" + hex.EncodeToString(contentHash[:16]),
+			Name:      prefix + suffix,
 			Namespace: comp.Namespace,
 			Labels: map[string]string{
 				manager.SynthesisIDLabelKey: comp.Status.CurrentSynthesis.UUID,
