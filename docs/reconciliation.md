@@ -124,8 +124,8 @@ metadata:
 
 ## Sharding
 
-You may reconcile a subset of Compositions and/or resources by optionally passing the following flags to the Eno reconciler:
-- **--composition-namespace**: Only watch compositions in the given namespace.
+The Eno reconciler watches Compositions across all namespaces by default. The following flags control its scope:
+- **--composition-namespace**: Optionally limit Composition and ResourceSlice watches to the given namespace. Defaults to all namespaces, independently of `POD_NAMESPACE`.
   ```
   --composition-namespace=default
   ```
@@ -142,7 +142,19 @@ You may reconcile a subset of Compositions and/or resources by optionally passin
 The flags stack up and are not mutually exclusive i.e. A resource filter will only be evaluated against resources whose Composition match the label selector, which in turn is only evaluated against Compositions in the selected namespace.
 ## Tombstone Recovery and Inventory
 
-`internal/controllers/backup` provides inventory construction, validation, selection, and missing-tombstone calculation helpers. These helpers do not register controllers, write Kubernetes objects, or gate reconstitution. Normal synthesis and reconciliation behavior is unchanged.
+`--enable-backup-operator` defaults to false. When enabled, backup requires `POD_NAMESPACE`, populated from the pod's `metadata.namespace` through the Downward API. Backup uses separate namespace-scoped watches for Compositions and ResourceSlice metadata in that namespace, respecting `--composition-label-selector` for Compositions and the existing Composition-only resource filter. It does not change the normal reconciler's `--composition-namespace` behavior. Only Compositions in the backup namespace wait for recovery; those outside it continue normal reconciliation. When backup is disabled, it registers no watches and imposes no `POD_NAMESPACE` requirement. Inventory ConfigMaps remain in downstream `kube-system`.
+
+When backup is enabled, the backup controller processes each eligible Composition in two phases. After synthesis, `tombstoneRecovery` reads the saved downstream inventory and persists missing tombstones only when `TombstoneRecoveryRequired` is true; otherwise the controller records a `NotNeeded` recovery decision without reading inventory. Once the recovery decision is complete and the synthesis is `Ready`, `inventoryUpdate` records a ConfigMap in the downstream cluster whether or not recovery was required. Inventory update trusts that decision and does not decode historical resources or repeat the tombstone diff; it still preserves history when the recorded recovery reason is `InventoryGetError` or `InventoryInvalid`.
+
+Inventory update only writes downstream ConfigMaps; it does not modify Composition status or clear `TombstoneRecoveryRequired`. That flag is computed independently for each synthesis rather than inherited from the preceding synthesis.
+
+Recovery uses the same group/kind/namespace/name identity resolution as normal synthesis: a Patch targeting a historical resource protects that resource from a recovery tombstone even when no full manifest is present. Patch pseudo-resources remain excluded from newly recorded inventories.
+
+Recovery overflow ResourceSlices use the Composition name as their prefix, like normal ResourceSlices, with a deterministic suffix derived from the Composition UID, synthesis UUID, and slice contents so retries reuse the same object. Long Composition names are truncated to keep the complete name within Kubernetes' 253-character limit.
+
+Recovery-created overflow slices carry `eno.azure.io/tombstone-recovery: "true"`. ResourceSlice cleanup temporarily retains only marked, unreferenced slices whose synthesis UUID matches the current synthesis while `TombstoneRecoveryRequired` is true and recovery is unfinished, unless the Composition is deleting. Ordinary unmarked slices retain their original cleanup behavior. Cleanup rechecks protected slices every five seconds because Composition events only enqueue referenced slices. Recovery publishes overflow references and completion together, handing protection over to the normal reference checks; after completion or supersession, unreferenced slices become eligible for cleanup. Recovery retries require an existing overflow slice to have the marker in addition to matching owner and spec.
+
+Composition status events advance these phases; successful recovery status writes do not explicitly requeue. Inventory recording waits for a subsequent event so it uses the persisted recovery decision and ResourceSlice references. Superseded work explicitly requeues, and API failures use controller-runtime error retries. Fresh Composition reads occur immediately before ResourceSlice writes and inventory ConfigMap creation/deletion, not between read-only steps. These checks reject missing Compositions, deletion, missing or changed synthesis UUIDs, and loss of readiness before inventory writes; metadata or recovery-status changes within the same synthesis do not invalidate the operation. Status patches rely on atomic UID/resourceVersion/synthesis UUID preconditions without an extra Composition read; rejected patches return errors for retry. Inventory rotation persists and verifies the replacement before deleting every other ConfigMap returned by the list scoped to `kube-system` and the inventory lineage label, regardless of source timestamp. Cleanup trusts this label and uses UID/resourceVersion delete preconditions to reject objects changed since listing.
 
 `makeInventory` returns a `*corev1.ConfigMap` ready for the controller to pass directly to `Create`. `selectInventory` also returns a ConfigMap. `decodeInventorySnapshot` returns only the decoded `[]inventoryResource`, which the controller can pass to `missingTombstones` to calculate the diff against current ResourceSlices; there is no inventory wrapper type.
 

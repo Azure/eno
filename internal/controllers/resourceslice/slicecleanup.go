@@ -105,22 +105,22 @@ func (c *cleanupController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{RequeueAfter: delta}, nil
 	}
 
-	del, err := c.shouldDelete(ctx, c.client, slice, owner)
+	del, requeueAfter, err := c.shouldDelete(ctx, c.client, slice, owner)
 	if err != nil {
 		logger.Error(err, "failed to check if resource slice should be deleted (cached)")
 		return ctrl.Result{}, err
 	}
 	if !del {
-		return ctrl.Result{}, nil // fail safe for stale cache
+		return ctrl.Result{RequeueAfter: requeueAfter}, nil // fail safe for stale cache
 	}
 
-	del, err = c.shouldDelete(ctx, c.noCacheReader, slice, owner)
+	del, requeueAfter, err = c.shouldDelete(ctx, c.noCacheReader, slice, owner)
 	if err != nil {
 		logger.Error(err, "failed to check if resource slice should be deleted")
 		return ctrl.Result{}, err
 	}
 	if !del {
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: requeueAfter}, nil
 	}
 
 	if err := c.client.Delete(ctx, slice, &client.Preconditions{UID: &slice.UID}); err != nil {
@@ -132,19 +132,19 @@ func (c *cleanupController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return ctrl.Result{}, nil
 }
 
-func (c *cleanupController) shouldDelete(ctx context.Context, reader client.Reader, slice *apiv1.ResourceSlice, ref *metav1.OwnerReference) (bool, error) {
+func (c *cleanupController) shouldDelete(ctx context.Context, reader client.Reader, slice *apiv1.ResourceSlice, ref *metav1.OwnerReference) (bool, time.Duration, error) {
 	comp := &apiv1.Composition{}
 	err := reader.Get(ctx, types.NamespacedName{Name: ref.Name, Namespace: slice.Namespace}, comp)
 	if errors.IsNotFound(err) {
-		return true, nil
+		return true, 0, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("getting composition: %w", err)
+		return false, 0, fmt.Errorf("getting composition: %w", err)
 	}
 
 	// Don't delete slices that are part of an active synthesis
 	if comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.UUID == slice.Spec.SynthesisUUID {
-		return false, nil
+		return false, 0, nil
 	}
 
 	// Check resource slice references
@@ -156,11 +156,19 @@ func (c *cleanupController) shouldDelete(ctx context.Context, reader client.Read
 			return ref != nil && ref.Name == slice.Name
 		})
 		if idx != -1 {
-			return false, nil
+			return false, 0, nil
 		}
 	}
 
-	return true, nil
+	if syn := comp.Status.CurrentSynthesis; slice.Labels[apiv1.TombstoneRecoveryLabelKey] == "true" &&
+		comp.DeletionTimestamp == nil && syn != nil &&
+		syn.UUID == slice.Spec.SynthesisUUID && syn.TombstoneRecoveryRequired && !syn.TombstoneRecoveryComplete() {
+		// Recovery publishes overflow references with completion. Unreferenced slices need polling because Composition events don't enqueue them.
+		logr.FromContextOrDiscard(ctx).Info("retaining unreferenced resource slice while tombstone recovery is pending")
+		return false, 5 * time.Second, nil
+	}
+
+	return true, 0, nil
 }
 
 // removeFinalizer removes the finalizer from the resource slice if the slice is not needed for deletion of the composition.
