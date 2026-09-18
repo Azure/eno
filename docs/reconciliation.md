@@ -148,6 +148,8 @@ When backup is enabled, the backup controller processes each eligible Compositio
 
 Inventory update only writes downstream ConfigMaps; it does not modify Composition status or clear `TombstoneRecoveryRequired`. That flag is computed independently for each synthesis rather than inherited from the preceding synthesis.
 
+Recovery uses the same group/kind/namespace/name identity resolution as normal synthesis: a Patch targeting a historical resource protects that resource from a recovery tombstone even when no full manifest is present. Patch pseudo-resources remain excluded from newly recorded inventories.
+
 Recovery overflow ResourceSlices use the Composition name as their prefix, like normal ResourceSlices, with a deterministic suffix derived from the Composition UID, synthesis UUID, and slice contents so retries reuse the same object. Long Composition names are truncated to keep the complete name within Kubernetes' 253-character limit.
 
 ResourceSlice cleanup retains unreferenced slices whose synthesis UUID matches the current synthesis while `TombstoneRecoveryRequired` is true and recovery is unfinished, unless the Composition is deleting. Cleanup rechecks these slices every five seconds because Composition events only enqueue referenced slices. Recovery publishes overflow references and completion together, handing protection over to the normal reference checks; after completion or supersession, unreferenced slices become eligible for cleanup.

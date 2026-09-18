@@ -511,8 +511,8 @@ func TestBackupInventoryMissingTombstones(t *testing.T) {
 	}}}
 	tombstones, err := missingTombstones([]apiv1.ResourceSlice{current}, resources)
 	require.NoError(t, err)
-	require.Len(t, tombstones, 3)
-	for i, expected := range []inventoryResource{additional, missing, patched} {
+	require.Len(t, tombstones, 2)
+	for i, expected := range []inventoryResource{additional, missing} {
 		assert.True(t, tombstones[i].Deleted)
 		assert.JSONEq(t, inventoryTestManifest(t, expected).Manifest, tombstones[i].Manifest)
 	}
@@ -521,6 +521,64 @@ func TestBackupInventoryMissingTombstones(t *testing.T) {
 	repeated, err := missingTombstones([]apiv1.ResourceSlice{current}, resources)
 	require.NoError(t, err)
 	assert.Empty(t, repeated)
+}
+
+func TestBackupInventoryPatchTargetPresence(t *testing.T) {
+	for _, target := range []inventoryResource{
+		{Version: "v1", Kind: "ConfigMap", Namespace: "workloads", Name: "foo"},
+		{Group: "apps", Version: "v1", Kind: "Deployment", Namespace: "workloads", Name: "foo"},
+		{Version: "v1", Kind: "Namespace", Name: "foo"},
+	} {
+		t.Run(target.Kind, func(t *testing.T) {
+			comp := inventoryTestComposition()
+			history, err := makeInventory(comp, []apiv1.ResourceSlice{{
+				Spec: apiv1.ResourceSliceSpec{Resources: []apiv1.Manifest{inventoryTestManifest(t, target)}},
+			}})
+			require.NoError(t, err)
+			resources, err := decodeInventorySnapshot(comp, *history)
+			require.NoError(t, err)
+
+			patch := apiv1.Manifest{Manifest: inventoryTestJSON(t, map[string]any{
+				"apiVersion": "eno.azure.io/v1", "kind": "Patch",
+				"metadata": map[string]any{"name": target.Name, "namespace": target.Namespace},
+				"patch": map[string]any{
+					"apiVersion": schema.GroupVersion{Group: target.Group, Version: target.Version}.String(),
+					"kind":       target.Kind, "ops": []any{},
+				},
+			})}
+			current := []apiv1.ResourceSlice{{Spec: apiv1.ResourceSliceSpec{Resources: []apiv1.Manifest{patch}}}}
+			tombstones, err := missingTombstones(current, resources)
+			require.NoError(t, err)
+			assert.Empty(t, tombstones)
+
+			inventory, err := makeInventory(comp, current)
+			require.NoError(t, err)
+			recorded, err := decodeInventorySnapshot(comp, *inventory)
+			require.NoError(t, err)
+			assert.Empty(t, recorded, "a Patch must not establish inventory ownership")
+
+			for _, field := range []string{"group", "kind", "namespace", "name"} {
+				other := target
+				switch field {
+				case "group":
+					other.Group = "other.example.com"
+				case "kind":
+					other.Kind = "Other"
+				case "namespace":
+					other.Namespace = "other"
+				case "name":
+					other.Name = "other"
+				}
+				tombstones, err := missingTombstones(current, []inventoryResource{other})
+				require.NoError(t, err)
+				require.Len(t, tombstones, 1, "different %s must not match the Patch target", field)
+				assert.True(t, tombstones[0].Deleted)
+				_, recovered, err := parseInventoryManifest(tombstones[0].Manifest)
+				require.NoError(t, err)
+				assert.Equal(t, other, recovered)
+			}
+		})
+	}
 }
 
 func TestBackupInventoryMissingTombstonesPreservesEntries(t *testing.T) {

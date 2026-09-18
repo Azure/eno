@@ -228,15 +228,12 @@ func missingTombstones(slices []apiv1.ResourceSlice, resources []inventoryResour
 	existing := map[resource.Ref]struct{}{}
 	for _, slice := range slices {
 		for i, manifest := range slice.Spec.Resources {
-			_, res, err := parseInventoryManifest(manifest.Manifest)
+			obj, _, err := parseInventoryManifest(manifest.Manifest)
 			if err != nil {
 				return nil, fmt.Errorf("parsing resource %d of slice %s/%s: %w", i, slice.Namespace, slice.Name, err)
 			}
-			if res.isPatch() {
-				continue
-			}
-			// Existing resources and tombstones protect their identities.
-			existing[res.ref()] = struct{}{}
+			// Use synthesis semantics: resources, tombstones, and Patch targets protect their identities.
+			existing[resource.RefFromUnstructured(obj)] = struct{}{}
 		}
 	}
 	var tombstones []apiv1.Manifest
