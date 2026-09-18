@@ -47,6 +47,7 @@ func Slice(comp *apiv1.Composition, previous []*apiv1.ResourceSlice, outputs []*
 			}
 
 			// We don't need a tombstone once the deleted resource has been reconciled
+			// Status may lag appended manifests; a missing status entry means the tombstone must be retained.
 			if _, ok := refs[newResourceRef(obj)]; ok || ((res.Deleted || slice.DeletionTimestamp != nil) && i < len(slice.Status.Resources) && slice.Status.Resources[i].Reconciled) {
 				continue // still exists or has already been deleted
 			}
