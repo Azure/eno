@@ -140,6 +140,32 @@ You may reconcile a subset of Compositions and/or resources by optionally passin
   > ⚠️ Changes to composition metadata (without changing the spec) will not trigger a re-evaluation of the filter.
 
 The flags stack up and are not mutually exclusive i.e. A resource filter will only be evaluated against resources whose Composition match the label selector, which in turn is only evaluated against Compositions in the selected namespace.
+## Tombstone Recovery and Inventory
+
+`internal/controllers/backup` provides inventory construction, validation, selection, and missing-tombstone calculation helpers. These helpers do not register controllers, write Kubernetes objects, or gate reconstitution. Normal synthesis and reconciliation behavior is unchanged.
+
+`makeInventory` returns a `*corev1.ConfigMap` ready for the controller to pass directly to `Create`. `selectInventory` also returns a ConfigMap. `decodeInventorySnapshot` returns only the decoded `[]inventoryResource`, which the controller can pass to `missingTombstones` to calculate the diff against current ResourceSlices; there is no inventory wrapper type.
+
+Inventory is represented as a ConfigMap in `kube-system`, named `eno-inventory-<lineageHash>-<synthesisUUID>` and labeled `eno.azure.io/inventory-lineage=<lineageHash>`. The lineage hash is the lowercase hexadecimal encoding of the first 16 bytes of SHA-256 over `<compositionNamespace>/<synthesizerName>`, excluding the Composition UID so inventory can survive recreation.
+
+The `inventory.json` data key contains only a JSON array of resource identities (group, version, kind, namespace, and name), labels, and `eno.azure.io/readiness-group` / `eno.azure.io/deletion-group` annotations. An inventory with no resources stores `[]`. Each inventory is limited to 1 MiB of ConfigMap data without truncation or sharding.
+
+Snapshot metadata is stored in the ConfigMap's `metadata.annotations`:
+
+| Annotation | Value |
+| --- | --- |
+| `eno.azure.io/inventory-format-version` | `1` |
+| `eno.azure.io/inventory-composition-namespace` | Source Composition namespace, not the ConfigMap's `kube-system` namespace |
+| `eno.azure.io/inventory-synthesizer-name` | Source synthesizer name |
+| `eno.azure.io/inventory-synthesis-uuid` | Source synthesis UUID |
+| `eno.azure.io/inventory-synthesized` | Source synthesis timestamp in RFC 3339 format |
+
+Composition name/UID, routing metadata, and Symphony identity are not stored. Only the annotation-based layout is supported; older JSON-envelope snapshots are rejected and must be replaced before use with this format.
+
+Selection uses the greatest source `synthesized` timestamp, not ConfigMap creation time or UUID ordering. Invalid candidates or distinct synthesis UUIDs tied at the greatest timestamp prevent selection. Missing-tombstone calculation protects currently desired resources, existing tombstones, and Eno Patch targets; recorded inventories exclude tombstones and Eno Patch pseudo-resources. Inventory construction assumes the caller supplies an already-selected Composition with a ready current synthesis and its ResourceSlices. It converts the manifests directly without rechecking synthesis eligibility, re-evaluating resource filters, or constructing reconciliation resources; validation of stored inventories happens when they are decoded. Duplicate group/kind/namespace/name identities keep the first occurrence's version, labels, and annotations rather than selecting the definition used during apply.
+
+Composition ownership can be evaluated through the existing `--resource-filter` CEL expression without resource output: definite `false` excludes the Composition, while resource-dependent unknowns remain eligible. Logical ownership must be disjoint between reconciler deployments; resource-only predicates cannot establish exclusive Composition ownership.
+
 ## Advanced Concepts
 
 - [Overrides](./overrides.md)
