@@ -87,6 +87,7 @@ func (c *backupController) writeTombstones(ctx context.Context, comp *apiv1.Comp
 			}
 			owner := metav1.GetControllerOf(existing)
 			if existing.DeletionTimestamp != nil || owner == nil || owner.UID != comp.UID || owner.Kind != "Composition" ||
+				existing.Labels[apiv1.TombstoneRecoveryLabelKey] != "true" ||
 				!reflect.DeepEqual(existing.Spec, slice.Spec) {
 				return nil, fmt.Errorf("existing recovery ResourceSlice %q does not match this operation or is being deleted", slice.Name)
 			}
@@ -115,7 +116,8 @@ func recoverySlice(comp *apiv1.Composition, manifests []apiv1.Manifest) (*apiv1.
 			Name:      prefix + suffix,
 			Namespace: comp.Namespace,
 			Labels: map[string]string{
-				manager.SynthesisIDLabelKey: comp.Status.CurrentSynthesis.UUID,
+				manager.SynthesisIDLabelKey:     comp.Status.CurrentSynthesis.UUID,
+				apiv1.TombstoneRecoveryLabelKey: "true",
 			},
 			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(comp, apiv1.SchemeGroupVersion.WithKind("Composition"))},
 			Finalizers:      []string{"eno.azure.io/cleanup"},

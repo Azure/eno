@@ -33,6 +33,7 @@ func newPendingRecoveryCleanup(t *testing.T) (client.Client, *apiv1.Composition,
 	slice := &apiv1.ResourceSlice{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "overflow", Namespace: comp.Namespace,
+			Labels:            map[string]string{apiv1.TombstoneRecoveryLabelKey: "true"},
 			CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute)),
 			Finalizers:        []string{"eno.azure.io/cleanup"},
 			OwnerReferences:   []metav1.OwnerReference{*metav1.NewControllerRef(comp, apiv1.SchemeGroupVersion.WithKind("Composition"))},
@@ -118,6 +119,33 @@ func TestSliceCleanupRecoveryProtection(t *testing.T) {
 				require.NoError(t, err)
 				assert.True(t, errors.IsNotFound(cli.Get(ctx, req.NamespacedName, slice)))
 			}
+		})
+	}
+}
+
+func TestSliceCleanupUnmarkedRecovery(t *testing.T) {
+	for _, marker := range []string{"absent", "false"} {
+		t.Run(marker, func(t *testing.T) {
+			ctx := testutil.NewContext(t)
+			cli, _, slice := newPendingRecoveryCleanup(t)
+			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(slice), slice))
+			if marker == "absent" {
+				slice.Labels = nil
+			} else {
+				slice.Labels[apiv1.TombstoneRecoveryLabelKey] = marker
+			}
+			require.NoError(t, cli.Update(ctx, slice))
+			c := cleanupController{client: cli, noCacheReader: cli}
+			req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(slice)}
+
+			result, err := c.Reconcile(ctx, req)
+			require.NoError(t, err)
+			assert.Zero(t, result.RequeueAfter)
+			require.NoError(t, cli.Get(ctx, req.NamespacedName, slice))
+			require.NotNil(t, slice.DeletionTimestamp, "unfinished recovery must not retain ordinary abandoned slices")
+			_, err = c.Reconcile(ctx, req)
+			require.NoError(t, err)
+			assert.True(t, errors.IsNotFound(cli.Get(ctx, req.NamespacedName, slice)))
 		})
 	}
 }

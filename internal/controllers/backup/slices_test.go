@@ -401,6 +401,12 @@ func TestWriteTombstonesOverflowCollision(t *testing.T) {
 		mutate func(*apiv1.ResourceSlice)
 		delete bool
 	}{
+		{name: "missing recovery marker", mutate: func(slice *apiv1.ResourceSlice) {
+			delete(slice.Labels, apiv1.TombstoneRecoveryLabelKey)
+		}},
+		{name: "false recovery marker", mutate: func(slice *apiv1.ResourceSlice) {
+			slice.Labels[apiv1.TombstoneRecoveryLabelKey] = "false"
+		}},
 		{name: "missing controller owner", mutate: func(slice *apiv1.ResourceSlice) {
 			slice.OwnerReferences = nil
 		}},
@@ -573,7 +579,10 @@ func TestRecoverySlice(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("%s-%x-%x", comp.Name, operation[:8], contents[:16]), slice.Name)
 	assert.Empty(t, slice.GenerateName)
 	assert.Equal(t, comp.Namespace, slice.Namespace)
-	assert.Equal(t, map[string]string{manager.SynthesisIDLabelKey: comp.Status.CurrentSynthesis.UUID}, slice.Labels)
+	assert.Equal(t, map[string]string{
+		manager.SynthesisIDLabelKey:     comp.Status.CurrentSynthesis.UUID,
+		apiv1.TombstoneRecoveryLabelKey: "true",
+	}, slice.Labels)
 	assert.Equal(t, []metav1.OwnerReference{*metav1.NewControllerRef(comp, apiv1.SchemeGroupVersion.WithKind("Composition"))}, slice.OwnerReferences)
 	assert.Equal(t, []string{"eno.azure.io/cleanup"}, slice.Finalizers)
 	assert.Equal(t, apiv1.ResourceSliceSpec{SynthesisUUID: comp.Status.CurrentSynthesis.UUID, Resources: manifests}, slice.Spec)
