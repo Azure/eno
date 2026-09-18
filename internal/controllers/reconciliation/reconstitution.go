@@ -28,9 +28,10 @@ type reconstitutionSource struct {
 	nonCachedReader      client.Reader
 	cache                *resource.Cache
 	enableBackupOperator bool
+	backupNamespace      string
 }
 
-func newReconstitutionSource(mgr ctrl.Manager, resourceFilter cel.Program, enableBackupOperator bool) (source.TypedSource[resource.Request], *resource.Cache, error) {
+func newReconstitutionSource(mgr ctrl.Manager, resourceFilter cel.Program, enableBackupOperator bool, backupNamespace string) (source.TypedSource[resource.Request], *resource.Cache, error) {
 	cache := resource.Cache{ResourceFilter: resourceFilter}
 	return source.TypedFunc[resource.Request](func(ctx context.Context, queue workqueue.TypedRateLimitingInterface[resource.Request]) error {
 		cache.SetQueue(queue)
@@ -40,6 +41,7 @@ func newReconstitutionSource(mgr ctrl.Manager, resourceFilter cel.Program, enabl
 			nonCachedReader:      mgr.GetAPIReader(),
 			cache:                &cache,
 			enableBackupOperator: enableBackupOperator,
+			backupNamespace:      backupNamespace,
 		}
 
 		// This controller's queue uses composition name/namespace as its key
@@ -92,8 +94,9 @@ func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) 
 		"operationOrigin", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	ctx = logr.NewContext(ctx, logger)
 
-	// Only backup-enabled reconcilers wait for recovery; deletion always bypasses the gate.
-	if syn := comp.Status.CurrentSynthesis; r.enableBackupOperator && comp.DeletionTimestamp == nil && syn != nil && syn.Synthesized != nil && !syn.TombstoneRecoveryComplete() {
+	// Only Compositions in the backup namespace wait for recovery; deletion always bypasses the gate.
+	if syn := comp.Status.CurrentSynthesis; r.enableBackupOperator && comp.Namespace == r.backupNamespace &&
+		comp.DeletionTimestamp == nil && syn != nil && syn.Synthesized != nil && !syn.TombstoneRecoveryComplete() {
 		logger.Info("waiting for tombstone recovery preparation", "synthesisUUID", syn.UUID)
 		return ctrl.Result{}, nil
 	}

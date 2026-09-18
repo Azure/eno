@@ -122,6 +122,7 @@ func recoveryReconstitutionNewHarness(t *testing.T, comp *apiv1.Composition, inf
 		client:          newClient("informer", informerSlices),
 		nonCachedReader: newClient("api", apiSlices),
 		cache:           cache,
+		backupNamespace: comp.Namespace,
 	}
 	return h
 }
@@ -225,6 +226,7 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 		notRequired bool
 		disabled    bool
 		deleting    bool
+		outside     bool
 		allow       bool
 	}{
 		{name: "missing"},
@@ -237,6 +239,10 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 		{name: "disabled-missing", disabled: true, allow: true},
 		{name: "disabled-unfinished", disabled: true, finished: &apiv1.TombstoneRecoveryStatus{SynthesisUUID: "current", Reason: "InventoryGetError"}, allow: true},
 		{name: "disabled-old-uuid", disabled: true, finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "old", Reason: "NotNeeded"}, allow: true},
+		{name: "outside-namespace-missing", outside: true, allow: true},
+		{name: "outside-namespace-unfinished", outside: true, finished: &apiv1.TombstoneRecoveryStatus{SynthesisUUID: "current", Reason: "InventoryGetError"}, allow: true},
+		{name: "outside-namespace-old-uuid", outside: true, finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "old", Reason: "NotNeeded"}, allow: true},
+		{name: "outside-namespace-disabled", outside: true, disabled: true, allow: true},
 		{name: "deleting-missing", deleting: true, allow: true},
 		{name: "deleting-unfinished", finished: &apiv1.TombstoneRecoveryStatus{SynthesisUUID: "current", Reason: "InventoryGetError"}, deleting: true, allow: true},
 		{name: "deleting-old-uuid", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "old", Reason: "NotNeeded"}, deleting: true, allow: true},
@@ -257,6 +263,9 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 			}
 			h := recoveryReconstitutionNewHarness(t, comp, slices, slices)
 			h.source.enableBackupOperator = !tc.disabled
+			if tc.outside {
+				h.source.backupNamespace = "backup-system"
+			}
 			result, err := h.recoveryReconstitutionReconcile()
 			require.NoError(t, err)
 			if !tc.allow {
@@ -279,6 +288,10 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 			h.recoveryReconstitutionQueue("previous-resource", "current-resource")
 		})
 	}
+}
+
+func TestRecoveryBackupNamespaceRequired(t *testing.T) {
+	require.EqualError(t, New(nil, Options{EnableBackupOperator: true}), "backup namespace is required when backup is enabled")
 }
 
 func TestRecoveryReconstitutionR1IncompleteSynthesis(t *testing.T) {

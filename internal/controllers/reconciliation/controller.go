@@ -37,6 +37,7 @@ type Options struct {
 	ResourceFilter cel.Program
 
 	EnableBackupOperator   bool
+	BackupNamespace        string
 	DisableServerSideApply bool
 	FailOpen               bool
 	MigratingFieldManagers []string
@@ -68,6 +69,9 @@ type Controller struct {
 }
 
 func New(mgr ctrl.Manager, opts Options) error {
+	if opts.EnableBackupOperator && opts.BackupNamespace == "" {
+		return fmt.Errorf("backup namespace is required when backup is enabled")
+	}
 	upstreamClient, err := client.New(opts.Downstream, client.Options{
 		Scheme: runtime.NewScheme(), // empty scheme since we shouldn't rely on compile-time types
 	})
@@ -75,7 +79,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 		return err
 	}
 
-	src, cache, err := newReconstitutionSource(mgr, opts.ResourceFilter, opts.EnableBackupOperator)
+	src, cache, err := newReconstitutionSource(mgr, opts.ResourceFilter, opts.EnableBackupOperator, opts.BackupNamespace)
 	if err != nil {
 		return err
 	}

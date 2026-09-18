@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -61,7 +62,7 @@ func run() error {
 	flag.DurationVar(&recOpts.DefaultReconcileInterval, "default-reconcile-interval", time.Minute*5, "Reconcile interval used for resources that set 'eno.azure.io/use-default-reconcile-interval: true' but don't specify an explicit 'eno.azure.io/reconcile-interval'")
 	flag.BoolVar(&recOpts.DisableServerSideApply, "disable-ssa", false, "Use non-strategic three-way merge patches instead of server-side apply")
 	flag.StringVar(&compositionSelector, "composition-label-selector", labels.Everything().String(), "Optional label selector for compositions to be reconciled")
-	flag.StringVar(&compositionNamespace, "composition-namespace", os.Getenv("POD_NAMESPACE"), "Namespace of Compositions to watch. Defaults to POD_NAMESPACE")
+	flag.StringVar(&compositionNamespace, "composition-namespace", metav1.NamespaceAll, "Optional namespace to limit compositions that will be reconciled")
 	flag.StringVar(&resourceFilter, "resource-filter", "", "Optional CEL filter expression for resources within compositions to be reconciled")
 	flag.BoolVar(&recOpts.EnableBackupOperator, "enable-backup-operator", false, "Recover missing tombstones and record inventory in downstream kube-system ConfigMaps")
 	flag.DurationVar(&namespaceCreationGracePeriod, "ns-creation-grace-period", time.Second, "A namespace is assumed to be missing if it doesn't exist once one of its resources has existed for this long")
@@ -73,8 +74,11 @@ func run() error {
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 
-	if compositionNamespace == "" {
-		return fmt.Errorf("a value is required in --composition-namespace or POD_NAMESPACE")
+	if recOpts.EnableBackupOperator {
+		recOpts.BackupNamespace = os.Getenv("POD_NAMESPACE")
+		if recOpts.BackupNamespace == "" {
+			return fmt.Errorf("POD_NAMESPACE is required when --enable-backup-operator is enabled")
+		}
 	}
 
 	zapCfg := zap.NewProductionConfig()
@@ -153,6 +157,8 @@ func run() error {
 	}
 
 	backupOpts.Enabled = recOpts.EnableBackupOperator
+	backupOpts.Namespace = recOpts.BackupNamespace
+	backupOpts.CompositionSelector = mgrOpts.CompositionSelector
 	backupOpts.Downstream = remoteConfig
 	backupOpts.ResourceFilter = recOpts.ResourceFilter
 	if err := backup.NewController(mgr, backupOpts); err != nil {
@@ -177,6 +183,7 @@ func run() error {
 		"compositionNamespace", compositionNamespace,
 		"resourceFilter", resourceFilter,
 		"enableBackupOperator", backupOpts.Enabled,
+		"backupNamespace", backupOpts.Namespace,
 		"namespaceCreationGracePeriod", namespaceCreationGracePeriod,
 		"namespaceCleanup", namespaceCleanup,
 		"failOpen", recOpts.FailOpen,

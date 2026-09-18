@@ -15,15 +15,20 @@ import (
 	"github.com/google/cel-go/cel"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 const (
@@ -39,9 +44,11 @@ const (
 var errSuperseded = errors.New("backup operation superseded")
 
 type Options struct {
-	Enabled        bool
-	Downstream     *rest.Config
-	ResourceFilter cel.Program
+	Enabled             bool
+	Namespace           string
+	CompositionSelector labels.Selector
+	Downstream          *rest.Config
+	ResourceFilter      cel.Program
 }
 
 type backupController struct {
@@ -63,8 +70,35 @@ func NewController(mgr ctrl.Manager, opts Options) error {
 	if !opts.Enabled {
 		return nil
 	}
+	if opts.Namespace == "" {
+		return fmt.Errorf("backup namespace is required")
+	}
+	backupCache, err := cache.New(mgr.GetConfig(), cache.Options{
+		Scheme:            mgr.GetScheme(),
+		Mapper:            mgr.GetRESTMapper(),
+		HTTPClient:        mgr.GetHTTPClient(),
+		DefaultNamespaces: map[string]cache.Config{opts.Namespace: {}},
+		ByObject: map[client.Object]cache.ByObject{
+			&apiv1.Composition{}: {Label: opts.CompositionSelector},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("constructing backup namespace cache: %w", err)
+	}
+	if err := mgr.Add(backupCache); err != nil {
+		return fmt.Errorf("registering backup namespace cache: %w", err)
+	}
+	upstream, err := client.New(mgr.GetConfig(), client.Options{
+		Scheme:     mgr.GetScheme(),
+		Mapper:     mgr.GetRESTMapper(),
+		HTTPClient: mgr.GetHTTPClient(),
+		Cache:      &client.CacheOptions{Reader: backupCache},
+	})
+	if err != nil {
+		return fmt.Errorf("constructing backup upstream client: %w", err)
+	}
 	c := &backupController{
-		client:         mgr.GetClient(),
+		client:         upstream,
 		reader:         mgr.GetAPIReader(),
 		resourceFilter: opts.ResourceFilter,
 	}
@@ -76,15 +110,17 @@ func NewController(mgr ctrl.Manager, opts Options) error {
 	if config.Timeout == 0 || config.Timeout > 10*time.Second {
 		config.Timeout = 10 * time.Second
 	}
-	var err error
 	c.downstream, err = client.New(config, client.Options{Scheme: mgr.GetScheme()})
 	if err != nil {
 		return fmt.Errorf("constructing backup downstream client: %w", err)
 	}
+	slice := &metav1.PartialObjectMetadata{}
+	slice.SetGroupVersionKind(apiv1.SchemeGroupVersion.WithKind("ResourceSlice"))
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("backupController").
-		For(&apiv1.Composition{}).
-		Owns(&apiv1.ResourceSlice{}).
+		WatchesRawSource(source.Kind(backupCache, &apiv1.Composition{}, &handler.TypedEnqueueRequestForObject[*apiv1.Composition]{})).
+		WatchesRawSource(source.Kind(backupCache, slice, handler.TypedEnqueueRequestForOwner[*metav1.PartialObjectMetadata](
+			mgr.GetScheme(), mgr.GetRESTMapper(), &apiv1.Composition{}, handler.OnlyControllerOwner()))).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 1,
 			RateLimiter:             &jitteredRateLimiter{workqueue.DefaultTypedControllerRateLimiter[reconcile.Request]()},

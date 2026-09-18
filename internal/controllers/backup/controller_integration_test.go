@@ -2,6 +2,9 @@ package backup
 
 import (
 	"context"
+	"net/http"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,13 +15,186 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/rest"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+type backupTestManager struct {
+	ctrl.Manager
+	httpClient *http.Client
+}
+
+func (m backupTestManager) GetHTTPClient() *http.Client { return m.httpClient }
+
+type backupTestRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f backupTestRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestBackupControllerNamespaceIsolation(t *testing.T) {
+	mgr := testutil.NewManager(t, testutil.WithCompositionNamespace(metav1.NamespaceAll))
+	ctx := t.Context()
+	upstreamConfig := rest.CopyConfig(mgr.RestConfig)
+	upstreamConfig.QPS = 200
+	upstream, err := client.New(upstreamConfig, client.Options{Scheme: mgr.GetScheme()})
+	require.NoError(t, err)
+	downstreamConfig := rest.CopyConfig(mgr.DownstreamRestConfig)
+	downstreamConfig.QPS = 200
+	downstream, err := client.New(downstreamConfig, client.Options{Scheme: mgr.GetScheme()})
+	require.NoError(t, err)
+	for _, namespace := range []string{"backup-system", "other-system"} {
+		require.NoError(t, upstream.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}))
+	}
+
+	comps := []*apiv1.Composition{
+		{ObjectMeta: metav1.ObjectMeta{Name: "selected", Namespace: "backup-system", Labels: map[string]string{"backup": "enabled"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "selected", Namespace: "other-system", Labels: map[string]string{"backup": "enabled"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "excluded", Namespace: "backup-system", Labels: map[string]string{"backup": "disabled"}}},
+	}
+	slices := make([]*apiv1.ResourceSlice, len(comps))
+	now := metav1.Now()
+	for i, comp := range comps {
+		comp.Spec.Synthesizer.Name = "test"
+		require.NoError(t, upstream.Create(ctx, comp))
+		slices[i] = &apiv1.ResourceSlice{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: comp.Name, Namespace: comp.Namespace,
+				OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(comp, apiv1.SchemeGroupVersion.WithKind("Composition"))},
+			},
+			Spec: apiv1.ResourceSliceSpec{
+				SynthesisUUID: controllerTestUUID(i + 1),
+				Resources:     []apiv1.Manifest{inventoryTestManifest(t, controllerTestResource(comp.Name))},
+			},
+		}
+		require.NoError(t, upstream.Create(ctx, slices[i]))
+		comp.Status.CurrentSynthesis = &apiv1.Synthesis{
+			UUID: slices[i].Spec.SynthesisUUID, Synthesized: &now, Ready: &now,
+			TombstoneRecoveryRequired: true,
+			ResourceSlices:            []*apiv1.ResourceSliceRef{{Name: slices[i].Name}},
+		}
+		require.NoError(t, upstream.Status().Update(ctx, comp))
+	}
+
+	type cacheRequest struct {
+		path, selector, accept string
+		watch                  bool
+	}
+	var mu sync.Mutex
+	var requests []cacheRequest
+	httpClient := *mgr.GetHTTPClient()
+	transport := httpClient.Transport
+	httpClient.Transport = backupTestRoundTripper(func(req *http.Request) (*http.Response, error) {
+		if req.Method == http.MethodGet && (strings.HasSuffix(req.URL.Path, "/compositions") || strings.HasSuffix(req.URL.Path, "/resourceslices")) {
+			mu.Lock()
+			requests = append(requests, cacheRequest{
+				path: req.URL.Path, selector: req.URL.Query().Get("labelSelector"),
+				accept: req.Header.Get("Accept"), watch: req.URL.Query().Get("watch") == "true",
+			})
+			mu.Unlock()
+		}
+		return transport.RoundTrip(req)
+	})
+	require.NoError(t, NewController(backupTestManager{Manager: mgr.Manager, httpClient: &httpClient}, Options{
+		Enabled: true, Namespace: "backup-system", CompositionSelector: labels.SelectorFromSet(labels.Set{"backup": "enabled"}),
+		Downstream: mgr.DownstreamRestConfig,
+	}))
+	mgr.Start(t)
+
+	inventoryKey := client.ObjectKey{Namespace: inventoryNamespace, Name: inventoryName(comps[0], controllerTestUUID(1))}
+	waitForInventory := func() {
+		t.Helper()
+		require.EventuallyWithT(t, func(c *assert.CollectT) {
+			inventory := &corev1.ConfigMap{}
+			require.NoError(c, downstream.Get(ctx, inventoryKey, inventory))
+			resources, err := decodeInventorySnapshot(comps[0], *inventory)
+			require.NoError(c, err)
+			require.Equal(c, []inventoryResource{controllerTestResource("selected")}, resources,
+				"inventory must use full APIReader manifests, not metadata-only cached slices")
+		}, 10*time.Second, 10*time.Millisecond)
+	}
+	waitForInventory()
+	observed := &apiv1.Composition{}
+	require.NoError(t, upstream.Get(ctx, client.ObjectKeyFromObject(comps[0]), observed))
+	require.True(t, observed.Status.CurrentSynthesis.TombstoneRecoveryComplete())
+	require.Equal(t, reasonInventoryNotFound, observed.Status.CurrentSynthesis.TombstoneRecoveryFinished.Reason)
+
+	// The main manager still caches every namespace and does not inherit the backup selector.
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		allComps := &apiv1.CompositionList{}
+		require.NoError(c, mgr.GetClient().List(ctx, allComps))
+		require.Len(c, allComps.Items, len(comps))
+		allSlices := &apiv1.ResourceSliceList{}
+		require.NoError(c, mgr.GetClient().List(ctx, allSlices))
+		require.Len(c, allSlices.Items, len(slices))
+	}, 10*time.Second, 10*time.Millisecond)
+
+	for _, change := range []string{"status", "metadata"} {
+		// No Composition event or explicit requeue may recreate this inventory.
+		require.NoError(t, downstream.Delete(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+			Name: inventoryKey.Name, Namespace: inventoryKey.Namespace,
+		}}))
+		require.Eventually(t, func() bool {
+			return apierrors.IsNotFound(downstream.Get(ctx, inventoryKey, &corev1.ConfigMap{}))
+		}, time.Second, 10*time.Millisecond)
+		require.Never(t, func() bool {
+			return !apierrors.IsNotFound(downstream.Get(ctx, inventoryKey, &corev1.ConfigMap{}))
+		}, 300*time.Millisecond, 50*time.Millisecond, "inventory must remain absent until an owner event")
+		for _, slice := range slices {
+			if change == "status" {
+				slice.Status.Resources = []apiv1.ResourceState{{Reconciled: true}}
+				require.NoError(t, upstream.Status().Update(ctx, slice))
+			} else {
+				slice.Annotations = map[string]string{"test.example/owner-watch": "updated"}
+				require.NoError(t, upstream.Update(ctx, slice))
+			}
+		}
+		waitForInventory()
+	}
+
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		mu.Lock()
+		defer mu.Unlock()
+		seen := map[string]map[bool]bool{}
+		for _, req := range requests {
+			resource := req.path[strings.LastIndex(req.path, "/")+1:]
+			require.Equal(c, "/apis/"+apiv1.SchemeGroupVersion.String()+"/namespaces/backup-system/"+resource, req.path,
+				"every backup LIST/WATCH must be namespace-restricted at the API")
+			if resource == "compositions" {
+				require.Equal(c, "backup=enabled", req.selector)
+			} else {
+				require.Empty(c, req.selector, "slice owner watches must not require Composition labels")
+				require.Contains(c, req.accept, "as=PartialObjectMetadata")
+			}
+			if seen[resource] == nil {
+				seen[resource] = map[bool]bool{}
+			}
+			seen[resource][req.watch] = true
+		}
+		for _, resource := range []string{"compositions", "resourceslices"} {
+			require.True(c, seen[resource][false], "missing %s LIST", resource)
+			require.True(c, seen[resource][true], "missing %s WATCH", resource)
+		}
+	}, 10*time.Second, 10*time.Millisecond)
+	for range 5 {
+		for _, comp := range comps[1:] {
+			got := &apiv1.Composition{}
+			require.NoError(t, upstream.Get(ctx, client.ObjectKeyFromObject(comp), got))
+			require.Equal(t, comp, got, "ignored Compositions must remain unchanged even after owner events")
+			key := client.ObjectKey{Namespace: inventoryNamespace, Name: inventoryName(comp, comp.Status.CurrentSynthesis.UUID)}
+			err := downstream.Get(ctx, key, &corev1.ConfigMap{})
+			require.True(t, apierrors.IsNotFound(err), "ignored inventory must not exist, got %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 func TestBackupControllerCompositionWatchAdvancesPhases(t *testing.T) {
 	mgr := testutil.NewManager(t)
-	require.NoError(t, NewController(mgr.Manager, Options{Enabled: true, Downstream: mgr.DownstreamRestConfig}))
+	require.NoError(t, NewController(mgr.Manager, Options{Enabled: true, Namespace: "default", Downstream: mgr.DownstreamRestConfig}))
 	mgr.Start(t)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)

@@ -559,6 +559,10 @@ func TestBackupControllerDisabled(t *testing.T) {
 	require.NoError(t, NewController(nil, Options{Enabled: false}), "disabled backup must not access the manager or register controllers")
 }
 
+func TestBackupControllerNamespaceRequired(t *testing.T) {
+	require.EqualError(t, NewController(nil, Options{Enabled: true}), "backup namespace is required")
+}
+
 func TestBackupControllerResourceFilterSkipsWrites(t *testing.T) {
 	for _, completed := range []bool{false, true} {
 		t.Run(fmt.Sprintf("recovery-completed-%t", completed), func(t *testing.T) {

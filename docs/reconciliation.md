@@ -124,8 +124,8 @@ metadata:
 
 ## Sharding
 
-The Eno reconciler watches Compositions in one namespace. The following flags control its scope:
-- **--composition-namespace**: Only watch Compositions and ResourceSlices in the given namespace. Defaults to `POD_NAMESPACE`, which should be populated from the pod's `metadata.namespace` through the Downward API. A nonempty value must be supplied through the flag or environment variable; the reconciler does not default to watching all namespaces.
+The Eno reconciler watches Compositions across all namespaces by default. The following flags control its scope:
+- **--composition-namespace**: Optionally limit Composition and ResourceSlice watches to the given namespace. Defaults to all namespaces, independently of `POD_NAMESPACE`.
   ```
   --composition-namespace=default
   ```
@@ -141,6 +141,8 @@ The Eno reconciler watches Compositions in one namespace. The following flags co
 
 The flags stack up and are not mutually exclusive i.e. A resource filter will only be evaluated against resources whose Composition match the label selector, which in turn is only evaluated against Compositions in the selected namespace.
 ## Tombstone Recovery and Inventory
+
+`--enable-backup-operator` defaults to false. When enabled, backup requires `POD_NAMESPACE`, populated from the pod's `metadata.namespace` through the Downward API. Backup uses separate namespace-scoped watches for Compositions and ResourceSlice metadata in that namespace, respecting `--composition-label-selector` for Compositions and the existing Composition-only resource filter. It does not change the normal reconciler's `--composition-namespace` behavior. Only Compositions in the backup namespace wait for recovery; those outside it continue normal reconciliation. When backup is disabled, it registers no watches and imposes no `POD_NAMESPACE` requirement. Inventory ConfigMaps remain in downstream `kube-system`.
 
 When backup is enabled, the backup controller processes each eligible Composition in two phases. After synthesis, `tombstoneRecovery` reads the saved downstream inventory and persists missing tombstones only when `TombstoneRecoveryRequired` is true; otherwise the controller records a `NotNeeded` recovery decision without reading inventory. Once the recovery decision is complete and the synthesis is `Ready`, `inventoryUpdate` records a ConfigMap in the downstream cluster whether or not recovery was required. Inventory update trusts that decision and does not decode historical resources or repeat the tombstone diff; it still preserves history when the recorded recovery reason is `InventoryGetError` or `InventoryInvalid`.
 
