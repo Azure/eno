@@ -82,6 +82,7 @@ func TestBackupControllerNamespaceIsolation(t *testing.T) {
 	type cacheRequest struct {
 		path, selector, accept string
 		watch                  bool
+		initialEvents          bool
 	}
 	var mu sync.Mutex
 	var requests []cacheRequest
@@ -93,6 +94,7 @@ func TestBackupControllerNamespaceIsolation(t *testing.T) {
 			requests = append(requests, cacheRequest{
 				path: req.URL.Path, selector: req.URL.Query().Get("labelSelector"),
 				accept: req.Header.Get("Accept"), watch: req.URL.Query().Get("watch") == "true",
+				initialEvents: req.URL.Query().Get("sendInitialEvents") == "true",
 			})
 			mu.Unlock()
 		}
@@ -159,6 +161,7 @@ func TestBackupControllerNamespaceIsolation(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		seen := map[string]map[bool]bool{}
+		initialized := map[string]bool{}
 		for _, req := range requests {
 			resource := req.path[strings.LastIndex(req.path, "/")+1:]
 			require.Equal(c, "/apis/"+apiv1.SchemeGroupVersion.String()+"/namespaces/backup-system/"+resource, req.path,
@@ -173,9 +176,13 @@ func TestBackupControllerNamespaceIsolation(t *testing.T) {
 				seen[resource] = map[bool]bool{}
 			}
 			seen[resource][req.watch] = true
+			// WatchList initializes the cache through watch events instead of a separate LIST.
+			if !req.watch || req.initialEvents {
+				initialized[resource] = true
+			}
 		}
 		for _, resource := range []string{"compositions", "resourceslices"} {
-			require.True(c, seen[resource][false], "missing %s LIST", resource)
+			require.True(c, initialized[resource], "missing %s LIST or WATCH with sendInitialEvents=true", resource)
 			require.True(c, seen[resource][true], "missing %s WATCH", resource)
 		}
 	}, 10*time.Second, 10*time.Millisecond)
