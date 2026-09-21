@@ -158,7 +158,7 @@ type Synthesis struct {
 	Attempts int `json:"attempts,omitempty"`
 
 	// References to every resource slice that contains the resources comprising this synthesis.
-	// Immutable.
+	// Recovery preparation may append overflow slice references before reconstitution.
 	ResourceSlices []*ResourceSliceRef `json:"resourceSlices,omitempty"`
 
 	// Results are passed through opaquely from the synthesizer's KRM function.
@@ -171,12 +171,34 @@ type Synthesis struct {
 	// or an input with a ref that sets `Defer == true`.
 	Deferred bool `json:"deferred,omitempty"`
 
-	// TombstoneRecoveryRequired indicates that resources may exist outside the available synthesis history.
-	// It is set when there is no current synthesis, or a historical ResourceSlice reference is nameless
+	// TombstoneRecoveryRequired indicates that this synthesis encountered incomplete history.
+	// Each synthesis starts with the flag false and does not inherit the preceding synthesis's flag.
+	// It is set when there is no current synthesis to use as history, or a historical ResourceSlice reference is nameless
 	// or points to a missing slice. Even a first synthesis may encounter resources left by a prior incarnation whose inventory was lost.
-	// The flag is carried forward because subsequent syntheses cannot account for those unknown resources.
-	// It does not block synthesis or reconciliation, and successful syntheses do not clear it.
+	// A complete historical reference list, including an empty list, does not require recovery.
+	// It does not request or block synthesis.
+	// Recovery preparation gates reconstitution through TombstoneRecoveryFinished only when backup is enabled and the Composition is not deleting.
 	TombstoneRecoveryRequired bool `json:"tombstoneRecoveryRequired,omitempty"`
+
+	// TombstoneRecoveryFinished records the recovery decision for this synthesis.
+	// A missing or unfinished decision prevents reconstitution only when backup is enabled and the Composition is not deleting.
+	TombstoneRecoveryFinished *TombstoneRecoveryStatus `json:"tombstoneRecoveryFinished,omitempty"`
+}
+
+type TombstoneRecoveryStatus struct {
+	// Status is true for any terminal decision, including skipped recovery and legacy disabled acknowledgments.
+	Status bool `json:"status"`
+
+	Reason  string `json:"reason"`
+	Message string `json:"message,omitempty"`
+
+	// SynthesisUUID prevents a decision from being reused when a synthesis UUID is replaced.
+	SynthesisUUID string `json:"synthesisUUID"`
+}
+
+func (s *Synthesis) TombstoneRecoveryComplete() bool {
+	return s != nil && s.TombstoneRecoveryFinished != nil &&
+		s.TombstoneRecoveryFinished.SynthesisUUID == s.UUID && s.TombstoneRecoveryFinished.Status
 }
 
 type Result struct {

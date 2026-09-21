@@ -50,6 +50,18 @@ func TestRecoveryFlagAPIPersistence(t *testing.T) {
 				InFlightSynthesis: &apiv1.Synthesis{UUID: "inflight", TombstoneRecoveryRequired: tc.flags[1]},
 				PreviousSynthesis: &apiv1.Synthesis{UUID: "previous", TombstoneRecoveryRequired: tc.flags[2]},
 			}
+			expectedSyntheses := []*apiv1.Synthesis{
+				comp.Status.CurrentSynthesis, comp.Status.InFlightSynthesis, comp.Status.PreviousSynthesis,
+			}
+			if tc.name == "all" {
+				for _, syn := range expectedSyntheses {
+					syn.TombstoneRecoveryFinished = &apiv1.TombstoneRecoveryStatus{
+						Status: true, Reason: "InventoryNotFound", Message: "no prior inventory", SynthesisUUID: syn.UUID,
+					}
+				}
+				comp.Status.InFlightSynthesis.TombstoneRecoveryFinished.Status = false
+				comp.Status.InFlightSynthesis.TombstoneRecoveryFinished.Reason = "BackupInProgress"
+			}
 			require.NoError(t, mgr.GetClient().Status().Update(t.Context(), comp))
 
 			wire := &unstructured.Unstructured{}
@@ -72,6 +84,14 @@ func TestRecoveryFlagAPIPersistence(t *testing.T) {
 			for i, syn := range syntheses {
 				require.NotNil(t, syn, fields[i])
 				require.Equal(t, tc.flags[i], syn.TombstoneRecoveryRequired, fields[i])
+				expected := expectedSyntheses[i].TombstoneRecoveryFinished
+				require.Equal(t, expected, syn.TombstoneRecoveryFinished, fields[i])
+				if expected != nil {
+					status, found, err := unstructured.NestedBool(wire.Object, "status", fields[i], "tombstoneRecoveryFinished", "status")
+					require.NoError(t, err)
+					require.True(t, found, "generated CRD must preserve %s.tombstoneRecoveryFinished.status", fields[i])
+					require.Equal(t, expected.Status, status, fields[i])
+				}
 				flag, found, err := unstructured.NestedBool(wire.Object, "status", fields[i], "tombstoneRecoveryRequired")
 				require.NoError(t, err)
 				require.Equal(t, tc.flags[i], flag, fields[i])
@@ -180,7 +200,7 @@ func TestRecoveryIntegrationPartialHistoryLifecycle(t *testing.T) {
 		return mgr.GetClient().Update(t.Context(), fresh)
 	}))
 	healthy := recoveryIntegrationWaitReady(t, mgr, key, recoveredSnapshot.UUID)
-	require.True(t, healthy.Status.CurrentSynthesis.TombstoneRecoveryRequired)
+	require.False(t, healthy.Status.CurrentSynthesis.TombstoneRecoveryRequired)
 	require.True(t, healthy.Status.PreviousSynthesis.TombstoneRecoveryRequired)
 	require.Equal(t, recoveredSnapshot.UUID, healthy.Status.PreviousSynthesis.UUID)
 	require.Equal(t, recoveredSnapshot.ResourceSlices, healthy.Status.PreviousSynthesis.ResourceSlices)
