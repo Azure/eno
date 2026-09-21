@@ -20,7 +20,7 @@ import (
 )
 
 // maxSliceJsonBytes is the max sum of a resource slice's manifests.
-const maxSliceJsonBytes = 1024 * 512
+const maxSliceJsonBytes = resource.MaxSliceJSONBytes
 
 type Executor struct {
 	Reader  client.Reader
@@ -246,7 +246,7 @@ func (e *Executor) fetchCurrentSynthesisResSlices(ctx context.Context, comp *api
 		return nil, true, nil
 	}
 
-	recoveryRequired := current.TombstoneRecoveryRequired
+	recoveryRequired := false
 	logger = logger.WithValues("currentSynthesisUUID", current.UUID)
 	slices := []*apiv1.ResourceSlice{}
 

@@ -98,9 +98,9 @@ func TestRecoveryHistoryFetch(t *testing.T) {
 		{name: "no-current", noCurrent: true, wantFlag: true},
 		{name: "nil-reference-list"},
 		{name: "empty-reference-list", refs: []*apiv1.ResourceSliceRef{}},
-		{name: "empty-inherited", inherited: true, wantFlag: true},
+		{name: "empty-history-does-not-inherit", inherited: true},
 		{name: "healthy", refs: recoveryRefs("a", "b"), wantNames: []string{"a", "b"}, wantReads: []string{"a", "b"}},
-		{name: "healthy-inherited", refs: recoveryRefs("a", "b"), inherited: true, wantFlag: true, wantNames: []string{"a", "b"}, wantReads: []string{"a", "b"}},
+		{name: "healthy-does-not-inherit", refs: recoveryRefs("a", "b"), inherited: true, wantNames: []string{"a", "b"}, wantReads: []string{"a", "b"}},
 		{name: "nil-entry-only", refs: []*apiv1.ResourceSliceRef{nil}, wantFlag: true},
 		{name: "empty-name-only", refs: recoveryRefs(""), wantFlag: true},
 		{name: "named-not-found", refs: recoveryRefs("missing"), wantFlag: true, wantReads: []string{"missing"}},
@@ -366,12 +366,12 @@ func TestRecoveryExecutorPublication(t *testing.T) {
 		want      map[string]bool
 	}{
 		{name: "healthy-false", refs: recoveryRefs("history-a", "history-b"), outputs: []string{"a", "b"}, want: map[string]bool{"a": false, "b": false}},
-		{name: "healthy-inherited", refs: recoveryRefs("history-a", "history-b"), inherited: true, outputs: []string{"a", "b"}, wantFlag: true, want: map[string]bool{"a": false, "b": false}},
+		{name: "healthy-does-not-inherit", refs: recoveryRefs("history-a", "history-b"), inherited: true, outputs: []string{"a", "b"}, want: map[string]bool{"a": false, "b": false}},
 		{name: "new-composition", noCurrent: true, outputs: []string{"d"}, wantFlag: true, want: map[string]bool{"d": false}},
 		{name: "zero-output-with-missing-history", refs: recoveryRefs("history-a", "missing-c", "history-b"), wantFlag: true, want: map[string]bool{"a": true, "b": true}},
 		{name: "zero-output-all-unavailable", refs: []*apiv1.ResourceSliceRef{nil, {}, {Name: "missing-c"}}, wantFlag: true, want: map[string]bool{}},
 		{name: "zero-output-empty-reference-list", refs: []*apiv1.ResourceSliceRef{}, want: map[string]bool{}},
-		{name: "zero-output-inherited", inherited: true, wantFlag: true, want: map[string]bool{}},
+		{name: "zero-output-does-not-inherit", inherited: true, want: map[string]bool{}},
 		{
 			name:    "mixed-history",
 			refs:    []*apiv1.ResourceSliceRef{{Name: "history-a"}, nil, {}, {Name: "missing-c"}, {Name: "history-b"}},
