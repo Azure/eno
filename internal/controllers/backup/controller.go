@@ -177,6 +177,10 @@ func (c *backupController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		} else {
 			err = c.markTombstoneRecoveryFinished(ctx, comp, reasonNotNeeded, "", nil)
 		}
+	} else if syn.Ready != nil {
+		logger = logger.WithValues("operation", "inventoryRecording", "inventoryConfigMap", inventoryName(comp, syn.UUID))
+		ctx = logr.NewContext(ctx, logger)
+		err = c.inventoryUpdate(ctx, comp)
 	}
 
 	if errors.Is(err, errSuperseded) {
@@ -349,6 +353,87 @@ func (c *backupController) readInventories(ctx context.Context, comp *apiv1.Comp
 		return nil, fmt.Errorf("listing downstream inventory ConfigMaps: %w", err)
 	}
 	return list.Items, nil
+}
+
+func (c *backupController) inventoryUpdate(ctx context.Context, comp *apiv1.Composition) error {
+	logger := logr.FromContextOrDiscard(ctx)
+
+	reason := comp.Status.CurrentSynthesis.TombstoneRecoveryFinished.Reason
+	if reason == reasonInventoryGetError || reason == reasonInventoryInvalid {
+		logger.Info("inventory recording deferred because historical inventory is unresolved",
+			"reason", reason)
+		return nil
+	}
+
+	items, err := c.readInventories(ctx, comp)
+	if err != nil {
+		return err
+	}
+
+	slices, err := c.loadCurrentSynthesisResourceSlices(ctx, comp)
+	if err != nil {
+		return err
+	}
+
+	configMap, err := makeInventory(comp, slices)
+	if err != nil {
+		return err
+	}
+
+	ctx = logr.NewContext(ctx, logger.WithValues("inventoryConfigMap", configMap.Name))
+	if err := c.persistInventory(ctx, comp, configMap); err != nil {
+		return err
+	}
+	return c.deleteOtherInventories(ctx, comp, configMap, items)
+}
+
+func (c *backupController) persistInventory(ctx context.Context, comp *apiv1.Composition, configMap *corev1.ConfigMap) error {
+	logger := logr.FromContextOrDiscard(ctx)
+
+	comp, err := c.getCurrentComposition(ctx, comp, true)
+	if err != nil {
+		return err
+	}
+
+	persisted := configMap.DeepCopy()
+	if err := c.downstream.Create(ctx, persisted); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("creating inventory ConfigMap %q: %w", configMap.Name, err)
+		}
+		if err := c.downstream.Get(ctx, client.ObjectKeyFromObject(configMap), persisted); err != nil {
+			return fmt.Errorf("reading existing inventory ConfigMap %q: %w", configMap.Name, err)
+		}
+	}
+
+	matches, err := inventoriesMatch(comp, persisted, configMap)
+	if err != nil {
+		return err
+	}
+	if !matches {
+		return fmt.Errorf("existing inventory ConfigMap %q does not match the intended snapshot", configMap.Name)
+	}
+
+	logger.Info("inventory snapshot persisted")
+	return nil
+}
+
+func (c *backupController) deleteOtherInventories(ctx context.Context, comp *apiv1.Composition, configMap *corev1.ConfigMap, items []corev1.ConfigMap) error {
+	logger := logr.FromContextOrDiscard(ctx)
+	for _, item := range items {
+		if item.Name == configMap.Name {
+			continue
+		}
+		if _, err := c.getCurrentComposition(ctx, comp, true); err != nil {
+			return err
+		}
+		err := c.downstream.Delete(ctx, &item, &client.Preconditions{UID: &item.UID, ResourceVersion: &item.ResourceVersion})
+		if err != nil && !apierrors.IsNotFound(err) {
+			logger.Error(err, "failed to clean up superseded inventory", "operation", "inventoryCleanup", "deletedInventoryConfigMap", item.Name)
+			return fmt.Errorf("deleting superseded inventory ConfigMap %q: %w", item.Name, err)
+		}
+		logger.Info("superseded inventory cleaned up", "operation", "inventoryCleanup", "deletedInventoryConfigMap", item.Name)
+	}
+	return nil
 }
 
 type statusPatch struct {
