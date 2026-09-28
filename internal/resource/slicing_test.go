@@ -104,6 +104,24 @@ func TestSliceTombstonesPatch(t *testing.T) {
 	require.Len(t, slices, 0)
 }
 
+func TestSliceTombstonesWithShortStatus(t *testing.T) {
+	previous := &apiv1.ResourceSlice{
+		Spec: apiv1.ResourceSliceSpec{Resources: []apiv1.Manifest{
+			{Manifest: `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"completed","namespace":"default"}}`, Deleted: true},
+			{Manifest: `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"recovered","namespace":"default"}}`, Deleted: true},
+		}},
+		Status: apiv1.ResourceSliceStatus{Resources: []apiv1.ResourceState{{Reconciled: true}}},
+	}
+	before := previous.DeepCopy()
+
+	slices, err := Slice(&apiv1.Composition{}, []*apiv1.ResourceSlice{previous}, nil, MaxSliceJSONBytes)
+	require.NoError(t, err)
+	require.Len(t, slices, 1)
+	assert.Equal(t, []apiv1.Manifest{previous.Spec.Resources[1]}, slices[0].Spec.Resources,
+		"an appended tombstone without status must survive while a completed tombstone is removed")
+	assert.Equal(t, before, previous)
+}
+
 func TestSliceTombstonesVersionSemantics(t *testing.T) {
 	outputs := []*unstructured.Unstructured{{
 		Object: map[string]interface{}{

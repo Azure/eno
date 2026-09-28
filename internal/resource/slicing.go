@@ -10,11 +10,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
+// MaxSliceJSONBytes is the maximum sum of manifest bytes used when packing ResourceSlices.
+const MaxSliceJSONBytes = 1024 * 512
+
 // Slice builds a new set of resource slices by merging a new set of resources onto an old set of slices.
 // - New and updated resources are partitioned across slices per maxJsonBytes
 // - Removed resources are converted into "tombstones" i.e. manifests with Deleted == true
 func Slice(comp *apiv1.Composition, previous []*apiv1.ResourceSlice, outputs []*unstructured.Unstructured, maxJsonBytes int) ([]*apiv1.ResourceSlice, error) {
-	refs := map[resourceRef]struct{}{}
+	refs := map[Ref]struct{}{}
 	manifests := []apiv1.Manifest{}
 	for i, output := range outputs {
 		js, err := output.MarshalJSON()
@@ -24,7 +27,7 @@ func Slice(comp *apiv1.Composition, previous []*apiv1.ResourceSlice, outputs []*
 		manifests = append(manifests, apiv1.Manifest{
 			Manifest: string(js),
 		})
-		refs[newResourceRef(output)] = struct{}{}
+		refs[RefFromUnstructured(output)] = struct{}{}
 	}
 
 	// Build tombstones by diffing the new state against the current state
@@ -44,7 +47,8 @@ func Slice(comp *apiv1.Composition, previous []*apiv1.ResourceSlice, outputs []*
 			}
 
 			// We don't need a tombstone once the deleted resource has been reconciled
-			if _, ok := refs[newResourceRef(obj)]; ok || ((res.Deleted || slice.DeletionTimestamp != nil) && slice.Status.Resources != nil && slice.Status.Resources[i].Reconciled) {
+			// Status may lag appended manifests; a missing status entry means the tombstone must be retained.
+			if _, ok := refs[RefFromUnstructured(obj)]; ok || ((res.Deleted || slice.DeletionTimestamp != nil) && i < len(slice.Status.Resources) && slice.Status.Resources[i].Reconciled) {
 				continue // still exists or has already been deleted
 			}
 
@@ -87,16 +91,13 @@ func Slice(comp *apiv1.Composition, previous []*apiv1.ResourceSlice, outputs []*
 	return slices, nil
 }
 
-type resourceRef struct {
-	Name, Namespace, Kind, Group string
-}
-
-func newResourceRef(obj *unstructured.Unstructured) resourceRef {
+// RefFromUnstructured returns the resource identity, resolving Eno Patches to their targets.
+func RefFromUnstructured(obj *unstructured.Unstructured) Ref {
 	if obj.GetObjectKind().GroupVersionKind() == patchGVK {
 		apiVersion, _, _ := unstructured.NestedString(obj.Object, "patch", "apiVersion")
 		kind, _, _ := unstructured.NestedString(obj.Object, "patch", "kind")
 		gv, _ := schema.ParseGroupVersion(apiVersion)
-		return resourceRef{
+		return Ref{
 			Name:      obj.GetName(),
 			Namespace: obj.GetNamespace(),
 			Kind:      kind,
@@ -104,7 +105,7 @@ func newResourceRef(obj *unstructured.Unstructured) resourceRef {
 		}
 	}
 
-	return resourceRef{
+	return Ref{
 		Name:      obj.GetName(),
 		Namespace: obj.GetNamespace(),
 		Kind:      obj.GetKind(),
