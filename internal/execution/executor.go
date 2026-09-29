@@ -246,7 +246,7 @@ func (e *Executor) fetchCurrentSynthesisResSlices(ctx context.Context, comp *api
 		return nil, true, nil
 	}
 
-	recoveryRequired := false
+	recoveryRequired := current.TombstoneRecoveryRequired && !current.TombstoneRecoveryComplete()
 	logger = logger.WithValues("currentSynthesisUUID", current.UUID)
 	slices := []*apiv1.ResourceSlice{}
 

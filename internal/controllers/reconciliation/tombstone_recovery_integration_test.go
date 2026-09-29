@@ -200,7 +200,7 @@ func TestRecoveryIntegrationPartialHistoryLifecycle(t *testing.T) {
 		return mgr.GetClient().Update(t.Context(), fresh)
 	}))
 	healthy := recoveryIntegrationWaitReady(t, mgr, key, recoveredSnapshot.UUID)
-	require.False(t, healthy.Status.CurrentSynthesis.TombstoneRecoveryRequired)
+	require.True(t, healthy.Status.CurrentSynthesis.TombstoneRecoveryRequired)
 	require.True(t, healthy.Status.PreviousSynthesis.TombstoneRecoveryRequired)
 	require.Equal(t, recoveredSnapshot.UUID, healthy.Status.PreviousSynthesis.UUID)
 	require.Equal(t, recoveredSnapshot.ResourceSlices, healthy.Status.PreviousSynthesis.ResourceSlices)

@@ -36,10 +36,12 @@ type Options struct {
 	Downstream     *rest.Config
 	ResourceFilter cel.Program
 
-	DisableServerSideApply bool
-	FailOpen               bool
-	MigratingFieldManagers []string
-	MigratingFields        []string
+	EnableTombstoneRecovery      bool
+	RecoveryCompositionNamespace string
+	DisableServerSideApply       bool
+	FailOpen                     bool
+	MigratingFieldManagers       []string
+	MigratingFields              []string
 
 	Timeout                  time.Duration
 	ReadinessPollInterval    time.Duration
@@ -67,6 +69,9 @@ type Controller struct {
 }
 
 func New(mgr ctrl.Manager, opts Options) error {
+	if opts.EnableTombstoneRecovery && opts.RecoveryCompositionNamespace == "" {
+		return fmt.Errorf("recovery composition namespace is required when tombstone recovery is enabled")
+	}
 	upstreamClient, err := client.New(opts.Downstream, client.Options{
 		Scheme: runtime.NewScheme(), // empty scheme since we shouldn't rely on compile-time types
 	})
@@ -74,7 +79,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 		return err
 	}
 
-	src, cache, err := newReconstitutionSource(mgr, opts.ResourceFilter)
+	src, cache, err := newReconstitutionSource(mgr, opts.ResourceFilter, opts.EnableTombstoneRecovery, opts.RecoveryCompositionNamespace)
 	if err != nil {
 		return err
 	}

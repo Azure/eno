@@ -9,6 +9,7 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	enocel "github.com/Azure/eno/internal/cel"
 	"github.com/Azure/eno/internal/resource"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -119,15 +120,21 @@ func recoveryReconstitutionNewHarness(t *testing.T, comp *apiv1.Composition, inf
 	cache := &resource.Cache{}
 	cache.SetQueue(h.queue)
 	h.source = &reconstitutionSource{
-		client:          newClient("informer", informerSlices),
-		nonCachedReader: newClient("api", apiSlices),
-		cache:           cache,
+		client:                       newClient("informer", informerSlices),
+		nonCachedReader:              newClient("api", apiSlices),
+		cache:                        cache,
+		recoveryCompositionNamespace: comp.Namespace,
 	}
 	return h
 }
 
 func recoveryReconstitutionSynthesis(uuid string, names ...string) *apiv1.Synthesis {
-	syn := &apiv1.Synthesis{UUID: uuid, Synthesized: recoveryReconstitutionTime()}
+	syn := &apiv1.Synthesis{
+		UUID: uuid, Synthesized: recoveryReconstitutionTime(),
+		TombstoneRecoveryFinished: &apiv1.TombstoneRecoveryStatus{
+			Status: true, Reason: "NotNeeded", SynthesisUUID: uuid,
+		},
+	}
 	for _, name := range names {
 		syn.ResourceSlices = append(syn.ResourceSlices, &apiv1.ResourceSliceRef{Name: name})
 	}
@@ -158,7 +165,7 @@ func recoveryReconstitutionSlice(name, uuid string, resources ...string) *apiv1.
 	}
 	for i, name := range resources {
 		slice.Spec.Resources = append(slice.Spec.Resources, apiv1.Manifest{Manifest: fmt.Sprintf(
-			`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":%q,"namespace":"default","annotations":{"eno.azure.io/readiness-group":%q}},"data":{"source":"full-api","resource":%q}}`,
+			`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":%q,"namespace":"default","labels":{"eno.azure.io/overlaymgr-component-type":"addon"},"annotations":{"eno.azure.io/readiness-group":%q}},"data":{"source":"full-api","resource":%q}}`,
 			name, fmt.Sprint(i), name,
 		)})
 	}
@@ -211,6 +218,88 @@ func (h *recoveryReconstitutionHarness) recoveryReconstitutionAPIReads() []strin
 		}
 	}
 	return reads
+}
+
+func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		finished    *apiv1.TombstoneRecoveryStatus
+		notRequired bool
+		disabled    bool
+		deleting    bool
+		outside     bool
+		filtered    bool
+		allow       bool
+	}{
+		{name: "missing"},
+		{name: "missing-even-when-not-required", notRequired: true},
+		{name: "unfinished", finished: &apiv1.TombstoneRecoveryStatus{SynthesisUUID: "current", Reason: "InventoryGetError"}},
+		{name: "wrong-uuid", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "old", Reason: "NotNeeded"}},
+		{name: "completed", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "current", Reason: "FinishedTombstoneRecovery"}, allow: true},
+		{name: "skipped", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "current", Reason: "InventoryNotFound"}, allow: true},
+		{name: "legacy-disabled-decision", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "current", Reason: "BackupOperatorNotEnabled"}, allow: true},
+		{name: "disabled-missing", disabled: true, allow: true},
+		{name: "disabled-unfinished", disabled: true, finished: &apiv1.TombstoneRecoveryStatus{SynthesisUUID: "current", Reason: "InventoryGetError"}, allow: true},
+		{name: "disabled-old-uuid", disabled: true, finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "old", Reason: "NotNeeded"}, allow: true},
+		{name: "outside-namespace-missing", outside: true, allow: true},
+		{name: "outside-namespace-unfinished", outside: true, finished: &apiv1.TombstoneRecoveryStatus{SynthesisUUID: "current", Reason: "InventoryGetError"}, allow: true},
+		{name: "outside-namespace-old-uuid", outside: true, finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "old", Reason: "NotNeeded"}, allow: true},
+		{name: "outside-namespace-disabled", outside: true, disabled: true, allow: true},
+		{name: "outside-resource-filter", filtered: true, allow: true},
+		{name: "deleting-missing", deleting: true, allow: true},
+		{name: "deleting-unfinished", finished: &apiv1.TombstoneRecoveryStatus{SynthesisUUID: "current", Reason: "InventoryGetError"}, deleting: true, allow: true},
+		{name: "deleting-old-uuid", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "old", Reason: "NotNeeded"}, deleting: true, allow: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			previous := recoveryReconstitutionSynthesis("previous", "previous-slice")
+			current := recoveryReconstitutionSynthesis("current", "current-slice")
+			current.TombstoneRecoveryRequired = !tc.notRequired
+			current.TombstoneRecoveryFinished = tc.finished
+			comp := recoveryReconstitutionComposition(previous, current)
+			if tc.deleting {
+				comp.DeletionTimestamp = recoveryReconstitutionTime()
+				comp.Finalizers = []string{"eno.azure.io/cleanup"}
+			}
+			slices := []*apiv1.ResourceSlice{
+				recoveryReconstitutionSlice("previous-slice", "previous", "previous-resource"),
+				recoveryReconstitutionSlice("current-slice", "current", "current-resource"),
+			}
+			h := recoveryReconstitutionNewHarness(t, comp, slices, slices)
+			h.source.enableTombstoneRecovery = !tc.disabled
+			if tc.outside {
+				h.source.recoveryCompositionNamespace = "backup-system"
+			}
+			if tc.filtered {
+				filter, err := enocel.Parse(`has(self.metadata.labels) && self.metadata.labels != null && 'eno.azure.io/overlaymgr-component-type' in self.metadata.labels && self.metadata.labels['eno.azure.io/overlaymgr-component-type'] == 'addon'`)
+				require.NoError(t, err)
+				h.source.cache.ResourceFilter = filter
+			}
+			result, err := h.recoveryReconstitutionReconcile()
+			require.NoError(t, err)
+			if !tc.allow {
+				assert.Zero(t, result)
+				assert.Empty(t, h.reads, "unfinished preparation must not load either synthesis")
+				assert.False(t, h.source.cache.Visit(h.ctx, comp, previous.UUID, nil))
+				assert.False(t, h.source.cache.Visit(h.ctx, comp, current.UUID, nil))
+				h.recoveryReconstitutionQueue()
+				return
+			}
+
+			for range 10 {
+				_, err = h.recoveryReconstitutionReconcile()
+				require.NoError(t, err)
+				if h.queue.Len() == 2 {
+					break
+				}
+			}
+			h.recoveryReconstitutionResource(current.UUID, "current-resource", "current-slice", 0, true)
+			h.recoveryReconstitutionQueue("previous-resource", "current-resource")
+		})
+	}
+}
+
+func TestRecoveryCompositionNamespaceRequired(t *testing.T) {
+	require.EqualError(t, New(nil, Options{EnableTombstoneRecovery: true}), "recovery composition namespace is required when tombstone recovery is enabled")
 }
 
 func TestRecoveryReconstitutionR1IncompleteSynthesis(t *testing.T) {

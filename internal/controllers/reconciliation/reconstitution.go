@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/controllers/backup"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/Azure/eno/internal/resource"
 	"github.com/go-logr/logr"
@@ -24,20 +25,24 @@ import (
 //
 // It's implemented as an untracked controller that runs as a Source of the reconciliation controller.
 type reconstitutionSource struct {
-	client          client.Client
-	nonCachedReader client.Reader
-	cache           *resource.Cache
+	client                       client.Client
+	nonCachedReader              client.Reader
+	cache                        *resource.Cache
+	enableTombstoneRecovery      bool
+	recoveryCompositionNamespace string
 }
 
-func newReconstitutionSource(mgr ctrl.Manager, resourceFilter cel.Program) (source.TypedSource[resource.Request], *resource.Cache, error) {
+func newReconstitutionSource(mgr ctrl.Manager, resourceFilter cel.Program, enableTombstoneRecovery bool, recoveryCompositionNamespace string) (source.TypedSource[resource.Request], *resource.Cache, error) {
 	cache := resource.Cache{ResourceFilter: resourceFilter}
 	return source.TypedFunc[resource.Request](func(ctx context.Context, queue workqueue.TypedRateLimitingInterface[resource.Request]) error {
 		cache.SetQueue(queue)
 
 		r := &reconstitutionSource{
-			client:          mgr.GetClient(),
-			nonCachedReader: mgr.GetAPIReader(),
-			cache:           &cache,
+			client:                       mgr.GetClient(),
+			nonCachedReader:              mgr.GetAPIReader(),
+			cache:                        &cache,
+			enableTombstoneRecovery:      enableTombstoneRecovery,
+			recoveryCompositionNamespace: recoveryCompositionNamespace,
 		}
 
 		// This controller's queue uses composition name/namespace as its key
@@ -89,6 +94,19 @@ func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) 
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", comp.Spec.Synthesizer.Name,
 		"operationOrigin", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	ctx = logr.NewContext(ctx, logger)
+
+	// Only Compositions owned by this reconciler's recovery controller wait for recovery; deletion always bypasses the gate.
+	if syn := comp.Status.CurrentSynthesis; r.enableTombstoneRecovery && comp.Namespace == r.recoveryCompositionNamespace &&
+		comp.DeletionTimestamp == nil && syn != nil && syn.Synthesized != nil && !syn.TombstoneRecoveryComplete() {
+		matches, err := backup.MatchesComposition(ctx, r.cache.ResourceFilter, comp)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("evaluating tombstone recovery eligibility: %w", err)
+		}
+		if matches {
+			logger.Info("waiting for tombstone recovery preparation", "synthesisUUID", syn.UUID)
+			return ctrl.Result{}, nil
+		}
+	}
 
 	// The reconciliation controller assumes that the previous synthesis will be loaded first
 	logger.Info("populating cache with previous synthesis")
