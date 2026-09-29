@@ -73,8 +73,8 @@ func setupTestSubject(t *testing.T, mgr *testutil.Manager) {
 }
 
 func setupTestSubjectForOptions(t *testing.T, mgr *testutil.Manager, opts Options) {
-	if opts.EnableBackupOperator && opts.BackupNamespace == "" {
-		opts.BackupNamespace = "default"
+	if opts.EnableTombstoneRecovery && opts.RecoveryCompositionNamespace == "" {
+		opts.RecoveryCompositionNamespace = "default"
 	}
 	opts.WriteBuffer = flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager)
 
@@ -89,7 +89,7 @@ func setupTestSubjectForOptions(t *testing.T, mgr *testutil.Manager, opts Option
 	}
 
 	require.NoError(t, backup.NewController(mgr.Manager, backup.Options{
-		Enabled: opts.EnableBackupOperator, Namespace: opts.BackupNamespace, Downstream: opts.Downstream, ResourceFilter: opts.ResourceFilter,
+		Enabled: opts.EnableTombstoneRecovery, Namespace: opts.RecoveryCompositionNamespace, Downstream: opts.Downstream, ResourceFilter: opts.ResourceFilter,
 	}))
 	err := New(mgr.Manager, opts)
 	require.NoError(t, err)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	enocel "github.com/Azure/eno/internal/cel"
 	"github.com/Azure/eno/internal/resource"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -119,10 +120,10 @@ func recoveryReconstitutionNewHarness(t *testing.T, comp *apiv1.Composition, inf
 	cache := &resource.Cache{}
 	cache.SetQueue(h.queue)
 	h.source = &reconstitutionSource{
-		client:          newClient("informer", informerSlices),
-		nonCachedReader: newClient("api", apiSlices),
-		cache:           cache,
-		backupNamespace: comp.Namespace,
+		client:                       newClient("informer", informerSlices),
+		nonCachedReader:              newClient("api", apiSlices),
+		cache:                        cache,
+		recoveryCompositionNamespace: comp.Namespace,
 	}
 	return h
 }
@@ -164,7 +165,7 @@ func recoveryReconstitutionSlice(name, uuid string, resources ...string) *apiv1.
 	}
 	for i, name := range resources {
 		slice.Spec.Resources = append(slice.Spec.Resources, apiv1.Manifest{Manifest: fmt.Sprintf(
-			`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":%q,"namespace":"default","annotations":{"eno.azure.io/readiness-group":%q}},"data":{"source":"full-api","resource":%q}}`,
+			`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":%q,"namespace":"default","labels":{"eno.azure.io/overlaymgr-component-type":"addon"},"annotations":{"eno.azure.io/readiness-group":%q}},"data":{"source":"full-api","resource":%q}}`,
 			name, fmt.Sprint(i), name,
 		)})
 	}
@@ -227,6 +228,7 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 		disabled    bool
 		deleting    bool
 		outside     bool
+		filtered    bool
 		allow       bool
 	}{
 		{name: "missing"},
@@ -243,6 +245,7 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 		{name: "outside-namespace-unfinished", outside: true, finished: &apiv1.TombstoneRecoveryStatus{SynthesisUUID: "current", Reason: "InventoryGetError"}, allow: true},
 		{name: "outside-namespace-old-uuid", outside: true, finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "old", Reason: "NotNeeded"}, allow: true},
 		{name: "outside-namespace-disabled", outside: true, disabled: true, allow: true},
+		{name: "outside-resource-filter", filtered: true, allow: true},
 		{name: "deleting-missing", deleting: true, allow: true},
 		{name: "deleting-unfinished", finished: &apiv1.TombstoneRecoveryStatus{SynthesisUUID: "current", Reason: "InventoryGetError"}, deleting: true, allow: true},
 		{name: "deleting-old-uuid", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "old", Reason: "NotNeeded"}, deleting: true, allow: true},
@@ -262,9 +265,14 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 				recoveryReconstitutionSlice("current-slice", "current", "current-resource"),
 			}
 			h := recoveryReconstitutionNewHarness(t, comp, slices, slices)
-			h.source.enableBackupOperator = !tc.disabled
+			h.source.enableTombstoneRecovery = !tc.disabled
 			if tc.outside {
-				h.source.backupNamespace = "backup-system"
+				h.source.recoveryCompositionNamespace = "backup-system"
+			}
+			if tc.filtered {
+				filter, err := enocel.Parse(`has(self.metadata.labels) && self.metadata.labels != null && 'eno.azure.io/overlaymgr-component-type' in self.metadata.labels && self.metadata.labels['eno.azure.io/overlaymgr-component-type'] == 'addon'`)
+				require.NoError(t, err)
+				h.source.cache.ResourceFilter = filter
 			}
 			result, err := h.recoveryReconstitutionReconcile()
 			require.NoError(t, err)
@@ -290,8 +298,8 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 	}
 }
 
-func TestRecoveryBackupNamespaceRequired(t *testing.T) {
-	require.EqualError(t, New(nil, Options{EnableBackupOperator: true}), "backup namespace is required when backup is enabled")
+func TestRecoveryCompositionNamespaceRequired(t *testing.T) {
+	require.EqualError(t, New(nil, Options{EnableTombstoneRecovery: true}), "recovery composition namespace is required when tombstone recovery is enabled")
 }
 
 func TestRecoveryReconstitutionR1IncompleteSynthesis(t *testing.T) {

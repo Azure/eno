@@ -19,7 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func (c *backupController) writeTombstones(ctx context.Context, comp *apiv1.Composition, slices []apiv1.ResourceSlice, tombstones []apiv1.Manifest) ([]*apiv1.ResourceSliceRef, error) {
+func (c *tombstoneRecoveryController) writeTombstones(ctx context.Context, comp *apiv1.Composition, slices []apiv1.ResourceSlice, tombstones []apiv1.Manifest) ([]*apiv1.ResourceSliceRef, error) {
 	additions := make([][]apiv1.Manifest, len(slices))
 	sizes := make([]int, len(slices))
 	for i, slice := range slices {

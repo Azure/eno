@@ -31,7 +31,7 @@ type controllerTestFixture struct {
 	t          *testing.T
 	upstream   client.WithWatch
 	downstream client.WithWatch
-	controller *backupController
+	controller *tombstoneRecoveryController
 	key        types.NamespacedName
 }
 
@@ -69,7 +69,7 @@ func newControllerTestFixture(t *testing.T, required bool, names ...string) *con
 			WithStatusSubresource(&apiv1.Composition{}, &apiv1.ResourceSlice{}).WithObjects(comp, slice).Build(),
 		downstream: fake.NewClientBuilder().WithScheme(scheme).Build(),
 	}
-	f.controller = &backupController{
+	f.controller = &tombstoneRecoveryController{
 		client: f.upstream, reader: f.upstream, downstream: f.downstream,
 	}
 	return f
@@ -184,7 +184,7 @@ func (f *controllerTestFixture) slice(name string) *apiv1.ResourceSlice {
 func (f *controllerTestFixture) restart() {
 	f.t.Helper()
 	old := f.controller
-	f.controller = &backupController{
+	f.controller = &tombstoneRecoveryController{
 		client: old.client, reader: old.reader, downstream: old.downstream,
 		resourceFilter: old.resourceFilter,
 	}

@@ -51,7 +51,7 @@ type Options struct {
 	ResourceFilter      cel.Program
 }
 
-type backupController struct {
+type tombstoneRecoveryController struct {
 	client         client.Client
 	reader         client.Reader
 	downstream     client.Client
@@ -97,7 +97,7 @@ func NewController(mgr ctrl.Manager, opts Options) error {
 	if err != nil {
 		return fmt.Errorf("constructing backup upstream client: %w", err)
 	}
-	c := &backupController{
+	c := &tombstoneRecoveryController{
 		client:         upstream,
 		reader:         mgr.GetAPIReader(),
 		resourceFilter: opts.ResourceFilter,
@@ -117,7 +117,7 @@ func NewController(mgr ctrl.Manager, opts Options) error {
 	slice := &metav1.PartialObjectMetadata{}
 	slice.SetGroupVersionKind(apiv1.SchemeGroupVersion.WithKind("ResourceSlice"))
 	return ctrl.NewControllerManagedBy(mgr).
-		Named("backupController").
+		Named("tombstoneRecoveryController").
 		WatchesRawSource(source.Kind(backupCache, &apiv1.Composition{}, &handler.TypedEnqueueRequestForObject[*apiv1.Composition]{})).
 		WatchesRawSource(source.Kind(backupCache, slice, handler.TypedEnqueueRequestForOwner[*metav1.PartialObjectMetadata](
 			mgr.GetScheme(), mgr.GetRESTMapper(), &apiv1.Composition{}, handler.OnlyControllerOwner()))).
@@ -125,11 +125,11 @@ func NewController(mgr ctrl.Manager, opts Options) error {
 			MaxConcurrentReconciles: 1,
 			RateLimiter:             &jitteredRateLimiter{workqueue.DefaultTypedControllerRateLimiter[reconcile.Request]()},
 		}).
-		WithLogConstructor(manager.NewLogConstructor(mgr, "backupController")).
+		WithLogConstructor(manager.NewLogConstructor(mgr, "tombstoneRecoveryController")).
 		Complete(c)
 }
 
-func (c *backupController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx).WithValues("compositionName", req.Name, "compositionNamespace", req.Namespace)
 	ctx = logr.NewContext(ctx, logger)
 	comp := &apiv1.Composition{}
@@ -154,7 +154,7 @@ func (c *backupController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	logger = logger.WithValues("compositionUID", comp.UID, "compositionGeneration", comp.Generation, "synthesisUUID", syn.UUID,
 		"synthesizerName", comp.Spec.Synthesizer.Name, "operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	ctx = logr.NewContext(ctx, logger)
-	matches, err := c.matchesComposition(ctx, comp)
+	matches, err := MatchesComposition(ctx, c.resourceFilter, comp)
 	if err != nil {
 		logger.Error(err, "failed to evaluate composition resource filter")
 		return ctrl.Result{}, err
@@ -189,13 +189,14 @@ func (c *backupController) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	return ctrl.Result{}, err
 }
 
-func (c *backupController) matchesComposition(ctx context.Context, comp *apiv1.Composition) (bool, error) {
-	if c.resourceFilter == nil {
+// MatchesComposition reports whether the Composition-only portion of a resource filter selects comp.
+func MatchesComposition(ctx context.Context, resourceFilter cel.Program, comp *apiv1.Composition) (bool, error) {
+	if resourceFilter == nil {
 		return true, nil
 	}
 	// This check uses Composition metadata only; self has no resource labels.
 	self := &unstructured.Unstructured{Object: map[string]any{"metadata": map[string]any{}}}
-	result, err := enocel.Eval(ctx, c.resourceFilter, comp, self, nil)
+	result, err := enocel.Eval(ctx, resourceFilter, comp, self, nil)
 	if err != nil {
 		return false, fmt.Errorf("evaluating composition resource filter: %w", err)
 	}
@@ -206,7 +207,7 @@ func (c *backupController) matchesComposition(ctx context.Context, comp *apiv1.C
 	return matches, nil
 }
 
-func (c *backupController) getCurrentComposition(ctx context.Context, expected *apiv1.Composition, requireReady bool) (*apiv1.Composition, error) {
+func (c *tombstoneRecoveryController) getCurrentComposition(ctx context.Context, expected *apiv1.Composition, requireReady bool) (*apiv1.Composition, error) {
 	comp := &apiv1.Composition{}
 	if err := c.reader.Get(ctx, client.ObjectKeyFromObject(expected), comp); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -238,7 +239,7 @@ func getOrCreateRecoveryStatus(comp *apiv1.Composition) apiv1.TombstoneRecoveryS
 	return apiv1.TombstoneRecoveryStatus{SynthesisUUID: syn.UUID}
 }
 
-func (c *backupController) tombstoneRecovery(ctx context.Context, comp *apiv1.Composition) error {
+func (c *tombstoneRecoveryController) tombstoneRecovery(ctx context.Context, comp *apiv1.Composition) error {
 	logger := logr.FromContextOrDiscard(ctx)
 	logger.Info("reading downstream inventory", "lineage", inventoryLineage(comp))
 	items, readErr := c.readInventories(ctx, comp)
@@ -283,7 +284,7 @@ func (c *backupController) tombstoneRecovery(ctx context.Context, comp *apiv1.Co
 	return err
 }
 
-func (c *backupController) loadCurrentSynthesisResourceSlices(ctx context.Context, comp *apiv1.Composition) ([]apiv1.ResourceSlice, error) {
+func (c *tombstoneRecoveryController) loadCurrentSynthesisResourceSlices(ctx context.Context, comp *apiv1.Composition) ([]apiv1.ResourceSlice, error) {
 	var slices []apiv1.ResourceSlice
 	for i, ref := range comp.Status.CurrentSynthesis.ResourceSlices {
 		if ref == nil || ref.Name == "" {
@@ -301,7 +302,7 @@ func (c *backupController) loadCurrentSynthesisResourceSlices(ctx context.Contex
 	return slices, nil
 }
 
-func (c *backupController) recordTombstoneRecoveryError(ctx context.Context, comp *apiv1.Composition, reason string, cause error) error {
+func (c *tombstoneRecoveryController) recordTombstoneRecoveryError(ctx context.Context, comp *apiv1.Composition, reason string, cause error) error {
 	if errors.Is(cause, errSuperseded) {
 		return cause
 	}
@@ -318,7 +319,7 @@ func (c *backupController) recordTombstoneRecoveryError(ctx context.Context, com
 	return cause
 }
 
-func (c *backupController) markTombstoneRecoveryFinished(ctx context.Context, comp *apiv1.Composition, reason, message string, refs []*apiv1.ResourceSliceRef) error {
+func (c *tombstoneRecoveryController) markTombstoneRecoveryFinished(ctx context.Context, comp *apiv1.Composition, reason, message string, refs []*apiv1.ResourceSliceRef) error {
 	status := getOrCreateRecoveryStatus(comp)
 	status.Status, status.Reason, status.Message = true, reason, message
 	after := comp.DeepCopy()
@@ -342,7 +343,7 @@ func (c *backupController) markTombstoneRecoveryFinished(ctx context.Context, co
 	return nil
 }
 
-func (c *backupController) readInventories(ctx context.Context, comp *apiv1.Composition) ([]corev1.ConfigMap, error) {
+func (c *tombstoneRecoveryController) readInventories(ctx context.Context, comp *apiv1.Composition) ([]corev1.ConfigMap, error) {
 	list := &corev1.ConfigMapList{}
 	if err := c.downstream.List(ctx, list, client.InNamespace(inventoryNamespace),
 		client.MatchingLabels{inventoryLineageLabel: inventoryLineage(comp)}); err != nil {
@@ -357,7 +358,7 @@ type statusPatch struct {
 	Value any    `json:"value"`
 }
 
-func (c *backupController) patchStatus(ctx context.Context, before, after *apiv1.Composition) error {
+func (c *tombstoneRecoveryController) patchStatus(ctx context.Context, before, after *apiv1.Composition) error {
 	if before.DeletionTimestamp != nil {
 		return fmt.Errorf("%w: composition is deleting", errSuperseded)
 	}
