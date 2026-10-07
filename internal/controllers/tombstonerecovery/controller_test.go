@@ -9,7 +9,9 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/execution"
 	"github.com/Azure/eno/internal/resource"
+	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -188,6 +190,51 @@ func (f *controllerTestFixture) restart() {
 }
 
 // NotNeeded must not read downstream history.
+
+func TestTombstoneRecoveryAfterSkippedSynthesis(t *testing.T) {
+	for _, reason := range []string{apiv1.TombstoneRecoveryOperatorNotEnabled, "OutsideRecoveryNamespace"} {
+		t.Run(reason, func(t *testing.T) {
+			f := newControllerTestFixture(t, true)
+			f.history("removed")
+			require.NoError(t, f.controller.recordRecoveryDecision(t.Context(), f.composition(), reason, "", nil))
+			comp := f.composition()
+			require.True(t, comp.Status.CurrentSynthesis.TombstoneRecoveryComplete())
+			comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: controllerTestUUID(3)}
+			require.NoError(t, f.upstream.Status().Update(t.Context(), comp))
+			syn := &apiv1.Synthesizer{ObjectMeta: metav1.ObjectMeta{Name: comp.Spec.Synthesizer.Name}}
+			require.NoError(t, f.upstream.Create(t.Context(), syn))
+			executor := execution.Executor{
+				Reader: f.upstream, Writer: f.upstream,
+				Handler: func(context.Context, *apiv1.Synthesizer, *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+					return &krmv1.ResourceList{}, nil
+				},
+			}
+			require.NoError(t, executor.Synthesize(t.Context(), &execution.Env{
+				CompositionName: comp.Name, CompositionNamespace: comp.Namespace, SynthesisUUID: controllerTestUUID(3),
+			}))
+			current := f.composition().Status.CurrentSynthesis
+			require.Equal(t, controllerTestUUID(3), current.UUID)
+			require.True(t, current.TombstoneRecoveryRequired)
+			require.Nil(t, current.TombstoneRecoveryFinished)
+			require.Empty(t, current.ResourceSlices)
+			inventoryReads := 0
+			f.controller.downstream = interceptor.NewClient(f.downstream, interceptor.Funcs{
+				List: func(ctx context.Context, cli client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					inventoryReads++
+					return cli.List(ctx, list, opts...)
+				},
+			})
+			f.finish(reasonFinished)
+			require.Equal(t, 1, inventoryReads)
+			current = f.composition().Status.CurrentSynthesis
+			require.Len(t, current.ResourceSlices, 1)
+			tombstones := f.slice(current.ResourceSlices[0].Name).Spec.Resources
+			require.Len(t, tombstones, 1)
+			assert.True(t, tombstones[0].Deleted)
+			assert.JSONEq(t, `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"removed","namespace":"workloads"}}`, tombstones[0].Manifest)
+		})
+	}
+}
 
 func TestTombstoneRecoveryOperatorRecoveryRetry(t *testing.T) {
 	for _, overflow := range []bool{false, true} {

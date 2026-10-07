@@ -325,6 +325,44 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 	}
 }
 
+func TestRecoveryReconstitutionSkippedDecisionRace(t *testing.T) {
+	for _, change := range []string{"synthesis", "decision"} {
+		t.Run(change, func(t *testing.T) {
+			current := recoveryReconstitutionSynthesis("current")
+			current.TombstoneRecoveryFinished = nil
+			comp := recoveryReconstitutionComposition(nil, current)
+			comp.Annotations = map[string]string{"eno.azure.io/recovery-enabled": "true"}
+			h := recoveryReconstitutionNewHarness(t, comp, nil, nil)
+			var expected *apiv1.Composition
+			h.source.client = testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
+				SubResourcePatch: func(ctx context.Context, cli client.Client, name string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					require.Equal(t, "status", name)
+					fresh := &apiv1.Composition{}
+					require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), fresh))
+					if change == "synthesis" {
+						fresh.Status.CurrentSynthesis.UUID = "next"
+					} else {
+						fresh.Status.CurrentSynthesis.TombstoneRecoveryFinished = &apiv1.TombstoneRecoveryStatus{
+							Status: true, Reason: "FinishedTombstoneRecovery", SynthesisUUID: "current",
+						}
+					}
+					require.NoError(t, cli.Status().Update(ctx, fresh))
+					expected = fresh.DeepCopy()
+					return cli.SubResource(name).Patch(ctx, obj, patch, opts...)
+				},
+			}, comp.DeepCopy())
+			_, err := h.recoveryReconstitutionReconcile()
+			require.True(t, apierrors.IsConflict(err), "stale decision must conflict: %v", err)
+			require.NotNil(t, expected)
+			stored := &apiv1.Composition{}
+			require.NoError(t, h.source.client.Get(t.Context(), client.ObjectKeyFromObject(comp), stored))
+			assert.Equal(t, expected, stored)
+			assert.Empty(t, h.reads)
+			assert.Zero(t, h.queue.Len())
+		})
+	}
+}
+
 func TestRecoveryCompositionNamespaceRequired(t *testing.T) {
 	require.EqualError(t, New(nil, Options{EnableTombstoneRecovery: true}), "recovery composition namespace is required when tombstone recovery is enabled")
 }
