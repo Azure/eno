@@ -9,14 +9,11 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	enocel "github.com/Azure/eno/internal/cel"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/go-logr/logr"
-	"github.com/google/cel-go/cel"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -48,14 +45,12 @@ type Options struct {
 	Namespace           string
 	CompositionSelector labels.Selector
 	Downstream          *rest.Config
-	ResourceFilter      cel.Program
 }
 
 type tombstoneRecoveryController struct {
-	client         client.Client
-	reader         client.Reader
-	downstream     client.Client
-	resourceFilter cel.Program
+	client     client.Client
+	reader     client.Reader
+	downstream client.Client
 }
 
 type jitteredRateLimiter struct {
@@ -98,9 +93,8 @@ func NewController(mgr ctrl.Manager, opts Options) error {
 		return fmt.Errorf("constructing backup upstream client: %w", err)
 	}
 	c := &tombstoneRecoveryController{
-		client:         upstream,
-		reader:         mgr.GetAPIReader(),
-		resourceFilter: opts.ResourceFilter,
+		client: upstream,
+		reader: mgr.GetAPIReader(),
 	}
 	config := opts.Downstream
 	if config == nil {
@@ -154,13 +148,8 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 	logger = logger.WithValues("compositionUID", comp.UID, "compositionGeneration", comp.Generation, "synthesisUUID", syn.UUID,
 		"synthesizerName", comp.Spec.Synthesizer.Name, "operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	ctx = logr.NewContext(ctx, logger)
-	matches, err := MatchesComposition(ctx, c.resourceFilter, comp)
-	if err != nil {
-		logger.Error(err, "failed to evaluate composition resource filter")
-		return ctrl.Result{}, err
-	}
-	if !matches {
-		logger.Info("composition is outside the backup resource filter")
+	if !comp.RecoveryEnabled() {
+		logger.Info("composition has not opted into recovery")
 		return ctrl.Result{}, nil
 	}
 	if syn.UUID == "" {
@@ -189,24 +178,6 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 	return ctrl.Result{}, err
 }
 
-// MatchesComposition reports whether the Composition-only portion of a resource filter selects comp.
-func MatchesComposition(ctx context.Context, resourceFilter cel.Program, comp *apiv1.Composition) (bool, error) {
-	if resourceFilter == nil {
-		return true, nil
-	}
-	// This check uses Composition metadata only; self has no resource labels.
-	self := &unstructured.Unstructured{Object: map[string]any{"metadata": map[string]any{}}}
-	result, err := enocel.Eval(ctx, resourceFilter, comp, self, nil)
-	if err != nil {
-		return false, fmt.Errorf("evaluating composition resource filter: %w", err)
-	}
-	matches, ok := result.Value().(bool)
-	if !ok {
-		return false, fmt.Errorf("resource filter expression must return a boolean, got %T", result.Value())
-	}
-	return matches, nil
-}
-
 func (c *tombstoneRecoveryController) getCurrentComposition(ctx context.Context, expected *apiv1.Composition, requireReady bool) (*apiv1.Composition, error) {
 	comp := &apiv1.Composition{}
 	if err := c.reader.Get(ctx, client.ObjectKeyFromObject(expected), comp); err != nil {
@@ -218,6 +189,9 @@ func (c *tombstoneRecoveryController) getCurrentComposition(ctx context.Context,
 	// Deletion can start before the Composition controller changes the synthesis UUID.
 	if comp.DeletionTimestamp != nil {
 		return nil, fmt.Errorf("%w: composition is deleting", errSuperseded)
+	}
+	if !comp.RecoveryEnabled() {
+		return nil, fmt.Errorf("%w: composition recovery is disabled", errSuperseded)
 	}
 	syn, old := comp.Status.CurrentSynthesis, expected.Status.CurrentSynthesis
 	if syn == nil || old == nil || syn.UUID != old.UUID {

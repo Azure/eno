@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/controllers/backup"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/Azure/eno/internal/resource"
 	"github.com/go-logr/logr"
@@ -97,15 +96,9 @@ func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Only Compositions owned by this reconciler's recovery controller wait for recovery; deletion always bypasses the gate.
 	if syn := comp.Status.CurrentSynthesis; r.enableTombstoneRecovery && comp.Namespace == r.recoveryCompositionNamespace &&
-		comp.DeletionTimestamp == nil && syn != nil && syn.Synthesized != nil && !syn.TombstoneRecoveryComplete() {
-		matches, err := backup.MatchesComposition(ctx, r.cache.ResourceFilter, comp)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("evaluating tombstone recovery eligibility: %w", err)
-		}
-		if matches {
-			logger.Info("waiting for tombstone recovery preparation", "synthesisUUID", syn.UUID)
-			return ctrl.Result{}, nil
-		}
+		comp.RecoveryEnabled() && comp.DeletionTimestamp == nil && syn != nil && syn.Synthesized != nil && !syn.TombstoneRecoveryComplete() {
+		logger.Info("waiting for tombstone recovery preparation", "synthesisUUID", syn.UUID)
+		return ctrl.Result{}, nil
 	}
 
 	// The reconciliation controller assumes that the previous synthesis will be loaded first

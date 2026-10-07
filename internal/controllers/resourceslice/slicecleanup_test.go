@@ -22,6 +22,7 @@ func newPendingRecoveryCleanup(t *testing.T) (client.Client, *apiv1.Composition,
 	comp := &apiv1.Composition{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "recovering", Namespace: "default", UID: "composition-uid",
+			Annotations: map[string]string{"eno.azure.io/recovery-enabled": "true"},
 			Finalizers: []string{"eno.azure.io/cleanup"},
 		},
 		Status: apiv1.CompositionStatus{
@@ -50,9 +51,11 @@ func TestSliceCleanupRecoveryProtection(t *testing.T) {
 		name         string
 		update       func(*apiv1.Composition)
 		keep         bool
+		removeOptIn  bool
 		requeueAfter time.Duration
 	}{
 		{name: "missing decision", keep: true, requeueAfter: 5 * time.Second},
+		{name: "recovery opt-in removed", removeOptIn: true},
 		{
 			name: "unfinished decision", keep: true, requeueAfter: 5 * time.Second,
 			update: func(comp *apiv1.Composition) {
@@ -99,6 +102,10 @@ func TestSliceCleanupRecoveryProtection(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := testutil.NewContext(t)
 			cli, comp, slice := newPendingRecoveryCleanup(t)
+			if tc.removeOptIn {
+				delete(comp.Annotations, "eno.azure.io/recovery-enabled")
+				require.NoError(t, cli.Update(ctx, comp))
+			}
 			if tc.update != nil {
 				tc.update(comp)
 				require.NoError(t, cli.Status().Update(ctx, comp))

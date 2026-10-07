@@ -160,7 +160,6 @@ func run() error {
 	recoveryOpts.Namespace = recOpts.RecoveryCompositionNamespace
 	recoveryOpts.CompositionSelector = mgrOpts.CompositionSelector
 	recoveryOpts.Downstream = remoteConfig
-	recoveryOpts.ResourceFilter = recOpts.ResourceFilter
 	if err := backup.NewController(mgr, recoveryOpts); err != nil {
 		return fmt.Errorf("constructing tombstone recovery controller: %w", err)
 	}

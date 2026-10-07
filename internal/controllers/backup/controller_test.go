@@ -9,7 +9,6 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	enocel "github.com/Azure/eno/internal/cel"
 	"github.com/Azure/eno/internal/resource"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,8 +23,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
-
-const controllerTestAddonFilter = `has(composition.metadata.labels) && composition.metadata.labels != null && 'aks.azure.com/component-type' in composition.metadata.labels ? composition.metadata.labels['aks.azure.com/component-type'] == 'addon' && (!has(self.metadata.labels) || self.metadata.labels == null || !('eno.azure.io/overlaymgr-component-type' in self.metadata.labels)) : has(self.metadata.labels) && self.metadata.labels != null && 'eno.azure.io/overlaymgr-component-type' in self.metadata.labels && self.metadata.labels['eno.azure.io/overlaymgr-component-type'] == 'addon'`
 
 type controllerTestFixture struct {
 	t          *testing.T
@@ -46,6 +43,7 @@ func controllerTestResource(name string) inventoryResource {
 func newControllerTestFixture(t *testing.T, required bool, names ...string) *controllerTestFixture {
 	t.Helper()
 	comp := inventoryTestComposition()
+	comp.Annotations["eno.azure.io/recovery-enabled"] = "true"
 	comp.Finalizers = []string{"eno.azure.io/cleanup"}
 	comp.Status.CurrentSynthesis.UUID = controllerTestUUID(2)
 	comp.Status.CurrentSynthesis.TombstoneRecoveryRequired = required
@@ -186,7 +184,6 @@ func (f *controllerTestFixture) restart() {
 	old := f.controller
 	f.controller = &tombstoneRecoveryController{
 		client: old.client, reader: old.reader, downstream: old.downstream,
-		resourceFilter: old.resourceFilter,
 	}
 }
 
@@ -264,7 +261,7 @@ func TestBackupControllerNamespaceRequired(t *testing.T) {
 	require.EqualError(t, NewController(nil, Options{Enabled: true}), "backup namespace is required")
 }
 
-func TestBackupControllerResourceFilterSkipsWrites(t *testing.T) {
+func TestBackupControllerMissingAnnotationSkipsWrites(t *testing.T) {
 	for _, completed := range []bool{false, true} {
 		t.Run(fmt.Sprintf("recovery-completed-%t", completed), func(t *testing.T) {
 			f := newControllerTestFixture(t, true, "desired")
@@ -272,9 +269,9 @@ func TestBackupControllerResourceFilterSkipsWrites(t *testing.T) {
 				f.finish(reasonInventoryNotFound)
 				f.ready()
 			}
-			filter, err := enocel.Parse(`composition.metadata.labels.owner == "other"`)
-			require.NoError(t, err)
-			f.controller.resourceFilter = filter
+			comp := f.composition()
+			delete(comp.Annotations, "eno.azure.io/recovery-enabled")
+			require.NoError(t, f.upstream.Update(t.Context(), comp))
 			before := f.composition()
 			slice := f.slice("desired")
 			f.controller.client = interceptor.NewClient(f.upstream, interceptor.Funcs{
@@ -295,24 +292,38 @@ func TestBackupControllerResourceFilterSkipsWrites(t *testing.T) {
 	}
 }
 
-func TestBackupControllerAddonResourceFilter(t *testing.T) {
+func TestBackupControllerRecoveryAnnotation(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		componentType string
 		overlayType   string
+		annotation    string
 		matches       bool
 	}{
-		{name: "addon", componentType: "addon", matches: true},
+		{name: "addon", componentType: "addon", annotation: "true", matches: true},
 		{name: "ccp", componentType: "ccp"},
 		{name: "legacy-addon", overlayType: "addon"},
 		{name: "legacy-ccp", overlayType: "ccp"},
 		{name: "legacy-unlabeled"},
-		{name: "addon-ignores-resource-labels", componentType: "addon", overlayType: "addon", matches: true},
+		{name: "label-only", componentType: "addon"},
+		{name: "addon-ignores-resource-labels", componentType: "addon", overlayType: "addon", annotation: "true", matches: true},
+		{name: "opt-in-without-labels", annotation: "true", matches: true},
+		{name: "addon-without-annotation", componentType: "addon"},
+		{name: "false", annotation: "false"},
+		{name: "uppercase", annotation: "True"},
+		{name: "whitespace", annotation: " true "},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newControllerTestFixture(t, false, "desired")
 			comp := f.composition()
+			comp.Annotations = nil
+			if tc.annotation != "" {
+				comp.Annotations = map[string]string{"eno.azure.io/recovery-enabled": tc.annotation}
+			}
 			comp.Labels = map[string]string{}
+			if tc.name == "label-only" {
+				comp.Labels["eno.azure.io/recovery-enabled"] = "true"
+			}
 			if tc.componentType != "" {
 				comp.Labels["aks.azure.com/component-type"] = tc.componentType
 			}
@@ -324,9 +335,6 @@ func TestBackupControllerAddonResourceFilter(t *testing.T) {
 			}
 			slice.Spec.Resources[0] = inventoryTestManifest(t, res)
 			require.NoError(t, f.upstream.Update(t.Context(), slice))
-			var err error
-			f.controller.resourceFilter, err = enocel.Parse(controllerTestAddonFilter)
-			require.NoError(t, err)
 			f.controller.reader = nil
 			f.controller.downstream = nil
 			statusWrites := 0
@@ -354,7 +362,7 @@ func TestBackupControllerAddonResourceFilter(t *testing.T) {
 	}
 }
 
-func TestBackupControllerEmptyCurrentResourceFilter(t *testing.T) {
+func TestBackupControllerEmptyCurrentRecoveryAnnotation(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		componentType string
@@ -370,6 +378,10 @@ func TestBackupControllerEmptyCurrentResourceFilter(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newControllerTestFixture(t, true)
 			comp := f.composition()
+			delete(comp.Annotations, "eno.azure.io/recovery-enabled")
+			if tc.matches {
+				comp.Annotations["eno.azure.io/recovery-enabled"] = "true"
+			}
 			comp.Labels = nil
 			if tc.componentType != "" {
 				comp.Labels = map[string]string{"aks.azure.com/component-type": tc.componentType}
@@ -383,9 +395,6 @@ func TestBackupControllerEmptyCurrentResourceFilter(t *testing.T) {
 				item.Data[inventoryDataKey] = inventoryTestJSON(t, []inventoryResource{res})
 				require.NoError(t, f.downstream.Update(t.Context(), item))
 			}
-			var err error
-			f.controller.resourceFilter, err = enocel.Parse(controllerTestAddonFilter)
-			require.NoError(t, err)
 			before, history := f.composition(), f.inventories()
 			if tc.matches {
 				reason := reasonInventoryNotFound
@@ -430,9 +439,6 @@ func TestBackupControllerDeletingSkipsInventory(t *testing.T) {
 				f.ready()
 			}
 			f.updateStatus(func(syn *apiv1.Synthesis) { syn.ResourceSlices = nil })
-			var err error
-			f.controller.resourceFilter, err = enocel.Parse(controllerTestAddonFilter)
-			require.NoError(t, err)
 			require.NoError(t, f.upstream.Delete(t.Context(), f.composition()))
 			before := f.composition()
 			f.controller.downstream = nil

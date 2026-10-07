@@ -229,6 +229,8 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 		deleting    bool
 		outside     bool
 		filtered    bool
+		optOut      bool
+		annotation  string
 		allow       bool
 	}{
 		{name: "missing"},
@@ -245,7 +247,11 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 		{name: "outside-namespace-unfinished", outside: true, finished: &apiv1.TombstoneRecoveryStatus{SynthesisUUID: "current", Reason: "InventoryGetError"}, allow: true},
 		{name: "outside-namespace-old-uuid", outside: true, finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "old", Reason: "NotNeeded"}, allow: true},
 		{name: "outside-namespace-disabled", outside: true, disabled: true, allow: true},
-		{name: "outside-resource-filter", filtered: true, allow: true},
+		{name: "resource-filter-still-waits", filtered: true},
+		{name: "missing-annotation", optOut: true, allow: true},
+		{name: "false-annotation", optOut: true, annotation: "false", allow: true},
+		{name: "uppercase-annotation", optOut: true, annotation: "True", allow: true},
+		{name: "missing-annotation-with-resource-filter", optOut: true, filtered: true, allow: true},
 		{name: "deleting-missing", deleting: true, allow: true},
 		{name: "deleting-unfinished", finished: &apiv1.TombstoneRecoveryStatus{SynthesisUUID: "current", Reason: "InventoryGetError"}, deleting: true, allow: true},
 		{name: "deleting-old-uuid", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "old", Reason: "NotNeeded"}, deleting: true, allow: true},
@@ -256,6 +262,11 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 			current.TombstoneRecoveryRequired = !tc.notRequired
 			current.TombstoneRecoveryFinished = tc.finished
 			comp := recoveryReconstitutionComposition(previous, current)
+			if !tc.optOut {
+				comp.Annotations = map[string]string{"eno.azure.io/recovery-enabled": "true"}
+			} else if tc.annotation != "" {
+				comp.Annotations = map[string]string{"eno.azure.io/recovery-enabled": tc.annotation}
+			}
 			if tc.deleting {
 				comp.DeletionTimestamp = recoveryReconstitutionTime()
 				comp.Finalizers = []string{"eno.azure.io/cleanup"}

@@ -89,7 +89,7 @@ func setupTestSubjectForOptions(t *testing.T, mgr *testutil.Manager, opts Option
 	}
 
 	require.NoError(t, backup.NewController(mgr.Manager, backup.Options{
-		Enabled: opts.EnableTombstoneRecovery, Namespace: opts.RecoveryCompositionNamespace, Downstream: opts.Downstream, ResourceFilter: opts.ResourceFilter,
+		Enabled: opts.EnableTombstoneRecovery, Namespace: opts.RecoveryCompositionNamespace, Downstream: opts.Downstream,
 	}))
 	err := New(mgr.Manager, opts)
 	require.NoError(t, err)

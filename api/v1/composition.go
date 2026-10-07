@@ -275,6 +275,10 @@ func (c *Composition) ShouldIgnoreSideEffects() bool {
 	return c.Annotations["eno.azure.io/ignore-side-effects"] == "true"
 }
 
+func (c *Composition) RecoveryEnabled() bool {
+	return c.Annotations["eno.azure.io/recovery-enabled"] == "true"
+}
+
 func (c *Composition) Synthesizing() bool {
 	return c.Status.InFlightSynthesis != nil && c.Status.InFlightSynthesis.Canceled == nil
 }
