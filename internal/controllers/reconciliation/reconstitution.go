@@ -101,7 +101,7 @@ func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) 
 			logger.Info("waiting for tombstone recovery preparation", "synthesisUUID", syn.UUID)
 			return ctrl.Result{}, nil
 		}
-		reason := "BackupOperatorNotEnabled"
+		reason := apiv1.TombstoneRecoveryOperatorNotEnabled
 		if r.enableTombstoneRecovery {
 			reason = "OutsideRecoveryNamespace"
 		}

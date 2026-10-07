@@ -172,18 +172,20 @@ type Synthesis struct {
 	Deferred bool `json:"deferred,omitempty"`
 
 	// TombstoneRecoveryRequired indicates that this synthesis encountered incomplete history.
-	// Each synthesis starts with the flag false and does not inherit the preceding synthesis's flag.
+	// A synthesis inherits an outstanding recovery requirement, including when its predecessor skipped recovery because it was disabled or out of scope.
 	// It is set when there is no current synthesis to use as history, or a historical ResourceSlice reference is nameless
 	// or points to a missing slice. Even a first synthesis may encounter resources left by a prior incarnation whose inventory was lost.
-	// A complete historical reference list, including an empty list, does not require recovery.
+	// A complete historical reference list, including an empty list, does not introduce a new recovery requirement.
 	// It does not request or block synthesis.
-	// Recovery preparation gates reconstitution through TombstoneRecoveryFinished only when backup is enabled and the Composition is not deleting.
+	// Recovery preparation gates reconstitution through TombstoneRecoveryFinished only when the tombstone recovery operator is enabled and the Composition is opted in and not deleting.
 	TombstoneRecoveryRequired bool `json:"tombstoneRecoveryRequired,omitempty"`
 
 	// TombstoneRecoveryFinished records the recovery decision for this synthesis.
-	// A missing or unfinished decision prevents reconstitution only when backup is enabled and the Composition is not deleting.
+	// A missing or unfinished decision prevents reconstitution only when the tombstone recovery operator is enabled and the Composition is opted in and not deleting.
 	TombstoneRecoveryFinished *TombstoneRecoveryStatus `json:"tombstoneRecoveryFinished,omitempty"`
 }
+
+const TombstoneRecoveryOperatorNotEnabled = "TombstoneRecoveryOperatorNotEnabled"
 
 type TombstoneRecoveryStatus struct {
 	// Status is true for any terminal decision, including skipped recovery and legacy disabled acknowledgments.

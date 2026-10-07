@@ -244,7 +244,7 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 		{name: "wrong-uuid", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "old", Reason: "NotNeeded"}},
 		{name: "completed", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "current", Reason: "FinishedTombstoneRecovery"}, allow: true},
 		{name: "skipped", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "current", Reason: "InventoryNotFound"}, allow: true},
-		{name: "legacy-disabled-decision", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "current", Reason: "BackupOperatorNotEnabled"}, allow: true},
+		{name: "disabled-decision", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "current", Reason: apiv1.TombstoneRecoveryOperatorNotEnabled}, allow: true},
 		{name: "disabled-missing", disabled: true, allow: true},
 		{name: "disabled-unfinished", disabled: true, finished: &apiv1.TombstoneRecoveryStatus{SynthesisUUID: "current", Reason: "InventoryGetError"}, allow: true},
 		{name: "disabled-old-uuid", disabled: true, finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "old", Reason: "NotNeeded"}, allow: true},
@@ -284,7 +284,7 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 			h.allowRecoveryDecision = tc.disabled || tc.outside
 			h.source.enableTombstoneRecovery = !tc.disabled
 			if tc.outside {
-				h.source.recoveryCompositionNamespace = "backup-system"
+				h.source.recoveryCompositionNamespace = "recovery-system"
 			}
 			if tc.filtered {
 				filter, err := enocel.Parse(`has(self.metadata.labels) && self.metadata.labels != null && 'eno.azure.io/overlaymgr-component-type' in self.metadata.labels && self.metadata.labels['eno.azure.io/overlaymgr-component-type'] == 'addon'`)
@@ -297,7 +297,7 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 				stored := &apiv1.Composition{}
 				require.NoError(t, h.source.client.Get(h.ctx, client.ObjectKeyFromObject(comp), stored))
 				require.True(t, stored.Status.CurrentSynthesis.TombstoneRecoveryComplete())
-				reason := "BackupOperatorNotEnabled"
+				reason := apiv1.TombstoneRecoveryOperatorNotEnabled
 				if !tc.disabled {
 					reason = "OutsideRecoveryNamespace"
 				}

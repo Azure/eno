@@ -91,6 +91,7 @@ func TestRecoveryHistoryFetch(t *testing.T) {
 		refs      []*apiv1.ResourceSliceRef
 		inherited bool
 		completed bool
+		reason    string
 		wantFlag  bool
 		wantNames []string
 		wantReads []string
@@ -101,6 +102,12 @@ func TestRecoveryHistoryFetch(t *testing.T) {
 		{name: "empty-reference-list", refs: []*apiv1.ResourceSliceRef{}},
 		{name: "unfinished-recovery-is-inherited", inherited: true, wantFlag: true},
 		{name: "completed-recovery-is-not-inherited", inherited: true, completed: true},
+		{name: "disabled-recovery-is-inherited", inherited: true, completed: true, reason: apiv1.TombstoneRecoveryOperatorNotEnabled, wantFlag: true},
+		{name: "out-of-scope-recovery-is-inherited", inherited: true, completed: true, reason: "OutsideRecoveryNamespace", wantFlag: true},
+		{name: "disabled-without-obligation", completed: true, reason: apiv1.TombstoneRecoveryOperatorNotEnabled},
+		{name: "out-of-scope-without-obligation", completed: true, reason: "OutsideRecoveryNamespace"},
+		{name: "inventory-not-found-is-not-inherited", inherited: true, completed: true, reason: "InventoryNotFound"},
+		{name: "inventory-invalid-is-not-inherited", inherited: true, completed: true, reason: "InventoryInvalid"},
 		{name: "healthy", refs: recoveryRefs("a", "b"), wantNames: []string{"a", "b"}, wantReads: []string{"a", "b"}},
 		{name: "healthy-inherits-unfinished-recovery", refs: recoveryRefs("a", "b"), inherited: true, wantFlag: true, wantNames: []string{"a", "b"}, wantReads: []string{"a", "b"}},
 		{name: "nil-entry-only", refs: []*apiv1.ResourceSliceRef{nil}, wantFlag: true},
@@ -138,6 +145,9 @@ func TestRecoveryHistoryFetch(t *testing.T) {
 			} else if tt.completed {
 				comp.Status.CurrentSynthesis.TombstoneRecoveryFinished = &apiv1.TombstoneRecoveryStatus{
 					Status: true, SynthesisUUID: "baseline-uuid", Reason: "FinishedTombstoneRecovery",
+				}
+				if tt.reason != "" {
+					comp.Status.CurrentSynthesis.TombstoneRecoveryFinished.Reason = tt.reason
 				}
 			}
 			before := comp.DeepCopy()
@@ -369,12 +379,17 @@ func TestRecoveryExecutorPublication(t *testing.T) {
 		inherited bool
 		outputs   []string
 		completed bool
+		reason    string
 		wantFlag  bool
 		want      map[string]bool
 	}{
 		{name: "healthy-false", refs: recoveryRefs("history-a", "history-b"), outputs: []string{"a", "b"}, want: map[string]bool{"a": false, "b": false}},
 		{name: "healthy-inherits-unfinished-recovery", refs: recoveryRefs("history-a", "history-b"), inherited: true, wantFlag: true, outputs: []string{"a", "b"}, want: map[string]bool{"a": false, "b": false}},
 		{name: "healthy-does-not-inherit-completed-recovery", refs: recoveryRefs("history-a", "history-b"), inherited: true, completed: true, outputs: []string{"a", "b"}, want: map[string]bool{"a": false, "b": false}},
+		{name: "healthy-inherits-disabled-recovery", refs: recoveryRefs("history-a", "history-b"), inherited: true, completed: true, reason: apiv1.TombstoneRecoveryOperatorNotEnabled, wantFlag: true, outputs: []string{"a", "b"}, want: map[string]bool{"a": false, "b": false}},
+		{name: "healthy-inherits-out-of-scope-recovery", refs: recoveryRefs("history-a", "history-b"), inherited: true, completed: true, reason: "OutsideRecoveryNamespace", wantFlag: true, outputs: []string{"a", "b"}, want: map[string]bool{"a": false, "b": false}},
+		{name: "zero-output-inherits-disabled-recovery", inherited: true, completed: true, reason: apiv1.TombstoneRecoveryOperatorNotEnabled, wantFlag: true, want: map[string]bool{}},
+		{name: "zero-output-inherits-out-of-scope-recovery", inherited: true, completed: true, reason: "OutsideRecoveryNamespace", wantFlag: true, want: map[string]bool{}},
 		{name: "new-composition", noCurrent: true, outputs: []string{"d"}, wantFlag: true, want: map[string]bool{"d": false}},
 		{name: "zero-output-with-missing-history", refs: recoveryRefs("history-a", "missing-c", "history-b"), wantFlag: true, want: map[string]bool{"a": true, "b": true}},
 		{name: "zero-output-all-unavailable", refs: []*apiv1.ResourceSliceRef{nil, {}, {Name: "missing-c"}}, wantFlag: true, want: map[string]bool{}},
@@ -394,6 +409,9 @@ func TestRecoveryExecutorPublication(t *testing.T) {
 			} else if tt.completed {
 				f.comp.Status.CurrentSynthesis.TombstoneRecoveryFinished = &apiv1.TombstoneRecoveryStatus{
 					Status: true, SynthesisUUID: "baseline-uuid", Reason: "FinishedTombstoneRecovery",
+				}
+				if tt.reason != "" {
+					f.comp.Status.CurrentSynthesis.TombstoneRecoveryFinished.Reason = tt.reason
 				}
 			}
 			a := recoverySlice(t, "history-a", recoveryObject("a"))

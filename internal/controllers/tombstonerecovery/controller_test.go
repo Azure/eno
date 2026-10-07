@@ -127,7 +127,7 @@ func (f *controllerTestFixture) expectError(want error) {
 
 func (f *controllerTestFixture) ready() {
 	f.t.Helper()
-	// Readiness comes from resource reconciliation, not from the backup controller.
+	// Readiness comes from resource reconciliation, not from the tombstone recovery operator.
 	f.updateStatus(func(syn *apiv1.Synthesis) {
 		ready := metav1.NewTime(syn.Synthesized.Add(time.Second))
 		syn.Ready = &ready
@@ -189,7 +189,7 @@ func (f *controllerTestFixture) restart() {
 
 // NotNeeded must not read downstream history.
 
-func TestBackupControllerRecoveryRetry(t *testing.T) {
+func TestTombstoneRecoveryOperatorRecoveryRetry(t *testing.T) {
 	for _, overflow := range []bool{false, true} {
 		t.Run(fmt.Sprintf("overflow-%t", overflow), func(t *testing.T) {
 			f := newControllerTestFixture(t, true, "desired")
@@ -253,15 +253,15 @@ func TestBackupControllerRecoveryRetry(t *testing.T) {
 	}
 }
 
-func TestBackupControllerDisabled(t *testing.T) {
-	require.NoError(t, NewController(nil, Options{Enabled: false}), "disabled backup must not access the manager or register controllers")
+func TestTombstoneRecoveryOperatorDisabled(t *testing.T) {
+	require.NoError(t, NewController(nil, Options{Enabled: false}), "disabled tombstone recovery operator must not access the manager or register controllers")
 }
 
-func TestBackupControllerNamespaceRequired(t *testing.T) {
-	require.EqualError(t, NewController(nil, Options{Enabled: true}), "backup namespace is required")
+func TestTombstoneRecoveryOperatorNamespaceRequired(t *testing.T) {
+	require.EqualError(t, NewController(nil, Options{Enabled: true}), "tombstone recovery namespace is required")
 }
 
-func TestBackupControllerMissingAnnotationSkipsWrites(t *testing.T) {
+func TestTombstoneRecoveryOperatorMissingAnnotationSkipsWrites(t *testing.T) {
 	for _, completed := range []bool{false, true} {
 		t.Run(fmt.Sprintf("recovery-completed-%t", completed), func(t *testing.T) {
 			f := newControllerTestFixture(t, true, "desired")
@@ -292,7 +292,7 @@ func TestBackupControllerMissingAnnotationSkipsWrites(t *testing.T) {
 	}
 }
 
-func TestBackupControllerRecoveryAnnotation(t *testing.T) {
+func TestTombstoneRecoveryOperatorRecoveryAnnotation(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		componentType string
@@ -362,7 +362,7 @@ func TestBackupControllerRecoveryAnnotation(t *testing.T) {
 	}
 }
 
-func TestBackupControllerEmptyCurrentRecoveryAnnotation(t *testing.T) {
+func TestTombstoneRecoveryOperatorEmptyCurrentRecoveryAnnotation(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		componentType string
@@ -429,7 +429,7 @@ func TestBackupControllerEmptyCurrentRecoveryAnnotation(t *testing.T) {
 	}
 }
 
-func TestBackupControllerDeletingSkipsInventory(t *testing.T) {
+func TestTombstoneRecoveryOperatorDeletingSkipsInventory(t *testing.T) {
 	for _, recording := range []bool{false, true} {
 		t.Run(fmt.Sprintf("recording-%t", recording), func(t *testing.T) {
 			f := newControllerTestFixture(t, !recording)
@@ -444,7 +444,7 @@ func TestBackupControllerDeletingSkipsInventory(t *testing.T) {
 			f.controller.downstream = nil
 			f.controller.client = interceptor.NewClient(f.upstream, interceptor.Funcs{
 				SubResourcePatch: func(context.Context, client.Client, string, client.Object, client.Patch, ...client.SubResourcePatchOption) error {
-					t.Error("deleting Composition must not receive backup status writes")
+					t.Error("deleting Composition must not receive tombstone recovery status writes")
 					return fmt.Errorf("unexpected status patch")
 				},
 			})
@@ -455,7 +455,7 @@ func TestBackupControllerDeletingSkipsInventory(t *testing.T) {
 	}
 }
 
-func TestBackupControllerObsoleteWork(t *testing.T) {
+func TestTombstoneRecoveryOperatorObsoleteWork(t *testing.T) {
 	for _, mode := range []string{"already-deleting", "deletion-during-read", "new-synthesis"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newControllerTestFixture(t, true, "desired")
@@ -510,7 +510,7 @@ func TestBackupControllerObsoleteWork(t *testing.T) {
 	}
 }
 
-func TestBackupControllerStatusWriteRace(t *testing.T) {
+func TestTombstoneRecoveryOperatorStatusWriteRace(t *testing.T) {
 	for _, mode := range []string{"deletion", "supersession"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newControllerTestFixture(t, false, "desired")
@@ -539,7 +539,7 @@ func TestBackupControllerStatusWriteRace(t *testing.T) {
 	}
 }
 
-func TestBackupControllerRecoveryInventorySelection(t *testing.T) {
+func TestTombstoneRecoveryOperatorRecoveryInventorySelection(t *testing.T) {
 	for _, invalidTime := range []bool{false, true} {
 		t.Run(fmt.Sprintf("invalid-time-%t", invalidTime), func(t *testing.T) {
 			f := newControllerTestFixture(t, true, "desired")
@@ -582,7 +582,7 @@ func TestBackupControllerRecoveryInventorySelection(t *testing.T) {
 	}
 }
 
-func TestBackupControllerRecoveryStatusPatch(t *testing.T) {
+func TestTombstoneRecoveryOperatorRecoveryStatusPatch(t *testing.T) {
 	f := newControllerTestFixture(t, true, "desired")
 	before := f.composition()
 	f.controller.reader = nil
@@ -618,7 +618,7 @@ func TestBackupControllerRecoveryStatusPatch(t *testing.T) {
 	assert.Equal(t, got, f.composition())
 }
 
-func TestBackupControllerRecoveryErrorPublication(t *testing.T) {
+func TestTombstoneRecoveryOperatorRecoveryErrorPublication(t *testing.T) {
 	f := newControllerTestFixture(t, true, "desired")
 	cause := apierrors.NewServiceUnavailable("downstream failure")
 	patchFailure := apierrors.NewConflict(schema.GroupResource{Resource: "compositions"}, f.key.Name, fmt.Errorf("status conflict"))
@@ -641,7 +641,7 @@ func TestBackupControllerRecoveryErrorPublication(t *testing.T) {
 	assert.Equal(t, before, f.composition())
 }
 
-func TestBackupControllerRecoverySliceReadFailures(t *testing.T) {
+func TestTombstoneRecoveryOperatorRecoverySliceReadFailures(t *testing.T) {
 	for _, mode := range []string{"nil-ref", "empty-ref", "missing", "deleting", "invalid-manifest", "read-failure"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newControllerTestFixture(t, true, "desired")

@@ -68,7 +68,7 @@ func inventoryTestManifest(t *testing.T, res inventoryResource) apiv1.Manifest {
 	})}
 }
 
-func TestBackupInventoryRoundTrip(t *testing.T) {
+func TestTombstoneRecoveryInventoryRoundTrip(t *testing.T) {
 	comp := inventoryTestComposition()
 	res := inventoryTestResource("desired")
 	snapshot, err := makeInventory(comp, []apiv1.ResourceSlice{{
@@ -170,7 +170,7 @@ func TestBackupInventoryRoundTrip(t *testing.T) {
 	})
 }
 
-func TestBackupInventoryNaming(t *testing.T) {
+func TestTombstoneRecoveryInventoryNaming(t *testing.T) {
 	comp := inventoryTestComposition()
 	uuid := comp.Status.CurrentSynthesis.UUID
 	hash := sha256.Sum256([]byte(comp.Namespace + "/" + comp.Spec.Synthesizer.Name))
@@ -203,7 +203,7 @@ func TestBackupInventoryNaming(t *testing.T) {
 	}
 }
 
-func TestBackupInventoryRejectsInvalid(t *testing.T) {
+func TestTombstoneRecoveryInventoryRejectsInvalid(t *testing.T) {
 	comp := inventoryTestComposition()
 	res := inventoryTestResource("desired")
 	snapshot, err := makeInventory(comp, []apiv1.ResourceSlice{{
@@ -270,7 +270,7 @@ func TestBackupInventoryRejectsInvalid(t *testing.T) {
 	}
 }
 
-func TestBackupInventoryComparison(t *testing.T) {
+func TestTombstoneRecoveryInventoryComparison(t *testing.T) {
 	comp := inventoryTestComposition()
 	base, err := makeInventory(comp, []apiv1.ResourceSlice{{
 		Spec: apiv1.ResourceSliceSpec{Resources: []apiv1.Manifest{inventoryTestManifest(t, inventoryTestResource("desired"))}},
@@ -314,7 +314,7 @@ func TestBackupInventoryComparison(t *testing.T) {
 	}
 }
 
-func TestBackupInventorySizeLimit(t *testing.T) {
+func TestTombstoneRecoveryInventorySizeLimit(t *testing.T) {
 	const limit = 1 << 20
 	comp := inventoryTestComposition()
 	snapshot, err := makeInventory(comp, nil)
@@ -359,7 +359,7 @@ func TestBackupInventorySizeLimit(t *testing.T) {
 	})
 }
 
-func TestBackupInventorySelection(t *testing.T) {
+func TestTombstoneRecoveryInventorySelection(t *testing.T) {
 	comp := inventoryTestComposition()
 	newest, err := makeInventory(comp, nil)
 	require.NoError(t, err)
@@ -429,7 +429,7 @@ func TestBackupInventorySelection(t *testing.T) {
 	})
 }
 
-func TestBackupInventoryMakeResources(t *testing.T) {
+func TestTombstoneRecoveryInventoryMakeResources(t *testing.T) {
 	comp := inventoryTestComposition()
 	first, second := inventoryTestResource("desired"), inventoryTestResource("desired")
 	first.Annotations["example.com/ignored"] = "not inventoried"
@@ -483,7 +483,7 @@ func TestBackupInventoryMakeResources(t *testing.T) {
 	})
 }
 
-func TestBackupInventoryMissingTombstones(t *testing.T) {
+func TestTombstoneRecoveryInventoryMissingTombstones(t *testing.T) {
 	comp := inventoryTestComposition()
 	desired := inventoryTestResource("desired")
 	missing := inventoryTestResource("missing")
@@ -523,7 +523,7 @@ func TestBackupInventoryMissingTombstones(t *testing.T) {
 	assert.Empty(t, repeated)
 }
 
-func TestBackupInventoryPatchTargetPresence(t *testing.T) {
+func TestTombstoneRecoveryInventoryPatchTargetPresence(t *testing.T) {
 	for _, target := range []inventoryResource{
 		{Version: "v1", Kind: "ConfigMap", Namespace: "workloads", Name: "foo"},
 		{Group: "apps", Version: "v1", Kind: "Deployment", Namespace: "workloads", Name: "foo"},
@@ -581,7 +581,7 @@ func TestBackupInventoryPatchTargetPresence(t *testing.T) {
 	}
 }
 
-func TestBackupInventoryMissingTombstonesPreservesEntries(t *testing.T) {
+func TestTombstoneRecoveryInventoryMissingTombstonesPreservesEntries(t *testing.T) {
 	first, second := inventoryTestResource("second"), inventoryTestResource("first")
 	clusterScoped := inventoryResource{Version: "v1", Kind: "Namespace", Name: "cluster"}
 	duplicate := second
@@ -606,7 +606,7 @@ func TestBackupInventoryMissingTombstonesPreservesEntries(t *testing.T) {
 	assert.Empty(t, empty)
 }
 
-func TestBackupInventoryMissingTombstonesErrors(t *testing.T) {
+func TestTombstoneRecoveryInventoryMissingTombstonesErrors(t *testing.T) {
 	for _, tt := range []struct {
 		name     string
 		manifest string

@@ -60,7 +60,7 @@ func TestRecoveryFlagAPIPersistence(t *testing.T) {
 					}
 				}
 				comp.Status.InFlightSynthesis.TombstoneRecoveryFinished.Status = false
-				comp.Status.InFlightSynthesis.TombstoneRecoveryFinished.Reason = "BackupInProgress"
+				comp.Status.InFlightSynthesis.TombstoneRecoveryFinished.Reason = "TombstoneRecoveryInProgress"
 			}
 			require.NoError(t, mgr.GetClient().Status().Update(t.Context(), comp))
 

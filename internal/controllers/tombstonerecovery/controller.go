@@ -38,7 +38,7 @@ const (
 	reasonFinished          = "FinishedTombstoneRecovery"
 )
 
-var errSuperseded = errors.New("backup operation superseded")
+var errSuperseded = errors.New("tombstone recovery operation superseded")
 
 type Options struct {
 	Enabled             bool
@@ -66,9 +66,9 @@ func NewController(mgr ctrl.Manager, opts Options) error {
 		return nil
 	}
 	if opts.Namespace == "" {
-		return fmt.Errorf("backup namespace is required")
+		return fmt.Errorf("tombstone recovery namespace is required")
 	}
-	backupCache, err := cache.New(mgr.GetConfig(), cache.Options{
+	recoveryCache, err := cache.New(mgr.GetConfig(), cache.Options{
 		Scheme:            mgr.GetScheme(),
 		Mapper:            mgr.GetRESTMapper(),
 		HTTPClient:        mgr.GetHTTPClient(),
@@ -78,19 +78,19 @@ func NewController(mgr ctrl.Manager, opts Options) error {
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("constructing backup namespace cache: %w", err)
+		return fmt.Errorf("constructing tombstone recovery namespace cache: %w", err)
 	}
-	if err := mgr.Add(backupCache); err != nil {
-		return fmt.Errorf("registering backup namespace cache: %w", err)
+	if err := mgr.Add(recoveryCache); err != nil {
+		return fmt.Errorf("registering tombstone recovery namespace cache: %w", err)
 	}
 	upstream, err := client.New(mgr.GetConfig(), client.Options{
 		Scheme:     mgr.GetScheme(),
 		Mapper:     mgr.GetRESTMapper(),
 		HTTPClient: mgr.GetHTTPClient(),
-		Cache:      &client.CacheOptions{Reader: backupCache},
+		Cache:      &client.CacheOptions{Reader: recoveryCache},
 	})
 	if err != nil {
-		return fmt.Errorf("constructing backup upstream client: %w", err)
+		return fmt.Errorf("constructing tombstone recovery upstream client: %w", err)
 	}
 	c := &tombstoneRecoveryController{
 		client: upstream,
@@ -106,14 +106,14 @@ func NewController(mgr ctrl.Manager, opts Options) error {
 	}
 	c.downstream, err = client.New(config, client.Options{Scheme: mgr.GetScheme()})
 	if err != nil {
-		return fmt.Errorf("constructing backup downstream client: %w", err)
+		return fmt.Errorf("constructing tombstone recovery downstream client: %w", err)
 	}
 	slice := &metav1.PartialObjectMetadata{}
 	slice.SetGroupVersionKind(apiv1.SchemeGroupVersion.WithKind("ResourceSlice"))
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("tombstoneRecoveryController").
-		WatchesRawSource(source.Kind(backupCache, &apiv1.Composition{}, &handler.TypedEnqueueRequestForObject[*apiv1.Composition]{})).
-		WatchesRawSource(source.Kind(backupCache, slice, handler.TypedEnqueueRequestForOwner[*metav1.PartialObjectMetadata](
+		WatchesRawSource(source.Kind(recoveryCache, &apiv1.Composition{}, &handler.TypedEnqueueRequestForObject[*apiv1.Composition]{})).
+		WatchesRawSource(source.Kind(recoveryCache, slice, handler.TypedEnqueueRequestForOwner[*metav1.PartialObjectMetadata](
 			mgr.GetScheme(), mgr.GetRESTMapper(), &apiv1.Composition{}, handler.OnlyControllerOwner()))).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 1,
@@ -135,7 +135,7 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 		logger.Error(err, "failed to get composition")
 		return ctrl.Result{}, err
 	}
-	// Deletion reuses existing slices and must not wait for backup, even if recovery is unfinished.
+	// Deletion reuses existing slices and must not wait for tombstone recovery.
 	if comp.DeletionTimestamp != nil {
 		logger.Info("composition is deleting; skipping recovery and inventory recording", "compositionUID", comp.UID,
 			"synthesisUUID", comp.Status.GetCurrentSynthesisUUID())
@@ -169,11 +169,11 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	if errors.Is(err, errSuperseded) {
-		logger.Info("abandoning obsolete backup work", "reason", err.Error())
+		logger.Info("abandoning obsolete tombstone recovery work", "reason", err.Error())
 		return ctrl.Result{Requeue: true}, nil
 	}
 	if err != nil {
-		logger.Error(err, "backup operation failed")
+		logger.Error(err, "tombstone recovery operation failed")
 	}
 	return ctrl.Result{}, err
 }
@@ -195,7 +195,7 @@ func (c *tombstoneRecoveryController) getCurrentComposition(ctx context.Context,
 	}
 	syn, old := comp.Status.CurrentSynthesis, expected.Status.CurrentSynthesis
 	if syn == nil || old == nil || syn.UUID != old.UUID {
-		logr.FromContextOrDiscard(ctx).Info("observed obsolete backup operation", "originalSynthesisUUID", expected.Status.GetCurrentSynthesisUUID(),
+		logr.FromContextOrDiscard(ctx).Info("observed obsolete tombstone recovery operation", "originalSynthesisUUID", expected.Status.GetCurrentSynthesisUUID(),
 			"currentSynthesisUUID", comp.Status.GetCurrentSynthesisUUID())
 		return nil, fmt.Errorf("%w: synthesis changed (current synthesis %q)", errSuperseded, comp.Status.GetCurrentSynthesisUUID())
 	}

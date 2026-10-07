@@ -351,7 +351,7 @@ func TestNoSlices(t *testing.T) {
 		assert.Nil(t, comp.Status.CurrentSynthesis.Reconciled)
 	}
 	comp.Status.CurrentSynthesis.TombstoneRecoveryFinished = &apiv1.TombstoneRecoveryStatus{
-		Status: true, Reason: "BackupOperatorNotEnabled", SynthesisUUID: "current",
+		Status: true, Reason: apiv1.TombstoneRecoveryOperatorNotEnabled, SynthesisUUID: "current",
 	}
 	require.NoError(t, cli.Status().Update(ctx, comp))
 	for range 2 {
