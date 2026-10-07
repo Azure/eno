@@ -6,10 +6,10 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
-	"github.com/Azure/eno/internal/controllers/backup"
 	"github.com/Azure/eno/internal/controllers/composition"
 	"github.com/Azure/eno/internal/controllers/liveness"
 	"github.com/Azure/eno/internal/controllers/resourceslice"
+	"github.com/Azure/eno/internal/controllers/tombstonerecovery"
 	"github.com/Azure/eno/internal/controllers/scheduling"
 	"github.com/Azure/eno/internal/controllers/symphony"
 	"github.com/Azure/eno/internal/controllers/synthesis"
@@ -88,7 +88,7 @@ func setupTestSubjectForOptions(t *testing.T, mgr *testutil.Manager, opts Option
 		opts.Downstream.QPS = 200 // minimal throttling for the tests
 	}
 
-	require.NoError(t, backup.NewController(mgr.Manager, backup.Options{
+	require.NoError(t, tombstonerecovery.NewController(mgr.Manager, tombstonerecovery.Options{
 		Enabled: opts.EnableTombstoneRecovery, Namespace: opts.RecoveryCompositionNamespace, Downstream: opts.Downstream,
 	}))
 	err := New(mgr.Manager, opts)

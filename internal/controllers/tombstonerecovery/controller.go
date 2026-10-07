@@ -1,4 +1,4 @@
-package backup
+package tombstonerecovery
 
 import (
 	"context"
@@ -162,7 +162,7 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 		logger = logger.WithValues("operation", "recoveryPreparation")
 		ctx = logr.NewContext(ctx, logger)
 		if syn.TombstoneRecoveryRequired {
-			err = c.tombstoneRecovery(ctx, comp)
+			err = c.recoverMissingTombstones(ctx, comp)
 		} else {
 			err = c.markTombstoneRecoveryFinished(ctx, comp, reasonNotNeeded, "", nil)
 		}
@@ -213,7 +213,7 @@ func getOrCreateRecoveryStatus(comp *apiv1.Composition) apiv1.TombstoneRecoveryS
 	return apiv1.TombstoneRecoveryStatus{SynthesisUUID: syn.UUID}
 }
 
-func (c *tombstoneRecoveryController) tombstoneRecovery(ctx context.Context, comp *apiv1.Composition) error {
+func (c *tombstoneRecoveryController) recoverMissingTombstones(ctx context.Context, comp *apiv1.Composition) error {
 	logger := logr.FromContextOrDiscard(ctx)
 	logger.Info("reading downstream inventory", "lineage", inventoryLineage(comp))
 	items, readErr := c.readInventories(ctx, comp)

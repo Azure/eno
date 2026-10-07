@@ -112,6 +112,17 @@ func TestStaleStatus(t *testing.T) {
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 	assert.Nil(t, comp.Status.CurrentSynthesis.Reconciled)
 	assert.Nil(t, comp.Status.CurrentSynthesis.Ready)
+
+	now = metav1.Now()
+	slice.Spec.Resources = append(slice.Spec.Resources, apiv1.Manifest{Manifest: "{}", Deleted: true})
+	require.NoError(t, cli.Update(ctx, slice))
+	slice.Status.Resources = []apiv1.ResourceState{{Reconciled: true, Ready: &now}}
+	require.NoError(t, cli.Status().Update(ctx, slice))
+	_, err = a.Reconcile(ctx, req)
+	require.NoError(t, err)
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	assert.Nil(t, comp.Status.CurrentSynthesis.Reconciled)
+	assert.Nil(t, comp.Status.CurrentSynthesis.Ready)
 }
 
 func TestCleanupSafety(t *testing.T) {
@@ -317,6 +328,40 @@ func TestNoSlices(t *testing.T) {
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
 	assert.Nil(t, comp.Status.CurrentSynthesis.Ready)
 	assert.NotNil(t, comp.Status.CurrentSynthesis.Reconciled)
+
+	comp.Annotations = map[string]string{"eno.azure.io/recovery-enabled": "true"}
+	require.NoError(t, cli.Update(ctx, comp))
+	comp.Status.CurrentSynthesis.UUID = "current"
+	comp.Status.CurrentSynthesis.Ready = &now
+	comp.Status.CurrentSynthesis.TombstoneRecoveryRequired = true
+	require.NoError(t, cli.Status().Update(ctx, comp))
+	for _, decision := range []*apiv1.TombstoneRecoveryStatus{
+		nil,
+		{Status: false, Reason: "InventoryGetError", SynthesisUUID: "current"},
+		{Status: true, Reason: "NotNeeded", SynthesisUUID: "previous"},
+	} {
+		comp.Status.CurrentSynthesis.TombstoneRecoveryFinished = decision
+		require.NoError(t, cli.Status().Update(ctx, comp))
+		for range 2 {
+			_, err = a.Reconcile(ctx, req)
+			require.NoError(t, err)
+		}
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+		assert.Nil(t, comp.Status.CurrentSynthesis.Ready)
+		assert.Nil(t, comp.Status.CurrentSynthesis.Reconciled)
+	}
+	comp.Status.CurrentSynthesis.TombstoneRecoveryFinished = &apiv1.TombstoneRecoveryStatus{
+		Status: true, Reason: "BackupOperatorNotEnabled", SynthesisUUID: "current",
+	}
+	require.NoError(t, cli.Status().Update(ctx, comp))
+	for range 2 {
+		_, err = a.Reconcile(ctx, req)
+		require.NoError(t, err)
+	}
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+	assert.NotNil(t, comp.Status.CurrentSynthesis.Ready)
+	assert.NotNil(t, comp.Status.CurrentSynthesis.Reconciled)
+	assert.True(t, comp.Status.CurrentSynthesis.TombstoneRecoveryRequired)
 }
 
 func TestMissingNewSlice(t *testing.T) {

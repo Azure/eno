@@ -80,7 +80,7 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 
 		// Handle a case where the reconciliation controller hasn't updated the slice's status yet
-		if len(slice.Status.Resources) == 0 && len(slice.Spec.Resources) > 0 {
+		if len(slice.Status.Resources) < len(slice.Spec.Resources) {
 			snapshot.Ready = false
 			snapshot.Reconciled = false
 			break // no need to check the other slices
@@ -161,6 +161,13 @@ func (s *sliceController) handleMissingSlice(ctx context.Context, comp *apiv1.Co
 
 func processCompositionTransition(ctx context.Context, comp *apiv1.Composition, snapshot statusSnapshot) (modified bool) {
 	logger := logr.FromContextOrDiscard(ctx)
+
+	if syn := comp.Status.CurrentSynthesis; syn != nil && comp.RecoveryEnabled() &&
+		comp.DeletionTimestamp == nil && !syn.TombstoneRecoveryComplete() {
+		snapshot.Ready = false
+		snapshot.Reconciled = false
+		logger.Info("withholding composition readiness while tombstone recovery is unfinished", "synthesisUUID", syn.UUID)
+	}
 
 	synthesisMatches := comp.Status.CurrentSynthesis == nil || ((comp.Status.CurrentSynthesis.Reconciled != nil) == snapshot.Reconciled && (comp.Status.CurrentSynthesis.Ready != nil) == snapshot.Ready)
 	errorsMatch := comp.Status.Simplified == nil || comp.Status.Simplified.Status != "Reconciling" || comp.Status.Simplified.Error == snapshot.Error

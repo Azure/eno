@@ -95,10 +95,25 @@ func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) 
 	ctx = logr.NewContext(ctx, logger)
 
 	// Only Compositions owned by this reconciler's recovery controller wait for recovery; deletion always bypasses the gate.
-	if syn := comp.Status.CurrentSynthesis; r.enableTombstoneRecovery && comp.Namespace == r.recoveryCompositionNamespace &&
-		comp.RecoveryEnabled() && comp.DeletionTimestamp == nil && syn != nil && syn.Synthesized != nil && !syn.TombstoneRecoveryComplete() {
-		logger.Info("waiting for tombstone recovery preparation", "synthesisUUID", syn.UUID)
-		return ctrl.Result{}, nil
+	if syn := comp.Status.CurrentSynthesis; comp.RecoveryEnabled() && comp.DeletionTimestamp == nil &&
+		syn != nil && syn.Synthesized != nil && !syn.TombstoneRecoveryComplete() {
+		if r.enableTombstoneRecovery && comp.Namespace == r.recoveryCompositionNamespace {
+			logger.Info("waiting for tombstone recovery preparation", "synthesisUUID", syn.UUID)
+			return ctrl.Result{}, nil
+		}
+		reason := "BackupOperatorNotEnabled"
+		if r.enableTombstoneRecovery {
+			reason = "OutsideRecoveryNamespace"
+		}
+		before := comp.DeepCopy()
+		syn.TombstoneRecoveryFinished = &apiv1.TombstoneRecoveryStatus{
+			Status: true, Reason: reason, SynthesisUUID: syn.UUID,
+		}
+		// The resourceVersion precondition protects against supersession, deletion, and concurrent recovery decisions.
+		if err := r.client.Status().Patch(ctx, comp, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
+			return ctrl.Result{}, fmt.Errorf("recording skipped tombstone recovery: %w", err)
+		}
+		logger.Info("recorded skipped tombstone recovery", "synthesisUUID", syn.UUID, "reason", reason)
 	}
 
 	// The reconciliation controller assumes that the previous synthesis will be loaded first

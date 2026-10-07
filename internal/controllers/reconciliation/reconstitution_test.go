@@ -34,6 +34,7 @@ type recoveryReconstitutionHarness struct {
 	informerErrors map[string]error
 	apiErrors      map[string]error
 	informerStatus map[string]apiv1.ResourceSliceStatus
+	allowRecoveryDecision bool
 }
 
 func recoveryReconstitutionNewHarness(t *testing.T, comp *apiv1.Composition, informerSlices, apiSlices []*apiv1.ResourceSlice) *recoveryReconstitutionHarness {
@@ -110,8 +111,12 @@ func recoveryReconstitutionNewHarness(t *testing.T, comp *apiv1.Composition, inf
 			SubResourceUpdate: func(context.Context, client.Client, string, client.Object, ...client.SubResourceUpdateOption) error {
 				return unexpectedWrite()
 			},
-			SubResourcePatch: func(context.Context, client.Client, string, client.Object, client.Patch, ...client.SubResourcePatchOption) error {
-				return unexpectedWrite()
+			SubResourcePatch: func(ctx context.Context, cli client.Client, name string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+				if !h.allowRecoveryDecision || view != "informer" || name != "status" {
+					return unexpectedWrite()
+				}
+				require.IsType(t, &apiv1.Composition{}, obj)
+				return cli.SubResource(name).Patch(ctx, obj, patch, opts...)
 			},
 		}, objects...)
 
@@ -276,6 +281,7 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 				recoveryReconstitutionSlice("current-slice", "current", "current-resource"),
 			}
 			h := recoveryReconstitutionNewHarness(t, comp, slices, slices)
+			h.allowRecoveryDecision = tc.disabled || tc.outside
 			h.source.enableTombstoneRecovery = !tc.disabled
 			if tc.outside {
 				h.source.recoveryCompositionNamespace = "backup-system"
@@ -287,6 +293,16 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 			}
 			result, err := h.recoveryReconstitutionReconcile()
 			require.NoError(t, err)
+			if h.allowRecoveryDecision && !tc.deleting && !tc.optOut {
+				stored := &apiv1.Composition{}
+				require.NoError(t, h.source.client.Get(h.ctx, client.ObjectKeyFromObject(comp), stored))
+				require.True(t, stored.Status.CurrentSynthesis.TombstoneRecoveryComplete())
+				reason := "BackupOperatorNotEnabled"
+				if !tc.disabled {
+					reason = "OutsideRecoveryNamespace"
+				}
+				assert.Equal(t, reason, stored.Status.CurrentSynthesis.TombstoneRecoveryFinished.Reason)
+			}
 			if !tc.allow {
 				assert.Zero(t, result)
 				assert.Empty(t, h.reads, "unfinished preparation must not load either synthesis")

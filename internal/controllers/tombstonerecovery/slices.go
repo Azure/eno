@@ -1,4 +1,4 @@
-package backup
+package tombstonerecovery
 
 import (
 	"context"
@@ -19,10 +19,26 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func (c *tombstoneRecoveryController) writeTombstones(ctx context.Context, comp *apiv1.Composition, slices []apiv1.ResourceSlice, tombstones []apiv1.Manifest) ([]*apiv1.ResourceSliceRef, error) {
-	additions := make([][]apiv1.Manifest, len(slices))
+type sliceAddition struct {
+	sliceIndex int
+	tombstones []apiv1.Manifest
+}
+
+type overflowSlice struct {
+	tombstones []apiv1.Manifest
+}
+
+type tombstonePackingPlan struct {
+	additions []sliceAddition
+	overflow  []overflowSlice // Each entry becomes a new ResourceSlice within the manifest-byte limit.
+}
+
+// planTombstones fills existing slices first, then batches overflow without mutating inputs.
+func planTombstones(slices []apiv1.ResourceSlice, tombstones []apiv1.Manifest) (tombstonePackingPlan, error) {
+	plan := tombstonePackingPlan{additions: make([]sliceAddition, len(slices))}
 	sizes := make([]int, len(slices))
 	for i, slice := range slices {
+		plan.additions[i].sliceIndex = i
 		for _, manifest := range slice.Spec.Resources {
 			sizes[i] += len(manifest.Manifest)
 		}
@@ -31,12 +47,12 @@ func (c *tombstoneRecoveryController) writeTombstones(ctx context.Context, comp 
 	for _, manifest := range tombstones {
 		size := len(manifest.Manifest)
 		if size > resource.MaxSliceJSONBytes {
-			return nil, fmt.Errorf("recovery tombstone exceeds the ResourceSlice manifest byte limit: %d > %d", size, resource.MaxSliceJSONBytes)
+			return tombstonePackingPlan{}, fmt.Errorf("recovery tombstone exceeds the ResourceSlice manifest byte limit: %d > %d", size, resource.MaxSliceJSONBytes)
 		}
 		placed := false
 		for i := range slices {
 			if sizes[i]+size <= resource.MaxSliceJSONBytes {
-				additions[i] = append(additions[i], manifest)
+				plan.additions[i].tombstones = append(plan.additions[i].tombstones, manifest)
 				sizes[i] += size
 				placed = true
 				break
@@ -47,30 +63,44 @@ func (c *tombstoneRecoveryController) writeTombstones(ctx context.Context, comp 
 		}
 	}
 
-	for i := range slices {
-		if len(additions[i]) == 0 {
-			continue
-		}
-		if _, err := c.getCurrentComposition(ctx, comp, false); err != nil {
-			return nil, err
-		}
-		before := slices[i].DeepCopy()
-		after := before.DeepCopy()
-		after.Spec.Resources = append(after.Spec.Resources, additions[i]...)
-		if err := c.client.Patch(ctx, after, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
-			return nil, fmt.Errorf("appending tombstones to ResourceSlice %q: %w", before.Name, err)
-		}
-		logr.FromContextOrDiscard(ctx).Info("appended recovery tombstones", "resourceSliceName", after.Name, "tombstoneCount", len(additions[i]))
-	}
-
-	var refs []*apiv1.ResourceSliceRef
+	// Leftover tombstones may need multiple new slices; each has the same size limit.
 	for len(overflow) > 0 {
 		size, count := 0, 0
 		for count < len(overflow) && size+len(overflow[count].Manifest) <= resource.MaxSliceJSONBytes {
 			size += len(overflow[count].Manifest)
 			count++
 		}
-		slice, err := recoverySlice(comp, overflow[:count])
+		plan.overflow = append(plan.overflow, overflowSlice{tombstones: overflow[:count]})
+		overflow = overflow[count:]
+	}
+	return plan, nil
+}
+
+func (c *tombstoneRecoveryController) writeTombstones(ctx context.Context, comp *apiv1.Composition, slices []apiv1.ResourceSlice, tombstones []apiv1.Manifest) ([]*apiv1.ResourceSliceRef, error) {
+	// Validate the entire batch before persisting any additions.
+	plan, err := planTombstones(slices, tombstones)
+	if err != nil {
+		return nil, err
+	}
+	for _, addition := range plan.additions {
+		if len(addition.tombstones) == 0 {
+			continue
+		}
+		before := slices[addition.sliceIndex].DeepCopy()
+		after := before.DeepCopy()
+		after.Spec.Resources = append(after.Spec.Resources, addition.tombstones...)
+		if _, err := c.getCurrentComposition(ctx, comp, false); err != nil {
+			return nil, err
+		}
+		if err := c.client.Patch(ctx, after, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
+			return nil, fmt.Errorf("appending tombstones to ResourceSlice %q: %w", before.Name, err)
+		}
+		logr.FromContextOrDiscard(ctx).Info("appended recovery tombstones", "resourceSliceName", after.Name, "tombstoneCount", len(addition.tombstones))
+	}
+
+	var refs []*apiv1.ResourceSliceRef
+	for _, overflow := range plan.overflow {
+		slice, err := recoverySlice(comp, overflow.tombstones)
 		if err != nil {
 			return nil, err
 		}
@@ -81,6 +111,7 @@ func (c *tombstoneRecoveryController) writeTombstones(ctx context.Context, comp 
 			if !apierrors.IsAlreadyExists(err) {
 				return nil, fmt.Errorf("creating recovery ResourceSlice %q: %w", slice.Name, err)
 			}
+			// A retry may find overflow persisted before its reference was published.
 			existing := &apiv1.ResourceSlice{}
 			if err := c.reader.Get(ctx, client.ObjectKeyFromObject(slice), existing); err != nil {
 				return nil, fmt.Errorf("reading existing recovery ResourceSlice %q: %w", slice.Name, err)
@@ -93,8 +124,7 @@ func (c *tombstoneRecoveryController) writeTombstones(ctx context.Context, comp 
 			}
 		}
 		refs = append(refs, &apiv1.ResourceSliceRef{Name: slice.Name})
-		logr.FromContextOrDiscard(ctx).Info("recovery overflow slice persisted", "resourceSliceName", slice.Name, "tombstoneCount", count)
-		overflow = overflow[count:]
+		logr.FromContextOrDiscard(ctx).Info("recovery overflow slice persisted", "resourceSliceName", slice.Name, "tombstoneCount", len(overflow.tombstones))
 	}
 	return refs, nil
 }

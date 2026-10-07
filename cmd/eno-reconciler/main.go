@@ -15,9 +15,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/Azure/eno/internal/cel"
-	"github.com/Azure/eno/internal/controllers/backup"
 	"github.com/Azure/eno/internal/controllers/liveness"
 	"github.com/Azure/eno/internal/controllers/reconciliation"
+	"github.com/Azure/eno/internal/controllers/tombstonerecovery"
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/k8s"
 	"github.com/Azure/eno/internal/logging"
@@ -51,7 +51,7 @@ func run() error {
 		}
 
 		recOpts      = reconciliation.Options{}
-		recoveryOpts = backup.Options{}
+		recoveryOpts = tombstonerecovery.Options{}
 	)
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.StringVar(&remoteKubeconfigFile, "remote-kubeconfig", "", "Path to the kubeconfig of the apiserver where the resources will be reconciled. The config from the environment is used if this is not provided")
@@ -160,7 +160,7 @@ func run() error {
 	recoveryOpts.Namespace = recOpts.RecoveryCompositionNamespace
 	recoveryOpts.CompositionSelector = mgrOpts.CompositionSelector
 	recoveryOpts.Downstream = remoteConfig
-	if err := backup.NewController(mgr, recoveryOpts); err != nil {
+	if err := tombstonerecovery.NewController(mgr, recoveryOpts); err != nil {
 		return fmt.Errorf("constructing tombstone recovery controller: %w", err)
 	}
 
