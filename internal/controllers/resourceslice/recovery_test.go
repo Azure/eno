@@ -107,6 +107,82 @@ func TestRecoverySliceRequestsResynthesis(t *testing.T) {
 	}
 }
 
+func TestRecoveryTerminatingSliceRequestsResynthesis(t *testing.T) {
+	for _, mode := range []string{"pending", "earlier slice unready", "unannotated", "completed", "deleting", "in flight", "ignore side effects", "already requested", "write failure"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := testutil.NewContext(t)
+			comp := recoverySliceComposition([]*apiv1.ResourceSliceRef{{Name: "terminating"}})
+			comp.Annotations = map[string]string{"eno.azure.io/recovery-enabled": "true"}
+			switch mode {
+			case "unannotated":
+				comp.Annotations = nil
+			case "completed":
+				comp.Status.CurrentSynthesis.TombstoneRecoveryFinished = &apiv1.TombstoneRecoveryStatus{
+					Status: true, Reason: "FinishedTombstoneRecovery", SynthesisUUID: "current",
+				}
+			case "deleting":
+				comp.DeletionTimestamp = ptr.To(metav1.Now())
+				comp.Finalizers = []string{"eno.azure.io/cleanup"}
+			case "in flight":
+				comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "next"}
+			case "ignore side effects":
+				comp.EnableIgnoreSideEffects()
+			case "already requested":
+				comp.ForceResynthesis()
+			}
+			slice := &apiv1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "terminating", Namespace: comp.Namespace, DeletionTimestamp: ptr.To(metav1.Now()),
+					Finalizers: []string{"eno.azure.io/cleanup"},
+				},
+				Spec: apiv1.ResourceSliceSpec{Resources: []apiv1.Manifest{{Manifest: "{}"}}},
+			}
+			objects := []client.Object{comp, slice}
+			if mode == "earlier slice unready" {
+				earlier := slice.DeepCopy()
+				earlier.Name, earlier.DeletionTimestamp = "unready", nil
+				comp.Status.CurrentSynthesis.ResourceSlices = append([]*apiv1.ResourceSliceRef{{Name: earlier.Name}}, comp.Status.CurrentSynthesis.ResourceSlices...)
+				objects = append(objects, earlier)
+			}
+			updates := 0
+			failure := errors.New("write unavailable")
+			cli := testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
+				Update: func(ctx context.Context, cli client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+					updates++
+					if mode == "write failure" {
+						return failure
+					}
+					return cli.Update(ctx, obj, opts...)
+				},
+			}, objects...)
+			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+			before := comp.Status.DeepCopy()
+			c := &sliceController{client: cli, apiReader: cli}
+			for range 2 {
+				_, err := c.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(comp)})
+				if mode == "write failure" {
+					require.ErrorIs(t, err, failure)
+				} else {
+					require.NoError(t, err)
+				}
+			}
+			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+			requested := mode == "pending" || mode == "earlier slice unready" || mode == "already requested"
+			assert.Equal(t, requested, comp.ShouldForceResynthesis())
+			wantUpdates := 0
+			if mode == "pending" || mode == "earlier slice unready" {
+				wantUpdates = 1
+			} else if mode == "write failure" {
+				wantUpdates = 2
+			}
+			assert.Equal(t, wantUpdates, updates)
+			assert.Equal(t, *before, comp.Status, "resynthesis must preserve the recovery obligation and decision")
+			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(slice), slice))
+			assert.Equal(t, []string{"eno.azure.io/cleanup"}, slice.Finalizers)
+		})
+	}
+}
+
 func TestRecoverySliceConfirmsMissingViaAPI(t *testing.T) {
 	for _, apiCase := range []struct {
 		name   string
