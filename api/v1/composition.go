@@ -275,6 +275,7 @@ func (c *Composition) ShouldIgnoreSideEffects() bool {
 	return c.Annotations["eno.azure.io/ignore-side-effects"] == "true"
 }
 
+// In AKS, Overlaymgr triggers a new synthesis after adding the recovery annotation.
 func (c *Composition) RecoveryEnabled() bool {
 	return c.Annotations["eno.azure.io/recovery-enabled"] == "true"
 }

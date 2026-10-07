@@ -164,7 +164,7 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 		if syn.TombstoneRecoveryRequired {
 			err = c.recoverMissingTombstones(ctx, comp)
 		} else {
-			err = c.markTombstoneRecoveryFinished(ctx, comp, reasonNotNeeded, "", nil)
+			err = c.recordRecoveryDecision(ctx, comp, reasonNotNeeded, "", nil)
 		}
 	}
 
@@ -229,13 +229,13 @@ func (c *tombstoneRecoveryController) recoverMissingTombstones(ctx context.Conte
 		logger.Error(readErr, "failed to read downstream inventory")
 		var invalid *invalidInventoryError
 		if errors.As(readErr, &invalid) {
-			return c.markTombstoneRecoveryFinished(ctx, comp, reasonInventoryInvalid, readErr.Error(), nil)
+			return c.recordRecoveryDecision(ctx, comp, reasonInventoryInvalid, readErr.Error(), nil)
 		}
 		return c.recordTombstoneRecoveryError(ctx, comp, reasonInventoryGetError, readErr)
 	}
 	if configMap == nil {
 		logger.Info("no downstream inventory found", "lineage", inventoryLineage(comp))
-		return c.markTombstoneRecoveryFinished(ctx, comp, reasonInventoryNotFound, "", nil)
+		return c.recordRecoveryDecision(ctx, comp, reasonInventoryNotFound, "", nil)
 	}
 
 	slices, err := c.loadCurrentSynthesisResourceSlices(ctx, comp)
@@ -251,7 +251,7 @@ func (c *tombstoneRecoveryController) recoverMissingTombstones(ctx context.Conte
 		return c.recordTombstoneRecoveryError(ctx, comp, reasonSliceWriteError, err)
 	}
 	logger.Info("recovery tombstones persisted", "tombstoneCount", len(tombstones), "overflowSliceCount", len(refs))
-	err = c.markTombstoneRecoveryFinished(ctx, comp, reasonFinished, "", refs)
+	err = c.recordRecoveryDecision(ctx, comp, reasonFinished, "", refs)
 	if err != nil && len(refs) > 0 {
 		return c.recordTombstoneRecoveryError(ctx, comp, reasonSliceWriteError, err)
 	}
@@ -293,7 +293,7 @@ func (c *tombstoneRecoveryController) recordTombstoneRecoveryError(ctx context.C
 	return cause
 }
 
-func (c *tombstoneRecoveryController) markTombstoneRecoveryFinished(ctx context.Context, comp *apiv1.Composition, reason, message string, refs []*apiv1.ResourceSliceRef) error {
+func (c *tombstoneRecoveryController) recordRecoveryDecision(ctx context.Context, comp *apiv1.Composition, reason, message string, refs []*apiv1.ResourceSliceRef) error {
 	status := getOrCreateRecoveryStatus(comp)
 	status.Status, status.Reason, status.Message = true, reason, message
 	after := comp.DeepCopy()

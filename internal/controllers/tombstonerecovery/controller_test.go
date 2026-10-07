@@ -608,12 +608,12 @@ func TestBackupControllerRecoveryStatusPatch(t *testing.T) {
 		},
 	})
 	refs := []*apiv1.ResourceSliceRef{{Name: "desired"}, {Name: "overflow"}, {Name: "overflow"}}
-	require.NoError(t, f.controller.markTombstoneRecoveryFinished(t.Context(), before, reasonFinished, "", refs))
+	require.NoError(t, f.controller.recordRecoveryDecision(t.Context(), before, reasonFinished, "", refs))
 	require.Equal(t, 1, writes, "publish one terminal decision with no pending status or direct reads")
 	got := f.composition()
 	assert.Equal(t, []*apiv1.ResourceSliceRef{{Name: "desired"}, {Name: "overflow"}}, got.Status.CurrentSynthesis.ResourceSlices)
 	assert.True(t, got.Status.CurrentSynthesis.TombstoneRecoveryRequired)
-	require.NoError(t, f.controller.markTombstoneRecoveryFinished(t.Context(), got, reasonFinished, "", refs))
+	require.NoError(t, f.controller.recordRecoveryDecision(t.Context(), got, reasonFinished, "", refs))
 	assert.Equal(t, 1, writes, "an identical terminal status and references must not be rewritten")
 	assert.Equal(t, got, f.composition())
 }
