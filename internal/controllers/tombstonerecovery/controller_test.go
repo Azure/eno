@@ -192,11 +192,10 @@ func (f *controllerTestFixture) restart() {
 // NotNeeded must not read downstream history.
 
 func TestTombstoneRecoveryAfterSkippedSynthesis(t *testing.T) {
-	for _, reason := range []string{apiv1.TombstoneRecoveryOperatorNotEnabled, "OutsideRecoveryNamespace"} {
-		t.Run(reason, func(t *testing.T) {
+	t.Run(apiv1.TombstoneRecoveryOperatorNotEnabled, func(t *testing.T) {
 			f := newControllerTestFixture(t, true)
 			f.history("removed")
-			require.NoError(t, f.controller.recordRecoveryDecision(t.Context(), f.composition(), reason, "", nil))
+			require.NoError(t, f.controller.recordRecoveryDecision(t.Context(), f.composition(), apiv1.TombstoneRecoveryOperatorNotEnabled, "", nil))
 			comp := f.composition()
 			require.True(t, comp.Status.CurrentSynthesis.TombstoneRecoveryComplete())
 			comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: controllerTestUUID(3)}
@@ -232,8 +231,7 @@ func TestTombstoneRecoveryAfterSkippedSynthesis(t *testing.T) {
 			require.Len(t, tombstones, 1)
 			assert.True(t, tombstones[0].Deleted)
 			assert.JSONEq(t, `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"removed","namespace":"workloads"}}`, tombstones[0].Manifest)
-		})
-	}
+	})
 }
 
 func TestTombstoneRecoveryOperatorRecoveryRetry(t *testing.T) {

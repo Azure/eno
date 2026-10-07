@@ -172,7 +172,7 @@ type Synthesis struct {
 	Deferred bool `json:"deferred,omitempty"`
 
 	// TombstoneRecoveryRequired indicates that this synthesis encountered incomplete history.
-	// A synthesis inherits an outstanding recovery requirement, including when its predecessor skipped recovery because it was disabled or out of scope.
+	// A synthesis inherits an outstanding recovery requirement, including when its predecessor skipped recovery because the operator was disabled.
 	// It is set when there is no current synthesis to use as history, or a historical ResourceSlice reference is nameless
 	// or points to a missing slice. Even a first synthesis may encounter resources left by a prior incarnation whose inventory was lost.
 	// A complete historical reference list, including an empty list, does not introduce a new recovery requirement.

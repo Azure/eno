@@ -128,7 +128,6 @@ func recoveryReconstitutionNewHarness(t *testing.T, comp *apiv1.Composition, inf
 		client:                       newClient("informer", informerSlices),
 		nonCachedReader:              newClient("api", apiSlices),
 		cache:                        cache,
-		recoveryCompositionNamespace: comp.Namespace,
 	}
 	return h
 }
@@ -232,7 +231,6 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 		notRequired bool
 		disabled    bool
 		deleting    bool
-		outside     bool
 		filtered    bool
 		optOut      bool
 		annotation  string
@@ -248,10 +246,6 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 		{name: "disabled-missing", disabled: true, allow: true},
 		{name: "disabled-unfinished", disabled: true, finished: &apiv1.TombstoneRecoveryStatus{SynthesisUUID: "current", Reason: "InventoryGetError"}, allow: true},
 		{name: "disabled-old-uuid", disabled: true, finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "old", Reason: "NotNeeded"}, allow: true},
-		{name: "outside-namespace-missing", outside: true, allow: true},
-		{name: "outside-namespace-unfinished", outside: true, finished: &apiv1.TombstoneRecoveryStatus{SynthesisUUID: "current", Reason: "InventoryGetError"}, allow: true},
-		{name: "outside-namespace-old-uuid", outside: true, finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "old", Reason: "NotNeeded"}, allow: true},
-		{name: "outside-namespace-disabled", outside: true, disabled: true, allow: true},
 		{name: "resource-filter-still-waits", filtered: true},
 		{name: "missing-annotation", optOut: true, allow: true},
 		{name: "false-annotation", optOut: true, annotation: "false", allow: true},
@@ -281,11 +275,8 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 				recoveryReconstitutionSlice("current-slice", "current", "current-resource"),
 			}
 			h := recoveryReconstitutionNewHarness(t, comp, slices, slices)
-			h.allowRecoveryDecision = tc.disabled || tc.outside
+			h.allowRecoveryDecision = tc.disabled
 			h.source.enableTombstoneRecovery = !tc.disabled
-			if tc.outside {
-				h.source.recoveryCompositionNamespace = "recovery-system"
-			}
 			if tc.filtered {
 				filter, err := enocel.Parse(`has(self.metadata.labels) && self.metadata.labels != null && 'eno.azure.io/overlaymgr-component-type' in self.metadata.labels && self.metadata.labels['eno.azure.io/overlaymgr-component-type'] == 'addon'`)
 				require.NoError(t, err)
@@ -298,9 +289,6 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 				require.NoError(t, h.source.client.Get(h.ctx, client.ObjectKeyFromObject(comp), stored))
 				require.True(t, stored.Status.CurrentSynthesis.TombstoneRecoveryComplete())
 				reason := apiv1.TombstoneRecoveryOperatorNotEnabled
-				if !tc.disabled {
-					reason = "OutsideRecoveryNamespace"
-				}
 				assert.Equal(t, reason, stored.Status.CurrentSynthesis.TombstoneRecoveryFinished.Reason)
 			}
 			if !tc.allow {

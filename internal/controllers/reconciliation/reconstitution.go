@@ -28,10 +28,9 @@ type reconstitutionSource struct {
 	nonCachedReader              client.Reader
 	cache                        *resource.Cache
 	enableTombstoneRecovery      bool
-	recoveryCompositionNamespace string
 }
 
-func newReconstitutionSource(mgr ctrl.Manager, resourceFilter cel.Program, enableTombstoneRecovery bool, recoveryCompositionNamespace string) (source.TypedSource[resource.Request], *resource.Cache, error) {
+func newReconstitutionSource(mgr ctrl.Manager, resourceFilter cel.Program, enableTombstoneRecovery bool) (source.TypedSource[resource.Request], *resource.Cache, error) {
 	cache := resource.Cache{ResourceFilter: resourceFilter}
 	return source.TypedFunc[resource.Request](func(ctx context.Context, queue workqueue.TypedRateLimitingInterface[resource.Request]) error {
 		cache.SetQueue(queue)
@@ -41,7 +40,6 @@ func newReconstitutionSource(mgr ctrl.Manager, resourceFilter cel.Program, enabl
 			nonCachedReader:              mgr.GetAPIReader(),
 			cache:                        &cache,
 			enableTombstoneRecovery:      enableTombstoneRecovery,
-			recoveryCompositionNamespace: recoveryCompositionNamespace,
 		}
 
 		// This controller's queue uses composition name/namespace as its key
@@ -97,14 +95,11 @@ func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) 
 	// Only Compositions owned by this reconciler's recovery controller wait for recovery; deletion always bypasses the gate.
 	if syn := comp.Status.CurrentSynthesis; comp.RecoveryEnabled() && comp.DeletionTimestamp == nil &&
 		syn != nil && syn.Synthesized != nil && !syn.TombstoneRecoveryComplete() {
-		if r.enableTombstoneRecovery && comp.Namespace == r.recoveryCompositionNamespace {
+		if r.enableTombstoneRecovery {
 			logger.Info("waiting for tombstone recovery preparation", "synthesisUUID", syn.UUID)
 			return ctrl.Result{}, nil
 		}
 		reason := apiv1.TombstoneRecoveryOperatorNotEnabled
-		if r.enableTombstoneRecovery {
-			reason = "OutsideRecoveryNamespace"
-		}
 		before := comp.DeepCopy()
 		syn.TombstoneRecoveryFinished = &apiv1.TombstoneRecoveryStatus{
 			Status: true, Reason: reason, SynthesisUUID: syn.UUID,

@@ -79,7 +79,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 		return err
 	}
 
-	src, cache, err := newReconstitutionSource(mgr, opts.ResourceFilter, opts.EnableTombstoneRecovery, opts.RecoveryCompositionNamespace)
+	src, cache, err := newReconstitutionSource(mgr, opts.ResourceFilter, opts.EnableTombstoneRecovery)
 	if err != nil {
 		return err
 	}

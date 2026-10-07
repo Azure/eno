@@ -248,11 +248,9 @@ func (e *Executor) fetchCurrentSynthesisResSlices(ctx context.Context, comp *api
 
 	recoveryRequired := current.TombstoneRecoveryRequired && !current.TombstoneRecoveryComplete()
 	// Skipping recovery releases readiness but does not resolve missing history.
-	if decision := current.TombstoneRecoveryFinished; current.TombstoneRecoveryRequired && decision != nil {
-		switch decision.Reason {
-		case apiv1.TombstoneRecoveryOperatorNotEnabled, "OutsideRecoveryNamespace":
-			recoveryRequired = true
-		}
+	if decision := current.TombstoneRecoveryFinished; current.TombstoneRecoveryRequired &&
+		decision != nil && decision.Reason == apiv1.TombstoneRecoveryOperatorNotEnabled {
+		recoveryRequired = true
 	}
 	logger = logger.WithValues("currentSynthesisUUID", current.UUID)
 	slices := []*apiv1.ResourceSlice{}
