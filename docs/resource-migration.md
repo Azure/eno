@@ -1,6 +1,6 @@
 # Resource Migration Between Compositions
 
-> ⚠️ This is an advanced Eno concept that builds on [Symphonies](./symphony.md), [Overrides](./overrides.md), and [Reconciliation](./reconciliation.md)
+> ⚠️ This is an advanced Eno concept that builds on [Symphonies](./symphony.md), [Overrides](./reconciliation/overrides.md), and [Reconciliation](./reconciliation/reconciliation.md)
 
 Resource migration enables you to safely transfer ownership of resources from one composition to another within the same symphony. This is useful when reorganizing resource management, splitting monolithic compositions, or consolidating resources.
 

@@ -16,7 +16,8 @@ Just print JSON objects to stdout and Eno will handle the rest.
 ## Docs
 
 - [Synthesis](./docs/synthesis.md)
-- [Reconciliation](./docs/reconciliation.md)
+- [Reconciliation](./docs/reconciliation/reconciliation.md)
+- [Resource Synthesis Self-Heal and Recovery](./docs/reconciliation/resource-synthesis-self-heal-and-recovery.md)
 - [Symphony](./docs/symphony.md)
 
 ### ResourceSlice naming
