@@ -96,7 +96,7 @@ Synthesis detects incomplete history or inherits an outstanding requirement
 
 - **Does:** Read every referenced current ResourceSlice before preparing any Secret writes; missing, terminating, malformed, or unreadable slices stop the attempt.
 - **Does:** Exclude tombstones and Patch resources, sort inventory identities, and deterministically pack complete JSON arrays into chunks within the Secret data limit.
-- **Does:** Recheck the Composition UID, synthesis UUID, namespace/selector scope, opt-in, deletion state, readiness, and finished recovery decision before writes.
+- **Does:** Recheck the current synthesis UUID, opt-in, deletion state, readiness, and finished recovery decision before writes. Namespace and label-selector scope are enforced by the informer cache that enqueues the Composition.
 - **Does:** Reuse stable Secret names, skip identical writes, and use resourceVersion-protected updates. Conflicts and transient failures retry through the controller.
 - **Does not:** Reopen a finished recovery decision, rewrite different contents under the same synthesis UUID, or remove leftover Secrets.
 - **Entry points:** [`recordInventory` and `writeInventoryChunk`](../../internal/controllers/tombstonerecovery/recording.go).

@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -71,7 +72,6 @@ func newControllerTestFixture(t *testing.T, required bool, names ...string) *con
 	}
 	f.controller = &tombstoneRecoveryController{
 		client: f.upstream, reader: f.upstream, downstream: f.downstream,
-		namespace: comp.Namespace,
 	}
 	return f
 }
@@ -191,11 +191,63 @@ func (f *controllerTestFixture) restart() {
 	old := f.controller
 	f.controller = &tombstoneRecoveryController{
 		client: old.client, reader: old.reader, downstream: old.downstream,
-		namespace: old.namespace, compositionSelector: old.compositionSelector,
 	}
 }
 
 // NotNeeded must not read downstream history.
+
+func TestNextCompositionOperation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		comp *apiv1.Composition
+		want compositionOperation
+	}{
+		{name: "nil"},
+		{name: "no current synthesis", comp: &apiv1.Composition{}},
+		{name: "synthesis in progress", comp: &apiv1.Composition{
+			Status: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{}},
+		}},
+		{name: "recover missing tombstones", comp: &apiv1.Composition{
+			Status: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{
+				Synthesized: ptr.To(metav1.Now()), TombstoneRecoveryRequired: true,
+			}},
+		}, want: compositionOperationRecover},
+		{name: "record not needed", comp: &apiv1.Composition{
+			Status: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{
+				Synthesized: ptr.To(metav1.Now()),
+			}},
+		}, want: compositionOperationNotNeeded},
+		{name: "finished but not ready", comp: &apiv1.Composition{
+			Status: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{
+				UUID: "current", Synthesized: ptr.To(metav1.Now()),
+				TombstoneRecoveryStatus: &apiv1.TombstoneRecoveryStatus{
+					Status: true, SynthesisUUID: "current",
+				},
+			}},
+		}},
+		{name: "record ready inventory", comp: &apiv1.Composition{
+			Status: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{
+				UUID: "current", Synthesized: ptr.To(metav1.Now()), Ready: ptr.To(metav1.Now()),
+				TombstoneRecoveryStatus: &apiv1.TombstoneRecoveryStatus{
+					Status: true, SynthesisUUID: "current",
+				},
+			}},
+		}, want: compositionOperationRecord},
+		{name: "stale decision recovers before recording", comp: &apiv1.Composition{
+			Status: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{
+				UUID: "current", Synthesized: ptr.To(metav1.Now()), Ready: ptr.To(metav1.Now()),
+				TombstoneRecoveryRequired: true,
+				TombstoneRecoveryStatus: &apiv1.TombstoneRecoveryStatus{
+					Status: true, SynthesisUUID: "old",
+				},
+			}},
+		}, want: compositionOperationRecover},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, nextCompositionOperation(tc.comp))
+		})
+	}
+}
 
 func TestTombstoneRecoveryAfterSkippedSynthesis(t *testing.T) {
 	t.Run(apiv1.TombstoneRecoveryOperatorNotEnabled, func(t *testing.T) {
