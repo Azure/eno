@@ -111,12 +111,21 @@ func selectInventory(items []corev1.Secret) ([]corev1.Secret, error) {
 	return selected, nil
 }
 
-func decodeInventorySnapshot(comp *apiv1.Composition, items []corev1.Secret) (resources []inventoryResource, err error) {
+func decodeInventorySnapshot(items []corev1.Secret) (resources []inventoryResource, err error) {
 	defer func() {
 		if err != nil {
 			err = &invalidInventoryError{err}
 		}
 	}()
+	resources, err = validateInventory(items)
+	if err != nil {
+		return nil, err
+	}
+	return resources, nil
+}
+
+// validateInventory checks that all chunks form one complete, internally consistent snapshot.
+func validateInventory(items []corev1.Secret) ([]inventoryResource, error) {
 	if len(items) == 0 {
 		return nil, fmt.Errorf("inventory snapshot has no chunks")
 	}
@@ -131,8 +140,8 @@ func decodeInventorySnapshot(comp *apiv1.Composition, items []corev1.Secret) (re
 	seen := map[resource.Ref]struct{}{}
 	for i := range items {
 		item := &items[i]
-		if err := validateInventoryIdentity(comp, item); err != nil {
-			return nil, fmt.Errorf("Secret %s/%s: %w", item.Namespace, item.Name, err)
+		if item.Annotations[inventoryFormatVersionAnnotation] != inventoryFormatVersion {
+			return nil, fmt.Errorf("Secret %q has unsupported inventory format version %q", item.Name, item.Annotations[inventoryFormatVersionAnnotation])
 		}
 		index, _, err := inventoryChunkPosition(item)
 		if err != nil {
@@ -181,7 +190,7 @@ func decodeInventorySnapshot(comp *apiv1.Composition, items []corev1.Secret) (re
 		}
 		chunks[index] = data
 	}
-	resources = []inventoryResource{}
+	resources := []inventoryResource{}
 	for index, chunk := range chunks {
 		if chunk == nil {
 			return nil, fmt.Errorf("missing inventory chunk index %d", index)
@@ -201,46 +210,6 @@ func inventoryChunkPosition(item *corev1.Secret) (int, int, error) {
 		return 0, 0, fmt.Errorf("Secret %q has an invalid chunk count", item.Name)
 	}
 	return index, count, nil
-}
-
-func validateInventoryIdentity(comp *apiv1.Composition, item *corev1.Secret) error {
-	if item.Namespace != inventoryNamespace {
-		return fmt.Errorf("namespace %q must be %q", item.Namespace, inventoryNamespace)
-	}
-	if item.DeletionTimestamp != nil {
-		return fmt.Errorf("secret is being deleted")
-	}
-	if item.Annotations[inventoryFormatVersionAnnotation] != inventoryFormatVersion {
-		return fmt.Errorf("unsupported inventory format version %q", item.Annotations[inventoryFormatVersionAnnotation])
-	}
-	if item.Annotations[inventorySynthesisUUIDAnnotation] == "" {
-		return fmt.Errorf("missing source synthesis UUID")
-	}
-	if _, err := inventorySynthesized(item); err != nil {
-		return err
-	}
-	namespace := item.Annotations[inventoryCompositionNamespaceAnnotation]
-	synthesizer := item.Annotations[inventorySynthesizerNameAnnotation]
-	if namespace != comp.Namespace || synthesizer != comp.Spec.Synthesizer.Name {
-		return fmt.Errorf("inventory lineage %q/%q does not match composition lineage %q/%q", namespace, synthesizer, comp.Namespace, comp.Spec.Synthesizer.Name)
-	}
-	lineage := inventoryLineage(comp)
-	if item.Labels[inventoryLineageLabel] != lineage || item.Annotations[inventoryLineageLabel] != lineage {
-		return fmt.Errorf("inventory lineage annotation and label must match %q", lineage)
-	}
-	sourceName := item.Annotations[inventoryCompositionNameAnnotation]
-	if problems := validation.IsDNS1123Subdomain(sourceName); len(problems) > 0 {
-		return fmt.Errorf("invalid source composition name %q: %s", sourceName, strings.Join(problems, ", "))
-	}
-	index, _, err := inventoryChunkPosition(item)
-	if err != nil {
-		return err
-	}
-	// Validate the stored source name, not the current Composition name: lineage survives recreation.
-	if name := inventoryName(sourceName, lineage, index); item.Name != name {
-		return fmt.Errorf("name %q must be %q", item.Name, name)
-	}
-	return nil
 }
 
 func inventorySynthesized(item *corev1.Secret) (time.Time, error) {

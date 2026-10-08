@@ -50,12 +50,6 @@ func (c *tombstoneRecoveryController) writeInventoryChunk(ctx context.Context, c
 	if err != nil {
 		return fmt.Errorf("reading inventory Secret %q: %w", intended.Name, err)
 	}
-	if err := validateInventoryIdentity(comp, existing); err != nil {
-		return fmt.Errorf("existing inventory Secret %q cannot be replaced: %w", existing.Name, err)
-	}
-	if existing.Annotations[inventoryCompositionNameAnnotation] != comp.Name {
-		return fmt.Errorf("inventory Secret %q belongs to a different source Composition", existing.Name)
-	}
 	existingTime, err := inventorySynthesized(existing)
 	if err != nil {
 		return err

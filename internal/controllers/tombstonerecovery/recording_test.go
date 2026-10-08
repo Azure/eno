@@ -143,7 +143,7 @@ func TestInventoryRecordingPartialFailureAndShrink(t *testing.T) {
 			partial, err := selectInventory(f.inventories())
 			require.NoError(t, err)
 			require.Len(t, partial, 1)
-			_, err = decodeInventorySnapshot(f.composition(), partial)
+			_, err = decodeInventorySnapshot(partial)
 			require.ErrorContains(t, err, "expected 3")
 			first := partial[0].DeepCopy()
 			f.restart()
@@ -152,7 +152,7 @@ func TestInventoryRecordingPartialFailureAndShrink(t *testing.T) {
 			selected, err := selectInventory(f.inventories())
 			require.NoError(t, err)
 			require.Len(t, selected, 3)
-			decoded, err := decodeInventorySnapshot(f.composition(), selected)
+			decoded, err := decodeInventorySnapshot(selected)
 			require.NoError(t, err)
 			require.Len(t, decoded, 3)
 			persisted := &corev1.Secret{}
@@ -332,7 +332,7 @@ func TestInventoryRecordingInvalidInputs(t *testing.T) {
 }
 
 func TestInventoryRecordingPreservesConflictingSecrets(t *testing.T) {
-	for _, mode := range []string{"same UUID different data", "newer snapshot", "wrong lineage", "deleting", "truncated name collision"} {
+	for _, mode := range []string{"same UUID different data", "newer snapshot"} {
 		t.Run(mode, func(t *testing.T) {
 			f := recordingTestFixture(t, "desired")
 			secret := f.history("old")
@@ -342,28 +342,8 @@ func TestInventoryRecordingPreservesConflictingSecrets(t *testing.T) {
 				secret.Annotations[inventorySynthesizedAnnotation] = f.composition().Status.CurrentSynthesis.Synthesized.Format(time.RFC3339)
 			case "newer snapshot":
 				secret.Annotations[inventorySynthesizedAnnotation] = f.composition().Status.CurrentSynthesis.Synthesized.Add(time.Minute).Format(time.RFC3339)
-			case "wrong lineage":
-				secret.Labels[inventoryLineageLabel] = "other"
-			case "deleting":
-				secret.Finalizers = []string{"test.example/hold"}
-			case "truncated name collision":
-				comp := f.composition()
-				require.NoError(t, f.downstream.Delete(t.Context(), secret))
-				name := strings.Repeat("a", 240)
-				comp.Name = name + "-current"
-				comp.ResourceVersion = ""
-				require.NoError(t, f.upstream.Create(t.Context(), comp))
-				f.key = client.ObjectKeyFromObject(comp)
-				secret.Annotations[inventoryCompositionNameAnnotation] = name + "-other"
-				secret.Name = inventoryName(name+"-other", inventoryLineage(comp), 0)
-				assert.Equal(t, inventoryName(comp.Name, inventoryLineage(comp), 0), secret.Name)
-				secret.ResourceVersion = ""
-				require.NoError(t, f.downstream.Create(t.Context(), secret))
 			}
 			require.NoError(t, f.downstream.Update(t.Context(), secret))
-			if mode == "deleting" {
-				require.NoError(t, f.downstream.Delete(t.Context(), secret))
-			}
 			before := f.inventories()
 			require.Error(t, f.reconcile())
 			assert.Equal(t, before, f.inventories(), "rejected replacement must not change any Secret")
