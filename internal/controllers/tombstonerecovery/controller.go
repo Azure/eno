@@ -227,12 +227,18 @@ func (c *tombstoneRecoveryController) getCurrentComposition(ctx context.Context,
 			"currentSynthesisUUID", comp.Status.GetCurrentSynthesisUUID())
 		return nil, fmt.Errorf("%w: synthesis changed (current synthesis %q)", errSuperseded, comp.Status.GetCurrentSynthesisUUID())
 	}
-	if requireReady && (syn.Ready == nil || !syn.IsTombstoneRecoveryFinished() ||
-		syn.Synthesized == nil || !syn.Synthesized.Equal(old.Synthesized) ||
-		!reflect.DeepEqual(syn.ResourceSlices, old.ResourceSlices)) {
+	if requireReady && !isInventoryRecordingStillValid(syn, old) {
 		return nil, fmt.Errorf("%w: synthesis is no longer eligible for inventory recording", errSuperseded)
 	}
 	return comp, nil
+}
+
+func isInventoryRecordingStillValid(current, expected *apiv1.Synthesis) bool {
+	// Inventory is built from the captured Ready synthesis; stop if its eligibility or slice set changes before a Secret write.
+	return current != nil && expected != nil &&
+		current.Ready != nil && current.IsTombstoneRecoveryFinished() &&
+		current.Synthesized != nil && current.Synthesized.Equal(expected.Synthesized) &&
+		reflect.DeepEqual(current.ResourceSlices, expected.ResourceSlices)
 }
 
 func getOrCreateRecoveryStatus(comp *apiv1.Composition) apiv1.TombstoneRecoveryStatus {
@@ -247,13 +253,13 @@ func (c *tombstoneRecoveryController) recoverMissingTombstones(ctx context.Conte
 	logger := logr.FromContextOrDiscard(ctx)
 	logger.Info("reading downstream inventory", "lineage", inventoryLineage(comp))
 	items, readErr := c.readInventories(ctx, comp)
-	var snapshot []corev1.Secret
+	var inventorySecrets []corev1.Secret
 	if readErr == nil {
-		snapshot, readErr = selectInventory(items)
+		inventorySecrets, readErr = selectInventory(items)
 	}
 	var resources []inventoryResource
-	if readErr == nil && len(snapshot) > 0 {
-		resources, readErr = decodeInventorySnapshot(comp, snapshot)
+	if readErr == nil && len(inventorySecrets) > 0 {
+		resources, readErr = decodeInventorySnapshot(inventorySecrets)
 	}
 	if readErr != nil {
 		logger.Error(readErr, "failed to read downstream inventory")
@@ -263,7 +269,7 @@ func (c *tombstoneRecoveryController) recoverMissingTombstones(ctx context.Conte
 		}
 		return c.recordTombstoneRecoveryError(ctx, comp, reasonInventoryGetError, readErr)
 	}
-	if len(snapshot) == 0 {
+	if len(inventorySecrets) == 0 {
 		logger.Info("no downstream inventory found", "lineage", inventoryLineage(comp))
 		return c.recordRecoveryDecision(ctx, comp, reasonInventoryNotFound, "", nil)
 	}
