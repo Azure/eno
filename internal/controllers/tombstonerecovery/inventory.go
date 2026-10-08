@@ -6,8 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"reflect"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -16,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 const (
@@ -28,10 +30,13 @@ const (
 	inventoryDeletionGroup  = "eno.azure.io/deletion-group"
 
 	inventoryFormatVersionAnnotation        = "eno.azure.io/inventory-format-version"
+	inventoryCompositionNameAnnotation      = "eno.azure.io/inventory-composition-name"
 	inventoryCompositionNamespaceAnnotation = "eno.azure.io/inventory-composition-namespace"
 	inventorySynthesizerNameAnnotation      = "eno.azure.io/inventory-synthesizer-name"
 	inventorySynthesisUUIDAnnotation        = "eno.azure.io/inventory-synthesis-uuid"
 	inventorySynthesizedAnnotation          = "eno.azure.io/inventory-synthesized"
+	inventoryChunkIndexAnnotation           = "eno.azure.io/inventory-chunk-index"
+	inventoryChunkCountAnnotation           = "eno.azure.io/inventory-chunk-count"
 )
 
 type inventoryResource struct {
@@ -61,91 +66,184 @@ func inventoryLineage(comp *apiv1.Composition) string {
 	return hex.EncodeToString(hash[:16])
 }
 
-func inventoryName(comp *apiv1.Composition, synthesisUUID string) string {
-	return "eno-inventory-" + inventoryLineage(comp) + "-" + synthesisUUID
+func inventoryName(compositionName, lineage string, chunkIndex int) string {
+	suffix := "-" + lineage + "-" + strconv.Itoa(chunkIndex)
+	prefix := compositionName
+	if maxPrefix := validation.DNS1123SubdomainMaxLength - len(suffix); len(prefix) > maxPrefix {
+		prefix = strings.TrimRight(prefix[:maxPrefix], ".-")
+	}
+	return prefix + suffix
 }
 
-func selectInventory(items []corev1.ConfigMap) (*corev1.ConfigMap, error) {
-	var latest *corev1.ConfigMap
+func selectInventory(items []corev1.Secret) ([]corev1.Secret, error) {
 	var latestTime time.Time
+	var latestUUID string
 	for i := range items {
 		item := &items[i]
 		synthesized, err := inventorySynthesized(item)
 		if err != nil {
-			return nil, &invalidInventoryError{fmt.Errorf("ConfigMap %s/%s: %w", item.Namespace, item.Name, err)}
+			return nil, &invalidInventoryError{fmt.Errorf("Secret %s/%s: %w", item.Namespace, item.Name, err)}
 		}
-		// Equal timestamps keep the first inventory.
-		if latest == nil || synthesized.After(latestTime) {
-			latest = item
+		if item.Annotations[inventorySynthesisUUIDAnnotation] == "" {
+			return nil, &invalidInventoryError{fmt.Errorf("Secret %s/%s has no source synthesis UUID", item.Namespace, item.Name)}
+		}
+		if latestUUID == "" || synthesized.After(latestTime) {
 			latestTime = synthesized
+			latestUUID = item.Annotations[inventorySynthesisUUIDAnnotation]
 		}
 	}
-	return latest.DeepCopy(), nil
-}
-
-func inventoriesMatch(comp *apiv1.Composition, existing, intended *corev1.ConfigMap) (bool, error) {
-	if existing == nil || intended == nil {
-		return false, nil
-	}
-	existingResources, err := decodeInventorySnapshot(comp, *existing)
-	if err != nil {
-		return false, err
-	}
-	intendedResources, err := decodeInventorySnapshot(comp, *intended)
-	if err != nil {
-		return false, err
-	}
-	if !reflect.DeepEqual(existingResources, intendedResources) {
-		return false, nil
-	}
-	for _, key := range []string{
-		inventoryFormatVersionAnnotation,
-		inventoryCompositionNamespaceAnnotation,
-		inventorySynthesizerNameAnnotation,
-		inventorySynthesisUUIDAnnotation,
-	} {
-		if existing.Annotations[key] != intended.Annotations[key] {
-			return false, nil
+	var selected []corev1.Secret
+	for i := range items {
+		item := &items[i]
+		synthesized, err := inventorySynthesized(item)
+		if err != nil {
+			return nil, &invalidInventoryError{err}
+		}
+		uuid := item.Annotations[inventorySynthesisUUIDAnnotation]
+		if synthesized.Equal(latestTime) && uuid != latestUUID {
+			return nil, &invalidInventoryError{fmt.Errorf("different synthesis UUIDs share the latest inventory timestamp %s", latestTime.Format(time.RFC3339))}
+		}
+		if uuid == latestUUID {
+			// Keep all chunks for this UUID so inconsistent timestamps cannot hide a partial snapshot.
+			selected = append(selected, *item)
 		}
 	}
-	existingTime, err := inventorySynthesized(existing)
-	if err != nil {
-		return false, err
-	}
-	intendedTime, err := inventorySynthesized(intended)
-	if err != nil {
-		return false, err
-	}
-	return existingTime.Equal(intendedTime), nil
+	return selected, nil
 }
 
-func decodeInventorySnapshot(comp *apiv1.Composition, item corev1.ConfigMap) (resources []inventoryResource, err error) {
+func decodeInventorySnapshot(comp *apiv1.Composition, items []corev1.Secret) (resources []inventoryResource, err error) {
 	defer func() {
 		if err != nil {
-			err = &invalidInventoryError{fmt.Errorf("ConfigMap %s/%s: %w", item.Namespace, item.Name, err)}
+			err = &invalidInventoryError{err}
 		}
 	}()
-	if item.Namespace != inventoryNamespace {
-		return nil, fmt.Errorf("namespace %q must be %q", item.Namespace, inventoryNamespace)
+	if len(items) == 0 {
+		return nil, fmt.Errorf("inventory snapshot has no chunks")
 	}
-	if item.DeletionTimestamp != nil {
-		return nil, fmt.Errorf("configmap is being deleted")
-	}
-	payload, ok := item.Data[inventoryDataKey]
-	if !ok {
-		return nil, fmt.Errorf("missing data key %q", inventoryDataKey)
-	}
-	var data []inventoryResource
-	if err := json.Unmarshal([]byte(payload), &data); err != nil {
-		return nil, fmt.Errorf("decoding %s: %w", inventoryDataKey, err)
-	}
-	if err := validateInventoryIdentity(comp, &item); err != nil {
+	_, count, err := inventoryChunkPosition(&items[0])
+	if err != nil {
 		return nil, err
 	}
-	return data, nil
+	if len(items) != count {
+		return nil, fmt.Errorf("inventory snapshot has %d chunks, expected %d", len(items), count)
+	}
+	chunks := make([][]inventoryResource, count)
+	seen := map[resource.Ref]struct{}{}
+	for i := range items {
+		item := &items[i]
+		if err := validateInventoryIdentity(comp, item); err != nil {
+			return nil, fmt.Errorf("Secret %s/%s: %w", item.Namespace, item.Name, err)
+		}
+		index, _, err := inventoryChunkPosition(item)
+		if err != nil {
+			return nil, err
+		}
+		for _, key := range []string{
+			inventoryCompositionNameAnnotation, inventorySynthesisUUIDAnnotation,
+			inventorySynthesizedAnnotation, inventoryChunkCountAnnotation,
+		} {
+			if item.Annotations[key] != items[0].Annotations[key] {
+				return nil, fmt.Errorf("Secret %q has inconsistent %s", item.Name, key)
+			}
+		}
+		if chunks[index] != nil {
+			return nil, fmt.Errorf("duplicate inventory chunk index %d", index)
+		}
+		payload, ok := item.Data[inventoryDataKey]
+		if !ok {
+			return nil, fmt.Errorf("Secret %q is missing data key %q", item.Name, inventoryDataKey)
+		}
+		size := 0
+		for _, value := range item.Data {
+			size += len(value)
+		}
+		if size > inventoryMaxDataBytes {
+			return nil, fmt.Errorf("Secret %q exceeds the %d-byte data limit", item.Name, inventoryMaxDataBytes)
+		}
+		var data []inventoryResource
+		if err := json.Unmarshal(payload, &data); err != nil {
+			return nil, fmt.Errorf("decoding Secret %q: %w", item.Name, err)
+		}
+		if data == nil {
+			return nil, fmt.Errorf("Secret %q inventory must be a JSON array", item.Name)
+		}
+		for _, res := range data {
+			if err := res.validate(); err != nil {
+				return nil, fmt.Errorf("Secret %q contains an invalid resource: %w", item.Name, err)
+			}
+			if res.isPatch() {
+				return nil, fmt.Errorf("Secret %q contains a Patch pseudo-resource", item.Name)
+			}
+			if _, exists := seen[res.ref()]; exists {
+				return nil, fmt.Errorf("duplicate inventory identity %v", res.ref())
+			}
+			seen[res.ref()] = struct{}{}
+		}
+		chunks[index] = data
+	}
+	resources = []inventoryResource{}
+	for index, chunk := range chunks {
+		if chunk == nil {
+			return nil, fmt.Errorf("missing inventory chunk index %d", index)
+		}
+		resources = append(resources, chunk...)
+	}
+	return resources, nil
 }
 
-func inventorySynthesized(item *corev1.ConfigMap) (time.Time, error) {
+func inventoryChunkPosition(item *corev1.Secret) (int, int, error) {
+	index, err := strconv.Atoi(item.Annotations[inventoryChunkIndexAnnotation])
+	if err != nil || index < 0 {
+		return 0, 0, fmt.Errorf("Secret %q has an invalid chunk index", item.Name)
+	}
+	count, err := strconv.Atoi(item.Annotations[inventoryChunkCountAnnotation])
+	if err != nil || count <= index {
+		return 0, 0, fmt.Errorf("Secret %q has an invalid chunk count", item.Name)
+	}
+	return index, count, nil
+}
+
+func validateInventoryIdentity(comp *apiv1.Composition, item *corev1.Secret) error {
+	if item.Namespace != inventoryNamespace {
+		return fmt.Errorf("namespace %q must be %q", item.Namespace, inventoryNamespace)
+	}
+	if item.DeletionTimestamp != nil {
+		return fmt.Errorf("secret is being deleted")
+	}
+	if item.Annotations[inventoryFormatVersionAnnotation] != inventoryFormatVersion {
+		return fmt.Errorf("unsupported inventory format version %q", item.Annotations[inventoryFormatVersionAnnotation])
+	}
+	if item.Annotations[inventorySynthesisUUIDAnnotation] == "" {
+		return fmt.Errorf("missing source synthesis UUID")
+	}
+	if _, err := inventorySynthesized(item); err != nil {
+		return err
+	}
+	namespace := item.Annotations[inventoryCompositionNamespaceAnnotation]
+	synthesizer := item.Annotations[inventorySynthesizerNameAnnotation]
+	if namespace != comp.Namespace || synthesizer != comp.Spec.Synthesizer.Name {
+		return fmt.Errorf("inventory lineage %q/%q does not match composition lineage %q/%q", namespace, synthesizer, comp.Namespace, comp.Spec.Synthesizer.Name)
+	}
+	lineage := inventoryLineage(comp)
+	if item.Labels[inventoryLineageLabel] != lineage || item.Annotations[inventoryLineageLabel] != lineage {
+		return fmt.Errorf("inventory lineage annotation and label must match %q", lineage)
+	}
+	sourceName := item.Annotations[inventoryCompositionNameAnnotation]
+	if problems := validation.IsDNS1123Subdomain(sourceName); len(problems) > 0 {
+		return fmt.Errorf("invalid source composition name %q: %s", sourceName, strings.Join(problems, ", "))
+	}
+	index, _, err := inventoryChunkPosition(item)
+	if err != nil {
+		return err
+	}
+	// Validate the stored source name, not the current Composition name: lineage survives recreation.
+	if name := inventoryName(sourceName, lineage, index); item.Name != name {
+		return fmt.Errorf("name %q must be %q", item.Name, name)
+	}
+	return nil
+}
+
+func inventorySynthesized(item *corev1.Secret) (time.Time, error) {
 	synthesized, err := time.Parse(time.RFC3339, item.Annotations[inventorySynthesizedAnnotation])
 	if err != nil {
 		return time.Time{}, fmt.Errorf("invalid source synthesized timestamp: %w", err)
@@ -156,35 +254,20 @@ func inventorySynthesized(item *corev1.ConfigMap) (time.Time, error) {
 	return synthesized.UTC(), nil
 }
 
-func validateInventoryIdentity(comp *apiv1.Composition, item *corev1.ConfigMap) error {
-	namespace := item.Annotations[inventoryCompositionNamespaceAnnotation]
-	synthesizer := item.Annotations[inventorySynthesizerNameAnnotation]
-	if namespace != comp.Namespace || synthesizer != comp.Spec.Synthesizer.Name {
-		return fmt.Errorf("inventory lineage %q/%q does not match composition lineage %q/%q", namespace, synthesizer, comp.Namespace, comp.Spec.Synthesizer.Name)
-	}
-	if item.Labels[inventoryLineageLabel] != inventoryLineage(comp) {
-		return fmt.Errorf("label %s=%q does not match lineage %q", inventoryLineageLabel, item.Labels[inventoryLineageLabel], inventoryLineage(comp))
-	}
-	if name := inventoryName(comp, item.Annotations[inventorySynthesisUUIDAnnotation]); item.Name != name {
-		return fmt.Errorf("name %q must be %q", item.Name, name)
-	}
-	return nil
-}
-
-func makeInventory(comp *apiv1.Composition, slices []apiv1.ResourceSlice) (*corev1.ConfigMap, error) {
+func makeInventory(comp *apiv1.Composition, slices []apiv1.ResourceSlice) ([]corev1.Secret, error) {
 	syn := comp.Status.CurrentSynthesis
+	if syn == nil || syn.UUID == "" || syn.Synthesized == nil || syn.Synthesized.IsZero() {
+		return nil, fmt.Errorf("inventory requires a synthesized current synthesis with a UUID")
+	}
 	data := []inventoryResource{}
 	seen := map[resource.Ref]struct{}{}
 	for _, slice := range slices {
 		for i, manifest := range slice.Spec.Resources {
-			if manifest.Deleted {
-				continue
-			}
 			_, res, err := parseInventoryManifest(manifest.Manifest)
 			if err != nil {
 				return nil, fmt.Errorf("parsing resource %d of slice %s/%s: %w", i, slice.Namespace, slice.Name, err)
 			}
-			if res.isPatch() {
+			if manifest.Deleted || res.isPatch() {
 				continue
 			}
 			ref := res.ref()
@@ -197,28 +280,62 @@ func makeInventory(comp *apiv1.Composition, slices []apiv1.ResourceSlice) (*core
 		}
 	}
 	normalizeInventoryResources(data)
-	payload, err := json.Marshal(data)
+	payloads, err := packInventory(data)
 	if err != nil {
-		return nil, fmt.Errorf("encoding inventory: %w", err)
+		return nil, err
 	}
-	if len(payload) > inventoryMaxDataBytes {
-		return nil, fmt.Errorf("inventory data is %d bytes, exceeding the %d-byte ConfigMap limit", len(payload), inventoryMaxDataBytes)
-	}
-	return &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      inventoryName(comp, syn.UUID),
-			Namespace: inventoryNamespace,
-			Labels:    map[string]string{inventoryLineageLabel: inventoryLineage(comp)},
-			Annotations: map[string]string{
-				inventoryFormatVersionAnnotation:        inventoryFormatVersion,
-				inventoryCompositionNamespaceAnnotation: comp.Namespace,
-				inventorySynthesizerNameAnnotation:      comp.Spec.Synthesizer.Name,
-				inventorySynthesisUUIDAnnotation:        syn.UUID,
-				inventorySynthesizedAnnotation:          syn.Synthesized.UTC().Format(time.RFC3339),
+	secrets := make([]corev1.Secret, 0, len(payloads))
+	lineage := inventoryLineage(comp)
+	for index, payload := range payloads {
+		secrets = append(secrets, corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      inventoryName(comp.Name, lineage, index),
+				Namespace: inventoryNamespace,
+				Labels:    map[string]string{inventoryLineageLabel: lineage},
+				Annotations: map[string]string{
+					inventoryLineageLabel:                   lineage,
+					inventoryFormatVersionAnnotation:        inventoryFormatVersion,
+					inventoryCompositionNameAnnotation:      comp.Name,
+					inventoryCompositionNamespaceAnnotation: comp.Namespace,
+					inventorySynthesizerNameAnnotation:      comp.Spec.Synthesizer.Name,
+					inventorySynthesisUUIDAnnotation:        syn.UUID,
+					inventorySynthesizedAnnotation:          syn.Synthesized.UTC().Format(time.RFC3339),
+					inventoryChunkIndexAnnotation:           strconv.Itoa(index),
+					inventoryChunkCountAnnotation:           strconv.Itoa(len(payloads)),
+				},
 			},
-		},
-		Data: map[string]string{inventoryDataKey: string(payload)},
-	}, nil
+			Type: corev1.SecretTypeOpaque,
+			Data: map[string][]byte{inventoryDataKey: payload},
+		})
+	}
+	return secrets, nil
+}
+
+func packInventory(resources []inventoryResource) ([][]byte, error) {
+	var chunks [][]byte
+	chunk := []byte{'['}
+	for _, res := range resources {
+		entry, err := json.Marshal(res)
+		if err != nil {
+			return nil, fmt.Errorf("encoding inventory resource: %w", err)
+		}
+		if len(entry)+2 > inventoryMaxDataBytes {
+			return nil, fmt.Errorf("inventory resource %v exceeds the %d-byte Secret data limit", res.ref(), inventoryMaxDataBytes)
+		}
+		separator := 0
+		if len(chunk) > 1 {
+			separator = 1
+		}
+		if len(chunk)+separator+len(entry)+1 > inventoryMaxDataBytes {
+			chunks = append(chunks, append(chunk, ']'))
+			chunk = []byte{'['}
+		}
+		if len(chunk) > 1 {
+			chunk = append(chunk, ',')
+		}
+		chunk = append(chunk, entry...)
+	}
+	return append(chunks, append(chunk, ']')), nil
 }
 
 func missingTombstones(slices []apiv1.ResourceSlice, resources []inventoryResource) ([]apiv1.Manifest, error) {
@@ -259,11 +376,21 @@ func parseInventoryManifest(manifest string) (*unstructured.Unstructured, invent
 		return nil, inventoryResource{}, fmt.Errorf("invalid manifest JSON: %w", err)
 	}
 	gvk := obj.GroupVersionKind()
+	labels, _, err := unstructured.NestedNullCoercingStringMap(obj.Object, "metadata", "labels")
+	if err != nil {
+		return nil, inventoryResource{}, fmt.Errorf("invalid manifest labels: %w", err)
+	}
+	annotations, _, err := unstructured.NestedNullCoercingStringMap(obj.Object, "metadata", "annotations")
+	if err != nil {
+		return nil, inventoryResource{}, fmt.Errorf("invalid manifest annotations: %w", err)
+	}
 	res := inventoryResource{
 		Group: gvk.Group, Version: gvk.Version, Kind: gvk.Kind,
-		Name: obj.GetName(), Namespace: obj.GetNamespace(), Labels: obj.GetLabels(),
+		Name: obj.GetName(), Namespace: obj.GetNamespace(), Labels: labels,
 	}
-	annotations := obj.GetAnnotations()
+	if err := res.validate(); err != nil {
+		return nil, inventoryResource{}, err
+	}
 	for _, key := range []string{inventoryReadinessGroup, inventoryDeletionGroup} {
 		if value, ok := annotations[key]; ok {
 			if res.Annotations == nil {
@@ -273,6 +400,13 @@ func parseInventoryManifest(manifest string) (*unstructured.Unstructured, invent
 		}
 	}
 	return obj, res, nil
+}
+
+func (res inventoryResource) validate() error {
+	if res.Version == "" || res.Kind == "" || res.Name == "" {
+		return fmt.Errorf("resource identity requires version, kind, and name")
+	}
+	return nil
 }
 
 func (res inventoryResource) ref() resource.Ref {
