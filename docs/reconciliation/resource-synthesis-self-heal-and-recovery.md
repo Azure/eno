@@ -5,7 +5,8 @@
 - **Self-heal:** Request a new synthesis when current ResourceSlice references are unavailable, including terminating slices that would block pending recovery.
 - **Recover:** Read saved inventory and restore missing tombstones into the current synthesis. A tombstone is a manifest with `Deleted: true`; normal resource reconciliation performs the downstream deletion.
 - **Coordinate:** Prevent reconstitution and readiness from advancing before the current synthesis has a terminal recovery decision.
-- **Not included:** Uploading or rotating inventory snapshots. The inventory construction helpers exist, but the recovery controller only reads inventory.
+- **Record:** Save the current Ready synthesis's inventory as one or more Secrets for future recovery.
+- **Not included:** General inventory garbage collection or cleanup on Composition deletion. Stable Secret names replace prior contents without deleting leftover chunks.
 - **Not guaranteed:** Recovery of every historical resource when inventory is missing or invalid, or atomic behavior across Composition status, ResourceSlices, and downstream resources.
 - **Related guide:** [Resource Reconciliation](./reconciliation.md) explains ordinary apply, deletion, readiness, and sharding behavior.
 
@@ -18,6 +19,7 @@
 - Each Composition must opt in with the annotation below. Missing annotations, labels with the same key, and annotation values other than the exact string `"true"` do not opt in.
 - Recovery eligibility does not evaluate `--resource-filter`. Normal resource reconciliation still evaluates that filter against actual resources, including recovered tombstones.
 - When disabled, the recovery controller registers no watches and imposes no `POD_NAMESPACE` requirement. Reconstitution can still acknowledge disabled recovery for annotated Compositions.
+- Inventory recording requires downstream permission to get, list, create, and update Secrets in `kube-system`. Recovery reads Secrets only; the unreleased ConfigMap inventory format is not supported.
 
 ```yaml
 metadata:
@@ -55,6 +57,7 @@ Synthesis detects incomplete history or inherits an outstanding requirement
     -> Reconstitution loads resources
     -> Normal reconciliation applies resources and processes deletions
     -> ResourceSlice aggregation reports Reconciled and Ready
+    -> Record the Ready synthesis's inventory in downstream Secrets
 ```
 
 - **No recovery requirement:** Record `NotNeeded` without reading inventory.
@@ -78,7 +81,8 @@ Synthesis detects incomplete history or inherits an outstanding requirement
 - **Does:** Select opted-in Compositions, read inventory when required, load complete current slices, and calculate missing resource identities.
 - **Does:** Treat current manifests, existing tombstones, and Eno Patch targets as present, using group/kind/namespace/name identity.
 - **Does:** Record retriable errors or terminal decisions, publishing overflow references together with completion.
-- **Does not:** Change an existing desired manifest into a tombstone, directly delete downstream resources, or record/rotate inventory snapshots.
+- **Does:** On a subsequent event, record inventory when the persisted current synthesis is Ready and its recovery decision is finished.
+- **Does not:** Change an existing desired manifest into a tombstone, directly delete downstream resources, or garbage-collect inventory Secrets.
 - **Entry points:** [`Reconcile` and `recoverMissingTombstones`](../../internal/controllers/tombstonerecovery/controller.go), [`missingTombstones`](../../internal/controllers/tombstonerecovery/inventory.go).
 
 ### Packing Planner and Writer
@@ -87,6 +91,15 @@ Synthesis detects incomplete history or inherits an outstanding requirement
 - **Writer does:** Execute the plan with optimistic locking, deterministic overflow names, collision validation, and freshness checks immediately before each slice write.
 - **Does not:** Publish Composition completion; that happens after the writer succeeds.
 - **Entry points:** [`planTombstones` and `writeTombstones`](../../internal/controllers/tombstonerecovery/slices.go).
+
+### Inventory Recording
+
+- **Does:** Read every referenced current ResourceSlice before preparing any Secret writes; missing, terminating, malformed, or unreadable slices stop the attempt.
+- **Does:** Exclude tombstones and Patch resources, sort inventory identities, and deterministically pack complete JSON arrays into chunks within the Secret data limit.
+- **Does:** Recheck the Composition UID, synthesis UUID, namespace/selector scope, opt-in, deletion state, readiness, and finished recovery decision before writes.
+- **Does:** Reuse stable Secret names, skip identical writes, and use resourceVersion-protected updates. Conflicts and transient failures retry through the controller.
+- **Does not:** Reopen a finished recovery decision, rewrite different contents under the same synthesis UUID, or remove leftover Secrets.
+- **Entry points:** [`recordInventory` and `writeInventoryChunk`](../../internal/controllers/tombstonerecovery/recording.go).
 
 ### Reconstitution
 
@@ -174,15 +187,26 @@ Synthesis detects incomplete history or inherits an outstanding requirement
 - **Handling:** Deleting/unannotated Compositions bypass recovery gates. Pre-write checks reject observed deletion or opt-out. A restarted controller reconstructs progress from persisted slices and status.
 - **Boundary:** Removing the annotation does not roll back tombstones already written; recovery-specific cleanup protection ends for unreferenced overflow.
 
+### Inventory Recording Fails or Is Superseded
+
+- **Situation:** A Secret write fails, a writer conflicts, or the current synthesis changes during a multi-chunk upload.
+- **Handling:** Report and retry errors; abandon superseded work and reevaluate the current synthesis. Reuse stable names on retries and refuse to overwrite an observed newer snapshot with an older one.
+- **Boundary:** Freshness checks are not a cross-cluster transaction. Partial replacement can leave mixed chunks; recovery records `InventoryInvalid` and skips that snapshot rather than guessing or falling back to older history.
+
 ## Inventory Format and Helper Contract
 
-- **Location:** Downstream `kube-system`, independent of the namespace containing the Composition and reconciler.
-- **Name:** `eno-inventory-<lineageHash>-<synthesisUUID>`.
-- **Lineage:** Hash of Composition namespace and synthesizer name, labeled with `eno.azure.io/inventory-lineage`; Composition name/UID is not part of this identity, allowing recovery across recreation.
-- **Payload:** `data["inventory.json"]` contains an array of group/version/kind/namespace/name identities, labels, and the `eno.azure.io/readiness-group` and `eno.azure.io/deletion-group` annotations. Empty inventory is `[]`.
-- **Metadata annotations:** `eno.azure.io/inventory-format-version`, `eno.azure.io/inventory-composition-namespace`, `eno.azure.io/inventory-synthesizer-name`, `eno.azure.io/inventory-synthesis-uuid`, and `eno.azure.io/inventory-synthesized`.
-- **Selection:** Choose the greatest source synthesized timestamp, not creation time or UUID ordering. Equal timestamps retain the first candidate; an invalid candidate timestamp prevents selection. Decode and validate the selected snapshot.
-- **Construction:** `makeInventory` returns a ConfigMap; it assumes the caller supplies a selected, ready Composition and its slices. It excludes tombstones and Patch pseudo-resources, keeps the first duplicate identity's version/metadata, and enforces a 1 MiB payload limit without truncation.
+- **Location and type:** Opaque Secrets in downstream `kube-system`, independent of the namespace containing the Composition and reconciler.
+- **Name:** `<comp-name>-<lineageHash>-<chunk-index>`, with the Composition prefix truncated if needed to fit the 253-character name limit. Names are reused across syntheses.
+- **Lineage:** Hash of Composition namespace and synthesizer name, stored in both the `eno.azure.io/inventory-lineage` annotation and lookup label. Composition name/UID is not part of this identity, allowing recovery across recreation.
+- **Payload:** `data["inventory.json"]` contains a JSON array of group/version/kind/namespace/name identities, labels, and the `eno.azure.io/readiness-group` and `eno.azure.io/deletion-group` annotations. Empty inventory is one Secret containing `[]`.
+- **Source metadata:** `eno.azure.io/inventory-format-version` is `1`; source annotations are `eno.azure.io/inventory-composition-name`, `eno.azure.io/inventory-composition-namespace`, `eno.azure.io/inventory-synthesizer-name`, `eno.azure.io/inventory-synthesis-uuid`, and `eno.azure.io/inventory-synthesized`.
+- **Source name validation:** The source Composition name annotation validates the stable Secret name. It need not equal the current Composition name, and no source Composition UID match is required.
+- **Chunk metadata:** `eno.azure.io/inventory-chunk-index` is zero-based; `eno.azure.io/inventory-chunk-count` gives the expected number of chunks. Every chunk has the same source UUID, timestamp, and count.
+- **Selection:** Choose the greatest source `Synthesized` timestamp in RFC 3339 format, not Secret creation time or UUID ordering. Different source UUIDs tied for newest are invalid. Do not fall back to older inventory.
+- **Completeness:** Require exactly one chunk for every expected index, consistent snapshot metadata, valid resource identities, and decodable JSON arrays. Missing/mixed/invalid chunks, invalid timestamps, or ambiguous selection produce `InventoryInvalid`; an empty Secret list produces `InventoryNotFound`.
+- **Construction:** `makeInventory` returns Secret chunks after reading a complete current-slice view. It excludes tombstones and Patch pseudo-resources, keeps the first duplicate identity's version/metadata, and sorts entries before packing.
+- **Size:** Each chunk stays within the 1 MiB decoded Secret-data limit, including JSON brackets and commas. Entries are never split; an entry that cannot fit causes an explicit error before writes.
+- **Replacement:** A new snapshot with fewer chunks ignores old extra chunks by selecting the new source UUID and declared count. Leftover Secrets are not deleted.
 - **No resource re-selection:** The inventory builder does not re-evaluate resource filters. Stored inventory checks and decoding are separate from construction.
 - **Not a full backup:** Inventory contains deletion identity/metadata, not full resource specifications or Symphony identity.
 
@@ -193,6 +217,6 @@ Synthesis detects incomplete history or inherits an outstanding requirement
 - **Concurrent downstream deletion:** An already-running deletion can overlap a newer synthesis that wants the resource. Recovery status preconditions do not make downstream operations transactional.
 - **Progress depends on the environment:** Permanent errors, inhibited resynthesis, or continuous synthesis churn can prevent completion.
 - **Namespace and ownership configuration:** Matching reconciliation/recovery scopes and assigning a single recovery owner per Composition are deployment responsibilities, not guarantees enforced by the annotation.
-- **Follow-up implementation:** Ready-synthesis inventory recording and rotation.
-- **Follow-up hardening:** Secret-based inventory storage and admission policies restricting unauthorized inventory or ResourceSlice changes, while permitting legitimate cleanup and garbage collection.
+- **Follow-up implementation:** Inventory garbage collection and Composition-deletion handling.
+- **Follow-up hardening:** Admission policies restricting unauthorized inventory or ResourceSlice changes, while permitting legitimate cleanup and garbage collection.
 - **Follow-up validation:** End-to-end coverage is deferred; focused unit regressions exercise recovery decisions, inheritance, partial-write retries, status races, and lifecycle guards.

@@ -71,6 +71,7 @@ func newControllerTestFixture(t *testing.T, required bool, names ...string) *con
 	}
 	f.controller = &tombstoneRecoveryController{
 		client: f.upstream, reader: f.upstream, downstream: f.downstream,
+		namespace: comp.Namespace,
 	}
 	return f
 }
@@ -136,9 +137,9 @@ func (f *controllerTestFixture) ready() {
 	})
 }
 
-func (f *controllerTestFixture) inventories() []corev1.ConfigMap {
+func (f *controllerTestFixture) inventories() []corev1.Secret {
 	f.t.Helper()
-	list := &corev1.ConfigMapList{}
+	list := &corev1.SecretList{}
 	require.NoError(f.t, f.downstream.List(f.t.Context(), list, client.InNamespace("kube-system")))
 	return list.Items
 }
@@ -146,10 +147,12 @@ func (f *controllerTestFixture) inventories() []corev1.ConfigMap {
 func (f *controllerTestFixture) assertInventory(sequence int, names ...string) {
 	f.t.Helper()
 	items := f.inventories()
-	require.Len(f.t, items, 1)
-	data, err := decodeInventorySnapshot(f.composition(), items[0])
+	selected, err := selectInventory(items)
 	require.NoError(f.t, err)
-	assert.Equal(f.t, controllerTestUUID(sequence), items[0].Annotations[inventorySynthesisUUIDAnnotation])
+	require.NotEmpty(f.t, selected)
+	data, err := decodeInventorySnapshot(f.composition(), selected)
+	require.NoError(f.t, err)
+	assert.Equal(f.t, controllerTestUUID(sequence), selected[0].Annotations[inventorySynthesisUUIDAnnotation])
 	want := []inventoryResource{}
 	for _, name := range names {
 		want = append(want, controllerTestResource(name))
@@ -157,7 +160,7 @@ func (f *controllerTestFixture) assertInventory(sequence int, names ...string) {
 	assert.ElementsMatch(f.t, want, data)
 }
 
-func (f *controllerTestFixture) history(names ...string) *corev1.ConfigMap {
+func (f *controllerTestFixture) history(names ...string) *corev1.Secret {
 	f.t.Helper()
 	comp := f.composition()
 	comp.Status.CurrentSynthesis.UUID = controllerTestUUID(1)
@@ -167,8 +170,10 @@ func (f *controllerTestFixture) history(names ...string) *corev1.ConfigMap {
 	for _, name := range names {
 		slice.Spec.Resources = append(slice.Spec.Resources, inventoryTestManifest(f.t, controllerTestResource(name)))
 	}
-	item, err := makeInventory(comp, []apiv1.ResourceSlice{slice})
+	items, err := makeInventory(comp, []apiv1.ResourceSlice{slice})
 	require.NoError(f.t, err)
+	require.Len(f.t, items, 1)
+	item := &items[0]
 	item.UID = "history-uid"
 	require.NoError(f.t, f.downstream.Create(f.t.Context(), item))
 	return item
@@ -186,6 +191,7 @@ func (f *controllerTestFixture) restart() {
 	old := f.controller
 	f.controller = &tombstoneRecoveryController{
 		client: old.client, reader: old.reader, downstream: old.downstream,
+		namespace: old.namespace, compositionSelector: old.compositionSelector,
 	}
 }
 
@@ -437,7 +443,7 @@ func TestTombstoneRecoveryOperatorEmptyCurrentRecoveryAnnotation(t *testing.T) {
 				item := f.history("removed")
 				res := controllerTestResource("removed")
 				res.Labels = map[string]string{"eno.azure.io/overlaymgr-component-type": tc.inventoryType}
-				item.Data[inventoryDataKey] = inventoryTestJSON(t, []inventoryResource{res})
+				item.Data[inventoryDataKey] = []byte(inventoryTestJSON(t, []inventoryResource{res}))
 				require.NoError(t, f.downstream.Update(t.Context(), item))
 			}
 			before, history := f.composition(), f.inventories()
@@ -495,7 +501,7 @@ func TestTombstoneRecoveryOperatorDeletingSkipsInventory(t *testing.T) {
 			})
 			require.NoError(t, f.reconcile())
 			assert.Equal(t, before, f.composition())
-			assert.Equal(t, []corev1.ConfigMap{*history}, f.inventories())
+			assert.Equal(t, []corev1.Secret{*history}, f.inventories())
 		})
 	}
 }
@@ -544,7 +550,7 @@ func TestTombstoneRecoveryOperatorObsoleteWork(t *testing.T) {
 			require.NotNil(t, expected, "the external deletion or supersession must occur")
 			assert.Equal(t, expected, f.composition(), "obsolete recovery must not acknowledge or change the new state")
 			assert.Equal(t, original.Spec, f.slice("desired").Spec)
-			assert.Equal(t, []corev1.ConfigMap{*old}, f.inventories())
+			assert.Equal(t, []corev1.Secret{*old}, f.inventories())
 			if mode != "new-synthesis" {
 				f.restart()
 				f.controller.downstream = nil
@@ -590,13 +596,14 @@ func TestTombstoneRecoveryOperatorRecoveryInventorySelection(t *testing.T) {
 			f := newControllerTestFixture(t, true, "desired")
 			older := f.history("obsolete")
 			newer := older.DeepCopy()
-			newer.Name = inventoryName(f.composition(), controllerTestUUID(3))
+			newer.Annotations[inventoryCompositionNameAnnotation] = "replacement"
+			newer.Name = inventoryName("replacement", inventoryLineage(f.composition()), 0)
 			newer.UID, newer.ResourceVersion = "newer-uid", ""
 			newer.Annotations[inventorySynthesisUUIDAnnotation] = controllerTestUUID(3)
 			newer.Annotations[inventorySynthesizedAnnotation] = f.composition().Status.CurrentSynthesis.Synthesized.Format(time.RFC3339)
-			newer.Data[inventoryDataKey] = inventoryTestJSON(t, []inventoryResource{controllerTestResource("removed")})
+			newer.Data[inventoryDataKey] = []byte(inventoryTestJSON(t, []inventoryResource{controllerTestResource("removed")}))
 			require.NoError(t, f.downstream.Create(t.Context(), newer))
-			older.Data[inventoryDataKey] = "{"
+			older.Data[inventoryDataKey] = []byte("{")
 			if invalidTime {
 				older.Annotations[inventorySynthesizedAnnotation] = "invalid"
 			}
@@ -609,11 +616,6 @@ func TestTombstoneRecoveryOperatorRecoveryInventorySelection(t *testing.T) {
 				assert.Equal(t, reasonInventoryInvalid, status.Reason)
 				assert.Contains(t, status.Message, "invalid source synthesized timestamp")
 				assert.Len(t, f.slice("desired").Spec.Resources, 1)
-				before := f.inventories()
-				f.ready()
-				f.controller.downstream = nil
-				f.reconcileEvent()
-				assert.Equal(t, before, f.inventories(), "an invalid recovery decision deliberately blocks replacement")
 			} else {
 				assert.Equal(t, reasonFinished, status.Reason)
 				manifests := f.slice("desired").Spec.Resources

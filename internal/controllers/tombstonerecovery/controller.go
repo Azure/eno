@@ -48,9 +48,11 @@ type Options struct {
 }
 
 type tombstoneRecoveryController struct {
-	client     client.Client
-	reader     client.Reader
-	downstream client.Client
+	client              client.Client
+	reader              client.Reader
+	downstream          client.Client
+	namespace           string
+	compositionSelector labels.Selector
 }
 
 type jitteredRateLimiter struct {
@@ -93,8 +95,10 @@ func NewController(mgr ctrl.Manager, opts Options) error {
 		return fmt.Errorf("constructing tombstone recovery upstream client: %w", err)
 	}
 	c := &tombstoneRecoveryController{
-		client: upstream,
-		reader: mgr.GetAPIReader(),
+		client:              upstream,
+		reader:              mgr.GetAPIReader(),
+		namespace:           opts.Namespace,
+		compositionSelector: opts.CompositionSelector,
 	}
 	config := opts.Downstream
 	if config == nil {
@@ -148,8 +152,8 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 	logger = logger.WithValues("compositionUID", comp.UID, "compositionGeneration", comp.Generation, "synthesisUUID", syn.UUID,
 		"synthesizerName", comp.Spec.Synthesizer.Name, "operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	ctx = logr.NewContext(ctx, logger)
-	if !comp.RecoveryEnabled() {
-		logger.Info("composition has not opted into recovery")
+	if !comp.RecoveryEnabled() || !c.matchesScope(comp) {
+		logger.Info("composition has not opted into recovery or is outside the configured scope")
 		return ctrl.Result{}, nil
 	}
 	if syn.UUID == "" {
@@ -166,6 +170,9 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 		} else {
 			err = c.recordRecoveryDecision(ctx, comp, reasonNotNeeded, "", nil)
 		}
+	} else if syn.Ready != nil {
+		ctx = logr.NewContext(ctx, logger.WithValues("operation", "inventoryRecording"))
+		err = c.recordInventory(ctx, comp)
 	}
 
 	if errors.Is(err, errSuperseded) {
@@ -178,6 +185,11 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 	return ctrl.Result{}, err
 }
 
+func (c *tombstoneRecoveryController) matchesScope(comp *apiv1.Composition) bool {
+	return (c.namespace == "" || comp.Namespace == c.namespace) &&
+		(c.compositionSelector == nil || c.compositionSelector.Matches(labels.Set(comp.Labels)))
+}
+
 func (c *tombstoneRecoveryController) getCurrentComposition(ctx context.Context, expected *apiv1.Composition, requireReady bool) (*apiv1.Composition, error) {
 	comp := &apiv1.Composition{}
 	if err := c.reader.Get(ctx, client.ObjectKeyFromObject(expected), comp); err != nil {
@@ -186,12 +198,15 @@ func (c *tombstoneRecoveryController) getCurrentComposition(ctx context.Context,
 		}
 		return nil, err
 	}
+	if comp.UID != expected.UID || inventoryLineage(comp) != inventoryLineage(expected) {
+		return nil, fmt.Errorf("%w: composition identity changed", errSuperseded)
+	}
 	// Deletion can start before the Composition controller changes the synthesis UUID.
 	if comp.DeletionTimestamp != nil {
 		return nil, fmt.Errorf("%w: composition is deleting", errSuperseded)
 	}
-	if !comp.RecoveryEnabled() {
-		return nil, fmt.Errorf("%w: composition recovery is disabled", errSuperseded)
+	if !comp.RecoveryEnabled() || !c.matchesScope(comp) {
+		return nil, fmt.Errorf("%w: composition is no longer eligible for recovery", errSuperseded)
 	}
 	syn, old := comp.Status.CurrentSynthesis, expected.Status.CurrentSynthesis
 	if syn == nil || old == nil || syn.UUID != old.UUID {
@@ -199,7 +214,9 @@ func (c *tombstoneRecoveryController) getCurrentComposition(ctx context.Context,
 			"currentSynthesisUUID", comp.Status.GetCurrentSynthesisUUID())
 		return nil, fmt.Errorf("%w: synthesis changed (current synthesis %q)", errSuperseded, comp.Status.GetCurrentSynthesisUUID())
 	}
-	if requireReady && syn.Ready == nil {
+	if requireReady && (syn.Ready == nil || !syn.IsTombstoneRecoveryFinished() ||
+		syn.Synthesized == nil || !syn.Synthesized.Equal(old.Synthesized) ||
+		!reflect.DeepEqual(syn.ResourceSlices, old.ResourceSlices)) {
 		return nil, fmt.Errorf("%w: synthesis is no longer eligible for inventory recording", errSuperseded)
 	}
 	return comp, nil
@@ -217,13 +234,13 @@ func (c *tombstoneRecoveryController) recoverMissingTombstones(ctx context.Conte
 	logger := logr.FromContextOrDiscard(ctx)
 	logger.Info("reading downstream inventory", "lineage", inventoryLineage(comp))
 	items, readErr := c.readInventories(ctx, comp)
-	var configMap *corev1.ConfigMap
+	var snapshot []corev1.Secret
 	if readErr == nil {
-		configMap, readErr = selectInventory(items)
+		snapshot, readErr = selectInventory(items)
 	}
 	var resources []inventoryResource
-	if readErr == nil && configMap != nil {
-		resources, readErr = decodeInventorySnapshot(comp, *configMap)
+	if readErr == nil && len(snapshot) > 0 {
+		resources, readErr = decodeInventorySnapshot(comp, snapshot)
 	}
 	if readErr != nil {
 		logger.Error(readErr, "failed to read downstream inventory")
@@ -233,7 +250,7 @@ func (c *tombstoneRecoveryController) recoverMissingTombstones(ctx context.Conte
 		}
 		return c.recordTombstoneRecoveryError(ctx, comp, reasonInventoryGetError, readErr)
 	}
-	if configMap == nil {
+	if len(snapshot) == 0 {
 		logger.Info("no downstream inventory found", "lineage", inventoryLineage(comp))
 		return c.recordRecoveryDecision(ctx, comp, reasonInventoryNotFound, "", nil)
 	}
@@ -317,11 +334,11 @@ func (c *tombstoneRecoveryController) recordRecoveryDecision(ctx context.Context
 	return nil
 }
 
-func (c *tombstoneRecoveryController) readInventories(ctx context.Context, comp *apiv1.Composition) ([]corev1.ConfigMap, error) {
-	list := &corev1.ConfigMapList{}
+func (c *tombstoneRecoveryController) readInventories(ctx context.Context, comp *apiv1.Composition) ([]corev1.Secret, error) {
+	list := &corev1.SecretList{}
 	if err := c.downstream.List(ctx, list, client.InNamespace(inventoryNamespace),
 		client.MatchingLabels{inventoryLineageLabel: inventoryLineage(comp)}); err != nil {
-		return nil, fmt.Errorf("listing downstream inventory ConfigMaps: %w", err)
+		return nil, fmt.Errorf("listing downstream inventory Secrets: %w", err)
 	}
 	return list.Items, nil
 }
