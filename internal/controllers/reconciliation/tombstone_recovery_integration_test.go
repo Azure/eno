@@ -55,12 +55,12 @@ func TestRecoveryFlagAPIPersistence(t *testing.T) {
 			}
 			if tc.name == "all" {
 				for _, syn := range expectedSyntheses {
-					syn.TombstoneRecoveryFinished = &apiv1.TombstoneRecoveryStatus{
+					syn.TombstoneRecoveryStatus = &apiv1.TombstoneRecoveryStatus{
 						Status: true, Reason: "InventoryNotFound", Message: "no prior inventory", SynthesisUUID: syn.UUID,
 					}
 				}
-				comp.Status.InFlightSynthesis.TombstoneRecoveryFinished.Status = false
-				comp.Status.InFlightSynthesis.TombstoneRecoveryFinished.Reason = "TombstoneRecoveryInProgress"
+				comp.Status.InFlightSynthesis.TombstoneRecoveryStatus.Status = false
+				comp.Status.InFlightSynthesis.TombstoneRecoveryStatus.Reason = "TombstoneRecoveryInProgress"
 			}
 			require.NoError(t, mgr.GetClient().Status().Update(t.Context(), comp))
 
@@ -84,12 +84,12 @@ func TestRecoveryFlagAPIPersistence(t *testing.T) {
 			for i, syn := range syntheses {
 				require.NotNil(t, syn, fields[i])
 				require.Equal(t, tc.flags[i], syn.TombstoneRecoveryRequired, fields[i])
-				expected := expectedSyntheses[i].TombstoneRecoveryFinished
-				require.Equal(t, expected, syn.TombstoneRecoveryFinished, fields[i])
+				expected := expectedSyntheses[i].TombstoneRecoveryStatus
+				require.Equal(t, expected, syn.TombstoneRecoveryStatus, fields[i])
 				if expected != nil {
-					status, found, err := unstructured.NestedBool(wire.Object, "status", fields[i], "tombstoneRecoveryFinished", "status")
+					status, found, err := unstructured.NestedBool(wire.Object, "status", fields[i], "tombstoneRecoveryStatus", "status")
 					require.NoError(t, err)
-					require.True(t, found, "generated CRD must preserve %s.tombstoneRecoveryFinished.status", fields[i])
+					require.True(t, found, "generated CRD must preserve %s.tombstoneRecoveryStatus.status", fields[i])
 					require.Equal(t, expected.Status, status, fields[i])
 				}
 				flag, found, err := unstructured.NestedBool(wire.Object, "status", fields[i], "tombstoneRecoveryRequired")

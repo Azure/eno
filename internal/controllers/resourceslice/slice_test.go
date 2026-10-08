@@ -340,7 +340,7 @@ func TestNoSlices(t *testing.T) {
 		{Status: false, Reason: "InventoryGetError", SynthesisUUID: "current"},
 		{Status: true, Reason: "NotNeeded", SynthesisUUID: "previous"},
 	} {
-		comp.Status.CurrentSynthesis.TombstoneRecoveryFinished = decision
+		comp.Status.CurrentSynthesis.TombstoneRecoveryStatus = decision
 		require.NoError(t, cli.Status().Update(ctx, comp))
 		for range 2 {
 			_, err = a.Reconcile(ctx, req)
@@ -350,7 +350,7 @@ func TestNoSlices(t *testing.T) {
 		assert.Nil(t, comp.Status.CurrentSynthesis.Ready)
 		assert.Nil(t, comp.Status.CurrentSynthesis.Reconciled)
 	}
-	comp.Status.CurrentSynthesis.TombstoneRecoveryFinished = &apiv1.TombstoneRecoveryStatus{
+	comp.Status.CurrentSynthesis.TombstoneRecoveryStatus = &apiv1.TombstoneRecoveryStatus{
 		Status: true, Reason: apiv1.TombstoneRecoveryOperatorNotEnabled, SynthesisUUID: "current",
 	}
 	require.NoError(t, cli.Status().Update(ctx, comp))

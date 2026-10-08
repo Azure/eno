@@ -141,11 +141,11 @@ func TestRecoveryHistoryFetch(t *testing.T) {
 			if tt.noCurrent {
 				comp.Status.CurrentSynthesis = nil
 			} else if tt.completed {
-				comp.Status.CurrentSynthesis.TombstoneRecoveryFinished = &apiv1.TombstoneRecoveryStatus{
+				comp.Status.CurrentSynthesis.TombstoneRecoveryStatus = &apiv1.TombstoneRecoveryStatus{
 					Status: true, SynthesisUUID: "baseline-uuid", Reason: "FinishedTombstoneRecovery",
 				}
 				if tt.reason != "" {
-					comp.Status.CurrentSynthesis.TombstoneRecoveryFinished.Reason = tt.reason
+					comp.Status.CurrentSynthesis.TombstoneRecoveryStatus.Reason = tt.reason
 				}
 			}
 			before := comp.DeepCopy()
@@ -403,11 +403,11 @@ func TestRecoveryExecutorPublication(t *testing.T) {
 			if tt.noCurrent {
 				f.comp.Status.CurrentSynthesis = nil
 			} else if tt.completed {
-				f.comp.Status.CurrentSynthesis.TombstoneRecoveryFinished = &apiv1.TombstoneRecoveryStatus{
+				f.comp.Status.CurrentSynthesis.TombstoneRecoveryStatus = &apiv1.TombstoneRecoveryStatus{
 					Status: true, SynthesisUUID: "baseline-uuid", Reason: "FinishedTombstoneRecovery",
 				}
 				if tt.reason != "" {
-					f.comp.Status.CurrentSynthesis.TombstoneRecoveryFinished.Reason = tt.reason
+					f.comp.Status.CurrentSynthesis.TombstoneRecoveryStatus.Reason = tt.reason
 				}
 			}
 			a := recoverySlice(t, "history-a", recoveryObject("a"))

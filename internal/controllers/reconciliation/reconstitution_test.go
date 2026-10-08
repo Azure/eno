@@ -135,7 +135,7 @@ func recoveryReconstitutionNewHarness(t *testing.T, comp *apiv1.Composition, inf
 func recoveryReconstitutionSynthesis(uuid string, names ...string) *apiv1.Synthesis {
 	syn := &apiv1.Synthesis{
 		UUID: uuid, Synthesized: recoveryReconstitutionTime(),
-		TombstoneRecoveryFinished: &apiv1.TombstoneRecoveryStatus{
+		TombstoneRecoveryStatus: &apiv1.TombstoneRecoveryStatus{
 			Status: true, Reason: "NotNeeded", SynthesisUUID: uuid,
 		},
 	}
@@ -259,7 +259,7 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 			previous := recoveryReconstitutionSynthesis("previous", "previous-slice")
 			current := recoveryReconstitutionSynthesis("current", "current-slice")
 			current.TombstoneRecoveryRequired = !tc.notRequired
-			current.TombstoneRecoveryFinished = tc.finished
+			current.TombstoneRecoveryStatus = tc.finished
 			comp := recoveryReconstitutionComposition(previous, current)
 			if !tc.optOut {
 				comp.Annotations = map[string]string{"eno.azure.io/recovery-enabled": "true"}
@@ -287,9 +287,9 @@ func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
 			if h.allowRecoveryDecision && !tc.deleting && !tc.optOut {
 				stored := &apiv1.Composition{}
 				require.NoError(t, h.source.client.Get(h.ctx, client.ObjectKeyFromObject(comp), stored))
-				require.True(t, stored.Status.CurrentSynthesis.TombstoneRecoveryComplete())
+				require.True(t, stored.Status.CurrentSynthesis.IsTombstoneRecoveryFinished())
 				reason := apiv1.TombstoneRecoveryOperatorNotEnabled
-				assert.Equal(t, reason, stored.Status.CurrentSynthesis.TombstoneRecoveryFinished.Reason)
+				assert.Equal(t, reason, stored.Status.CurrentSynthesis.TombstoneRecoveryStatus.Reason)
 			}
 			if !tc.allow {
 				assert.Zero(t, result)
@@ -317,7 +317,7 @@ func TestRecoveryReconstitutionSkippedDecisionRace(t *testing.T) {
 	for _, change := range []string{"synthesis", "decision"} {
 		t.Run(change, func(t *testing.T) {
 			current := recoveryReconstitutionSynthesis("current")
-			current.TombstoneRecoveryFinished = nil
+			current.TombstoneRecoveryStatus = nil
 			comp := recoveryReconstitutionComposition(nil, current)
 			comp.Annotations = map[string]string{"eno.azure.io/recovery-enabled": "true"}
 			h := recoveryReconstitutionNewHarness(t, comp, nil, nil)
@@ -330,7 +330,7 @@ func TestRecoveryReconstitutionSkippedDecisionRace(t *testing.T) {
 					if change == "synthesis" {
 						fresh.Status.CurrentSynthesis.UUID = "next"
 					} else {
-						fresh.Status.CurrentSynthesis.TombstoneRecoveryFinished = &apiv1.TombstoneRecoveryStatus{
+						fresh.Status.CurrentSynthesis.TombstoneRecoveryStatus = &apiv1.TombstoneRecoveryStatus{
 							Status: true, Reason: "FinishedTombstoneRecovery", SynthesisUUID: "current",
 						}
 					}
@@ -349,10 +349,6 @@ func TestRecoveryReconstitutionSkippedDecisionRace(t *testing.T) {
 			assert.Zero(t, h.queue.Len())
 		})
 	}
-}
-
-func TestRecoveryCompositionNamespaceRequired(t *testing.T) {
-	require.EqualError(t, New(nil, Options{EnableTombstoneRecovery: true}), "recovery composition namespace is required when tombstone recovery is enabled")
 }
 
 func TestRecoveryReconstitutionR1IncompleteSynthesis(t *testing.T) {

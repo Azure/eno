@@ -280,9 +280,9 @@ spec:
                       was written
                     format: date-time
                     type: string
-                  tombstoneRecoveryFinished:
+                  tombstoneRecoveryStatus:
                     description: |-
-                      TombstoneRecoveryFinished records the recovery decision for this synthesis.
+                      TombstoneRecoveryStatus records the recovery decision for this synthesis.
                       A missing or unfinished decision prevents reconstitution only when the tombstone recovery operator is enabled and the Composition is opted in and not deleting.
                     properties:
                       message:
@@ -310,7 +310,7 @@ spec:
                       or points to a missing slice. Even a first synthesis may encounter resources left by a prior incarnation whose inventory was lost.
                       A complete historical reference list, including an empty list, does not introduce a new recovery requirement.
                       It does not request or block synthesis.
-                      Recovery preparation gates reconstitution through TombstoneRecoveryFinished only when the tombstone recovery operator is enabled and the Composition is opted in and not deleting.
+                      Recovery preparation gates reconstitution through TombstoneRecoveryStatus only when the tombstone recovery operator is enabled and the Composition is opted in and not deleting.
                     type: boolean
                   uuid:
                     description: |-
@@ -442,9 +442,9 @@ spec:
                       was written
                     format: date-time
                     type: string
-                  tombstoneRecoveryFinished:
+                  tombstoneRecoveryStatus:
                     description: |-
-                      TombstoneRecoveryFinished records the recovery decision for this synthesis.
+                      TombstoneRecoveryStatus records the recovery decision for this synthesis.
                       A missing or unfinished decision prevents reconstitution only when the tombstone recovery operator is enabled and the Composition is opted in and not deleting.
                     properties:
                       message:
@@ -472,7 +472,7 @@ spec:
                       or points to a missing slice. Even a first synthesis may encounter resources left by a prior incarnation whose inventory was lost.
                       A complete historical reference list, including an empty list, does not introduce a new recovery requirement.
                       It does not request or block synthesis.
-                      Recovery preparation gates reconstitution through TombstoneRecoveryFinished only when the tombstone recovery operator is enabled and the Composition is opted in and not deleting.
+                      Recovery preparation gates reconstitution through TombstoneRecoveryStatus only when the tombstone recovery operator is enabled and the Composition is opted in and not deleting.
                     type: boolean
                   uuid:
                     description: |-
@@ -597,9 +597,9 @@ spec:
                       was written
                     format: date-time
                     type: string
-                  tombstoneRecoveryFinished:
+                  tombstoneRecoveryStatus:
                     description: |-
-                      TombstoneRecoveryFinished records the recovery decision for this synthesis.
+                      TombstoneRecoveryStatus records the recovery decision for this synthesis.
                       A missing or unfinished decision prevents reconstitution only when the tombstone recovery operator is enabled and the Composition is opted in and not deleting.
                     properties:
                       message:
@@ -627,7 +627,7 @@ spec:
                       or points to a missing slice. Even a first synthesis may encounter resources left by a prior incarnation whose inventory was lost.
                       A complete historical reference list, including an empty list, does not introduce a new recovery requirement.
                       It does not request or block synthesis.
-                      Recovery preparation gates reconstitution through TombstoneRecoveryFinished only when the tombstone recovery operator is enabled and the Composition is opted in and not deleting.
+                      Recovery preparation gates reconstitution through TombstoneRecoveryStatus only when the tombstone recovery operator is enabled and the Composition is opted in and not deleting.
                     type: boolean
                   uuid:
                     description: |-

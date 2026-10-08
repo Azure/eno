@@ -59,7 +59,7 @@ func TestSliceCleanupRecoveryProtection(t *testing.T) {
 		{
 			name: "unfinished decision", keep: true, requeueAfter: 5 * time.Second,
 			update: func(comp *apiv1.Composition) {
-				comp.Status.CurrentSynthesis.TombstoneRecoveryFinished = &apiv1.TombstoneRecoveryStatus{
+				comp.Status.CurrentSynthesis.TombstoneRecoveryStatus = &apiv1.TombstoneRecoveryStatus{
 					SynthesisUUID: "current", Status: false,
 				}
 			},
@@ -67,7 +67,7 @@ func TestSliceCleanupRecoveryProtection(t *testing.T) {
 		{
 			name: "stale completed decision", keep: true, requeueAfter: 5 * time.Second,
 			update: func(comp *apiv1.Composition) {
-				comp.Status.CurrentSynthesis.TombstoneRecoveryFinished = &apiv1.TombstoneRecoveryStatus{
+				comp.Status.CurrentSynthesis.TombstoneRecoveryStatus = &apiv1.TombstoneRecoveryStatus{
 					SynthesisUUID: "previous", Status: true,
 				}
 			},
@@ -176,7 +176,7 @@ func TestSliceCleanupRecoveryTransitions(t *testing.T) {
 
 			switch transition {
 			case "publish references", "finish without references":
-				comp.Status.CurrentSynthesis.TombstoneRecoveryFinished = &apiv1.TombstoneRecoveryStatus{
+				comp.Status.CurrentSynthesis.TombstoneRecoveryStatus = &apiv1.TombstoneRecoveryStatus{
 					SynthesisUUID: "current", Status: true,
 				}
 				if transition == "publish references" {

@@ -14,7 +14,7 @@
 - `--enable-tombstone-recovery` enables the operator; it defaults to `false`.
 - When enabled, `POD_NAMESPACE` must contain the reconciler pod's namespace, supplied through the Downward API.
 - The recovery controller uses a separate informer cache scoped to `POD_NAMESPACE`; its Composition watch also respects `--composition-label-selector`.
-- Configure `--composition-namespace` to match `POD_NAMESPACE`. The reconstitution gate assumes that opted-in Compositions it watches are within the recovery namespace.
+- With recovery enabled, startup requires `--composition-namespace` to match `POD_NAMESPACE`; missing or mismatched namespaces are rejected immediately before recovery controller registration and before the manager starts. Recovery configuration is validated separately from the generic reconciliation constructor. The recovery controller is registered only when enabled, using the same downstream configuration as reconciliation.
 - Each Composition must opt in with the annotation below. Missing annotations, labels with the same key, and annotation values other than the exact string `"true"` do not opt in.
 - Recovery eligibility does not evaluate `--resource-filter`. Normal resource reconciliation still evaluates that filter against actual resources, including recovered tombstones.
 - When disabled, the recovery controller registers no watches and imposes no `POD_NAMESPACE` requirement. Reconstitution can still acknowledge disabled recovery for annotated Compositions.
@@ -35,8 +35,8 @@ metadata:
 
 - **`eno.azure.io/recovery-enabled`:** Does this Composition opt into recovery?
 - **`TombstoneRecoveryRequired`:** Does this synthesis have potentially missing history that still requires recovery?
-- **`TombstoneRecoveryFinished`:** What recovery decision has been recorded for this synthesis?
-- **`TombstoneRecoveryComplete()`:** Is the decision terminal (`Status: true`) and bound to the current synthesis UUID?
+- **`TombstoneRecoveryStatus`:** What recovery decision has been recorded for this synthesis?
+- **`IsTombstoneRecoveryFinished()`:** Is the decision finished (`Status: true`) and bound to the current synthesis UUID, including skipped recovery?
 - A first synthesis requires recovery because resources from an earlier Composition incarnation may remain downstream.
 - A successor inherits an outstanding recovery requirement. Complete slice references do not erase work that recovery has not yet performed.
 - `TombstoneRecoveryOperatorNotEnabled` releases the gates but preserves an existing requirement for the next synthesis. It means "skipped for now," not "historical resources recovered."

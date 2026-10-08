@@ -117,7 +117,7 @@ func TestRecoveryTerminatingSliceRequestsResynthesis(t *testing.T) {
 			case "unannotated":
 				comp.Annotations = nil
 			case "completed":
-				comp.Status.CurrentSynthesis.TombstoneRecoveryFinished = &apiv1.TombstoneRecoveryStatus{
+				comp.Status.CurrentSynthesis.TombstoneRecoveryStatus = &apiv1.TombstoneRecoveryStatus{
 					Status: true, Reason: "FinishedTombstoneRecovery", SynthesisUUID: "current",
 				}
 			case "deleting":

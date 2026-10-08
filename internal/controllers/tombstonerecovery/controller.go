@@ -158,7 +158,7 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	// Inventory must use the persisted recovery decision and slice references from a subsequent event.
-	if !syn.TombstoneRecoveryComplete() {
+	if !syn.IsTombstoneRecoveryFinished() {
 		logger = logger.WithValues("operation", "recoveryPreparation")
 		ctx = logr.NewContext(ctx, logger)
 		if syn.TombstoneRecoveryRequired {
@@ -207,7 +207,7 @@ func (c *tombstoneRecoveryController) getCurrentComposition(ctx context.Context,
 
 func getOrCreateRecoveryStatus(comp *apiv1.Composition) apiv1.TombstoneRecoveryStatus {
 	syn := comp.Status.CurrentSynthesis
-	if status := syn.TombstoneRecoveryFinished; status != nil && status.SynthesisUUID == syn.UUID {
+	if status := syn.TombstoneRecoveryStatus; status != nil && status.SynthesisUUID == syn.UUID {
 		return *status
 	}
 	return apiv1.TombstoneRecoveryStatus{SynthesisUUID: syn.UUID}
@@ -285,7 +285,7 @@ func (c *tombstoneRecoveryController) recordTombstoneRecoveryError(ctx context.C
 	status := getOrCreateRecoveryStatus(comp)
 	status.Status, status.Reason, status.Message = false, reason, cause.Error()
 	after := comp.DeepCopy()
-	after.Status.CurrentSynthesis.TombstoneRecoveryFinished = &status
+	after.Status.CurrentSynthesis.TombstoneRecoveryStatus = &status
 	if err := c.patchStatus(ctx, comp, after); err != nil {
 		logger.Error(err, "failed to persist recovery preparation error")
 		return errors.Join(cause, err)
@@ -297,7 +297,7 @@ func (c *tombstoneRecoveryController) recordRecoveryDecision(ctx context.Context
 	status := getOrCreateRecoveryStatus(comp)
 	status.Status, status.Reason, status.Message = true, reason, message
 	after := comp.DeepCopy()
-	after.Status.CurrentSynthesis.TombstoneRecoveryFinished = &status
+	after.Status.CurrentSynthesis.TombstoneRecoveryStatus = &status
 	seen := map[string]bool{}
 	for _, ref := range after.Status.CurrentSynthesis.ResourceSlices {
 		if ref != nil {
@@ -343,8 +343,8 @@ func (c *tombstoneRecoveryController) patchStatus(ctx context.Context, before, a
 		{Op: "test", Path: "/metadata/resourceVersion", Value: before.ResourceVersion},
 		{Op: "test", Path: "/status/currentSynthesis/uuid", Value: old.UUID},
 	}
-	if !reflect.DeepEqual(old.TombstoneRecoveryFinished, next.TombstoneRecoveryFinished) {
-		ops = append(ops, statusPatch{Op: "add", Path: "/status/currentSynthesis/tombstoneRecoveryFinished", Value: next.TombstoneRecoveryFinished})
+	if !reflect.DeepEqual(old.TombstoneRecoveryStatus, next.TombstoneRecoveryStatus) {
+		ops = append(ops, statusPatch{Op: "add", Path: "/status/currentSynthesis/tombstoneRecoveryStatus", Value: next.TombstoneRecoveryStatus})
 	}
 	if !reflect.DeepEqual(old.ResourceSlices, next.ResourceSlices) {
 		ops = append(ops, statusPatch{Op: "add", Path: "/status/currentSynthesis/resourceSlices", Value: next.ResourceSlices})

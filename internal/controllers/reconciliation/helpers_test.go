@@ -73,9 +73,6 @@ func setupTestSubject(t *testing.T, mgr *testutil.Manager) {
 }
 
 func setupTestSubjectForOptions(t *testing.T, mgr *testutil.Manager, opts Options) {
-	if opts.EnableTombstoneRecovery && opts.RecoveryCompositionNamespace == "" {
-		opts.RecoveryCompositionNamespace = "default"
-	}
 	opts.WriteBuffer = flowcontrol.NewResourceSliceWriteBufferForManager(mgr.Manager)
 
 	var cache resource.Cache
@@ -89,7 +86,7 @@ func setupTestSubjectForOptions(t *testing.T, mgr *testutil.Manager, opts Option
 	}
 
 	require.NoError(t, tombstonerecovery.NewController(mgr.Manager, tombstonerecovery.Options{
-		Enabled: opts.EnableTombstoneRecovery, Namespace: opts.RecoveryCompositionNamespace, Downstream: opts.Downstream,
+		Enabled: opts.EnableTombstoneRecovery, Namespace: "default", Downstream: opts.Downstream,
 	}))
 	err := New(mgr.Manager, opts)
 	require.NoError(t, err)

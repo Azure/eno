@@ -94,14 +94,14 @@ func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Only Compositions owned by this reconciler's recovery controller wait for recovery; deletion always bypasses the gate.
 	if syn := comp.Status.CurrentSynthesis; comp.RecoveryEnabled() && comp.DeletionTimestamp == nil &&
-		syn != nil && syn.Synthesized != nil && !syn.TombstoneRecoveryComplete() {
+		syn != nil && syn.Synthesized != nil && !syn.IsTombstoneRecoveryFinished() {
 		if r.enableTombstoneRecovery {
 			logger.Info("waiting for tombstone recovery preparation", "synthesisUUID", syn.UUID)
 			return ctrl.Result{}, nil
 		}
 		reason := apiv1.TombstoneRecoveryOperatorNotEnabled
 		before := comp.DeepCopy()
-		syn.TombstoneRecoveryFinished = &apiv1.TombstoneRecoveryStatus{
+		syn.TombstoneRecoveryStatus = &apiv1.TombstoneRecoveryStatus{
 			Status: true, Reason: reason, SynthesisUUID: syn.UUID,
 		}
 		// The resourceVersion precondition protects against supersession, deletion, and concurrent recovery decisions.

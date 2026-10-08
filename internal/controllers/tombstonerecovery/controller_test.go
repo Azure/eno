@@ -107,7 +107,7 @@ func (f *controllerTestFixture) finish(reason string) {
 	for range 12 {
 		require.NoError(f.t, f.reconcile())
 		syn := f.composition().Status.CurrentSynthesis
-		if done := syn.TombstoneRecoveryFinished; done != nil && done.Status {
+		if done := syn.TombstoneRecoveryStatus; done != nil && done.Status {
 			require.Equal(f.t, syn.UUID, done.SynthesisUUID)
 			require.Equal(f.t, reason, done.Reason)
 			return
@@ -197,7 +197,7 @@ func TestTombstoneRecoveryAfterSkippedSynthesis(t *testing.T) {
 			f.history("removed")
 			require.NoError(t, f.controller.recordRecoveryDecision(t.Context(), f.composition(), apiv1.TombstoneRecoveryOperatorNotEnabled, "", nil))
 			comp := f.composition()
-			require.True(t, comp.Status.CurrentSynthesis.TombstoneRecoveryComplete())
+			require.True(t, comp.Status.CurrentSynthesis.IsTombstoneRecoveryFinished())
 			comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: controllerTestUUID(3)}
 			require.NoError(t, f.upstream.Status().Update(t.Context(), comp))
 			syn := &apiv1.Synthesizer{ObjectMeta: metav1.ObjectMeta{Name: comp.Spec.Synthesizer.Name}}
@@ -214,7 +214,7 @@ func TestTombstoneRecoveryAfterSkippedSynthesis(t *testing.T) {
 			current := f.composition().Status.CurrentSynthesis
 			require.Equal(t, controllerTestUUID(3), current.UUID)
 			require.True(t, current.TombstoneRecoveryRequired)
-			require.Nil(t, current.TombstoneRecoveryFinished)
+			require.Nil(t, current.TombstoneRecoveryStatus)
 			require.Empty(t, current.ResourceSlices)
 			inventoryReads := 0
 			f.controller.downstream = interceptor.NewClient(f.downstream, interceptor.Funcs{
@@ -256,7 +256,7 @@ func TestTombstoneRecoveryOperatorRecoveryRetry(t *testing.T) {
 			f.controller.client = interceptor.NewClient(f.upstream, interceptor.Funcs{
 				SubResourcePatch: func(ctx context.Context, cli client.Client, name string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
 					comp := obj.(*apiv1.Composition)
-					status := comp.Status.CurrentSynthesis.TombstoneRecoveryFinished
+					status := comp.Status.CurrentSynthesis.TombstoneRecoveryStatus
 					if status != nil && status.Status && status.Reason == "FinishedTombstoneRecovery" && !rejected {
 						rejected = true
 						return rejection
@@ -265,7 +265,7 @@ func TestTombstoneRecoveryOperatorRecoveryRetry(t *testing.T) {
 				},
 			})
 			f.expectError(rejection)
-			assert.False(t, f.composition().Status.CurrentSynthesis.TombstoneRecoveryComplete())
+			assert.False(t, f.composition().Status.CurrentSynthesis.IsTombstoneRecoveryFinished())
 			f.restart()
 			f.finish("FinishedTombstoneRecovery")
 			syn := f.composition().Status.CurrentSynthesis
@@ -393,7 +393,7 @@ func TestTombstoneRecoveryOperatorRecoveryAnnotation(t *testing.T) {
 			require.NoError(t, f.reconcile())
 			if tc.matches {
 				require.Equal(t, 1, statusWrites)
-				status := f.composition().Status.CurrentSynthesis.TombstoneRecoveryFinished
+				status := f.composition().Status.CurrentSynthesis.TombstoneRecoveryStatus
 				require.NotNil(t, status)
 				assert.True(t, status.Status)
 				assert.Equal(t, reasonNotNeeded, status.Reason)
@@ -523,7 +523,7 @@ func TestTombstoneRecoveryOperatorObsoleteWork(t *testing.T) {
 						} else {
 							f.updateStatus(func(syn *apiv1.Synthesis) {
 								syn.UUID = controllerTestUUID(3)
-								syn.TombstoneRecoveryFinished = nil
+								syn.TombstoneRecoveryStatus = nil
 							})
 						}
 						expected = f.composition()
@@ -578,7 +578,7 @@ func TestTombstoneRecoveryOperatorStatusWriteRace(t *testing.T) {
 			require.Error(t, f.reconcile(), "stale recovery status must not be accepted")
 			require.NotNil(t, expected)
 			assert.Equal(t, expected, f.composition())
-			assert.Nil(t, f.composition().Status.CurrentSynthesis.TombstoneRecoveryFinished)
+			assert.Nil(t, f.composition().Status.CurrentSynthesis.TombstoneRecoveryStatus)
 			assert.Empty(t, f.inventories())
 		})
 	}
@@ -602,7 +602,7 @@ func TestTombstoneRecoveryOperatorRecoveryInventorySelection(t *testing.T) {
 			}
 			require.NoError(t, f.downstream.Update(t.Context(), older))
 			f.reconcileEvent()
-			status := f.composition().Status.CurrentSynthesis.TombstoneRecoveryFinished
+			status := f.composition().Status.CurrentSynthesis.TombstoneRecoveryStatus
 			require.NotNil(t, status)
 			require.True(t, status.Status)
 			if invalidTime {
@@ -643,7 +643,7 @@ func TestTombstoneRecoveryOperatorRecoveryStatusPatch(t *testing.T) {
 				{Op: "test", Path: "/metadata/uid", Value: before.UID},
 				{Op: "test", Path: "/metadata/resourceVersion", Value: before.ResourceVersion},
 				{Op: "test", Path: "/status/currentSynthesis/uuid", Value: before.Status.CurrentSynthesis.UUID},
-				{Op: "add", Path: "/status/currentSynthesis/tombstoneRecoveryFinished", Value: apiv1.TombstoneRecoveryStatus{
+				{Op: "add", Path: "/status/currentSynthesis/tombstoneRecoveryStatus", Value: apiv1.TombstoneRecoveryStatus{
 					SynthesisUUID: before.Status.CurrentSynthesis.UUID, Status: true, Reason: reasonFinished,
 				}},
 				{Op: "add", Path: "/status/currentSynthesis/resourceSlices", Value: []*apiv1.ResourceSliceRef{{Name: "desired"}, {Name: "overflow"}}},
@@ -733,7 +733,7 @@ func TestTombstoneRecoveryOperatorRecoverySliceReadFailures(t *testing.T) {
 			case "invalid-manifest":
 				assert.ErrorContains(t, err, "invalid manifest JSON")
 			}
-			status := f.composition().Status.CurrentSynthesis.TombstoneRecoveryFinished
+			status := f.composition().Status.CurrentSynthesis.TombstoneRecoveryStatus
 			require.NotNil(t, status)
 			assert.False(t, status.Status)
 			assert.Equal(t, reasonSliceReadError, status.Reason)

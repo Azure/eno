@@ -162,7 +162,7 @@ func (c *cleanupController) shouldDelete(ctx context.Context, reader client.Read
 
 	if syn := comp.Status.CurrentSynthesis; slice.Labels[apiv1.TombstoneRecoveryLabelKey] == "true" &&
 		comp.RecoveryEnabled() && comp.DeletionTimestamp == nil && syn != nil &&
-		syn.UUID == slice.Spec.SynthesisUUID && syn.TombstoneRecoveryRequired && !syn.TombstoneRecoveryComplete() {
+		syn.UUID == slice.Spec.SynthesisUUID && syn.TombstoneRecoveryRequired && !syn.IsTombstoneRecoveryFinished() {
 		// Recovery publishes overflow references with completion. Unreferenced slices need polling because Composition events don't enqueue them.
 		logr.FromContextOrDiscard(ctx).Info("retaining unreferenced resource slice while tombstone recovery is pending")
 		return false, 5 * time.Second, nil

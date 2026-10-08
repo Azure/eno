@@ -177,12 +177,12 @@ type Synthesis struct {
 	// or points to a missing slice. Even a first synthesis may encounter resources left by a prior incarnation whose inventory was lost.
 	// A complete historical reference list, including an empty list, does not introduce a new recovery requirement.
 	// It does not request or block synthesis.
-	// Recovery preparation gates reconstitution through TombstoneRecoveryFinished only when the tombstone recovery operator is enabled and the Composition is opted in and not deleting.
+	// Recovery preparation gates reconstitution through TombstoneRecoveryStatus only when the tombstone recovery operator is enabled and the Composition is opted in and not deleting.
 	TombstoneRecoveryRequired bool `json:"tombstoneRecoveryRequired,omitempty"`
 
-	// TombstoneRecoveryFinished records the recovery decision for this synthesis.
+	// TombstoneRecoveryStatus records the recovery decision for this synthesis.
 	// A missing or unfinished decision prevents reconstitution only when the tombstone recovery operator is enabled and the Composition is opted in and not deleting.
-	TombstoneRecoveryFinished *TombstoneRecoveryStatus `json:"tombstoneRecoveryFinished,omitempty"`
+	TombstoneRecoveryStatus *TombstoneRecoveryStatus `json:"tombstoneRecoveryStatus,omitempty"`
 }
 
 const TombstoneRecoveryOperatorNotEnabled = "TombstoneRecoveryOperatorNotEnabled"
@@ -198,9 +198,9 @@ type TombstoneRecoveryStatus struct {
 	SynthesisUUID string `json:"synthesisUUID"`
 }
 
-func (s *Synthesis) TombstoneRecoveryComplete() bool {
-	return s != nil && s.TombstoneRecoveryFinished != nil &&
-		s.TombstoneRecoveryFinished.SynthesisUUID == s.UUID && s.TombstoneRecoveryFinished.Status
+func (s *Synthesis) IsTombstoneRecoveryFinished() bool {
+	return s != nil && s.TombstoneRecoveryStatus != nil &&
+		s.TombstoneRecoveryStatus.SynthesisUUID == s.UUID && s.TombstoneRecoveryStatus.Status
 }
 
 type Result struct {

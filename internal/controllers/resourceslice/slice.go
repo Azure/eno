@@ -49,7 +49,7 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	recoveryPending := comp.RecoveryEnabled() && comp.DeletionTimestamp == nil &&
-		!comp.Status.CurrentSynthesis.TombstoneRecoveryComplete()
+		!comp.Status.CurrentSynthesis.IsTombstoneRecoveryFinished()
 	snapshot := statusSnapshot{Reconciled: true, Ready: true}
 
 	for _, ref := range comp.Status.CurrentSynthesis.ResourceSlices {
@@ -174,7 +174,7 @@ func processCompositionTransition(ctx context.Context, comp *apiv1.Composition, 
 	logger := logr.FromContextOrDiscard(ctx)
 
 	if syn := comp.Status.CurrentSynthesis; syn != nil && comp.RecoveryEnabled() &&
-		comp.DeletionTimestamp == nil && !syn.TombstoneRecoveryComplete() {
+		comp.DeletionTimestamp == nil && !syn.IsTombstoneRecoveryFinished() {
 		snapshot.Ready = false
 		snapshot.Reconciled = false
 		logger.Info("withholding composition readiness while tombstone recovery is unfinished", "synthesisUUID", syn.UUID)

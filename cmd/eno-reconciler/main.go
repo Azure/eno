@@ -50,8 +50,7 @@ func run() error {
 			Rest: ctrl.GetConfigOrDie(),
 		}
 
-		recOpts      = reconciliation.Options{}
-		recoveryOpts = tombstonerecovery.Options{}
+		recOpts = reconciliation.Options{}
 	)
 	flag.BoolVar(&debugLogging, "debug", true, "Enable debug logging")
 	flag.StringVar(&remoteKubeconfigFile, "remote-kubeconfig", "", "Path to the kubeconfig of the apiserver where the resources will be reconciled. The config from the environment is used if this is not provided")
@@ -73,13 +72,6 @@ func run() error {
 	flag.IntVar(&recOpts.MaxConcurrentReconciles, "max-concurrent-reconciles", 1, "Maximum number of concurrent reconciles for the reconciliation controller")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
-
-	if recOpts.EnableTombstoneRecovery {
-		recOpts.RecoveryCompositionNamespace = os.Getenv("POD_NAMESPACE")
-		if recOpts.RecoveryCompositionNamespace == "" {
-			return fmt.Errorf("POD_NAMESPACE is required when --enable-tombstone-recovery is enabled")
-		}
-	}
 
 	zapCfg := zap.NewProductionConfig()
 	if debugLogging {
@@ -156,12 +148,18 @@ func run() error {
 		}
 	}
 
-	recoveryOpts.Enabled = recOpts.EnableTombstoneRecovery
-	recoveryOpts.Namespace = recOpts.RecoveryCompositionNamespace
-	recoveryOpts.CompositionSelector = mgrOpts.CompositionSelector
-	recoveryOpts.Downstream = remoteConfig
-	if err := tombstonerecovery.NewController(mgr, recoveryOpts); err != nil {
-		return fmt.Errorf("constructing tombstone recovery controller: %w", err)
+	var recoveryOpts tombstonerecovery.Options
+	if recOpts.EnableTombstoneRecovery {
+		recoveryOpts, err = validateTombstoneRecoveryOptions(recOpts.EnableTombstoneRecovery, compositionNamespace)
+		if err != nil {
+			return err
+		}
+		recoveryOpts.CompositionSelector = mgrOpts.CompositionSelector
+		recoveryOpts.Downstream = remoteConfig
+		err = tombstonerecovery.NewController(mgr, recoveryOpts)
+		if err != nil {
+			return fmt.Errorf("constructing tombstone recovery controller: %w", err)
+		}
 	}
 
 	err = reconciliation.New(mgr, recOpts)
@@ -193,4 +191,19 @@ func run() error {
 	)
 
 	return mgr.Start(ctx)
+}
+
+func validateTombstoneRecoveryOptions(enabled bool, compositionNamespace string) (tombstonerecovery.Options, error) {
+	opts := tombstonerecovery.Options{Enabled: enabled}
+	if !enabled {
+		return opts, nil
+	}
+	opts.Namespace = os.Getenv("POD_NAMESPACE")
+	if opts.Namespace == "" {
+		return opts, fmt.Errorf("POD_NAMESPACE is required when --enable-tombstone-recovery is enabled")
+	}
+	if compositionNamespace != opts.Namespace {
+		return opts, fmt.Errorf("--composition-namespace must match POD_NAMESPACE when tombstone recovery is enabled: got %q, want %q", compositionNamespace, opts.Namespace)
+	}
+	return opts, nil
 }

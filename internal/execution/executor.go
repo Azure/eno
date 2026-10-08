@@ -246,9 +246,9 @@ func (e *Executor) fetchCurrentSynthesisResSlices(ctx context.Context, comp *api
 		return nil, true, nil
 	}
 
-	recoveryRequired := current.TombstoneRecoveryRequired && !current.TombstoneRecoveryComplete()
+	recoveryRequired := current.TombstoneRecoveryRequired && !current.IsTombstoneRecoveryFinished()
 	// Skipping recovery releases readiness but does not resolve missing history.
-	if decision := current.TombstoneRecoveryFinished; current.TombstoneRecoveryRequired &&
+	if decision := current.TombstoneRecoveryStatus; current.TombstoneRecoveryRequired &&
 		decision != nil && decision.Reason == apiv1.TombstoneRecoveryOperatorNotEnabled {
 		recoveryRequired = true
 	}

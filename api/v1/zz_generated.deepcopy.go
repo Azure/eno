@@ -734,8 +734,8 @@ func (in *Synthesis) DeepCopyInto(out *Synthesis) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
-	if in.TombstoneRecoveryFinished != nil {
-		in, out := &in.TombstoneRecoveryFinished, &out.TombstoneRecoveryFinished
+	if in.TombstoneRecoveryStatus != nil {
+		in, out := &in.TombstoneRecoveryStatus, &out.TombstoneRecoveryStatus
 		*out = new(TombstoneRecoveryStatus)
 		**out = **in
 	}
