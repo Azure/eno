@@ -13,7 +13,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -39,7 +38,7 @@ func recordingTestLargeSlice(f *controllerTestFixture) {
 }
 
 func TestInventoryRecordingEligibility(t *testing.T) {
-	for _, mode := range []string{"unready", "reconciled only", "unsynthesized", "unfinished", "wrong decision UUID", "unannotated", "false annotation", "deleting", "wrong namespace", "wrong selector"} {
+	for _, mode := range []string{"unready", "reconciled only", "unsynthesized", "unfinished", "wrong decision UUID", "unannotated", "false annotation", "deleting"} {
 		t.Run(mode, func(t *testing.T) {
 			f := recordingTestFixture(t, "desired")
 			comp := f.composition()
@@ -69,10 +68,6 @@ func TestInventoryRecordingEligibility(t *testing.T) {
 				require.NoError(t, f.upstream.Update(t.Context(), comp))
 			case "deleting":
 				require.NoError(t, f.upstream.Delete(t.Context(), comp))
-			case "wrong namespace":
-				f.controller.namespace = "other"
-			case "wrong selector":
-				f.controller.compositionSelector = labels.SelectorFromSet(labels.Set{"owner": "other"})
 			}
 			f.controller.downstream = nil // Neither inventory reads nor writes are allowed in these cases.
 			f.reconcileEvent()
@@ -178,11 +173,10 @@ func TestInventoryRecordingPartialFailureAndShrink(t *testing.T) {
 }
 
 func TestInventoryRecordingFreshnessBeforeWrites(t *testing.T) {
-	for _, mode := range []string{"synthesis", "UID", "opt-out", "deleting", "not ready", "unfinished", "selector", "synthesizer", "read error"} {
+	for _, mode := range []string{"synthesis", "opt-out", "deleting", "not ready", "unfinished", "read error"} {
 		t.Run(mode, func(t *testing.T) {
 			f := recordingTestFixture(t)
 			recordingTestLargeSlice(f)
-			f.controller.compositionSelector = labels.SelectorFromSet(labels.Set{"owner": "team"})
 			writes := 0
 			failure := apierrors.NewServiceUnavailable("composition unavailable")
 			f.controller.downstream = interceptor.NewClient(f.downstream, interceptor.Funcs{
@@ -213,14 +207,8 @@ func TestInventoryRecordingFreshnessBeforeWrites(t *testing.T) {
 						require.NoError(t, f.upstream.Delete(ctx, comp))
 					default:
 						switch mode {
-						case "UID":
-							comp.UID = "replacement"
 						case "opt-out":
 							delete(comp.Annotations, "eno.azure.io/recovery-enabled")
-						case "selector":
-							comp.Labels["owner"] = "other"
-						case "synthesizer":
-							comp.Spec.Synthesizer.Name = "other"
 						}
 						require.NoError(t, f.upstream.Update(ctx, comp))
 					}

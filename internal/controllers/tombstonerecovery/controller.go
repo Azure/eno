@@ -40,6 +40,15 @@ const (
 
 var errSuperseded = errors.New("tombstone recovery operation superseded")
 
+type compositionOperation string
+
+const (
+	compositionOperationNone      compositionOperation = ""
+	compositionOperationRecover   compositionOperation = "recoverMissingTombstones"
+	compositionOperationNotNeeded compositionOperation = "recordRecoveryNotNeeded"
+	compositionOperationRecord    compositionOperation = "recordInventory"
+)
+
 type Options struct {
 	Enabled             bool
 	Namespace           string
@@ -48,11 +57,9 @@ type Options struct {
 }
 
 type tombstoneRecoveryController struct {
-	client              client.Client
-	reader              client.Reader
-	downstream          client.Client
-	namespace           string
-	compositionSelector labels.Selector
+	client     client.Client
+	reader     client.Reader
+	downstream client.Client
 }
 
 type jitteredRateLimiter struct {
@@ -95,10 +102,8 @@ func NewController(mgr ctrl.Manager, opts Options) error {
 		return fmt.Errorf("constructing tombstone recovery upstream client: %w", err)
 	}
 	c := &tombstoneRecoveryController{
-		client:              upstream,
-		reader:              mgr.GetAPIReader(),
-		namespace:           opts.Namespace,
-		compositionSelector: opts.CompositionSelector,
+		client: upstream,
+		reader: mgr.GetAPIReader(),
 	}
 	config := opts.Downstream
 	if config == nil {
@@ -152,8 +157,8 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 	logger = logger.WithValues("compositionUID", comp.UID, "compositionGeneration", comp.Generation, "synthesisUUID", syn.UUID,
 		"synthesizerName", comp.Spec.Synthesizer.Name, "operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	ctx = logr.NewContext(ctx, logger)
-	if !comp.RecoveryEnabled() || !c.matchesScope(comp) {
-		logger.Info("composition has not opted into recovery or is outside the configured scope")
+	if !comp.RecoveryEnabled() {
+		logger.Info("composition has not opted into recovery")
 		return ctrl.Result{}, nil
 	}
 	if syn.UUID == "" {
@@ -161,17 +166,15 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, fmt.Errorf("published synthesis has no UUID")
 	}
 
-	// Inventory must use the persisted recovery decision and slice references from a subsequent event.
-	if !syn.IsTombstoneRecoveryFinished() {
-		logger = logger.WithValues("operation", "recoveryPreparation")
-		ctx = logr.NewContext(ctx, logger)
-		if syn.TombstoneRecoveryRequired {
-			err = c.recoverMissingTombstones(ctx, comp)
-		} else {
-			err = c.recordRecoveryDecision(ctx, comp, reasonNotNeeded, "", nil)
-		}
-	} else if syn.Ready != nil {
-		ctx = logr.NewContext(ctx, logger.WithValues("operation", "inventoryRecording"))
+	operation := nextCompositionOperation(comp)
+	ctx = logr.NewContext(ctx, logger.WithValues("operation", operation))
+	switch operation {
+	case compositionOperationRecover:
+		err = c.recoverMissingTombstones(ctx, comp)
+	case compositionOperationNotNeeded:
+		// Recording waits for a later event containing this persisted decision.
+		err = c.recordRecoveryDecision(ctx, comp, reasonNotNeeded, "", nil)
+	case compositionOperationRecord:
 		err = c.recordInventory(ctx, comp)
 	}
 
@@ -185,9 +188,22 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 	return ctrl.Result{}, err
 }
 
-func (c *tombstoneRecoveryController) matchesScope(comp *apiv1.Composition) bool {
-	return (c.namespace == "" || comp.Namespace == c.namespace) &&
-		(c.compositionSelector == nil || c.compositionSelector.Matches(labels.Set(comp.Labels)))
+// nextCompositionOperation selects one idempotent operation without performing side effects.
+func nextCompositionOperation(comp *apiv1.Composition) compositionOperation {
+	if comp == nil || comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil {
+		return compositionOperationNone
+	}
+	syn := comp.Status.CurrentSynthesis
+	if !syn.IsTombstoneRecoveryFinished() {
+		if syn.TombstoneRecoveryRequired {
+			return compositionOperationRecover
+		}
+		return compositionOperationNotNeeded
+	}
+	if syn.Ready != nil {
+		return compositionOperationRecord
+	}
+	return compositionOperationNone
 }
 
 func (c *tombstoneRecoveryController) getCurrentComposition(ctx context.Context, expected *apiv1.Composition, requireReady bool) (*apiv1.Composition, error) {
@@ -198,15 +214,12 @@ func (c *tombstoneRecoveryController) getCurrentComposition(ctx context.Context,
 		}
 		return nil, err
 	}
-	if comp.UID != expected.UID || inventoryLineage(comp) != inventoryLineage(expected) {
-		return nil, fmt.Errorf("%w: composition identity changed", errSuperseded)
-	}
 	// Deletion can start before the Composition controller changes the synthesis UUID.
 	if comp.DeletionTimestamp != nil {
 		return nil, fmt.Errorf("%w: composition is deleting", errSuperseded)
 	}
-	if !comp.RecoveryEnabled() || !c.matchesScope(comp) {
-		return nil, fmt.Errorf("%w: composition is no longer eligible for recovery", errSuperseded)
+	if !comp.RecoveryEnabled() {
+		return nil, fmt.Errorf("%w: composition recovery is disabled", errSuperseded)
 	}
 	syn, old := comp.Status.CurrentSynthesis, expected.Status.CurrentSynthesis
 	if syn == nil || old == nil || syn.UUID != old.UUID {
