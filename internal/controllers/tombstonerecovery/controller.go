@@ -29,25 +29,22 @@ import (
 )
 
 const (
-	reasonNotNeeded         = "NotNeeded"
-	reasonInventoryNotFound = "InventoryNotFound"
-	reasonInventoryGetError = "InventoryGetError"
-	reasonInventoryInvalid  = "InventoryInvalid"
-	reasonSliceReadError    = "CurrentSynthesisResourceSliceError"
-	reasonSliceWriteError   = "ErrUpdateResourceSlice"
-	reasonFinished          = "FinishedTombstoneRecovery"
-)
-
-var errSuperseded = errors.New("tombstone recovery operation superseded")
-
-type compositionOperation string
-
-const (
+	reasonNotNeeded                                    = "NotNeeded"
+	reasonInventoryNotFound                            = "InventoryNotFound"
+	reasonInventoryGetError                            = "InventoryGetError"
+	reasonInventoryInvalid                             = "InventoryInvalid"
+	reasonSliceReadError                               = "CurrentSynthesisResourceSliceError"
+	reasonSliceWriteError                              = "ErrUpdateResourceSlice"
+	reasonFinished                                     = "FinishedTombstoneRecovery"
 	compositionOperationNone      compositionOperation = ""
 	compositionOperationRecover   compositionOperation = "recoverMissingTombstones"
 	compositionOperationNotNeeded compositionOperation = "recordRecoveryNotNeeded"
 	compositionOperationRecord    compositionOperation = "recordInventory"
 )
+
+var errSuperseded = errors.New("tombstone recovery operation superseded")
+
+type compositionOperation string
 
 type Options struct {
 	Enabled             bool
@@ -166,7 +163,7 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, fmt.Errorf("published synthesis has no UUID")
 	}
 
-	operation := nextCompositionOperation(comp)
+	operation := selectTombstoneRecoveryOperation(comp)
 	ctx = logr.NewContext(ctx, logger.WithValues("operation", operation))
 	switch operation {
 	case compositionOperationRecover:
@@ -188,8 +185,8 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 	return ctrl.Result{}, err
 }
 
-// nextCompositionOperation selects one idempotent operation without performing side effects.
-func nextCompositionOperation(comp *apiv1.Composition) compositionOperation {
+// selectTombstoneRecoveryOperation selects one idempotent operation without performing side effects.
+func selectTombstoneRecoveryOperation(comp *apiv1.Composition) compositionOperation {
 	if comp == nil || comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil {
 		return compositionOperationNone
 	}
@@ -206,6 +203,9 @@ func nextCompositionOperation(comp *apiv1.Composition) compositionOperation {
 	return compositionOperationNone
 }
 
+// getCurrentComposition reads the latest Composition before a write.
+// - Requires the Composition to exist, not be deleting, remain opted in, and keep the same current synthesis UUID.
+// - When requireReady is true, also requires the same Ready synthesis and ResourceSlice references used to build the inventory.
 func (c *tombstoneRecoveryController) getCurrentComposition(ctx context.Context, expected *apiv1.Composition, requireReady bool) (*apiv1.Composition, error) {
 	comp := &apiv1.Composition{}
 	if err := c.reader.Get(ctx, client.ObjectKeyFromObject(expected), comp); err != nil {
@@ -235,10 +235,16 @@ func (c *tombstoneRecoveryController) getCurrentComposition(ctx context.Context,
 
 func isInventoryRecordingStillValid(current, expected *apiv1.Synthesis) bool {
 	// Inventory is built from the captured Ready synthesis; stop if its eligibility or slice set changes before a Secret write.
-	return current != nil && expected != nil &&
-		current.Ready != nil && current.IsTombstoneRecoveryFinished() &&
-		current.Synthesized != nil && current.Synthesized.Equal(expected.Synthesized) &&
-		reflect.DeepEqual(current.ResourceSlices, expected.ResourceSlices)
+	if current == nil || expected == nil {
+		return false
+	}
+	if current.Ready == nil || !current.IsTombstoneRecoveryFinished() {
+		return false
+	}
+	if current.Synthesized == nil || !current.Synthesized.Equal(expected.Synthesized) {
+		return false
+	}
+	return reflect.DeepEqual(current.ResourceSlices, expected.ResourceSlices)
 }
 
 func getOrCreateRecoveryStatus(comp *apiv1.Composition) apiv1.TombstoneRecoveryStatus {
@@ -249,6 +255,12 @@ func getOrCreateRecoveryStatus(comp *apiv1.Composition) apiv1.TombstoneRecoveryS
 	return apiv1.TombstoneRecoveryStatus{SynthesisUUID: syn.UUID}
 }
 
+// recoverMissingTombstones:
+//  1. Lists inventory Secrets for the Composition lineage.
+//  2. Selects and validates the latest complete inventory.
+//  3. Reads every ResourceSlice from the current synthesis.
+//  4. Writes tombstones for historical resource identities missing from the current slices.
+//  5. Records the finished recovery decision and any new overflow-slice references.
 func (c *tombstoneRecoveryController) recoverMissingTombstones(ctx context.Context, comp *apiv1.Composition) error {
 	logger := logr.FromContextOrDiscard(ctx)
 	logger.Info("reading downstream inventory", "lineage", inventoryLineage(comp))

@@ -196,7 +196,7 @@ func (f *controllerTestFixture) restart() {
 
 // NotNeeded must not read downstream history.
 
-func TestNextCompositionOperation(t *testing.T) {
+func TestSelectTombstoneRecoveryOperation(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		comp *apiv1.Composition
@@ -244,7 +244,7 @@ func TestNextCompositionOperation(t *testing.T) {
 		}, want: compositionOperationRecover},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, nextCompositionOperation(tc.comp))
+			assert.Equal(t, tc.want, selectTombstoneRecoveryOperation(tc.comp))
 		})
 	}
 }
@@ -689,7 +689,7 @@ func TestTombstoneRecoveryOperatorRecoveryInventorySelection(t *testing.T) {
 			older := f.history("obsolete")
 			newer := older.DeepCopy()
 			newer.Annotations[inventoryCompositionNameAnnotation] = "replacement"
-			newer.Name = inventoryName("replacement", inventoryLineage(f.composition()), 0)
+			newer.Name = inventoryName(inventoryLineage(f.composition()), controllerTestUUID(3), 0)
 			newer.UID, newer.ResourceVersion = "newer-uid", ""
 			newer.Annotations[inventorySynthesisUUIDAnnotation] = controllerTestUUID(3)
 			newer.Annotations[inventorySynthesizedAnnotation] = f.composition().Status.CurrentSynthesis.Synthesized.Format(time.RFC3339)

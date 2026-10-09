@@ -3,8 +3,8 @@ package tombstonerecovery
 import (
 	"context"
 	"fmt"
-	"maps"
 	"reflect"
+	"sort"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/go-logr/logr"
@@ -30,6 +30,12 @@ func (c *tombstoneRecoveryController) recordInventory(ctx context.Context, comp 
 			return err
 		}
 	}
+	if err := c.verifyInventorySnapshot(ctx, comp, chunks); err != nil {
+		return err
+	}
+	if err := c.deleteOldInventorySnapshots(ctx, comp, chunks[0].Annotations[inventorySynthesisUUIDAnnotation]); err != nil {
+		return err
+	}
 	logr.FromContextOrDiscard(ctx).V(1).Info("inventory snapshot persisted", "chunkCount", len(chunks))
 	return nil
 }
@@ -50,42 +56,68 @@ func (c *tombstoneRecoveryController) writeInventoryChunk(ctx context.Context, c
 	if err != nil {
 		return fmt.Errorf("reading inventory Secret %q: %w", intended.Name, err)
 	}
-	existingTime, err := inventorySynthesized(existing)
-	if err != nil {
-		return err
-	}
-	intendedTime, err := inventorySynthesized(intended)
-	if err != nil {
-		return err
-	}
-	if existingTime.After(intendedTime) {
-		return fmt.Errorf("refusing to overwrite inventory Secret %q with an older source timestamp", existing.Name)
-	}
-	after := existing.DeepCopy()
-	after.Type = intended.Type
-	after.Data = intended.Data
-	if after.Labels == nil {
-		after.Labels = map[string]string{}
-	}
-	if after.Annotations == nil {
-		after.Annotations = map[string]string{}
-	}
-	maps.Copy(after.Labels, intended.Labels)
-	maps.Copy(after.Annotations, intended.Annotations)
-	if reflect.DeepEqual(existing, after) {
+	if inventorySecretMatches(existing, intended) {
 		return nil
 	}
-	// One synthesis describes one immutable snapshot, including its chunk boundaries.
-	if existing.Annotations[inventorySynthesisUUIDAnnotation] == intended.Annotations[inventorySynthesisUUIDAnnotation] {
-		return fmt.Errorf("inventory Secret %q has different contents or metadata for the same synthesis UUID", existing.Name)
-	}
-	if _, err := c.getCurrentComposition(ctx, comp, true); err != nil {
+	return fmt.Errorf("inventory Secret %q has different contents or metadata for synthesis UUID %q",
+		existing.Name, intended.Annotations[inventorySynthesisUUIDAnnotation])
+}
+
+func inventorySecretMatches(existing, intended *corev1.Secret) bool {
+	return existing.Type == intended.Type &&
+		reflect.DeepEqual(existing.Data, intended.Data) &&
+		reflect.DeepEqual(existing.Labels, intended.Labels) &&
+		reflect.DeepEqual(existing.Annotations, intended.Annotations)
+}
+
+func (c *tombstoneRecoveryController) verifyInventorySnapshot(ctx context.Context, comp *apiv1.Composition, intended []corev1.Secret) error {
+	items, err := c.readInventories(ctx, comp)
+	if err != nil {
 		return err
 	}
-	// Update carries the resourceVersion from Get; conflicting updates retry through reconciliation.
-	if err := c.downstream.Update(ctx, after); err != nil {
-		return fmt.Errorf("updating inventory Secret %q: %w", existing.Name, err)
+	uuid := intended[0].Annotations[inventorySynthesisUUIDAnnotation]
+	actual := make([]corev1.Secret, 0, len(intended))
+	for i := range items {
+		if items[i].Annotations[inventorySynthesisUUIDAnnotation] == uuid {
+			actual = append(actual, items[i])
+		}
 	}
-	logr.FromContextOrDiscard(ctx).Info("updated inventory chunk", "secretName", existing.Name)
+	if _, err := validateInventory(actual); err != nil {
+		return fmt.Errorf("verifying inventory snapshot: %w", err)
+	}
+	byName := map[string]*corev1.Secret{}
+	for i := range actual {
+		byName[actual[i].Name] = &actual[i]
+	}
+	for i := range intended {
+		existing := byName[intended[i].Name]
+		if existing == nil || !inventorySecretMatches(existing, &intended[i]) {
+			return fmt.Errorf("verifying inventory snapshot: Secret %q does not match intended contents", intended[i].Name)
+		}
+	}
+	return nil
+}
+
+func (c *tombstoneRecoveryController) deleteOldInventorySnapshots(ctx context.Context, comp *apiv1.Composition, currentUUID string) error {
+	items, err := c.readInventories(ctx, comp)
+	if err != nil {
+		return err
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Name < items[j].Name
+	})
+	for i := range items {
+		item := &items[i]
+		if item.Annotations[inventorySynthesisUUIDAnnotation] == currentUUID {
+			continue
+		}
+		if _, err := c.getCurrentComposition(ctx, comp, true); err != nil {
+			return err
+		}
+		if err := c.downstream.Delete(ctx, item, &client.Preconditions{UID: &item.UID}); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("deleting old inventory Secret %q: %w", item.Name, err)
+		}
+		logr.FromContextOrDiscard(ctx).Info("deleted old inventory chunk", "secretName", item.Name)
+	}
 	return nil
 }

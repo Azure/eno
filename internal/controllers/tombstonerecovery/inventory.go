@@ -8,7 +8,6 @@ import (
 	"maps"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
@@ -17,24 +16,29 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 const (
-	inventoryNamespace      = "kube-system"
-	inventoryLineageLabel   = "eno.azure.io/inventory-lineage"
-	inventoryDataKey        = "inventory.json"
-	inventoryFormatVersion  = "1"
-	inventoryMaxDataBytes   = 1 << 20
+	// Secret storage and lookup.
+	inventoryNamespace     = "kube-system"
+	inventoryLineageLabel  = "eno.azure.io/inventory-lineage"
+	inventoryDataKey       = "inventory.json"
+	inventoryMaxDataBytes  = 1 << 20
+	inventoryFormatVersion = "1"
+
+	// Resource metadata retained in each inventory entry.
 	inventoryReadinessGroup = "eno.azure.io/readiness-group"
 	inventoryDeletionGroup  = "eno.azure.io/deletion-group"
 
+	// Snapshot source metadata written on every Secret chunk.
 	inventoryFormatVersionAnnotation        = "eno.azure.io/inventory-format-version"
 	inventoryCompositionNameAnnotation      = "eno.azure.io/inventory-composition-name"
 	inventoryCompositionNamespaceAnnotation = "eno.azure.io/inventory-composition-namespace"
 	inventorySynthesizerNameAnnotation      = "eno.azure.io/inventory-synthesizer-name"
 	inventorySynthesisUUIDAnnotation        = "eno.azure.io/inventory-synthesis-uuid"
 	inventorySynthesizedAnnotation          = "eno.azure.io/inventory-synthesized"
+
+	// Chunk ordering and completeness metadata.
 	inventoryChunkIndexAnnotation           = "eno.azure.io/inventory-chunk-index"
 	inventoryChunkCountAnnotation           = "eno.azure.io/inventory-chunk-count"
 )
@@ -66,49 +70,84 @@ func inventoryLineage(comp *apiv1.Composition) string {
 	return hex.EncodeToString(hash[:16])
 }
 
-func inventoryName(compositionName, lineage string, chunkIndex int) string {
-	suffix := "-" + lineage + "-" + strconv.Itoa(chunkIndex)
-	prefix := compositionName
-	if maxPrefix := validation.DNS1123SubdomainMaxLength - len(suffix); len(prefix) > maxPrefix {
-		prefix = strings.TrimRight(prefix[:maxPrefix], ".-")
-	}
-	return prefix + suffix
+func inventoryName(lineage, synthesisUUID string, chunkIndex int) string {
+	return "eno-inventory-" + lineage + "-" + synthesisUUID + "-" + strconv.Itoa(chunkIndex)
 }
 
 func selectInventory(items []corev1.Secret) ([]corev1.Secret, error) {
-	var latestTime time.Time
-	var latestUUID string
+	if len(items) == 0 {
+		return nil, nil
+	}
+	byUUID := map[string][]corev1.Secret{}
 	for i := range items {
 		item := &items[i]
-		synthesized, err := inventorySynthesized(item)
-		if err != nil {
-			return nil, &invalidInventoryError{fmt.Errorf("Secret %s/%s: %w", item.Namespace, item.Name, err)}
-		}
-		if item.Annotations[inventorySynthesisUUIDAnnotation] == "" {
+		uuid := item.Annotations[inventorySynthesisUUIDAnnotation]
+		if uuid == "" {
 			return nil, &invalidInventoryError{fmt.Errorf("Secret %s/%s has no source synthesis UUID", item.Namespace, item.Name)}
 		}
-		if latestUUID == "" || synthesized.After(latestTime) {
-			latestTime = synthesized
-			latestUUID = item.Annotations[inventorySynthesisUUIDAnnotation]
-		}
+		byUUID[uuid] = append(byUUID[uuid], *item)
 	}
 	var selected []corev1.Secret
-	for i := range items {
-		item := &items[i]
-		synthesized, err := inventorySynthesized(item)
+	var latestTime time.Time
+	var latestUUID string
+	incomplete := false
+	for uuid, inventorySecrets := range byUUID {
+		synthesized, err := inventoryGroupSynthesized(inventorySecrets)
 		if err != nil {
 			return nil, &invalidInventoryError{err}
 		}
-		uuid := item.Annotations[inventorySynthesisUUIDAnnotation]
-		if synthesized.Equal(latestTime) && uuid != latestUUID {
+		if !hasAllInventoryChunks(inventorySecrets) {
+			incomplete = true
+			continue
+		}
+		if latestUUID != "" && synthesized.Equal(latestTime) && uuid != latestUUID {
 			return nil, &invalidInventoryError{fmt.Errorf("different synthesis UUIDs share the latest inventory timestamp %s", latestTime.Format(time.RFC3339))}
 		}
-		if uuid == latestUUID {
-			// Keep all chunks for this UUID so inconsistent timestamps cannot hide a partial snapshot.
-			selected = append(selected, *item)
+		if latestUUID == "" || synthesized.After(latestTime) {
+			latestTime = synthesized
+			latestUUID = uuid
+			selected = inventorySecrets
 		}
 	}
+	if len(selected) == 0 && incomplete {
+		return nil, &invalidInventoryError{fmt.Errorf("no complete inventory snapshot found")}
+	}
 	return selected, nil
+}
+
+func inventoryGroupSynthesized(items []corev1.Secret) (time.Time, error) {
+	var synthesized time.Time
+	for i := range items {
+		current, err := inventorySynthesized(&items[i])
+		if err != nil {
+			return time.Time{}, fmt.Errorf("Secret %s/%s: %w", items[i].Namespace, items[i].Name, err)
+		}
+		if synthesized.IsZero() {
+			synthesized = current
+		} else if !synthesized.Equal(current) {
+			return time.Time{}, fmt.Errorf("synthesis UUID %q has inconsistent source timestamps", items[i].Annotations[inventorySynthesisUUIDAnnotation])
+		}
+	}
+	return synthesized, nil
+}
+
+func hasAllInventoryChunks(items []corev1.Secret) bool {
+	if len(items) == 0 {
+		return false
+	}
+	_, count, err := inventoryChunkPosition(&items[0])
+	if err != nil || len(items) != count {
+		return false
+	}
+	indexes := map[int]struct{}{}
+	for i := range items {
+		index, currentCount, err := inventoryChunkPosition(&items[i])
+		if err != nil || currentCount != count {
+			return false
+		}
+		indexes[index] = struct{}{}
+	}
+	return len(indexes) == count
 }
 
 func decodeInventorySnapshot(items []corev1.Secret) (resources []inventoryResource, err error) {
@@ -258,7 +297,7 @@ func makeInventory(comp *apiv1.Composition, slices []apiv1.ResourceSlice) ([]cor
 	for index, payload := range payloads {
 		secrets = append(secrets, corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      inventoryName(comp.Name, lineage, index),
+				Name:      inventoryName(lineage, syn.UUID, index),
 				Namespace: inventoryNamespace,
 				Labels:    map[string]string{inventoryLineageLabel: lineage},
 				Annotations: map[string]string{
