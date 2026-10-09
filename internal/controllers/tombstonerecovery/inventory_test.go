@@ -18,7 +18,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -105,7 +104,6 @@ func TestTombstoneRecoveryInventoryChunkValidation(t *testing.T) {
 				chunks[1].Annotations[inventoryChunkCountAnnotation] = "4"
 			case "mixed source":
 				chunks[1].Annotations[inventoryCompositionNameAnnotation] = "other"
-				chunks[1].Name = inventoryName("other", inventoryLineage(comp), 1)
 			case "duplicate identity":
 				chunks[1].Data = chunks[0].DeepCopy().Data
 			}
@@ -123,18 +121,18 @@ func TestTombstoneRecoveryInventoryChunkValidation(t *testing.T) {
 			assert.Equal(t, before.Items, chunks)
 		})
 	}
-	t.Run("select newest even if incomplete", func(t *testing.T) {
+	t.Run("ignore incomplete newer upload", func(t *testing.T) {
 		old := comp.DeepCopy()
 		old.Status.CurrentSynthesis.UUID = "old"
 		old.Status.CurrentSynthesis.Synthesized = &metav1.Time{Time: comp.Status.CurrentSynthesis.Synthesized.Add(-time.Minute)}
 		older := inventoryTestChunkedSnapshot(t, old)
-		items := []corev1.Secret{base[0], older[1], older[2]}
+		items := append([]corev1.Secret{base[0]}, older...)
 		selected, err := selectInventory(items)
 		require.NoError(t, err)
-		require.Len(t, selected, 1)
-		assert.Equal(t, comp.Status.CurrentSynthesis.UUID, selected[0].Annotations[inventorySynthesisUUIDAnnotation])
+		require.Len(t, selected, 3)
+		assert.Equal(t, old.Status.CurrentSynthesis.UUID, selected[0].Annotations[inventorySynthesisUUIDAnnotation])
 		_, err = decodeInventorySnapshot(selected)
-		require.ErrorContains(t, err, "expected 3")
+		require.NoError(t, err)
 	})
 	t.Run("ignore old extra chunks after shrink", func(t *testing.T) {
 		next := comp.DeepCopy()
@@ -278,7 +276,8 @@ func TestTombstoneRecoveryInventoryNaming(t *testing.T) {
 	hash := sha256.Sum256([]byte(comp.Namespace + "/" + comp.Spec.Synthesizer.Name))
 	lineage := hex.EncodeToString(hash[:16])
 	assert.Equal(t, lineage, inventoryLineage(comp))
-	assert.Equal(t, comp.Name+"-"+lineage+"-0", inventoryName(comp.Name, lineage, 0))
+	assert.Equal(t, "eno-inventory-"+lineage+"-"+comp.Status.CurrentSynthesis.UUID+"-0",
+		inventoryName(lineage, comp.Status.CurrentSynthesis.UUID, 0))
 
 	for _, tt := range []struct {
 		name        string
@@ -289,7 +288,7 @@ func TestTombstoneRecoveryInventoryNaming(t *testing.T) {
 		{"replacement composition", func(c *apiv1.Composition) {
 			c.Name, c.UID = "replacement", "new-uid"
 			c.Labels, c.Annotations = nil, nil
-		}, true, false},
+		}, true, true},
 		{"different namespace", func(c *apiv1.Composition) {
 			c.Namespace = "other"
 		}, false, false},
@@ -298,22 +297,20 @@ func TestTombstoneRecoveryInventoryNaming(t *testing.T) {
 		}, false, false},
 		{"different synthesis", func(c *apiv1.Composition) {
 			c.Status.CurrentSynthesis.UUID = "00000000-0000-4000-8000-000000000002"
-		}, true, true},
+		}, true, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			other := comp.DeepCopy()
 			tt.change(other)
 			assert.Equal(t, tt.sameLineage, inventoryLineage(comp) == inventoryLineage(other))
-			assert.Equal(t, tt.sameName, inventoryName(comp.Name, lineage, 0) == inventoryName(other.Name, inventoryLineage(other), 0))
+			assert.Equal(t, tt.sameName,
+				inventoryName(lineage, comp.Status.CurrentSynthesis.UUID, 0) ==
+					inventoryName(inventoryLineage(other), other.Status.CurrentSynthesis.UUID, 0))
 		})
 	}
-	for _, name := range []string{strings.Repeat("a", 253), strings.Repeat("a", 218) + "." + strings.Repeat("b", 34)} {
-		for _, index := range []int{0, 10, 1000} {
-			got := inventoryName(name, lineage, index)
-			assert.LessOrEqual(t, len(got), validation.DNS1123SubdomainMaxLength)
-			assert.Empty(t, validation.IsDNS1123Subdomain(got))
-			assert.True(t, strings.HasSuffix(got, "-"+lineage+"-"+strconv.Itoa(index)))
-		}
+	for _, index := range []int{0, 10, 1000} {
+		got := inventoryName(lineage, comp.Status.CurrentSynthesis.UUID, index)
+		assert.True(t, strings.HasSuffix(got, "-"+strconv.Itoa(index)))
 	}
 }
 

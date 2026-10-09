@@ -140,16 +140,28 @@ func TestInventoryRecordingPartialFailureAndShrink(t *testing.T) {
 				},
 			})
 			require.ErrorIs(t, f.reconcile(), failure)
-			partial, err := selectInventory(f.inventories())
-			require.NoError(t, err)
-			require.Len(t, partial, 1)
-			_, err = decodeInventorySnapshot(partial)
-			require.ErrorContains(t, err, "expected 3")
-			first := partial[0].DeepCopy()
+			items := f.inventories()
+			var first *corev1.Secret
+			for i := range items {
+				if items[i].Annotations[inventorySynthesisUUIDAnnotation] == controllerTestUUID(2) {
+					first = items[i].DeepCopy()
+					break
+				}
+			}
+			require.NotNil(t, first)
+			selected, err := selectInventory(items)
+			if updating {
+				require.NoError(t, err)
+				require.Len(t, selected, 3)
+				assert.Equal(t, controllerTestUUID(1), selected[0].Annotations[inventorySynthesisUUIDAnnotation])
+			} else {
+				require.ErrorContains(t, err, "no complete inventory snapshot")
+				assert.Empty(t, selected)
+			}
 			f.restart()
 			f.reconcileEvent()
 			require.Equal(t, 4, writes, "retry must skip the already-persisted first chunk")
-			selected, err := selectInventory(f.inventories())
+			selected, err = selectInventory(f.inventories())
 			require.NoError(t, err)
 			require.Len(t, selected, 3)
 			decoded, err := decodeInventorySnapshot(selected)
@@ -166,7 +178,7 @@ func TestInventoryRecordingPartialFailureAndShrink(t *testing.T) {
 			comp.Status.CurrentSynthesis.ResourceSlices = nil
 			require.NoError(t, f.upstream.Status().Update(t.Context(), comp))
 			f.reconcileEvent()
-			require.Len(t, f.inventories(), 3, "recording does not garbage-collect leftover chunks")
+			require.Len(t, f.inventories(), 1, "the verified replacement deletes all older chunks")
 			f.assertInventory(3)
 		})
 	}
@@ -228,46 +240,46 @@ func TestInventoryRecordingFreshnessBeforeWrites(t *testing.T) {
 	}
 }
 
-func TestInventoryRecordingConflicts(t *testing.T) {
-	for _, mode := range []string{"update conflict", "create AlreadyExists"} {
-		t.Run(mode, func(t *testing.T) {
-			f := recordingTestFixture(t, "desired")
-			var existing *corev1.Secret
-			if mode == "update conflict" {
-				existing = f.history("old")
+func TestInventoryRecordingCreateAlreadyExists(t *testing.T) {
+	f := recordingTestFixture(t, "desired")
+	intercepted := false
+	f.controller.downstream = interceptor.NewClient(f.downstream, interceptor.Funcs{
+		Create: func(ctx context.Context, cli client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			if !intercepted {
+				intercepted = true
+				require.NoError(t, cli.Create(ctx, obj.DeepCopyObject().(client.Object)))
 			}
-			intercepted := false
-			f.controller.downstream = interceptor.NewClient(f.downstream, interceptor.Funcs{
-				Create: func(ctx context.Context, cli client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
-					if !intercepted {
-						intercepted = true
-						require.NoError(t, cli.Create(ctx, obj.DeepCopyObject().(client.Object)))
-					}
-					return cli.Create(ctx, obj, opts...)
-				},
-				Update: func(ctx context.Context, cli client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
-					if !intercepted {
-						intercepted = true
-						existing.Annotations["example.com/concurrent"] = "preserve"
-						require.NoError(t, cli.Update(ctx, existing))
-					}
-					return cli.Update(ctx, obj, opts...)
-				},
-			})
-			err := f.reconcile()
-			if mode == "update conflict" {
-				require.True(t, apierrors.IsConflict(err), "stale update must be rejected: %v", err)
-				f.assertInventory(1, "old")
-			} else {
-				require.True(t, apierrors.IsAlreadyExists(err), "duplicate create must retry: %v", err)
+			return cli.Create(ctx, obj, opts...)
+		},
+	})
+	require.True(t, apierrors.IsAlreadyExists(f.reconcile()))
+	f.reconcileEvent()
+	f.assertInventory(2, "desired")
+}
+
+func TestInventoryRecordingRetriesOldSnapshotDeletion(t *testing.T) {
+	f := recordingTestFixture(t, "desired")
+	old := f.history("old")
+	failure := apierrors.NewServiceUnavailable("delete unavailable")
+	deletes := 0
+	f.controller.downstream = interceptor.NewClient(f.downstream, interceptor.Funcs{
+		Delete: func(ctx context.Context, cli client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+			deletes++
+			if deletes == 1 {
+				return failure
 			}
-			f.reconcileEvent()
-			f.assertInventory(2, "desired")
-			if mode == "update conflict" {
-				assert.Equal(t, "preserve", f.inventories()[0].Annotations["example.com/concurrent"])
-			}
-		})
-	}
+			return cli.Delete(ctx, obj, opts...)
+		},
+	})
+	require.ErrorIs(t, f.reconcile(), failure)
+	require.Len(t, f.inventories(), 2, "cleanup failure must retain both complete snapshots")
+	selected, err := selectInventory(f.inventories())
+	require.NoError(t, err)
+	assert.Equal(t, controllerTestUUID(2), selected[0].Annotations[inventorySynthesisUUIDAnnotation])
+	require.NoError(t, f.downstream.Get(t.Context(), client.ObjectKeyFromObject(old), &corev1.Secret{}))
+	f.reconcileEvent()
+	require.Equal(t, 2, deletes)
+	f.assertInventory(2, "desired")
 }
 
 func TestInventoryRecordingInvalidInputs(t *testing.T) {
@@ -331,27 +343,20 @@ func TestInventoryRecordingInvalidInputs(t *testing.T) {
 	}
 }
 
-func TestInventoryRecordingPreservesConflictingSecrets(t *testing.T) {
-	for _, mode := range []string{"same UUID different data", "newer snapshot"} {
-		t.Run(mode, func(t *testing.T) {
-			f := recordingTestFixture(t, "desired")
-			secret := f.history("old")
-			switch mode {
-			case "same UUID different data":
-				secret.Annotations[inventorySynthesisUUIDAnnotation] = controllerTestUUID(2)
-				secret.Annotations[inventorySynthesizedAnnotation] = f.composition().Status.CurrentSynthesis.Synthesized.Format(time.RFC3339)
-			case "newer snapshot":
-				secret.Annotations[inventorySynthesizedAnnotation] = f.composition().Status.CurrentSynthesis.Synthesized.Add(time.Minute).Format(time.RFC3339)
-			}
-			require.NoError(t, f.downstream.Update(t.Context(), secret))
-			before := f.inventories()
-			require.Error(t, f.reconcile())
-			assert.Equal(t, before, f.inventories(), "rejected replacement must not change any Secret")
-		})
-	}
+func TestInventoryRecordingPreservesConflictingSecret(t *testing.T) {
+	f := recordingTestFixture(t, "desired")
+	intended, err := makeInventory(f.composition(), []apiv1.ResourceSlice{*f.slice("desired")})
+	require.NoError(t, err)
+	require.Len(t, intended, 1)
+	collision := intended[0].DeepCopy()
+	collision.Data[inventoryDataKey] = []byte("[]")
+	require.NoError(t, f.downstream.Create(t.Context(), collision))
+	before := f.inventories()
+	require.ErrorContains(t, f.reconcile(), "different contents or metadata")
+	assert.Equal(t, before, f.inventories(), "rejected collision must not change any Secret")
 }
 
-func TestInventoryRecordingSupersededBeforeUpdate(t *testing.T) {
+func TestInventoryRecordingSupersededBeforeCreate(t *testing.T) {
 	f := recordingTestFixture(t, "desired")
 	f.history("old")
 	before := f.inventories()
@@ -363,8 +368,8 @@ func TestInventoryRecordingSupersededBeforeUpdate(t *testing.T) {
 			})
 			return err
 		},
-		Update: func(context.Context, client.WithWatch, client.Object, ...client.UpdateOption) error {
-			t.Error("superseded recording must not update the Secret")
+		Create: func(context.Context, client.WithWatch, client.Object, ...client.CreateOption) error {
+			t.Error("superseded recording must not create the Secret")
 			return fmt.Errorf("unexpected write")
 		},
 	})
@@ -389,11 +394,13 @@ func TestInventoryRecoverySecretFailureDecisions(t *testing.T) {
 			case "mixed timestamp":
 				chunks[1].Annotations[inventorySynthesizedAnnotation] = f.composition().Status.CurrentSynthesis.Synthesized.Add(-time.Minute).Format(time.RFC3339)
 			case "tied snapshots":
-				other := chunks[0].DeepCopy()
-				other.Name = inventoryName("other", inventoryLineage(f.composition()), 0)
-				other.Annotations[inventoryCompositionNameAnnotation] = "other"
-				other.Annotations[inventorySynthesisUUIDAnnotation] = "other"
-				chunks = append(chunks, *other)
+				for i := range chunks {
+					other := chunks[i].DeepCopy()
+					other.Name = inventoryName(inventoryLineage(f.composition()), "other", i)
+					other.Annotations[inventoryCompositionNameAnnotation] = "other"
+					other.Annotations[inventorySynthesisUUIDAnnotation] = "other"
+					chunks = append(chunks, *other)
+				}
 			case "malformed JSON":
 				chunks[0].Data[inventoryDataKey] = []byte("{")
 			case "read failure":
