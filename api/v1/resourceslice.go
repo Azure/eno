@@ -7,6 +7,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// TombstoneRecoveryLabelKey marks overflow slices created by tombstone recovery.
+const TombstoneRecoveryLabelKey = "eno.azure.io/tombstone-recovery"
+
 // +kubebuilder:object:root=true
 type ResourceSliceList struct {
 	metav1.TypeMeta `json:",inline"`

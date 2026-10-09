@@ -1,4 +1,4 @@
-package backup
+package tombstonerecovery
 
 import (
 	"crypto/sha256"

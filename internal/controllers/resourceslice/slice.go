@@ -48,6 +48,8 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, nil
 	}
 
+	recoveryPending := comp.RecoveryEnabled() && comp.DeletionTimestamp == nil &&
+		!comp.Status.CurrentSynthesis.IsTombstoneRecoveryFinished()
 	snapshot := statusSnapshot{Reconciled: true, Ready: true}
 
 	for _, ref := range comp.Status.CurrentSynthesis.ResourceSlices {
@@ -74,15 +76,24 @@ func (s *sliceController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{}, err
 		}
 
+		if recoveryPending && slice.DeletionTimestamp != nil {
+			// Recovery cannot consume this slice, while its finalizer waits for reconciliation.
+			logger.Info("current resource slice is terminating during recovery; requesting resynthesis", "resourceSliceName", slice.Name)
+			return s.requestResynthesis(ctx, comp)
+		}
+
 		// All active slices should be orphaned if composition deletion was caused by symphony deletion
 		if comp.Labels != nil && comp.Labels["eno.azure.io/symphony-deleting"] == "true" {
 			continue
 		}
 
 		// Handle a case where the reconciliation controller hasn't updated the slice's status yet
-		if len(slice.Status.Resources) == 0 && len(slice.Spec.Resources) > 0 {
+		if len(slice.Status.Resources) < len(slice.Spec.Resources) {
 			snapshot.Ready = false
 			snapshot.Reconciled = false
+			if recoveryPending {
+				continue // A later slice may be terminating and require resynthesis.
+			}
 			break // no need to check the other slices
 		}
 
@@ -161,6 +172,13 @@ func (s *sliceController) handleMissingSlice(ctx context.Context, comp *apiv1.Co
 
 func processCompositionTransition(ctx context.Context, comp *apiv1.Composition, snapshot statusSnapshot) (modified bool) {
 	logger := logr.FromContextOrDiscard(ctx)
+
+	if syn := comp.Status.CurrentSynthesis; syn != nil && comp.RecoveryEnabled() &&
+		comp.DeletionTimestamp == nil && !syn.IsTombstoneRecoveryFinished() {
+		snapshot.Ready = false
+		snapshot.Reconciled = false
+		logger.Info("withholding composition readiness while tombstone recovery is unfinished", "synthesisUUID", syn.UUID)
+	}
 
 	synthesisMatches := comp.Status.CurrentSynthesis == nil || ((comp.Status.CurrentSynthesis.Reconciled != nil) == snapshot.Reconciled && (comp.Status.CurrentSynthesis.Ready != nil) == snapshot.Ready)
 	errorsMatch := comp.Status.Simplified == nil || comp.Status.Simplified.Status != "Reconciling" || comp.Status.Simplified.Error == snapshot.Error
@@ -249,9 +267,9 @@ func (s *sliceController) requestResynthesis(ctx context.Context, comp *apiv1.Co
 
 	comp.ForceResynthesis()
 	if err := s.client.Update(ctx, comp); err != nil {
-		return ctrl.Result{}, fmt.Errorf("requesting resynthesis for empty or missing resource slice references: %w", err)
+		return ctrl.Result{}, fmt.Errorf("requesting resynthesis for unavailable resource slices: %w", err)
 	}
 
-	logger.Info("successfully requested resynthesis for empty or missing resource slice references")
+	logger.Info("successfully requested resynthesis for unavailable resource slices")
 	return ctrl.Result{}, nil
 }

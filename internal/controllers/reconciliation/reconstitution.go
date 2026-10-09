@@ -24,20 +24,22 @@ import (
 //
 // It's implemented as an untracked controller that runs as a Source of the reconciliation controller.
 type reconstitutionSource struct {
-	client          client.Client
-	nonCachedReader client.Reader
-	cache           *resource.Cache
+	client                       client.Client
+	nonCachedReader              client.Reader
+	cache                        *resource.Cache
+	enableTombstoneRecovery      bool
 }
 
-func newReconstitutionSource(mgr ctrl.Manager, resourceFilter cel.Program) (source.TypedSource[resource.Request], *resource.Cache, error) {
+func newReconstitutionSource(mgr ctrl.Manager, resourceFilter cel.Program, enableTombstoneRecovery bool) (source.TypedSource[resource.Request], *resource.Cache, error) {
 	cache := resource.Cache{ResourceFilter: resourceFilter}
 	return source.TypedFunc[resource.Request](func(ctx context.Context, queue workqueue.TypedRateLimitingInterface[resource.Request]) error {
 		cache.SetQueue(queue)
 
 		r := &reconstitutionSource{
-			client:          mgr.GetClient(),
-			nonCachedReader: mgr.GetAPIReader(),
-			cache:           &cache,
+			client:                       mgr.GetClient(),
+			nonCachedReader:              mgr.GetAPIReader(),
+			cache:                        &cache,
+			enableTombstoneRecovery:      enableTombstoneRecovery,
 		}
 
 		// This controller's queue uses composition name/namespace as its key
@@ -89,6 +91,25 @@ func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) 
 	logger = logger.WithValues("compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", comp.Spec.Synthesizer.Name,
 		"operationOrigin", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	ctx = logr.NewContext(ctx, logger)
+
+	// Only Compositions owned by this reconciler's recovery controller wait for recovery; deletion always bypasses the gate.
+	if syn := comp.Status.CurrentSynthesis; comp.RecoveryEnabled() && comp.DeletionTimestamp == nil &&
+		syn != nil && syn.Synthesized != nil && !syn.IsTombstoneRecoveryFinished() {
+		if r.enableTombstoneRecovery {
+			logger.Info("waiting for tombstone recovery preparation", "synthesisUUID", syn.UUID)
+			return ctrl.Result{}, nil
+		}
+		reason := apiv1.TombstoneRecoveryOperatorNotEnabled
+		before := comp.DeepCopy()
+		syn.TombstoneRecoveryStatus = &apiv1.TombstoneRecoveryStatus{
+			Status: true, Reason: reason, SynthesisUUID: syn.UUID,
+		}
+		// The resourceVersion precondition protects against supersession, deletion, and concurrent recovery decisions.
+		if err := r.client.Status().Patch(ctx, comp, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
+			return ctrl.Result{}, fmt.Errorf("recording skipped tombstone recovery: %w", err)
+		}
+		logger.Info("recorded skipped tombstone recovery", "synthesisUUID", syn.UUID, "reason", reason)
+	}
 
 	// The reconciliation controller assumes that the previous synthesis will be loaded first
 	logger.Info("populating cache with previous synthesis")

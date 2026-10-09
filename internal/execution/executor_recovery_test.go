@@ -90,6 +90,8 @@ func TestRecoveryHistoryFetch(t *testing.T) {
 		noCurrent bool
 		refs      []*apiv1.ResourceSliceRef
 		inherited bool
+		completed bool
+		reason    string
 		wantFlag  bool
 		wantNames []string
 		wantReads []string
@@ -98,9 +100,14 @@ func TestRecoveryHistoryFetch(t *testing.T) {
 		{name: "no-current", noCurrent: true, wantFlag: true},
 		{name: "nil-reference-list"},
 		{name: "empty-reference-list", refs: []*apiv1.ResourceSliceRef{}},
-		{name: "empty-history-does-not-inherit", inherited: true},
+		{name: "unfinished-recovery-is-inherited", inherited: true, wantFlag: true},
+		{name: "completed-recovery-is-not-inherited", inherited: true, completed: true},
+		{name: "disabled-recovery-is-inherited", inherited: true, completed: true, reason: apiv1.TombstoneRecoveryOperatorNotEnabled, wantFlag: true},
+		{name: "disabled-without-obligation", completed: true, reason: apiv1.TombstoneRecoveryOperatorNotEnabled},
+		{name: "inventory-not-found-is-not-inherited", inherited: true, completed: true, reason: "InventoryNotFound"},
+		{name: "inventory-invalid-is-not-inherited", inherited: true, completed: true, reason: "InventoryInvalid"},
 		{name: "healthy", refs: recoveryRefs("a", "b"), wantNames: []string{"a", "b"}, wantReads: []string{"a", "b"}},
-		{name: "healthy-does-not-inherit", refs: recoveryRefs("a", "b"), inherited: true, wantNames: []string{"a", "b"}, wantReads: []string{"a", "b"}},
+		{name: "healthy-inherits-unfinished-recovery", refs: recoveryRefs("a", "b"), inherited: true, wantFlag: true, wantNames: []string{"a", "b"}, wantReads: []string{"a", "b"}},
 		{name: "nil-entry-only", refs: []*apiv1.ResourceSliceRef{nil}, wantFlag: true},
 		{name: "empty-name-only", refs: recoveryRefs(""), wantFlag: true},
 		{name: "named-not-found", refs: recoveryRefs("missing"), wantFlag: true, wantReads: []string{"missing"}},
@@ -133,6 +140,13 @@ func TestRecoveryHistoryFetch(t *testing.T) {
 			}
 			if tt.noCurrent {
 				comp.Status.CurrentSynthesis = nil
+			} else if tt.completed {
+				comp.Status.CurrentSynthesis.TombstoneRecoveryStatus = &apiv1.TombstoneRecoveryStatus{
+					Status: true, SynthesisUUID: "baseline-uuid", Reason: "FinishedTombstoneRecovery",
+				}
+				if tt.reason != "" {
+					comp.Status.CurrentSynthesis.TombstoneRecoveryStatus.Reason = tt.reason
+				}
 			}
 			before := comp.DeepCopy()
 			a, b := recoverySlice(t, "a", recoveryObject("a")), recoverySlice(t, "b", recoveryObject("b"))
@@ -362,16 +376,21 @@ func TestRecoveryExecutorPublication(t *testing.T) {
 		refs      []*apiv1.ResourceSliceRef
 		inherited bool
 		outputs   []string
+		completed bool
+		reason    string
 		wantFlag  bool
 		want      map[string]bool
 	}{
 		{name: "healthy-false", refs: recoveryRefs("history-a", "history-b"), outputs: []string{"a", "b"}, want: map[string]bool{"a": false, "b": false}},
-		{name: "healthy-does-not-inherit", refs: recoveryRefs("history-a", "history-b"), inherited: true, outputs: []string{"a", "b"}, want: map[string]bool{"a": false, "b": false}},
+		{name: "healthy-inherits-unfinished-recovery", refs: recoveryRefs("history-a", "history-b"), inherited: true, wantFlag: true, outputs: []string{"a", "b"}, want: map[string]bool{"a": false, "b": false}},
+		{name: "healthy-does-not-inherit-completed-recovery", refs: recoveryRefs("history-a", "history-b"), inherited: true, completed: true, outputs: []string{"a", "b"}, want: map[string]bool{"a": false, "b": false}},
+		{name: "healthy-inherits-disabled-recovery", refs: recoveryRefs("history-a", "history-b"), inherited: true, completed: true, reason: apiv1.TombstoneRecoveryOperatorNotEnabled, wantFlag: true, outputs: []string{"a", "b"}, want: map[string]bool{"a": false, "b": false}},
+		{name: "zero-output-inherits-disabled-recovery", inherited: true, completed: true, reason: apiv1.TombstoneRecoveryOperatorNotEnabled, wantFlag: true, want: map[string]bool{}},
 		{name: "new-composition", noCurrent: true, outputs: []string{"d"}, wantFlag: true, want: map[string]bool{"d": false}},
 		{name: "zero-output-with-missing-history", refs: recoveryRefs("history-a", "missing-c", "history-b"), wantFlag: true, want: map[string]bool{"a": true, "b": true}},
 		{name: "zero-output-all-unavailable", refs: []*apiv1.ResourceSliceRef{nil, {}, {Name: "missing-c"}}, wantFlag: true, want: map[string]bool{}},
 		{name: "zero-output-empty-reference-list", refs: []*apiv1.ResourceSliceRef{}, want: map[string]bool{}},
-		{name: "zero-output-does-not-inherit", inherited: true, want: map[string]bool{}},
+		{name: "zero-output-inherits-unfinished-recovery", inherited: true, wantFlag: true, want: map[string]bool{}},
 		{
 			name:    "mixed-history",
 			refs:    []*apiv1.ResourceSliceRef{{Name: "history-a"}, nil, {}, {Name: "missing-c"}, {Name: "history-b"}},
@@ -383,6 +402,13 @@ func TestRecoveryExecutorPublication(t *testing.T) {
 			f := newRecoveryFixture(tt.refs, tt.inherited)
 			if tt.noCurrent {
 				f.comp.Status.CurrentSynthesis = nil
+			} else if tt.completed {
+				f.comp.Status.CurrentSynthesis.TombstoneRecoveryStatus = &apiv1.TombstoneRecoveryStatus{
+					Status: true, SynthesisUUID: "baseline-uuid", Reason: "FinishedTombstoneRecovery",
+				}
+				if tt.reason != "" {
+					f.comp.Status.CurrentSynthesis.TombstoneRecoveryStatus.Reason = tt.reason
+				}
 			}
 			a := recoverySlice(t, "history-a", recoveryObject("a"))
 			b := recoverySlice(t, "history-b", recoveryObject("b"))

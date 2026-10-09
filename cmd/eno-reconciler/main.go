@@ -17,6 +17,7 @@ import (
 	"github.com/Azure/eno/internal/cel"
 	"github.com/Azure/eno/internal/controllers/liveness"
 	"github.com/Azure/eno/internal/controllers/reconciliation"
+	"github.com/Azure/eno/internal/controllers/tombstonerecovery"
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/k8s"
 	"github.com/Azure/eno/internal/logging"
@@ -62,6 +63,7 @@ func run() error {
 	flag.StringVar(&compositionSelector, "composition-label-selector", labels.Everything().String(), "Optional label selector for compositions to be reconciled")
 	flag.StringVar(&compositionNamespace, "composition-namespace", metav1.NamespaceAll, "Optional namespace to limit compositions that will be reconciled")
 	flag.StringVar(&resourceFilter, "resource-filter", "", "Optional CEL filter expression for resources within compositions to be reconciled")
+	flag.BoolVar(&recOpts.EnableTombstoneRecovery, "enable-tombstone-recovery", false, "Recover missing tombstones before reconciling synthesized resources")
 	flag.DurationVar(&namespaceCreationGracePeriod, "ns-creation-grace-period", time.Second, "A namespace is assumed to be missing if it doesn't exist once one of its resources has existed for this long")
 	flag.BoolVar(&namespaceCleanup, "namespace-cleanup", true, "Clean up orphaned resources caused by namespace force-deletions")
 	flag.BoolVar(&recOpts.FailOpen, "fail-open", false, "Report that resources are reconciled once they've been seen, even if reconciliation failed. Overridden by individual resources with 'eno.azure.io/fail-open: true|false'")
@@ -146,6 +148,20 @@ func run() error {
 		}
 	}
 
+	var recoveryOpts tombstonerecovery.Options
+	if recOpts.EnableTombstoneRecovery {
+		recoveryOpts, err = validateTombstoneRecoveryOptions(recOpts.EnableTombstoneRecovery, compositionNamespace)
+		if err != nil {
+			return err
+		}
+		recoveryOpts.CompositionSelector = mgrOpts.CompositionSelector
+		recoveryOpts.Downstream = remoteConfig
+		err = tombstonerecovery.NewController(mgr, recoveryOpts)
+		if err != nil {
+			return fmt.Errorf("constructing tombstone recovery controller: %w", err)
+		}
+	}
+
 	err = reconciliation.New(mgr, recOpts)
 	if err != nil {
 		return fmt.Errorf("constructing reconciliation controller: %w", err)
@@ -163,6 +179,8 @@ func run() error {
 		"compositionLabelSelector", compositionSelector,
 		"compositionNamespace", compositionNamespace,
 		"resourceFilter", resourceFilter,
+		"enableTombstoneRecovery", recoveryOpts.Enabled,
+		"recoveryCompositionNamespace", recoveryOpts.Namespace,
 		"namespaceCreationGracePeriod", namespaceCreationGracePeriod,
 		"namespaceCleanup", namespaceCleanup,
 		"failOpen", recOpts.FailOpen,
@@ -173,4 +191,19 @@ func run() error {
 	)
 
 	return mgr.Start(ctx)
+}
+
+func validateTombstoneRecoveryOptions(enabled bool, compositionNamespace string) (tombstonerecovery.Options, error) {
+	opts := tombstonerecovery.Options{Enabled: enabled}
+	if !enabled {
+		return opts, nil
+	}
+	opts.Namespace = os.Getenv("POD_NAMESPACE")
+	if opts.Namespace == "" {
+		return opts, fmt.Errorf("POD_NAMESPACE is required when --enable-tombstone-recovery is enabled")
+	}
+	if compositionNamespace != opts.Namespace {
+		return opts, fmt.Errorf("--composition-namespace must match POD_NAMESPACE when tombstone recovery is enabled: got %q, want %q", compositionNamespace, opts.Namespace)
+	}
+	return opts, nil
 }

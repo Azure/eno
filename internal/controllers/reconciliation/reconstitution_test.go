@@ -9,6 +9,7 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	enocel "github.com/Azure/eno/internal/cel"
 	"github.com/Azure/eno/internal/resource"
 	"github.com/Azure/eno/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -33,6 +34,7 @@ type recoveryReconstitutionHarness struct {
 	informerErrors map[string]error
 	apiErrors      map[string]error
 	informerStatus map[string]apiv1.ResourceSliceStatus
+	allowRecoveryDecision bool
 }
 
 func recoveryReconstitutionNewHarness(t *testing.T, comp *apiv1.Composition, informerSlices, apiSlices []*apiv1.ResourceSlice) *recoveryReconstitutionHarness {
@@ -109,8 +111,12 @@ func recoveryReconstitutionNewHarness(t *testing.T, comp *apiv1.Composition, inf
 			SubResourceUpdate: func(context.Context, client.Client, string, client.Object, ...client.SubResourceUpdateOption) error {
 				return unexpectedWrite()
 			},
-			SubResourcePatch: func(context.Context, client.Client, string, client.Object, client.Patch, ...client.SubResourcePatchOption) error {
-				return unexpectedWrite()
+			SubResourcePatch: func(ctx context.Context, cli client.Client, name string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+				if !h.allowRecoveryDecision || view != "informer" || name != "status" {
+					return unexpectedWrite()
+				}
+				require.IsType(t, &apiv1.Composition{}, obj)
+				return cli.SubResource(name).Patch(ctx, obj, patch, opts...)
 			},
 		}, objects...)
 
@@ -119,15 +125,20 @@ func recoveryReconstitutionNewHarness(t *testing.T, comp *apiv1.Composition, inf
 	cache := &resource.Cache{}
 	cache.SetQueue(h.queue)
 	h.source = &reconstitutionSource{
-		client:          newClient("informer", informerSlices),
-		nonCachedReader: newClient("api", apiSlices),
-		cache:           cache,
+		client:                       newClient("informer", informerSlices),
+		nonCachedReader:              newClient("api", apiSlices),
+		cache:                        cache,
 	}
 	return h
 }
 
 func recoveryReconstitutionSynthesis(uuid string, names ...string) *apiv1.Synthesis {
-	syn := &apiv1.Synthesis{UUID: uuid, Synthesized: recoveryReconstitutionTime()}
+	syn := &apiv1.Synthesis{
+		UUID: uuid, Synthesized: recoveryReconstitutionTime(),
+		TombstoneRecoveryStatus: &apiv1.TombstoneRecoveryStatus{
+			Status: true, Reason: "NotNeeded", SynthesisUUID: uuid,
+		},
+	}
 	for _, name := range names {
 		syn.ResourceSlices = append(syn.ResourceSlices, &apiv1.ResourceSliceRef{Name: name})
 	}
@@ -158,7 +169,7 @@ func recoveryReconstitutionSlice(name, uuid string, resources ...string) *apiv1.
 	}
 	for i, name := range resources {
 		slice.Spec.Resources = append(slice.Spec.Resources, apiv1.Manifest{Manifest: fmt.Sprintf(
-			`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":%q,"namespace":"default","annotations":{"eno.azure.io/readiness-group":%q}},"data":{"source":"full-api","resource":%q}}`,
+			`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":%q,"namespace":"default","labels":{"eno.azure.io/overlaymgr-component-type":"addon"},"annotations":{"eno.azure.io/readiness-group":%q}},"data":{"source":"full-api","resource":%q}}`,
 			name, fmt.Sprint(i), name,
 		)})
 	}
@@ -211,6 +222,133 @@ func (h *recoveryReconstitutionHarness) recoveryReconstitutionAPIReads() []strin
 		}
 	}
 	return reads
+}
+
+func TestRecoveryReconstitutionPreparationGate(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		finished    *apiv1.TombstoneRecoveryStatus
+		notRequired bool
+		disabled    bool
+		deleting    bool
+		filtered    bool
+		optOut      bool
+		annotation  string
+		allow       bool
+	}{
+		{name: "missing"},
+		{name: "missing-even-when-not-required", notRequired: true},
+		{name: "unfinished", finished: &apiv1.TombstoneRecoveryStatus{SynthesisUUID: "current", Reason: "InventoryGetError"}},
+		{name: "wrong-uuid", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "old", Reason: "NotNeeded"}},
+		{name: "completed", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "current", Reason: "FinishedTombstoneRecovery"}, allow: true},
+		{name: "skipped", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "current", Reason: "InventoryNotFound"}, allow: true},
+		{name: "disabled-decision", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "current", Reason: apiv1.TombstoneRecoveryOperatorNotEnabled}, allow: true},
+		{name: "disabled-missing", disabled: true, allow: true},
+		{name: "disabled-unfinished", disabled: true, finished: &apiv1.TombstoneRecoveryStatus{SynthesisUUID: "current", Reason: "InventoryGetError"}, allow: true},
+		{name: "disabled-old-uuid", disabled: true, finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "old", Reason: "NotNeeded"}, allow: true},
+		{name: "resource-filter-still-waits", filtered: true},
+		{name: "missing-annotation", optOut: true, allow: true},
+		{name: "false-annotation", optOut: true, annotation: "false", allow: true},
+		{name: "uppercase-annotation", optOut: true, annotation: "True", allow: true},
+		{name: "missing-annotation-with-resource-filter", optOut: true, filtered: true, allow: true},
+		{name: "deleting-missing", deleting: true, allow: true},
+		{name: "deleting-unfinished", finished: &apiv1.TombstoneRecoveryStatus{SynthesisUUID: "current", Reason: "InventoryGetError"}, deleting: true, allow: true},
+		{name: "deleting-old-uuid", finished: &apiv1.TombstoneRecoveryStatus{Status: true, SynthesisUUID: "old", Reason: "NotNeeded"}, deleting: true, allow: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			previous := recoveryReconstitutionSynthesis("previous", "previous-slice")
+			current := recoveryReconstitutionSynthesis("current", "current-slice")
+			current.TombstoneRecoveryRequired = !tc.notRequired
+			current.TombstoneRecoveryStatus = tc.finished
+			comp := recoveryReconstitutionComposition(previous, current)
+			if !tc.optOut {
+				comp.Annotations = map[string]string{"eno.azure.io/recovery-enabled": "true"}
+			} else if tc.annotation != "" {
+				comp.Annotations = map[string]string{"eno.azure.io/recovery-enabled": tc.annotation}
+			}
+			if tc.deleting {
+				comp.DeletionTimestamp = recoveryReconstitutionTime()
+				comp.Finalizers = []string{"eno.azure.io/cleanup"}
+			}
+			slices := []*apiv1.ResourceSlice{
+				recoveryReconstitutionSlice("previous-slice", "previous", "previous-resource"),
+				recoveryReconstitutionSlice("current-slice", "current", "current-resource"),
+			}
+			h := recoveryReconstitutionNewHarness(t, comp, slices, slices)
+			h.allowRecoveryDecision = tc.disabled
+			h.source.enableTombstoneRecovery = !tc.disabled
+			if tc.filtered {
+				filter, err := enocel.Parse(`has(self.metadata.labels) && self.metadata.labels != null && 'eno.azure.io/overlaymgr-component-type' in self.metadata.labels && self.metadata.labels['eno.azure.io/overlaymgr-component-type'] == 'addon'`)
+				require.NoError(t, err)
+				h.source.cache.ResourceFilter = filter
+			}
+			result, err := h.recoveryReconstitutionReconcile()
+			require.NoError(t, err)
+			if h.allowRecoveryDecision && !tc.deleting && !tc.optOut {
+				stored := &apiv1.Composition{}
+				require.NoError(t, h.source.client.Get(h.ctx, client.ObjectKeyFromObject(comp), stored))
+				require.True(t, stored.Status.CurrentSynthesis.IsTombstoneRecoveryFinished())
+				reason := apiv1.TombstoneRecoveryOperatorNotEnabled
+				assert.Equal(t, reason, stored.Status.CurrentSynthesis.TombstoneRecoveryStatus.Reason)
+			}
+			if !tc.allow {
+				assert.Zero(t, result)
+				assert.Empty(t, h.reads, "unfinished preparation must not load either synthesis")
+				assert.False(t, h.source.cache.Visit(h.ctx, comp, previous.UUID, nil))
+				assert.False(t, h.source.cache.Visit(h.ctx, comp, current.UUID, nil))
+				h.recoveryReconstitutionQueue()
+				return
+			}
+
+			for range 10 {
+				_, err = h.recoveryReconstitutionReconcile()
+				require.NoError(t, err)
+				if h.queue.Len() == 2 {
+					break
+				}
+			}
+			h.recoveryReconstitutionResource(current.UUID, "current-resource", "current-slice", 0, true)
+			h.recoveryReconstitutionQueue("previous-resource", "current-resource")
+		})
+	}
+}
+
+func TestRecoveryReconstitutionSkippedDecisionRace(t *testing.T) {
+	for _, change := range []string{"synthesis", "decision"} {
+		t.Run(change, func(t *testing.T) {
+			current := recoveryReconstitutionSynthesis("current")
+			current.TombstoneRecoveryStatus = nil
+			comp := recoveryReconstitutionComposition(nil, current)
+			comp.Annotations = map[string]string{"eno.azure.io/recovery-enabled": "true"}
+			h := recoveryReconstitutionNewHarness(t, comp, nil, nil)
+			var expected *apiv1.Composition
+			h.source.client = testutil.NewClientWithInterceptors(t, &interceptor.Funcs{
+				SubResourcePatch: func(ctx context.Context, cli client.Client, name string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					require.Equal(t, "status", name)
+					fresh := &apiv1.Composition{}
+					require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), fresh))
+					if change == "synthesis" {
+						fresh.Status.CurrentSynthesis.UUID = "next"
+					} else {
+						fresh.Status.CurrentSynthesis.TombstoneRecoveryStatus = &apiv1.TombstoneRecoveryStatus{
+							Status: true, Reason: "FinishedTombstoneRecovery", SynthesisUUID: "current",
+						}
+					}
+					require.NoError(t, cli.Status().Update(ctx, fresh))
+					expected = fresh.DeepCopy()
+					return cli.SubResource(name).Patch(ctx, obj, patch, opts...)
+				},
+			}, comp.DeepCopy())
+			_, err := h.recoveryReconstitutionReconcile()
+			require.True(t, apierrors.IsConflict(err), "stale decision must conflict: %v", err)
+			require.NotNil(t, expected)
+			stored := &apiv1.Composition{}
+			require.NoError(t, h.source.client.Get(t.Context(), client.ObjectKeyFromObject(comp), stored))
+			assert.Equal(t, expected, stored)
+			assert.Empty(t, h.reads)
+			assert.Zero(t, h.queue.Len())
+		})
+	}
 }
 
 func TestRecoveryReconstitutionR1IncompleteSynthesis(t *testing.T) {

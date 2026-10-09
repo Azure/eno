@@ -36,10 +36,11 @@ type Options struct {
 	Downstream     *rest.Config
 	ResourceFilter cel.Program
 
-	DisableServerSideApply bool
-	FailOpen               bool
-	MigratingFieldManagers []string
-	MigratingFields        []string
+	EnableTombstoneRecovery bool
+	DisableServerSideApply  bool
+	FailOpen                bool
+	MigratingFieldManagers  []string
+	MigratingFields         []string
 
 	Timeout                  time.Duration
 	ReadinessPollInterval    time.Duration
@@ -74,7 +75,7 @@ func New(mgr ctrl.Manager, opts Options) error {
 		return err
 	}
 
-	src, cache, err := newReconstitutionSource(mgr, opts.ResourceFilter)
+	src, cache, err := newReconstitutionSource(mgr, opts.ResourceFilter, opts.EnableTombstoneRecovery)
 	if err != nil {
 		return err
 	}

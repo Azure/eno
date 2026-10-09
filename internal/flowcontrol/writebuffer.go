@@ -214,6 +214,22 @@ func (*ResourceSliceWriteBuffer) buildPatch(slice *apiv1.ResourceSlice, updates 
 				Path:  "/status/resources",
 				Value: make([]apiv1.ResourceState, len(slice.Spec.Resources)),
 			})
+		unsafeSlice = make([]apiv1.ResourceState, len(slice.Spec.Resources))
+	} else if len(unsafeSlice) < len(slice.Spec.Resources) {
+		extended := make([]apiv1.ResourceState, len(slice.Spec.Resources))
+		copy(extended, unsafeSlice)
+		patches = append(patches,
+			&jsonPatch{
+				Op:    "test",
+				Path:  "/status/resources",
+				Value: unsafeSlice,
+			},
+			&jsonPatch{
+				Op:    "replace",
+				Path:  "/status/resources",
+				Value: extended,
+			})
+		unsafeSlice = extended
 	}
 
 	for _, update := range updates {

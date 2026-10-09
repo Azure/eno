@@ -52,6 +52,29 @@ func TestResourceSliceStatusUpdateBasics(t *testing.T) {
 	assert.Equal(t, 0, w.queue.Len())
 }
 
+func TestResourceSliceStatusUpdateExtendsPartialStatus(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	cli := testutil.NewClient(t)
+	w := NewResourceSliceWriteBuffer(cli)
+
+	slice := &apiv1.ResourceSlice{}
+	slice.Name = "test-slice-partial-status"
+	slice.Spec.Resources = make([]apiv1.Manifest, 3)
+	slice.Status.Resources = []apiv1.ResourceState{{Reconciled: true}}
+	require.NoError(t, cli.Create(ctx, slice))
+
+	req := &resource.ManifestRef{Slice: types.NamespacedName{Name: slice.Name}, Index: 2}
+	w.PatchStatusAsync(ctx, req, setReconciled())
+
+	w.processQueueItem(ctx)
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(slice), slice))
+	require.Len(t, slice.Status.Resources, 3)
+	assert.True(t, slice.Status.Resources[0].Reconciled)
+	assert.False(t, slice.Status.Resources[1].Reconciled)
+	assert.True(t, slice.Status.Resources[2].Reconciled)
+	assert.Empty(t, w.state)
+}
+
 func TestResourceSliceStatusUpdateOrdering(t *testing.T) {
 	ctx := testutil.NewContext(t)
 	cli := testutil.NewClient(t)
