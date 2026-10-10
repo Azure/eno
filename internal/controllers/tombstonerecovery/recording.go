@@ -14,6 +14,13 @@ import (
 )
 
 func (c *tombstoneRecoveryController) recordInventory(ctx context.Context, comp *apiv1.Composition) error {
+	items, err := c.readInventories(ctx, comp)
+	if err != nil {
+		return err
+	}
+	if isInventoryAlreadyRecorded(items, comp.Status.CurrentSynthesis.UUID) {
+		return nil
+	}
 	if _, err := c.getCurrentComposition(ctx, comp, true); err != nil {
 		return err
 	}
@@ -63,6 +70,20 @@ func (c *tombstoneRecoveryController) writeInventoryChunk(ctx context.Context, c
 		existing.Name, intended.Labels[inventorySynthesisUUIDLabel])
 }
 
+// isInventoryAlreadyRecorded reports whether the only inventory is a complete one for the current synthesis.
+func isInventoryAlreadyRecorded(items []corev1.Secret, currentUUID string) bool {
+	if len(items) == 0 {
+		return false
+	}
+	for i := range items {
+		if items[i].Labels[inventorySynthesisUUIDLabel] != currentUUID {
+			return false
+		}
+	}
+	_, complete := orderInventoryChunks(items)
+	return complete
+}
+
 func inventorySecretMatches(existing, intended *corev1.Secret) bool {
 	return existing.Type == intended.Type &&
 		reflect.DeepEqual(existing.Data, intended.Data) &&
@@ -70,24 +91,22 @@ func inventorySecretMatches(existing, intended *corev1.Secret) bool {
 		reflect.DeepEqual(existing.Annotations, intended.Annotations)
 }
 
+// verifyInventorySnapshot checks that the stored chunks for this synthesis are exactly the intended chunks.
+// Matching every intended chunk, with no extras, also proves the snapshot is complete and consistent.
 func (c *tombstoneRecoveryController) verifyInventorySnapshot(ctx context.Context, comp *apiv1.Composition, intended []corev1.Secret) error {
 	items, err := c.readInventories(ctx, comp)
 	if err != nil {
 		return err
 	}
 	uuid := intended[0].Labels[inventorySynthesisUUIDLabel]
-	actual := make([]corev1.Secret, 0, len(intended))
+	byName := map[string]*corev1.Secret{}
 	for i := range items {
 		if items[i].Labels[inventorySynthesisUUIDLabel] == uuid {
-			actual = append(actual, items[i])
+			byName[items[i].Name] = &items[i]
 		}
 	}
-	if _, err := validateInventory(actual); err != nil {
-		return fmt.Errorf("verifying inventory snapshot: %w", err)
-	}
-	byName := map[string]*corev1.Secret{}
-	for i := range actual {
-		byName[actual[i].Name] = &actual[i]
+	if len(byName) != len(intended) {
+		return fmt.Errorf("verifying inventory snapshot: found %d chunks, want %d", len(byName), len(intended))
 	}
 	for i := range intended {
 		existing := byName[intended[i].Name]

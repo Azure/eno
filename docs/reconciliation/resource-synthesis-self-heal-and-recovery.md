@@ -97,7 +97,7 @@ Synthesis detects incomplete history or inherits an outstanding requirement
 - **Does:** Read every referenced current ResourceSlice before preparing any Secret writes; missing, terminating, malformed, or unreadable slices stop the attempt.
 - **Does:** Exclude tombstones and Patch resources, sort inventory identities, and deterministically pack complete JSON arrays into chunks within the Secret data limit.
 - **Does:** Recheck the current synthesis UUID, opt-in, deletion state, readiness, and finished recovery decision before writes. Namespace and label-selector scope are enforced by the informer cache that enqueues the Composition.
-- **Does:** Use immutable synthesis-versioned Secret names, skip identical existing chunks, verify the complete new snapshot, then delete older lineage snapshots.
+- **Does:** Return early when the only stored snapshot is complete and belongs to the current synthesis. Otherwise use immutable synthesis-versioned Secret names, skip identical existing chunks, verify the stored chunks exactly match the intended chunks, then delete older lineage snapshots.
 - **Does not:** Reopen a finished recovery decision, overwrite different contents under the same synthesis UUID, or perform general orphan garbage collection.
 - **Entry points:** [`recordInventory` and `writeInventoryChunk`](../../internal/controllers/tombstonerecovery/recording.go).
 

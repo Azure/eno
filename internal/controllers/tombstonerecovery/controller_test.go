@@ -150,7 +150,7 @@ func (f *controllerTestFixture) assertInventory(sequence int, names ...string) {
 	selected, err := selectInventory(items)
 	require.NoError(f.t, err)
 	require.NotEmpty(f.t, selected)
-	data, err := decodeInventorySnapshot(selected)
+	data, err := decodeInventory(selected)
 	require.NoError(f.t, err)
 	assert.Equal(f.t, controllerTestUUID(sequence), selected[0].Labels[inventorySynthesisUUIDLabel])
 	want := []inventoryResource{}
@@ -249,11 +249,10 @@ func TestSelectTombstoneRecoveryOperation(t *testing.T) {
 	}
 }
 
-func TestSameReadySynthesis(t *testing.T) {
+func TestIsInventoryRecordingStillValid(t *testing.T) {
 	now := metav1.Now()
 	base := &apiv1.Synthesis{
 		UUID: "current", Synthesized: &now, Ready: &now,
-		ResourceSlices: []*apiv1.ResourceSliceRef{{Name: "slice"}},
 		TombstoneRecoveryStatus: &apiv1.TombstoneRecoveryStatus{
 			Status: true, SynthesisUUID: "current",
 		},
@@ -270,11 +269,8 @@ func TestSameReadySynthesis(t *testing.T) {
 		{name: "recovery unfinished", change: func(s *apiv1.Synthesis) {
 			s.TombstoneRecoveryStatus.Status = false
 		}},
-		{name: "synthesis timestamp changed", change: func(s *apiv1.Synthesis) {
-			s.Synthesized = ptr.To(metav1.NewTime(now.Add(time.Second)))
-		}},
-		{name: "slices changed", change: func(s *apiv1.Synthesis) {
-			s.ResourceSlices = append(s.ResourceSlices, &apiv1.ResourceSliceRef{Name: "overflow"})
+		{name: "recovery decision for another synthesis", change: func(s *apiv1.Synthesis) {
+			s.TombstoneRecoveryStatus.SynthesisUUID = "previous"
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -282,11 +278,10 @@ func TestSameReadySynthesis(t *testing.T) {
 			if tc.change != nil {
 				tc.change(current)
 			}
-			assert.Equal(t, tc.match, isInventoryRecordingStillValid(current, base))
+			assert.Equal(t, tc.match, isInventoryRecordingStillValid(current))
 		})
 	}
-	assert.False(t, isInventoryRecordingStillValid(nil, base))
-	assert.False(t, isInventoryRecordingStillValid(base, nil))
+	assert.False(t, isInventoryRecordingStillValid(nil))
 }
 
 func TestTombstoneRecoveryAfterSkippedSynthesis(t *testing.T) {

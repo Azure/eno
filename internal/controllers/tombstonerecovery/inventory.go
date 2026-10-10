@@ -48,23 +48,11 @@ type inventoryResource struct {
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
-type invalidInventoryError struct {
-	err error
-}
-
 type synthesisInventory struct {
 	synthesisUUID string
 	synthesized   time.Time
 	secrets       []corev1.Secret
 	complete      bool
-}
-
-func (e *invalidInventoryError) Error() string {
-	return "invalid inventory: " + e.err.Error()
-}
-
-func (e *invalidInventoryError) Unwrap() error {
-	return e.err
 }
 
 func inventoryLineage(comp *apiv1.Composition) string {
@@ -76,19 +64,29 @@ func inventoryName(lineage, synthesisUUID string, chunkIndex int) string {
 	return "eno-inventory-" + lineage + "-" + synthesisUUID + "-" + strconv.Itoa(chunkIndex)
 }
 
-func selectInventory(items []corev1.Secret) ([]corev1.Secret, error) {
+// loadInventory selects the newest complete inventory and decodes it.
+// found is false when there are no inventory Secrets; any other problem is returned as an error.
+func loadInventory(items []corev1.Secret) (resources []inventoryResource, found bool, err error) {
 	if len(items) == 0 {
-		return nil, nil
+		return nil, false, nil
 	}
+	selected, err := selectInventory(items)
+	if err != nil {
+		return nil, true, err
+	}
+	resources, err = decodeInventory(selected)
+	if err != nil {
+		return nil, true, err
+	}
+	return resources, true, nil
+}
+
+// selectInventory returns the ordered chunks of the newest complete inventory.
+// Grouping is the only place chunk order, completeness, and timestamps are checked.
+func selectInventory(items []corev1.Secret) ([]corev1.Secret, error) {
 	inventories, err := groupInventorySecretsBySynthesis(items)
 	if err != nil {
-		return nil, &invalidInventoryError{err}
-	}
-	if len(inventories) == 1 {
-		if !inventories[0].complete {
-			return nil, &invalidInventoryError{fmt.Errorf("no complete inventory snapshot found")}
-		}
-		return inventories[0].secrets, nil
+		return nil, err
 	}
 	return selectNewestCompleteInventory(inventories)
 }
@@ -121,11 +119,9 @@ func groupInventorySecretsBySynthesis(items []corev1.Secret) ([]synthesisInvento
 // selectNewestCompleteInventory ignores partial inventories and returns the latest usable inventory.
 func selectNewestCompleteInventory(inventories []synthesisInventory) ([]corev1.Secret, error) {
 	var latestTime time.Time
-	incomplete := false
 	for i := range inventories {
 		inventory := &inventories[i]
 		if !inventory.complete {
-			incomplete = true
 			continue
 		}
 		if latestTime.IsZero() || inventory.synthesized.After(latestTime) {
@@ -139,17 +135,14 @@ func selectNewestCompleteInventory(inventories []synthesisInventory) ([]corev1.S
 			continue
 		}
 		if selected != nil {
-			return nil, &invalidInventoryError{fmt.Errorf("different synthesis UUIDs share the latest inventory timestamp %s", latestTime.Format(time.RFC3339))}
+			return nil, fmt.Errorf("different synthesis UUIDs share the latest inventory timestamp %s", latestTime.Format(time.RFC3339))
 		}
 		selected = inventory
 	}
-	if selected != nil {
-		return selected.secrets, nil
+	if selected == nil {
+		return nil, fmt.Errorf("no complete inventory snapshot found")
 	}
-	if incomplete {
-		return nil, &invalidInventoryError{fmt.Errorf("no complete inventory snapshot found")}
-	}
-	return nil, nil
+	return selected.secrets, nil
 }
 
 func inventoryGroupSynthesized(items []corev1.Secret) (time.Time, error) {
@@ -190,29 +183,8 @@ func orderInventoryChunks(items []corev1.Secret) ([]corev1.Secret, bool) {
 	return ordered, true
 }
 
-func decodeInventorySnapshot(items []corev1.Secret) (resources []inventoryResource, err error) {
-	defer func() {
-		if err != nil {
-			err = &invalidInventoryError{err}
-		}
-	}()
-	resources, err = validateInventory(items)
-	if err != nil {
-		return nil, err
-	}
-	return resources, nil
-}
-
-// validateInventory checks that all chunks form one complete, internally consistent snapshot.
-func validateInventory(items []corev1.Secret) ([]inventoryResource, error) {
-	ordered, complete := orderInventoryChunks(items)
-	if !complete {
-		return nil, fmt.Errorf("inventory snapshot chunks are incomplete or invalid")
-	}
-	if _, err := inventoryGroupSynthesized(ordered); err != nil {
-		return nil, err
-	}
-	seen := map[resource.Ref]struct{}{}
+// decodeInventory parses chunks that selectInventory already ordered and checked.
+func decodeInventory(ordered []corev1.Secret) ([]inventoryResource, error) {
 	resources := []inventoryResource{}
 	for i := range ordered {
 		item := &ordered[i]
@@ -234,10 +206,6 @@ func validateInventory(items []corev1.Secret) ([]inventoryResource, error) {
 			if res.isPatch() {
 				return nil, fmt.Errorf("Secret %q contains a Patch pseudo-resource", item.Name)
 			}
-			if _, exists := seen[res.ref()]; exists {
-				return nil, fmt.Errorf("duplicate inventory identity %v", res.ref())
-			}
-			seen[res.ref()] = struct{}{}
 		}
 		resources = append(resources, data...)
 	}
@@ -292,7 +260,7 @@ func makeInventory(comp *apiv1.Composition, slices []apiv1.ResourceSlice) ([]cor
 			data = append(data, res)
 		}
 	}
-	normalizeInventoryResources(data)
+	sortInventoryResources(data)
 	payloads, err := packInventory(data)
 	if err != nil {
 		return nil, err
@@ -443,15 +411,8 @@ func (res inventoryResource) object() *unstructured.Unstructured {
 	return obj
 }
 
-func normalizeInventoryResources(resources []inventoryResource) {
-	for i := range resources {
-		if len(resources[i].Labels) == 0 {
-			resources[i].Labels = nil
-		}
-		if len(resources[i].Annotations) == 0 {
-			resources[i].Annotations = nil
-		}
-	}
+// sortInventoryResources keeps Secret contents deterministic for the same synthesis.
+func sortInventoryResources(resources []inventoryResource) {
 	sort.Slice(resources, func(i, j int) bool {
 		a, b := resources[i], resources[j]
 		for _, pair := range [][2]string{{a.Group, b.Group}, {a.Kind, b.Kind}, {a.Namespace, b.Namespace}, {a.Name, b.Name}} {
