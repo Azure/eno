@@ -33,7 +33,7 @@ func (c *tombstoneRecoveryController) recordInventory(ctx context.Context, comp 
 	if err := c.verifyInventorySnapshot(ctx, comp, chunks); err != nil {
 		return err
 	}
-	if err := c.deleteOldInventorySnapshots(ctx, comp, chunks[0].Annotations[inventorySynthesisUUIDAnnotation]); err != nil {
+	if err := c.deleteOldInventorySnapshots(ctx, comp, chunks[0].Labels[inventorySynthesisUUIDLabel]); err != nil {
 		return err
 	}
 	logr.FromContextOrDiscard(ctx).V(1).Info("inventory snapshot persisted", "chunkCount", len(chunks))
@@ -60,7 +60,7 @@ func (c *tombstoneRecoveryController) writeInventoryChunk(ctx context.Context, c
 		return nil
 	}
 	return fmt.Errorf("inventory Secret %q has different contents or metadata for synthesis UUID %q",
-		existing.Name, intended.Annotations[inventorySynthesisUUIDAnnotation])
+		existing.Name, intended.Labels[inventorySynthesisUUIDLabel])
 }
 
 func inventorySecretMatches(existing, intended *corev1.Secret) bool {
@@ -75,10 +75,10 @@ func (c *tombstoneRecoveryController) verifyInventorySnapshot(ctx context.Contex
 	if err != nil {
 		return err
 	}
-	uuid := intended[0].Annotations[inventorySynthesisUUIDAnnotation]
+	uuid := intended[0].Labels[inventorySynthesisUUIDLabel]
 	actual := make([]corev1.Secret, 0, len(intended))
 	for i := range items {
-		if items[i].Annotations[inventorySynthesisUUIDAnnotation] == uuid {
+		if items[i].Labels[inventorySynthesisUUIDLabel] == uuid {
 			actual = append(actual, items[i])
 		}
 	}
@@ -108,7 +108,7 @@ func (c *tombstoneRecoveryController) deleteOldInventorySnapshots(ctx context.Co
 	})
 	for i := range items {
 		item := &items[i]
-		if item.Annotations[inventorySynthesisUUIDAnnotation] == currentUUID {
+		if item.Labels[inventorySynthesisUUIDLabel] == currentUUID {
 			continue
 		}
 		if _, err := c.getCurrentComposition(ctx, comp, true); err != nil {

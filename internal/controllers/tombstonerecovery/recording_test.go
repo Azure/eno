@@ -143,7 +143,7 @@ func TestInventoryRecordingPartialFailureAndShrink(t *testing.T) {
 			items := f.inventories()
 			var first *corev1.Secret
 			for i := range items {
-				if items[i].Annotations[inventorySynthesisUUIDAnnotation] == controllerTestUUID(2) {
+				if items[i].Labels[inventorySynthesisUUIDLabel] == controllerTestUUID(2) {
 					first = items[i].DeepCopy()
 					break
 				}
@@ -153,7 +153,7 @@ func TestInventoryRecordingPartialFailureAndShrink(t *testing.T) {
 			if updating {
 				require.NoError(t, err)
 				require.Len(t, selected, 3)
-				assert.Equal(t, controllerTestUUID(1), selected[0].Annotations[inventorySynthesisUUIDAnnotation])
+				assert.Equal(t, controllerTestUUID(1), selected[0].Labels[inventorySynthesisUUIDLabel])
 			} else {
 				require.ErrorContains(t, err, "no complete inventory snapshot")
 				assert.Empty(t, selected)
@@ -275,7 +275,7 @@ func TestInventoryRecordingRetriesOldSnapshotDeletion(t *testing.T) {
 	require.Len(t, f.inventories(), 2, "cleanup failure must retain both complete snapshots")
 	selected, err := selectInventory(f.inventories())
 	require.NoError(t, err)
-	assert.Equal(t, controllerTestUUID(2), selected[0].Annotations[inventorySynthesisUUIDAnnotation])
+	assert.Equal(t, controllerTestUUID(2), selected[0].Labels[inventorySynthesisUUIDLabel])
 	require.NoError(t, f.downstream.Get(t.Context(), client.ObjectKeyFromObject(old), &corev1.Secret{}))
 	f.reconcileEvent()
 	require.Equal(t, 2, deletes)
@@ -389,7 +389,7 @@ func TestInventoryRecoverySecretFailureDecisions(t *testing.T) {
 			case "missing chunk":
 				chunks = chunks[:1]
 			case "mixed UUID":
-				chunks[1].Annotations[inventorySynthesisUUIDAnnotation] = "other"
+				chunks[1].Labels[inventorySynthesisUUIDLabel] = "other"
 				chunks[1].Annotations[inventorySynthesizedAnnotation] = f.composition().Status.CurrentSynthesis.Synthesized.Add(-time.Minute).Format(time.RFC3339)
 			case "mixed timestamp":
 				chunks[1].Annotations[inventorySynthesizedAnnotation] = f.composition().Status.CurrentSynthesis.Synthesized.Add(-time.Minute).Format(time.RFC3339)
@@ -397,8 +397,7 @@ func TestInventoryRecoverySecretFailureDecisions(t *testing.T) {
 				for i := range chunks {
 					other := chunks[i].DeepCopy()
 					other.Name = inventoryName(inventoryLineage(f.composition()), "other", i)
-					other.Annotations[inventoryCompositionNameAnnotation] = "other"
-					other.Annotations[inventorySynthesisUUIDAnnotation] = "other"
+					other.Labels[inventorySynthesisUUIDLabel] = "other"
 					chunks = append(chunks, *other)
 				}
 			case "malformed JSON":

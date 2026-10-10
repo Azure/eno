@@ -197,10 +197,10 @@ Synthesis detects incomplete history or inherits an outstanding requirement
 
 - **Location and type:** Opaque Secrets in downstream `kube-system`, independent of the namespace containing the Composition and reconciler.
 - **Name:** `eno-inventory-<lineageHash>-<synthesisUUID>-<chunk-index>`. Names are immutable and reused only by retries for the same synthesis UUID.
-- **Lineage:** Hash of Composition namespace and synthesizer name, stored in both the `eno.azure.io/inventory-lineage` annotation and lookup label. Composition name/UID is not part of this identity, allowing recovery across recreation.
+- **Labels:** `eno.azure.io/inventory-lineage` selects all inventory for the Composition lineage; `eno.azure.io/inventory-synthesis-uuid` groups chunks by source synthesis.
+- **Lineage:** Hash of Composition namespace and synthesizer name. Composition name/UID is not part of this identity, allowing recovery across recreation.
 - **Payload:** `data["inventory.json"]` contains a JSON array of group/version/kind/namespace/name identities, labels, and the `eno.azure.io/readiness-group` and `eno.azure.io/deletion-group` annotations. Empty inventory is one Secret containing `[]`.
-- **Source metadata:** `eno.azure.io/inventory-format-version` is `1`; source annotations are `eno.azure.io/inventory-composition-name`, `eno.azure.io/inventory-composition-namespace`, `eno.azure.io/inventory-synthesizer-name`, `eno.azure.io/inventory-synthesis-uuid`, and `eno.azure.io/inventory-synthesized`.
-- **Source metadata:** Composition name/namespace and synthesizer annotations describe the writer but are not used to re-establish ownership. The namespace-scoped, lineage-label query selects inventory for this reconciler.
+- **Source metadata:** `eno.azure.io/inventory-synthesized` stores the source synthesis timestamp used for selection.
 - **Chunk metadata:** `eno.azure.io/inventory-chunk-index` is zero-based; `eno.azure.io/inventory-chunk-count` gives the expected number of chunks. Every chunk has the same source UUID, timestamp, and count.
 - **Selection:** Group chunks by source synthesis UUID and choose the newest complete snapshot by source `Synthesized` timestamp, not Secret creation time or UUID ordering. Ignore incomplete newer uploads. Different complete source UUIDs tied for newest are invalid.
 - **Completeness:** Require exactly one chunk for every expected index, matching synthesis UUID/timestamp/count, valid resource identities, and decodable JSON arrays. Missing/mixed/invalid chunks, invalid timestamps, or ambiguous selection produce `InventoryInvalid`; an empty Secret list produces `InventoryNotFound`.

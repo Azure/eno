@@ -20,23 +20,18 @@ import (
 
 const (
 	// Secret storage and lookup.
-	inventoryNamespace     = "kube-system"
-	inventoryLineageLabel  = "eno.azure.io/inventory-lineage"
-	inventoryDataKey       = "inventory.json"
-	inventoryMaxDataBytes  = 1 << 20
-	inventoryFormatVersion = "1"
+	inventoryNamespace          = "kube-system"
+	inventoryLineageLabel       = "eno.azure.io/inventory-lineage"
+	inventorySynthesisUUIDLabel = "eno.azure.io/inventory-synthesis-uuid"
+	inventoryDataKey            = "inventory.json"
+	inventoryMaxDataBytes       = 1 << 20
 
 	// Resource metadata retained in each inventory entry.
 	inventoryReadinessGroup = "eno.azure.io/readiness-group"
 	inventoryDeletionGroup  = "eno.azure.io/deletion-group"
 
 	// Snapshot source metadata written on every Secret chunk.
-	inventoryFormatVersionAnnotation        = "eno.azure.io/inventory-format-version"
-	inventoryCompositionNameAnnotation      = "eno.azure.io/inventory-composition-name"
-	inventoryCompositionNamespaceAnnotation = "eno.azure.io/inventory-composition-namespace"
-	inventorySynthesizerNameAnnotation      = "eno.azure.io/inventory-synthesizer-name"
-	inventorySynthesisUUIDAnnotation        = "eno.azure.io/inventory-synthesis-uuid"
-	inventorySynthesizedAnnotation          = "eno.azure.io/inventory-synthesized"
+	inventorySynthesizedAnnotation = "eno.azure.io/inventory-synthesized"
 
 	// Chunk ordering and completeness metadata.
 	inventoryChunkIndexAnnotation           = "eno.azure.io/inventory-chunk-index"
@@ -55,6 +50,13 @@ type inventoryResource struct {
 
 type invalidInventoryError struct {
 	err error
+}
+
+type synthesisInventory struct {
+	synthesisUUID string
+	synthesized   time.Time
+	secrets       []corev1.Secret
+	complete      bool
 }
 
 func (e *invalidInventoryError) Error() string {
@@ -78,41 +80,76 @@ func selectInventory(items []corev1.Secret) ([]corev1.Secret, error) {
 	if len(items) == 0 {
 		return nil, nil
 	}
+	inventories, err := groupInventorySecretsBySynthesis(items)
+	if err != nil {
+		return nil, &invalidInventoryError{err}
+	}
+	if len(inventories) == 1 {
+		if !inventories[0].complete {
+			return nil, &invalidInventoryError{fmt.Errorf("no complete inventory snapshot found")}
+		}
+		return inventories[0].secrets, nil
+	}
+	return selectNewestCompleteInventory(inventories)
+}
+
+// groupInventorySecretsBySynthesis builds one inventory per source synthesis UUID.
+func groupInventorySecretsBySynthesis(items []corev1.Secret) ([]synthesisInventory, error) {
 	byUUID := map[string][]corev1.Secret{}
 	for i := range items {
 		item := &items[i]
-		uuid := item.Annotations[inventorySynthesisUUIDAnnotation]
+		uuid := item.Labels[inventorySynthesisUUIDLabel]
 		if uuid == "" {
-			return nil, &invalidInventoryError{fmt.Errorf("Secret %s/%s has no source synthesis UUID", item.Namespace, item.Name)}
+			return nil, fmt.Errorf("Secret %s/%s has no source synthesis UUID label", item.Namespace, item.Name)
 		}
 		byUUID[uuid] = append(byUUID[uuid], *item)
 	}
-	var selected []corev1.Secret
-	var latestTime time.Time
-	var latestUUID string
-	incomplete := false
+	inventories := make([]synthesisInventory, 0, len(byUUID))
 	for uuid, inventorySecrets := range byUUID {
 		synthesized, err := inventoryGroupSynthesized(inventorySecrets)
 		if err != nil {
-			return nil, &invalidInventoryError{err}
+			return nil, err
 		}
-		if !hasAllInventoryChunks(inventorySecrets) {
+		orderedSecrets, complete := orderInventoryChunks(inventorySecrets)
+		inventories = append(inventories, synthesisInventory{
+			synthesisUUID: uuid, synthesized: synthesized, secrets: orderedSecrets, complete: complete,
+		})
+	}
+	return inventories, nil
+}
+
+// selectNewestCompleteInventory ignores partial inventories and returns the latest usable inventory.
+func selectNewestCompleteInventory(inventories []synthesisInventory) ([]corev1.Secret, error) {
+	var latestTime time.Time
+	incomplete := false
+	for i := range inventories {
+		inventory := &inventories[i]
+		if !inventory.complete {
 			incomplete = true
 			continue
 		}
-		if latestUUID != "" && synthesized.Equal(latestTime) && uuid != latestUUID {
+		if latestTime.IsZero() || inventory.synthesized.After(latestTime) {
+			latestTime = inventory.synthesized
+		}
+	}
+	var selected *synthesisInventory
+	for i := range inventories {
+		inventory := &inventories[i]
+		if !inventory.complete || !inventory.synthesized.Equal(latestTime) {
+			continue
+		}
+		if selected != nil {
 			return nil, &invalidInventoryError{fmt.Errorf("different synthesis UUIDs share the latest inventory timestamp %s", latestTime.Format(time.RFC3339))}
 		}
-		if latestUUID == "" || synthesized.After(latestTime) {
-			latestTime = synthesized
-			latestUUID = uuid
-			selected = inventorySecrets
-		}
+		selected = inventory
 	}
-	if len(selected) == 0 && incomplete {
+	if selected != nil {
+		return selected.secrets, nil
+	}
+	if incomplete {
 		return nil, &invalidInventoryError{fmt.Errorf("no complete inventory snapshot found")}
 	}
-	return selected, nil
+	return nil, nil
 }
 
 func inventoryGroupSynthesized(items []corev1.Secret) (time.Time, error) {
@@ -125,29 +162,32 @@ func inventoryGroupSynthesized(items []corev1.Secret) (time.Time, error) {
 		if synthesized.IsZero() {
 			synthesized = current
 		} else if !synthesized.Equal(current) {
-			return time.Time{}, fmt.Errorf("synthesis UUID %q has inconsistent source timestamps", items[i].Annotations[inventorySynthesisUUIDAnnotation])
+			return time.Time{}, fmt.Errorf("synthesis UUID %q has inconsistent source timestamps", items[i].Labels[inventorySynthesisUUIDLabel])
 		}
 	}
 	return synthesized, nil
 }
 
-func hasAllInventoryChunks(items []corev1.Secret) bool {
+// orderInventoryChunks returns chunks in index order and reports whether the set is complete.
+func orderInventoryChunks(items []corev1.Secret) ([]corev1.Secret, bool) {
 	if len(items) == 0 {
-		return false
+		return nil, false
 	}
 	_, count, err := inventoryChunkPosition(&items[0])
 	if err != nil || len(items) != count {
-		return false
+		return items, false
 	}
-	indexes := map[int]struct{}{}
+	ordered := make([]corev1.Secret, count)
+	seen := make([]bool, count)
 	for i := range items {
 		index, currentCount, err := inventoryChunkPosition(&items[i])
-		if err != nil || currentCount != count {
-			return false
+		if err != nil || currentCount != count || seen[index] {
+			return items, false
 		}
-		indexes[index] = struct{}{}
+		ordered[index] = items[i]
+		seen[index] = true
 	}
-	return len(indexes) == count
+	return ordered, true
 }
 
 func decodeInventorySnapshot(items []corev1.Secret) (resources []inventoryResource, err error) {
@@ -165,48 +205,20 @@ func decodeInventorySnapshot(items []corev1.Secret) (resources []inventoryResour
 
 // validateInventory checks that all chunks form one complete, internally consistent snapshot.
 func validateInventory(items []corev1.Secret) ([]inventoryResource, error) {
-	if len(items) == 0 {
-		return nil, fmt.Errorf("inventory snapshot has no chunks")
+	ordered, complete := orderInventoryChunks(items)
+	if !complete {
+		return nil, fmt.Errorf("inventory snapshot chunks are incomplete or invalid")
 	}
-	_, count, err := inventoryChunkPosition(&items[0])
-	if err != nil {
+	if _, err := inventoryGroupSynthesized(ordered); err != nil {
 		return nil, err
 	}
-	if len(items) != count {
-		return nil, fmt.Errorf("inventory snapshot has %d chunks, expected %d", len(items), count)
-	}
-	chunks := make([][]inventoryResource, count)
 	seen := map[resource.Ref]struct{}{}
-	for i := range items {
-		item := &items[i]
-		if item.Annotations[inventoryFormatVersionAnnotation] != inventoryFormatVersion {
-			return nil, fmt.Errorf("Secret %q has unsupported inventory format version %q", item.Name, item.Annotations[inventoryFormatVersionAnnotation])
-		}
-		index, _, err := inventoryChunkPosition(item)
-		if err != nil {
-			return nil, err
-		}
-		for _, key := range []string{
-			inventoryCompositionNameAnnotation, inventorySynthesisUUIDAnnotation,
-			inventorySynthesizedAnnotation, inventoryChunkCountAnnotation,
-		} {
-			if item.Annotations[key] != items[0].Annotations[key] {
-				return nil, fmt.Errorf("Secret %q has inconsistent %s", item.Name, key)
-			}
-		}
-		if chunks[index] != nil {
-			return nil, fmt.Errorf("duplicate inventory chunk index %d", index)
-		}
+	resources := []inventoryResource{}
+	for i := range ordered {
+		item := &ordered[i]
 		payload, ok := item.Data[inventoryDataKey]
 		if !ok {
 			return nil, fmt.Errorf("Secret %q is missing data key %q", item.Name, inventoryDataKey)
-		}
-		size := 0
-		for _, value := range item.Data {
-			size += len(value)
-		}
-		if size > inventoryMaxDataBytes {
-			return nil, fmt.Errorf("Secret %q exceeds the %d-byte data limit", item.Name, inventoryMaxDataBytes)
 		}
 		var data []inventoryResource
 		if err := json.Unmarshal(payload, &data); err != nil {
@@ -227,14 +239,7 @@ func validateInventory(items []corev1.Secret) ([]inventoryResource, error) {
 			}
 			seen[res.ref()] = struct{}{}
 		}
-		chunks[index] = data
-	}
-	resources := []inventoryResource{}
-	for index, chunk := range chunks {
-		if chunk == nil {
-			return nil, fmt.Errorf("missing inventory chunk index %d", index)
-		}
-		resources = append(resources, chunk...)
+		resources = append(resources, data...)
 	}
 	return resources, nil
 }
@@ -299,17 +304,14 @@ func makeInventory(comp *apiv1.Composition, slices []apiv1.ResourceSlice) ([]cor
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      inventoryName(lineage, syn.UUID, index),
 				Namespace: inventoryNamespace,
-				Labels:    map[string]string{inventoryLineageLabel: lineage},
+				Labels: map[string]string{
+					inventoryLineageLabel:       lineage,
+					inventorySynthesisUUIDLabel: syn.UUID,
+				},
 				Annotations: map[string]string{
-					inventoryLineageLabel:                   lineage,
-					inventoryFormatVersionAnnotation:        inventoryFormatVersion,
-					inventoryCompositionNameAnnotation:      comp.Name,
-					inventoryCompositionNamespaceAnnotation: comp.Namespace,
-					inventorySynthesizerNameAnnotation:      comp.Spec.Synthesizer.Name,
-					inventorySynthesisUUIDAnnotation:        syn.UUID,
-					inventorySynthesizedAnnotation:          syn.Synthesized.UTC().Format(time.RFC3339),
-					inventoryChunkIndexAnnotation:           strconv.Itoa(index),
-					inventoryChunkCountAnnotation:           strconv.Itoa(len(payloads)),
+					inventorySynthesizedAnnotation: syn.Synthesized.UTC().Format(time.RFC3339),
+					inventoryChunkIndexAnnotation:  strconv.Itoa(index),
+					inventoryChunkCountAnnotation:  strconv.Itoa(len(payloads)),
 				},
 			},
 			Type: corev1.SecretTypeOpaque,
