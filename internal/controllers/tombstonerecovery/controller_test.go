@@ -152,7 +152,7 @@ func (f *controllerTestFixture) assertInventory(sequence int, names ...string) {
 	require.NotEmpty(f.t, selected)
 	data, err := decodeInventorySnapshot(selected)
 	require.NoError(f.t, err)
-	assert.Equal(f.t, controllerTestUUID(sequence), selected[0].Annotations[inventorySynthesisUUIDAnnotation])
+	assert.Equal(f.t, controllerTestUUID(sequence), selected[0].Labels[inventorySynthesisUUIDLabel])
 	want := []inventoryResource{}
 	for _, name := range names {
 		want = append(want, controllerTestResource(name))
@@ -688,10 +688,9 @@ func TestTombstoneRecoveryOperatorRecoveryInventorySelection(t *testing.T) {
 			f := newControllerTestFixture(t, true, "desired")
 			older := f.history("obsolete")
 			newer := older.DeepCopy()
-			newer.Annotations[inventoryCompositionNameAnnotation] = "replacement"
 			newer.Name = inventoryName(inventoryLineage(f.composition()), controllerTestUUID(3), 0)
 			newer.UID, newer.ResourceVersion = "newer-uid", ""
-			newer.Annotations[inventorySynthesisUUIDAnnotation] = controllerTestUUID(3)
+			newer.Labels[inventorySynthesisUUIDLabel] = controllerTestUUID(3)
 			newer.Annotations[inventorySynthesizedAnnotation] = f.composition().Status.CurrentSynthesis.Synthesized.Format(time.RFC3339)
 			newer.Data[inventoryDataKey] = []byte(inventoryTestJSON(t, []inventoryResource{controllerTestResource("removed")}))
 			require.NoError(t, f.downstream.Create(t.Context(), newer))

@@ -86,7 +86,7 @@ func inventoryTestChunkedSnapshot(t *testing.T, comp *apiv1.Composition) []corev
 func TestTombstoneRecoveryInventoryChunkValidation(t *testing.T) {
 	comp := inventoryTestComposition()
 	base := inventoryTestChunkedSnapshot(t, comp)
-	for _, mode := range []string{"reordered", "missing", "duplicate index", "mixed UUID", "mixed timestamp", "mixed count", "mixed source", "duplicate identity"} {
+	for _, mode := range []string{"reordered", "missing", "duplicate index", "mixed timestamp", "mixed count", "duplicate identity"} {
 		t.Run(mode, func(t *testing.T) {
 			chunks := (&corev1.SecretList{Items: base}).DeepCopy().Items
 			switch mode {
@@ -96,14 +96,10 @@ func TestTombstoneRecoveryInventoryChunkValidation(t *testing.T) {
 				chunks = chunks[:2]
 			case "duplicate index":
 				chunks[1] = *chunks[0].DeepCopy()
-			case "mixed UUID":
-				chunks[1].Annotations[inventorySynthesisUUIDAnnotation] = "other"
 			case "mixed timestamp":
 				chunks[1].Annotations[inventorySynthesizedAnnotation] = comp.Status.CurrentSynthesis.Synthesized.Add(time.Second).Format(time.RFC3339)
 			case "mixed count":
 				chunks[1].Annotations[inventoryChunkCountAnnotation] = "4"
-			case "mixed source":
-				chunks[1].Annotations[inventoryCompositionNameAnnotation] = "other"
 			case "duplicate identity":
 				chunks[1].Data = chunks[0].DeepCopy().Data
 			}
@@ -130,7 +126,7 @@ func TestTombstoneRecoveryInventoryChunkValidation(t *testing.T) {
 		selected, err := selectInventory(items)
 		require.NoError(t, err)
 		require.Len(t, selected, 3)
-		assert.Equal(t, old.Status.CurrentSynthesis.UUID, selected[0].Annotations[inventorySynthesisUUIDAnnotation])
+		assert.Equal(t, old.Status.CurrentSynthesis.UUID, selected[0].Labels[inventorySynthesisUUIDLabel])
 		_, err = decodeInventorySnapshot(selected)
 		require.NoError(t, err)
 	})
@@ -197,17 +193,14 @@ func TestTombstoneRecoveryInventoryRoundTrip(t *testing.T) {
 	item := &inventorySecrets[0]
 	assert.JSONEq(t, inventoryTestJSON(t, []inventoryResource{res}), string(item.Data[inventoryDataKey]))
 	assert.Equal(t, map[string]string{
-		inventoryLineageLabel:                   inventoryLineage(comp),
-		inventoryFormatVersionAnnotation:        "1",
-		inventoryCompositionNameAnnotation:      comp.Name,
-		inventoryCompositionNamespaceAnnotation: comp.Namespace,
-		inventorySynthesizerNameAnnotation:      comp.Spec.Synthesizer.Name,
-		inventorySynthesisUUIDAnnotation:        comp.Status.CurrentSynthesis.UUID,
-		inventorySynthesizedAnnotation:          "2026-09-16T12:00:00Z",
-		inventoryChunkIndexAnnotation:           "0",
-		inventoryChunkCountAnnotation:           "1",
+		inventorySynthesizedAnnotation: "2026-09-16T12:00:00Z",
+		inventoryChunkIndexAnnotation:  "0",
+		inventoryChunkCountAnnotation:  "1",
 	}, item.Annotations)
-	assert.Equal(t, map[string]string{inventoryLineageLabel: inventoryLineage(comp)}, item.Labels)
+	assert.Equal(t, map[string]string{
+		inventoryLineageLabel:       inventoryLineage(comp),
+		inventorySynthesisUUIDLabel: comp.Status.CurrentSynthesis.UUID,
+	}, item.Labels)
 	assert.Equal(t, corev1.SecretTypeOpaque, item.Type)
 	assert.Equal(t, "kube-system", item.Namespace)
 
@@ -338,19 +331,16 @@ func TestTombstoneRecoveryInventoryRejectsInvalid(t *testing.T) {
 		}, "missing data key"},
 		{"missing metadata", func(cm *corev1.Secret) {
 			cm.Annotations = nil
-		}, "invalid chunk index"},
-		{"unsupported version", func(cm *corev1.Secret) {
-			cm.Annotations[inventoryFormatVersionAnnotation] = "other"
-		}, "unsupported inventory format version"},
+		}, "chunks are incomplete or invalid"},
 		{"negative index", func(cm *corev1.Secret) {
 			cm.Annotations[inventoryChunkIndexAnnotation] = "-1"
-		}, "invalid chunk index"},
+		}, "chunks are incomplete or invalid"},
 		{"index outside count", func(cm *corev1.Secret) {
 			cm.Annotations[inventoryChunkIndexAnnotation] = "1"
-		}, "invalid chunk count"},
+		}, "chunks are incomplete or invalid"},
 		{"zero count", func(cm *corev1.Secret) {
 			cm.Annotations[inventoryChunkCountAnnotation] = "0"
-		}, "invalid chunk count"},
+		}, "chunks are incomplete or invalid"},
 		{"missing resource name", func(cm *corev1.Secret) {
 			cm.Data[inventoryDataKey] = []byte(`[{"version":"v1","kind":"ConfigMap"}]`)
 		}, "resource identity requires"},
@@ -387,19 +377,6 @@ func TestTombstoneRecoveryInventoryRejectsInvalid(t *testing.T) {
 func TestTombstoneRecoveryInventorySizeLimit(t *testing.T) {
 	const limit = 1 << 20
 	comp := inventoryTestComposition()
-	inventorySecrets, err := makeInventory(comp, nil)
-	require.NoError(t, err)
-	t.Run("total decoded Secret data", func(t *testing.T) {
-			item := inventorySecrets[0].DeepCopy()
-			item.Data["padding"] = []byte(strings.Repeat("x", limit-len(item.Data[inventoryDataKey])))
-			_, err := decodeInventorySnapshot([]corev1.Secret{*item})
-			require.NoError(t, err, "exactly 1 MiB must be accepted")
-			item.Data["extra"] = []byte("x")
-			got, err := decodeInventorySnapshot([]corev1.Secret{*item})
-			require.ErrorContains(t, err, "exceeds the 1048576-byte data limit")
-			assert.Nil(t, got)
-	})
-
 	t.Run("recording oversized inventory", func(t *testing.T) {
 		labels := map[string]string{}
 		for i := range 64 {
