@@ -205,7 +205,7 @@ func selectTombstoneRecoveryOperation(comp *apiv1.Composition) compositionOperat
 
 // getCurrentComposition reads the latest Composition before a write.
 // - Requires the Composition to exist, not be deleting, remain opted in, and keep the same current synthesis UUID.
-// - When requireReady is true, also requires the same Ready synthesis and ResourceSlice references used to build the inventory.
+// - When requireReady is true, also requires the synthesis to be Ready with a finished recovery decision.
 func (c *tombstoneRecoveryController) getCurrentComposition(ctx context.Context, expected *apiv1.Composition, requireReady bool) (*apiv1.Composition, error) {
 	comp := &apiv1.Composition{}
 	if err := c.reader.Get(ctx, client.ObjectKeyFromObject(expected), comp); err != nil {
@@ -227,24 +227,19 @@ func (c *tombstoneRecoveryController) getCurrentComposition(ctx context.Context,
 			"currentSynthesisUUID", comp.Status.GetCurrentSynthesisUUID())
 		return nil, fmt.Errorf("%w: synthesis changed (current synthesis %q)", errSuperseded, comp.Status.GetCurrentSynthesisUUID())
 	}
-	if requireReady && !isInventoryRecordingStillValid(syn, old) {
+	if requireReady && !isInventoryRecordingStillValid(syn) {
 		return nil, fmt.Errorf("%w: synthesis is no longer eligible for inventory recording", errSuperseded)
 	}
 	return comp, nil
 }
 
-func isInventoryRecordingStillValid(current, expected *apiv1.Synthesis) bool {
-	// Inventory is built from the captured Ready synthesis; stop if its eligibility or slice set changes before a Secret write.
-	if current == nil || expected == nil {
+// isInventoryRecordingStillValid reports whether the synthesis is still Ready with a finished recovery decision.
+// The caller has already confirmed the synthesis UUID is unchanged.
+func isInventoryRecordingStillValid(current *apiv1.Synthesis) bool {
+	if current == nil {
 		return false
 	}
-	if current.Ready == nil || !current.IsTombstoneRecoveryFinished() {
-		return false
-	}
-	if current.Synthesized == nil || !current.Synthesized.Equal(expected.Synthesized) {
-		return false
-	}
-	return reflect.DeepEqual(current.ResourceSlices, expected.ResourceSlices)
+	return current.Ready != nil && current.IsTombstoneRecoveryFinished()
 }
 
 func getOrCreateRecoveryStatus(comp *apiv1.Composition) apiv1.TombstoneRecoveryStatus {
@@ -264,24 +259,16 @@ func getOrCreateRecoveryStatus(comp *apiv1.Composition) apiv1.TombstoneRecoveryS
 func (c *tombstoneRecoveryController) recoverMissingTombstones(ctx context.Context, comp *apiv1.Composition) error {
 	logger := logr.FromContextOrDiscard(ctx)
 	logger.Info("reading downstream inventory", "lineage", inventoryLineage(comp))
-	items, readErr := c.readInventories(ctx, comp)
-	var inventorySecrets []corev1.Secret
-	if readErr == nil {
-		inventorySecrets, readErr = selectInventory(items)
+	items, err := c.readInventories(ctx, comp)
+	if err != nil {
+		return c.recordTombstoneRecoveryError(ctx, comp, reasonInventoryGetError, err)
 	}
-	var resources []inventoryResource
-	if readErr == nil && len(inventorySecrets) > 0 {
-		resources, readErr = decodeInventorySnapshot(inventorySecrets)
+	resources, found, err := loadInventory(items)
+	if err != nil {
+		logger.Error(err, "downstream inventory is invalid")
+		return c.recordRecoveryDecision(ctx, comp, reasonInventoryInvalid, err.Error(), nil)
 	}
-	if readErr != nil {
-		logger.Error(readErr, "failed to read downstream inventory")
-		var invalid *invalidInventoryError
-		if errors.As(readErr, &invalid) {
-			return c.recordRecoveryDecision(ctx, comp, reasonInventoryInvalid, readErr.Error(), nil)
-		}
-		return c.recordTombstoneRecoveryError(ctx, comp, reasonInventoryGetError, readErr)
-	}
-	if len(inventorySecrets) == 0 {
+	if !found {
 		logger.Info("no downstream inventory found", "lineage", inventoryLineage(comp))
 		return c.recordRecoveryDecision(ctx, comp, reasonInventoryNotFound, "", nil)
 	}

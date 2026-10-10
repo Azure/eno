@@ -164,7 +164,7 @@ func TestInventoryRecordingPartialFailureAndShrink(t *testing.T) {
 			selected, err = selectInventory(f.inventories())
 			require.NoError(t, err)
 			require.Len(t, selected, 3)
-			decoded, err := decodeInventorySnapshot(selected)
+			decoded, err := decodeInventory(selected)
 			require.NoError(t, err)
 			require.Len(t, decoded, 3)
 			persisted := &corev1.Secret{}
@@ -345,6 +345,8 @@ func TestInventoryRecordingInvalidInputs(t *testing.T) {
 
 func TestInventoryRecordingPreservesConflictingSecret(t *testing.T) {
 	f := recordingTestFixture(t, "desired")
+	// Keep an old snapshot so recording cannot take the already-recorded fast path.
+	f.history("old")
 	intended, err := makeInventory(f.composition(), []apiv1.ResourceSlice{*f.slice("desired")})
 	require.NoError(t, err)
 	require.Len(t, intended, 1)

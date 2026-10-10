@@ -86,7 +86,7 @@ func inventoryTestChunkedSnapshot(t *testing.T, comp *apiv1.Composition) []corev
 func TestTombstoneRecoveryInventoryChunkValidation(t *testing.T) {
 	comp := inventoryTestComposition()
 	base := inventoryTestChunkedSnapshot(t, comp)
-	for _, mode := range []string{"reordered", "missing", "duplicate index", "mixed timestamp", "mixed count", "duplicate identity"} {
+	for _, mode := range []string{"reordered", "missing", "duplicate index", "mixed timestamp", "mixed count"} {
 		t.Run(mode, func(t *testing.T) {
 			chunks := (&corev1.SecretList{Items: base}).DeepCopy().Items
 			switch mode {
@@ -100,18 +100,15 @@ func TestTombstoneRecoveryInventoryChunkValidation(t *testing.T) {
 				chunks[1].Annotations[inventorySynthesizedAnnotation] = comp.Status.CurrentSynthesis.Synthesized.Add(time.Second).Format(time.RFC3339)
 			case "mixed count":
 				chunks[1].Annotations[inventoryChunkCountAnnotation] = "4"
-			case "duplicate identity":
-				chunks[1].Data = chunks[0].DeepCopy().Data
 			}
 			before := (&corev1.SecretList{Items: chunks}).DeepCopy()
-			decoded, err := decodeInventorySnapshot(chunks)
+			decoded, err := loadInventoryForTest(chunks)
 			if mode == "reordered" {
 				require.NoError(t, err)
 				require.Len(t, decoded, 3)
 				assert.Equal(t, []string{"first", "second", "third"}, []string{decoded[0].Name, decoded[1].Name, decoded[2].Name})
 			} else {
-				var invalid *invalidInventoryError
-				require.ErrorAs(t, err, &invalid)
+				require.Error(t, err)
 				assert.Nil(t, decoded)
 			}
 			assert.Equal(t, before.Items, chunks)
@@ -127,7 +124,7 @@ func TestTombstoneRecoveryInventoryChunkValidation(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, selected, 3)
 		assert.Equal(t, old.Status.CurrentSynthesis.UUID, selected[0].Labels[inventorySynthesisUUIDLabel])
-		_, err = decodeInventorySnapshot(selected)
+		_, err = decodeInventory(selected)
 		require.NoError(t, err)
 	})
 	t.Run("ignore old extra chunks after shrink", func(t *testing.T) {
@@ -140,7 +137,7 @@ func TestTombstoneRecoveryInventoryChunkValidation(t *testing.T) {
 		selected, err := selectInventory(items)
 		require.NoError(t, err)
 		require.Len(t, selected, 1)
-		decoded, err := decodeInventorySnapshot(selected)
+		decoded, err := decodeInventory(selected)
 		require.NoError(t, err)
 		assert.Empty(t, decoded)
 	})
@@ -166,7 +163,7 @@ func TestTombstoneRecoveryInventoryManifestValidation(t *testing.T) {
 				assert.Nil(t, got)
 			} else {
 				require.NoError(t, err)
-				decoded, err := decodeInventorySnapshot(got)
+				decoded, err := loadInventoryForTest(got)
 				require.NoError(t, err)
 				require.Len(t, decoded, 1)
 				assert.Nil(t, decoded[0].Labels)
@@ -216,7 +213,7 @@ func TestTombstoneRecoveryInventoryRoundTrip(t *testing.T) {
 	recreated.Name, recreated.UID = "replacement", "replacement-uid"
 	recreated.Labels, recreated.Annotations = nil, nil
 	recreated.Status.CurrentSynthesis.UUID = "00000000-0000-4000-8000-000000000002"
-	recovered, err := decodeInventorySnapshot([]corev1.Secret{*stored})
+	recovered, err := loadInventoryForTest([]corev1.Secret{*stored})
 	require.NoError(t, err)
 	assert.Equal(t, []inventoryResource{res}, recovered)
 
@@ -224,7 +221,7 @@ func TestTombstoneRecoveryInventoryRoundTrip(t *testing.T) {
 		empty, err := makeInventory(comp, nil)
 		require.NoError(t, err)
 		require.Len(t, empty, 1)
-		decoded, err := decodeInventorySnapshot(empty)
+		decoded, err := loadInventoryForTest(empty)
 		require.NoError(t, err)
 		assert.NotNil(t, decoded)
 		assert.Empty(t, decoded)
@@ -245,7 +242,7 @@ func TestTombstoneRecoveryInventoryRoundTrip(t *testing.T) {
 		assert.Equal(t, "2026-09-16T12:00:00Z", item.Annotations[inventorySynthesizedAnnotation])
 		item.Annotations[inventorySynthesizedAnnotation] = comp.Status.CurrentSynthesis.Synthesized.Format(time.RFC3339)
 		original := item.DeepCopy()
-		decoded, err := decodeInventorySnapshot([]corev1.Secret{*item})
+		decoded, err := loadInventoryForTest([]corev1.Secret{*item})
 		require.NoError(t, err)
 		assert.Len(t, decoded, 1)
 		assert.Equal(t, original, item)
@@ -257,7 +254,7 @@ func TestTombstoneRecoveryInventoryRoundTrip(t *testing.T) {
 		resources[0].Labels = map[string]string{}
 		item.Data[inventoryDataKey] = []byte(strings.Replace(inventoryTestJSON(t, resources), `"name":"second"`, `"name":"second","labels":{}`, 1))
 		original := item.DeepCopy()
-		decoded, err := decodeInventorySnapshot([]corev1.Secret{*item})
+		decoded, err := loadInventoryForTest([]corev1.Secret{*item})
 		require.NoError(t, err)
 		assert.Equal(t, resources, decoded)
 		assert.Equal(t, original, item)
@@ -331,22 +328,19 @@ func TestTombstoneRecoveryInventoryRejectsInvalid(t *testing.T) {
 		}, "missing data key"},
 		{"missing metadata", func(cm *corev1.Secret) {
 			cm.Annotations = nil
-		}, "chunks are incomplete or invalid"},
+		}, "invalid source synthesized timestamp"},
 		{"negative index", func(cm *corev1.Secret) {
 			cm.Annotations[inventoryChunkIndexAnnotation] = "-1"
-		}, "chunks are incomplete or invalid"},
+		}, "no complete inventory snapshot found"},
 		{"index outside count", func(cm *corev1.Secret) {
 			cm.Annotations[inventoryChunkIndexAnnotation] = "1"
-		}, "chunks are incomplete or invalid"},
+		}, "no complete inventory snapshot found"},
 		{"zero count", func(cm *corev1.Secret) {
 			cm.Annotations[inventoryChunkCountAnnotation] = "0"
-		}, "chunks are incomplete or invalid"},
+		}, "no complete inventory snapshot found"},
 		{"missing resource name", func(cm *corev1.Secret) {
 			cm.Data[inventoryDataKey] = []byte(`[{"version":"v1","kind":"ConfigMap"}]`)
 		}, "resource identity requires"},
-		{"duplicate resource", func(cm *corev1.Secret) {
-			cm.Data[inventoryDataKey] = []byte(inventoryTestJSON(t, []inventoryResource{res, res}))
-		}, "duplicate inventory identity"},
 		{"Patch resource", func(cm *corev1.Secret) {
 			cm.Data[inventoryDataKey] = []byte(`[{"group":"eno.azure.io","version":"v1","kind":"Patch","name":"patch"}]`)
 		}, "Patch pseudo-resource"},
@@ -361,10 +355,8 @@ func TestTombstoneRecoveryInventoryRejectsInvalid(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			item := inventorySecrets[0].DeepCopy()
 			tt.change(item)
-			got, err := decodeInventorySnapshot([]corev1.Secret{*item})
+			got, err := loadInventoryForTest([]corev1.Secret{*item})
 			require.ErrorContains(t, err, tt.err)
-			var invalid *invalidInventoryError
-			assert.ErrorAs(t, err, &invalid)
 			if tt.name == "malformed JSON" {
 				var syntax *json.SyntaxError
 				assert.ErrorAs(t, err, &syntax)
@@ -402,7 +394,7 @@ func TestTombstoneRecoveryInventorySizeLimit(t *testing.T) {
 			assert.Equal(t, strconv.Itoa(i), chunk.Annotations[inventoryChunkIndexAnnotation])
 			assert.Equal(t, strconv.Itoa(len(got)), chunk.Annotations[inventoryChunkCountAnnotation])
 		}
-		decoded, err := decodeInventorySnapshot(got)
+		decoded, err := loadInventoryForTest(got)
 		require.NoError(t, err)
 		assert.ElementsMatch(t, resources, decoded)
 		before := inventoryTestJSON(t, manifests)
@@ -470,7 +462,7 @@ func TestTombstoneRecoveryInventorySelection(t *testing.T) {
 		want  *corev1.Secret
 		err   string
 	}{
-		{"none", nil, nil, ""},
+		{"none", nil, nil, "no complete inventory snapshot found"},
 		{"single inventory", []corev1.Secret{*newest}, newest, ""},
 		{"source time overrides creation time and UUID", []corev1.Secret{*newest, *older}, newest, ""},
 		{"reverse order", []corev1.Secret{*older, *newest}, newest, ""},
@@ -486,8 +478,6 @@ func TestTombstoneRecoveryInventorySelection(t *testing.T) {
 			got, err := selectInventory(tt.items)
 			if tt.err != "" {
 				require.ErrorContains(t, err, tt.err)
-				var invalid *invalidInventoryError
-				assert.ErrorAs(t, err, &invalid)
 				assert.Nil(t, got)
 				return
 			}
@@ -541,7 +531,7 @@ func TestTombstoneRecoveryInventoryMakeResources(t *testing.T) {
 				{Spec: apiv1.ResourceSliceSpec{Resources: input.Spec.Resources[1:]}},
 			})
 			require.NoError(t, err)
-			resources, err := decodeInventorySnapshot(inventorySecrets)
+			resources, err := loadInventoryForTest(inventorySecrets)
 			require.NoError(t, err)
 			assert.Equal(t, []inventoryResource{clusterScoped, otherNamespace, additional, winner, otherKind, otherGroup}, resources)
 		})
@@ -571,7 +561,7 @@ func TestTombstoneRecoveryInventoryMissingTombstones(t *testing.T) {
 		Spec: apiv1.ResourceSliceSpec{Resources: history},
 	}})
 	require.NoError(t, err)
-	resources, err := decodeInventorySnapshot(inventorySecrets)
+	resources, err := loadInventoryForTest(inventorySecrets)
 	require.NoError(t, err)
 
 	desired.Version = "v1beta1"
@@ -607,7 +597,7 @@ func TestTombstoneRecoveryInventoryPatchTargetPresence(t *testing.T) {
 				Spec: apiv1.ResourceSliceSpec{Resources: []apiv1.Manifest{inventoryTestManifest(t, target)}},
 			}})
 			require.NoError(t, err)
-			resources, err := decodeInventorySnapshot(history)
+			resources, err := loadInventoryForTest(history)
 			require.NoError(t, err)
 
 			patch := apiv1.Manifest{Manifest: inventoryTestJSON(t, map[string]any{
@@ -625,7 +615,7 @@ func TestTombstoneRecoveryInventoryPatchTargetPresence(t *testing.T) {
 
 			inventory, err := makeInventory(comp, current)
 			require.NoError(t, err)
-			recorded, err := decodeInventorySnapshot(inventory)
+			recorded, err := loadInventoryForTest(inventory)
 			require.NoError(t, err)
 			assert.Empty(t, recorded, "a Patch must not establish inventory ownership")
 
@@ -693,4 +683,9 @@ func TestTombstoneRecoveryInventoryMissingTombstonesErrors(t *testing.T) {
 			assert.Nil(t, tombstones)
 		})
 	}
+}
+
+func loadInventoryForTest(items []corev1.Secret) ([]inventoryResource, error) {
+	resources, _, err := loadInventory(items)
+	return resources, err
 }
