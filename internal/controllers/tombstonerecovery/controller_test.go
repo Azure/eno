@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -136,9 +137,9 @@ func (f *controllerTestFixture) ready() {
 	})
 }
 
-func (f *controllerTestFixture) inventories() []corev1.ConfigMap {
+func (f *controllerTestFixture) inventories() []corev1.Secret {
 	f.t.Helper()
-	list := &corev1.ConfigMapList{}
+	list := &corev1.SecretList{}
 	require.NoError(f.t, f.downstream.List(f.t.Context(), list, client.InNamespace("kube-system")))
 	return list.Items
 }
@@ -146,10 +147,12 @@ func (f *controllerTestFixture) inventories() []corev1.ConfigMap {
 func (f *controllerTestFixture) assertInventory(sequence int, names ...string) {
 	f.t.Helper()
 	items := f.inventories()
-	require.Len(f.t, items, 1)
-	data, err := decodeInventorySnapshot(f.composition(), items[0])
+	selected, err := selectInventory(items)
 	require.NoError(f.t, err)
-	assert.Equal(f.t, controllerTestUUID(sequence), items[0].Annotations[inventorySynthesisUUIDAnnotation])
+	require.NotEmpty(f.t, selected)
+	data, err := decodeInventory(selected)
+	require.NoError(f.t, err)
+	assert.Equal(f.t, controllerTestUUID(sequence), selected[0].Labels[inventorySynthesisUUIDLabel])
 	want := []inventoryResource{}
 	for _, name := range names {
 		want = append(want, controllerTestResource(name))
@@ -157,7 +160,7 @@ func (f *controllerTestFixture) assertInventory(sequence int, names ...string) {
 	assert.ElementsMatch(f.t, want, data)
 }
 
-func (f *controllerTestFixture) history(names ...string) *corev1.ConfigMap {
+func (f *controllerTestFixture) history(names ...string) *corev1.Secret {
 	f.t.Helper()
 	comp := f.composition()
 	comp.Status.CurrentSynthesis.UUID = controllerTestUUID(1)
@@ -167,8 +170,10 @@ func (f *controllerTestFixture) history(names ...string) *corev1.ConfigMap {
 	for _, name := range names {
 		slice.Spec.Resources = append(slice.Spec.Resources, inventoryTestManifest(f.t, controllerTestResource(name)))
 	}
-	item, err := makeInventory(comp, []apiv1.ResourceSlice{slice})
+	items, err := makeInventory(comp, []apiv1.ResourceSlice{slice})
 	require.NoError(f.t, err)
+	require.Len(f.t, items, 1)
+	item := &items[0]
 	item.UID = "history-uid"
 	require.NoError(f.t, f.downstream.Create(f.t.Context(), item))
 	return item
@@ -190,6 +195,94 @@ func (f *controllerTestFixture) restart() {
 }
 
 // NotNeeded must not read downstream history.
+
+func TestSelectTombstoneRecoveryOperation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		comp *apiv1.Composition
+		want compositionOperation
+	}{
+		{name: "nil"},
+		{name: "no current synthesis", comp: &apiv1.Composition{}},
+		{name: "synthesis in progress", comp: &apiv1.Composition{
+			Status: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{}},
+		}},
+		{name: "recover missing tombstones", comp: &apiv1.Composition{
+			Status: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{
+				Synthesized: ptr.To(metav1.Now()), TombstoneRecoveryRequired: true,
+			}},
+		}, want: compositionOperationRecover},
+		{name: "record not needed", comp: &apiv1.Composition{
+			Status: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{
+				Synthesized: ptr.To(metav1.Now()),
+			}},
+		}, want: compositionOperationNotNeeded},
+		{name: "finished but not ready", comp: &apiv1.Composition{
+			Status: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{
+				UUID: "current", Synthesized: ptr.To(metav1.Now()),
+				TombstoneRecoveryStatus: &apiv1.TombstoneRecoveryStatus{
+					Status: true, SynthesisUUID: "current",
+				},
+			}},
+		}},
+		{name: "record ready inventory", comp: &apiv1.Composition{
+			Status: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{
+				UUID: "current", Synthesized: ptr.To(metav1.Now()), Ready: ptr.To(metav1.Now()),
+				TombstoneRecoveryStatus: &apiv1.TombstoneRecoveryStatus{
+					Status: true, SynthesisUUID: "current",
+				},
+			}},
+		}, want: compositionOperationRecord},
+		{name: "stale decision recovers before recording", comp: &apiv1.Composition{
+			Status: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{
+				UUID: "current", Synthesized: ptr.To(metav1.Now()), Ready: ptr.To(metav1.Now()),
+				TombstoneRecoveryRequired: true,
+				TombstoneRecoveryStatus: &apiv1.TombstoneRecoveryStatus{
+					Status: true, SynthesisUUID: "old",
+				},
+			}},
+		}, want: compositionOperationRecover},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, selectTombstoneRecoveryOperation(tc.comp))
+		})
+	}
+}
+
+func TestIsInventoryRecordingStillValid(t *testing.T) {
+	now := metav1.Now()
+	base := &apiv1.Synthesis{
+		UUID: "current", Synthesized: &now, Ready: &now,
+		TombstoneRecoveryStatus: &apiv1.TombstoneRecoveryStatus{
+			Status: true, SynthesisUUID: "current",
+		},
+	}
+	for _, tc := range []struct {
+		name   string
+		change func(*apiv1.Synthesis)
+		match  bool
+	}{
+		{name: "same", match: true},
+		{name: "not ready", change: func(s *apiv1.Synthesis) {
+			s.Ready = nil
+		}},
+		{name: "recovery unfinished", change: func(s *apiv1.Synthesis) {
+			s.TombstoneRecoveryStatus.Status = false
+		}},
+		{name: "recovery decision for another synthesis", change: func(s *apiv1.Synthesis) {
+			s.TombstoneRecoveryStatus.SynthesisUUID = "previous"
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			current := base.DeepCopy()
+			if tc.change != nil {
+				tc.change(current)
+			}
+			assert.Equal(t, tc.match, isInventoryRecordingStillValid(current))
+		})
+	}
+	assert.False(t, isInventoryRecordingStillValid(nil))
+}
 
 func TestTombstoneRecoveryAfterSkippedSynthesis(t *testing.T) {
 	t.Run(apiv1.TombstoneRecoveryOperatorNotEnabled, func(t *testing.T) {
@@ -437,7 +530,7 @@ func TestTombstoneRecoveryOperatorEmptyCurrentRecoveryAnnotation(t *testing.T) {
 				item := f.history("removed")
 				res := controllerTestResource("removed")
 				res.Labels = map[string]string{"eno.azure.io/overlaymgr-component-type": tc.inventoryType}
-				item.Data[inventoryDataKey] = inventoryTestJSON(t, []inventoryResource{res})
+				item.Data[inventoryDataKey] = []byte(inventoryTestJSON(t, []inventoryResource{res}))
 				require.NoError(t, f.downstream.Update(t.Context(), item))
 			}
 			before, history := f.composition(), f.inventories()
@@ -495,7 +588,7 @@ func TestTombstoneRecoveryOperatorDeletingSkipsInventory(t *testing.T) {
 			})
 			require.NoError(t, f.reconcile())
 			assert.Equal(t, before, f.composition())
-			assert.Equal(t, []corev1.ConfigMap{*history}, f.inventories())
+			assert.Equal(t, []corev1.Secret{*history}, f.inventories())
 		})
 	}
 }
@@ -544,7 +637,7 @@ func TestTombstoneRecoveryOperatorObsoleteWork(t *testing.T) {
 			require.NotNil(t, expected, "the external deletion or supersession must occur")
 			assert.Equal(t, expected, f.composition(), "obsolete recovery must not acknowledge or change the new state")
 			assert.Equal(t, original.Spec, f.slice("desired").Spec)
-			assert.Equal(t, []corev1.ConfigMap{*old}, f.inventories())
+			assert.Equal(t, []corev1.Secret{*old}, f.inventories())
 			if mode != "new-synthesis" {
 				f.restart()
 				f.controller.downstream = nil
@@ -590,13 +683,13 @@ func TestTombstoneRecoveryOperatorRecoveryInventorySelection(t *testing.T) {
 			f := newControllerTestFixture(t, true, "desired")
 			older := f.history("obsolete")
 			newer := older.DeepCopy()
-			newer.Name = inventoryName(f.composition(), controllerTestUUID(3))
+			newer.Name = inventoryName(inventoryLineage(f.composition()), controllerTestUUID(3), 0)
 			newer.UID, newer.ResourceVersion = "newer-uid", ""
-			newer.Annotations[inventorySynthesisUUIDAnnotation] = controllerTestUUID(3)
+			newer.Labels[inventorySynthesisUUIDLabel] = controllerTestUUID(3)
 			newer.Annotations[inventorySynthesizedAnnotation] = f.composition().Status.CurrentSynthesis.Synthesized.Format(time.RFC3339)
-			newer.Data[inventoryDataKey] = inventoryTestJSON(t, []inventoryResource{controllerTestResource("removed")})
+			newer.Data[inventoryDataKey] = []byte(inventoryTestJSON(t, []inventoryResource{controllerTestResource("removed")}))
 			require.NoError(t, f.downstream.Create(t.Context(), newer))
-			older.Data[inventoryDataKey] = "{"
+			older.Data[inventoryDataKey] = []byte("{")
 			if invalidTime {
 				older.Annotations[inventorySynthesizedAnnotation] = "invalid"
 			}
@@ -609,11 +702,6 @@ func TestTombstoneRecoveryOperatorRecoveryInventorySelection(t *testing.T) {
 				assert.Equal(t, reasonInventoryInvalid, status.Reason)
 				assert.Contains(t, status.Message, "invalid source synthesized timestamp")
 				assert.Len(t, f.slice("desired").Spec.Resources, 1)
-				before := f.inventories()
-				f.ready()
-				f.controller.downstream = nil
-				f.reconcileEvent()
-				assert.Equal(t, before, f.inventories(), "an invalid recovery decision deliberately blocks replacement")
 			} else {
 				assert.Equal(t, reasonFinished, status.Reason)
 				manifests := f.slice("desired").Spec.Resources
