@@ -444,3 +444,18 @@ func TestInventoryRecoverySecretFailureDecisions(t *testing.T) {
 		})
 	}
 }
+
+func TestInventoryRecordingRejectsTerminatingChunk(t *testing.T) {
+	f := recordingTestFixture(t, "desired")
+	old := f.history("old")
+	intended, err := makeInventory(f.composition(), []apiv1.ResourceSlice{*f.slice("desired")})
+	require.NoError(t, err)
+	require.Len(t, intended, 1)
+	terminating := intended[0].DeepCopy()
+	terminating.Finalizers = []string{"example.com/hold"}
+	require.NoError(t, f.downstream.Create(t.Context(), terminating))
+	require.NoError(t, f.downstream.Delete(t.Context(), terminating))
+
+	require.ErrorContains(t, f.reconcile(), "is being deleted")
+	require.NoError(t, f.downstream.Get(t.Context(), client.ObjectKeyFromObject(old), &corev1.Secret{}), "old snapshot must be kept")
+}

@@ -57,6 +57,10 @@ func (c *tombstoneRecoveryController) writeInventoryChunk(ctx context.Context, c
 	if err != nil {
 		return fmt.Errorf("reading inventory Secret %q: %w", intended.Name, err)
 	}
+	// A terminating Secret will disappear, so it cannot stand in for the new snapshot; retry until it is gone.
+	if existing.DeletionTimestamp != nil {
+		return fmt.Errorf("inventory Secret %q is being deleted", existing.Name)
+	}
 	if inventorySecretMatches(existing, intended) {
 		return nil
 	}
@@ -64,13 +68,13 @@ func (c *tombstoneRecoveryController) writeInventoryChunk(ctx context.Context, c
 		existing.Name, intended.Labels[inventorySynthesisUUIDLabel])
 }
 
-// isInventoryAlreadyRecorded reports whether the only inventory is a complete one for the current synthesis.
+// isInventoryAlreadyRecorded reports whether the only inventory is a complete, non-terminating one for the current synthesis.
 func isInventoryAlreadyRecorded(items []corev1.Secret, currentUUID string) bool {
 	if len(items) == 0 {
 		return false
 	}
 	for i := range items {
-		if items[i].Labels[inventorySynthesisUUIDLabel] != currentUUID {
+		if items[i].Labels[inventorySynthesisUUIDLabel] != currentUUID || items[i].DeletionTimestamp != nil {
 			return false
 		}
 	}
