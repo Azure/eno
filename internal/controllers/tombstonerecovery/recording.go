@@ -28,22 +28,19 @@ func (c *tombstoneRecoveryController) recordInventory(ctx context.Context, comp 
 	if err != nil {
 		return err
 	}
-	chunks, err := makeInventory(comp, slices)
+	secrets, err := makeInventory(comp, slices)
 	if err != nil {
 		return fmt.Errorf("building inventory: %w", err)
 	}
-	for i := range chunks {
-		if err := c.writeInventoryChunk(ctx, comp, &chunks[i]); err != nil {
+	for i := range secrets {
+		if err := c.writeInventoryChunk(ctx, comp, &secrets[i]); err != nil {
 			return err
 		}
 	}
-	if err := c.verifyInventorySnapshot(ctx, comp, chunks); err != nil {
+	if err := c.deleteOldInventorySnapshots(ctx, comp, secrets[0].Labels[inventorySynthesisUUIDLabel]); err != nil {
 		return err
 	}
-	if err := c.deleteOldInventorySnapshots(ctx, comp, chunks[0].Labels[inventorySynthesisUUIDLabel]); err != nil {
-		return err
-	}
-	logr.FromContextOrDiscard(ctx).V(1).Info("inventory snapshot persisted", "chunkCount", len(chunks))
+	logr.FromContextOrDiscard(ctx).V(1).Info("inventory snapshot persisted", "secretCount", len(secrets))
 	return nil
 }
 
@@ -51,9 +48,6 @@ func (c *tombstoneRecoveryController) writeInventoryChunk(ctx context.Context, c
 	existing := &corev1.Secret{}
 	err := c.downstream.Get(ctx, client.ObjectKeyFromObject(intended), existing)
 	if apierrors.IsNotFound(err) {
-		if _, err := c.getCurrentComposition(ctx, comp, true); err != nil {
-			return err
-		}
 		if err := c.downstream.Create(ctx, intended); err != nil {
 			return fmt.Errorf("creating inventory Secret %q: %w", intended.Name, err)
 		}
@@ -91,32 +85,6 @@ func inventorySecretMatches(existing, intended *corev1.Secret) bool {
 		reflect.DeepEqual(existing.Annotations, intended.Annotations)
 }
 
-// verifyInventorySnapshot checks that the stored chunks for this synthesis are exactly the intended chunks.
-// Matching every intended chunk, with no extras, also proves the snapshot is complete and consistent.
-func (c *tombstoneRecoveryController) verifyInventorySnapshot(ctx context.Context, comp *apiv1.Composition, intended []corev1.Secret) error {
-	items, err := c.readInventories(ctx, comp)
-	if err != nil {
-		return err
-	}
-	uuid := intended[0].Labels[inventorySynthesisUUIDLabel]
-	byName := map[string]*corev1.Secret{}
-	for i := range items {
-		if items[i].Labels[inventorySynthesisUUIDLabel] == uuid {
-			byName[items[i].Name] = &items[i]
-		}
-	}
-	if len(byName) != len(intended) {
-		return fmt.Errorf("verifying inventory snapshot: found %d chunks, want %d", len(byName), len(intended))
-	}
-	for i := range intended {
-		existing := byName[intended[i].Name]
-		if existing == nil || !inventorySecretMatches(existing, &intended[i]) {
-			return fmt.Errorf("verifying inventory snapshot: Secret %q does not match intended contents", intended[i].Name)
-		}
-	}
-	return nil
-}
-
 func (c *tombstoneRecoveryController) deleteOldInventorySnapshots(ctx context.Context, comp *apiv1.Composition, currentUUID string) error {
 	items, err := c.readInventories(ctx, comp)
 	if err != nil {
@@ -129,9 +97,6 @@ func (c *tombstoneRecoveryController) deleteOldInventorySnapshots(ctx context.Co
 		item := &items[i]
 		if item.Labels[inventorySynthesisUUIDLabel] == currentUUID {
 			continue
-		}
-		if _, err := c.getCurrentComposition(ctx, comp, true); err != nil {
-			return err
 		}
 		if err := c.downstream.Delete(ctx, item, &client.Preconditions{UID: &item.UID}); err != nil && !apierrors.IsNotFound(err) {
 			return fmt.Errorf("deleting old inventory Secret %q: %w", item.Name, err)

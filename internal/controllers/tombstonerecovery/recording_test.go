@@ -178,7 +178,7 @@ func TestInventoryRecordingPartialFailureAndShrink(t *testing.T) {
 			comp.Status.CurrentSynthesis.ResourceSlices = nil
 			require.NoError(t, f.upstream.Status().Update(t.Context(), comp))
 			f.reconcileEvent()
-			require.Len(t, f.inventories(), 1, "the verified replacement deletes all older chunks")
+			require.Len(t, f.inventories(), 1, "the replacement deletes all older chunks")
 			f.assertInventory(3)
 		})
 	}
@@ -190,12 +190,18 @@ func TestInventoryRecordingFreshnessBeforeWrites(t *testing.T) {
 			f := recordingTestFixture(t)
 			recordingTestLargeSlice(f)
 			writes := 0
+			changed := false
 			failure := apierrors.NewServiceUnavailable("composition unavailable")
+			// Change the live Composition after the cached reconcile starts, before the freshness check.
 			f.controller.downstream = interceptor.NewClient(f.downstream, interceptor.Funcs{
-				Create: func(ctx context.Context, cli client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
-					writes++
-					err := cli.Create(ctx, obj, opts...)
-					require.NoError(t, err)
+				List: func(ctx context.Context, cli client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if err := cli.List(ctx, list, opts...); err != nil {
+						return err
+					}
+					if changed {
+						return nil
+					}
+					changed = true
 					if mode == "read error" {
 						f.controller.reader = interceptor.NewClient(f.upstream, interceptor.Funcs{
 							Get: func(context.Context, client.WithWatch, client.ObjectKey, client.Object, ...client.GetOption) error {
@@ -217,14 +223,15 @@ func TestInventoryRecordingFreshnessBeforeWrites(t *testing.T) {
 						require.NoError(t, f.upstream.Status().Update(ctx, comp))
 					case "deleting":
 						require.NoError(t, f.upstream.Delete(ctx, comp))
-					default:
-						switch mode {
-						case "opt-out":
-							delete(comp.Annotations, "eno.azure.io/recovery-enabled")
-						}
+					case "opt-out":
+						delete(comp.Annotations, "eno.azure.io/recovery-enabled")
 						require.NoError(t, f.upstream.Update(ctx, comp))
 					}
 					return nil
+				},
+				Create: func(ctx context.Context, cli client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+					writes++
+					return cli.Create(ctx, obj, opts...)
 				},
 			})
 			result, err := f.controller.Reconcile(t.Context(), ctrl.Request{NamespacedName: f.key})
@@ -234,8 +241,8 @@ func TestInventoryRecordingFreshnessBeforeWrites(t *testing.T) {
 				require.NoError(t, err)
 				assert.True(t, result.Requeue)
 			}
-			assert.Equal(t, 1, writes, "freshness must be checked before every chunk")
-			assert.Len(t, f.inventories(), 1)
+			assert.Equal(t, 0, writes, "freshness must be checked before any Secret write")
+			assert.Empty(t, f.inventories())
 		})
 	}
 }
@@ -363,8 +370,8 @@ func TestInventoryRecordingSupersededBeforeCreate(t *testing.T) {
 	f.history("old")
 	before := f.inventories()
 	f.controller.downstream = interceptor.NewClient(f.downstream, interceptor.Funcs{
-		Get: func(ctx context.Context, cli client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-			err := cli.Get(ctx, key, obj, opts...)
+		List: func(ctx context.Context, cli client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			err := cli.List(ctx, list, opts...)
 			f.updateStatus(func(syn *apiv1.Synthesis) {
 				syn.UUID = controllerTestUUID(3)
 			})
@@ -382,7 +389,7 @@ func TestInventoryRecordingSupersededBeforeCreate(t *testing.T) {
 }
 
 func TestInventoryRecoverySecretFailureDecisions(t *testing.T) {
-	for _, mode := range []string{"missing chunk", "mixed UUID", "mixed timestamp", "tied snapshots", "malformed JSON", "read failure", "ConfigMap only"} {
+	for _, mode := range []string{"missing chunk", "mixed UUID", "malformed JSON", "read failure", "ConfigMap only"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newControllerTestFixture(t, true, "desired")
 			chunks := inventoryTestChunkedSnapshot(t, f.composition())
@@ -393,15 +400,6 @@ func TestInventoryRecoverySecretFailureDecisions(t *testing.T) {
 			case "mixed UUID":
 				chunks[1].Labels[inventorySynthesisUUIDLabel] = "other"
 				chunks[1].Annotations[inventorySynthesizedAnnotation] = f.composition().Status.CurrentSynthesis.Synthesized.Add(-time.Minute).Format(time.RFC3339)
-			case "mixed timestamp":
-				chunks[1].Annotations[inventorySynthesizedAnnotation] = f.composition().Status.CurrentSynthesis.Synthesized.Add(-time.Minute).Format(time.RFC3339)
-			case "tied snapshots":
-				for i := range chunks {
-					other := chunks[i].DeepCopy()
-					other.Name = inventoryName(inventoryLineage(f.composition()), "other", i)
-					other.Labels[inventorySynthesisUUIDLabel] = "other"
-					chunks = append(chunks, *other)
-				}
 			case "malformed JSON":
 				chunks[0].Data[inventoryDataKey] = []byte("{")
 			case "read failure":

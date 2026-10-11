@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"sort"
 	"strconv"
 	"time"
 
@@ -26,16 +25,12 @@ const (
 	inventoryDataKey            = "inventory.json"
 	inventoryMaxDataBytes       = 1 << 20
 
-	// Resource metadata retained in each inventory entry.
-	inventoryReadinessGroup = "eno.azure.io/readiness-group"
-	inventoryDeletionGroup  = "eno.azure.io/deletion-group"
-
 	// Snapshot source metadata written on every Secret chunk.
 	inventorySynthesizedAnnotation = "eno.azure.io/inventory-synthesized"
 
 	// Chunk ordering and completeness metadata.
-	inventoryChunkIndexAnnotation           = "eno.azure.io/inventory-chunk-index"
-	inventoryChunkCountAnnotation           = "eno.azure.io/inventory-chunk-count"
+	inventoryChunkIndexAnnotation = "eno.azure.io/inventory-chunk-index"
+	inventoryChunkCountAnnotation = "eno.azure.io/inventory-chunk-count"
 )
 
 type inventoryResource struct {
@@ -64,8 +59,7 @@ func inventoryName(lineage, synthesisUUID string, chunkIndex int) string {
 	return "eno-inventory-" + lineage + "-" + synthesisUUID + "-" + strconv.Itoa(chunkIndex)
 }
 
-// loadInventory selects the newest complete inventory and decodes it.
-// found is false when there are no inventory Secrets; any other problem is returned as an error.
+// loadInventory selects the newest complete inventory and decodes it. found is false when there are no inventory Secrets; any other problem is returned as an error.
 func loadInventory(items []corev1.Secret) (resources []inventoryResource, found bool, err error) {
 	if len(items) == 0 {
 		return nil, false, nil
@@ -84,33 +78,38 @@ func loadInventory(items []corev1.Secret) (resources []inventoryResource, found 
 // selectInventory returns the ordered chunks of the newest complete inventory.
 // Grouping is the only place chunk order, completeness, and timestamps are checked.
 func selectInventory(items []corev1.Secret) ([]corev1.Secret, error) {
-	inventories, err := groupInventorySecretsBySynthesis(items)
+	inventories, err := groupInventorySecretsBySynthesisUUID(items)
 	if err != nil {
 		return nil, err
+	}
+	// Common case: one complete snapshot, so there is nothing to compare.
+	if len(inventories) == 1 && inventories[0].complete {
+		return inventories[0].secrets, nil
 	}
 	return selectNewestCompleteInventory(inventories)
 }
 
-// groupInventorySecretsBySynthesis builds one inventory per source synthesis UUID.
-func groupInventorySecretsBySynthesis(items []corev1.Secret) ([]synthesisInventory, error) {
-	byUUID := map[string][]corev1.Secret{}
+// groupInventorySecretsBySynthesisUUID builds one inventory per source synthesis UUID.
+func groupInventorySecretsBySynthesisUUID(items []corev1.Secret) ([]synthesisInventory, error) {
+	secretsBySynthesisUUID := map[string][]corev1.Secret{}
 	for i := range items {
 		item := &items[i]
-		uuid := item.Labels[inventorySynthesisUUIDLabel]
-		if uuid == "" {
+		synthesisUUID := item.Labels[inventorySynthesisUUIDLabel]
+		if synthesisUUID == "" {
 			return nil, fmt.Errorf("Secret %s/%s has no source synthesis UUID label", item.Namespace, item.Name)
 		}
-		byUUID[uuid] = append(byUUID[uuid], *item)
+		secretsBySynthesisUUID[synthesisUUID] = append(secretsBySynthesisUUID[synthesisUUID], *item)
 	}
-	inventories := make([]synthesisInventory, 0, len(byUUID))
-	for uuid, inventorySecrets := range byUUID {
-		synthesized, err := inventoryGroupSynthesized(inventorySecrets)
+	inventories := make([]synthesisInventory, 0, len(secretsBySynthesisUUID))
+	for synthesisUUID, inventorySecrets := range secretsBySynthesisUUID {
+		// Chunks of one synthesis are written together, so any chunk carries the snapshot timestamp.
+		synthesized, err := inventorySynthesized(&inventorySecrets[0])
 		if err != nil {
 			return nil, err
 		}
 		orderedSecrets, complete := orderInventoryChunks(inventorySecrets)
 		inventories = append(inventories, synthesisInventory{
-			synthesisUUID: uuid, synthesized: synthesized, secrets: orderedSecrets, complete: complete,
+			synthesisUUID: synthesisUUID, synthesized: synthesized, secrets: orderedSecrets, complete: complete,
 		})
 	}
 	return inventories, nil
@@ -118,47 +117,20 @@ func groupInventorySecretsBySynthesis(items []corev1.Secret) ([]synthesisInvento
 
 // selectNewestCompleteInventory ignores partial inventories and returns the latest usable inventory.
 func selectNewestCompleteInventory(inventories []synthesisInventory) ([]corev1.Secret, error) {
-	var latestTime time.Time
+	var selected *synthesisInventory
 	for i := range inventories {
 		inventory := &inventories[i]
 		if !inventory.complete {
 			continue
 		}
-		if latestTime.IsZero() || inventory.synthesized.After(latestTime) {
-			latestTime = inventory.synthesized
+		if selected == nil || inventory.synthesized.After(selected.synthesized) {
+			selected = inventory
 		}
-	}
-	var selected *synthesisInventory
-	for i := range inventories {
-		inventory := &inventories[i]
-		if !inventory.complete || !inventory.synthesized.Equal(latestTime) {
-			continue
-		}
-		if selected != nil {
-			return nil, fmt.Errorf("different synthesis UUIDs share the latest inventory timestamp %s", latestTime.Format(time.RFC3339))
-		}
-		selected = inventory
 	}
 	if selected == nil {
 		return nil, fmt.Errorf("no complete inventory snapshot found")
 	}
 	return selected.secrets, nil
-}
-
-func inventoryGroupSynthesized(items []corev1.Secret) (time.Time, error) {
-	var synthesized time.Time
-	for i := range items {
-		current, err := inventorySynthesized(&items[i])
-		if err != nil {
-			return time.Time{}, fmt.Errorf("Secret %s/%s: %w", items[i].Namespace, items[i].Name, err)
-		}
-		if synthesized.IsZero() {
-			synthesized = current
-		} else if !synthesized.Equal(current) {
-			return time.Time{}, fmt.Errorf("synthesis UUID %q has inconsistent source timestamps", items[i].Labels[inventorySynthesisUUIDLabel])
-		}
-	}
-	return synthesized, nil
 }
 
 // orderInventoryChunks returns chunks in index order and reports whether the set is complete.
@@ -224,13 +196,14 @@ func inventoryChunkPosition(item *corev1.Secret) (int, int, error) {
 	return index, count, nil
 }
 
+// inventorySynthesized reads the snapshot's source synthesis time from the Secret annotation.
 func inventorySynthesized(item *corev1.Secret) (time.Time, error) {
 	synthesized, err := time.Parse(time.RFC3339, item.Annotations[inventorySynthesizedAnnotation])
 	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid source synthesized timestamp: %w", err)
+		return time.Time{}, fmt.Errorf("Secret %s/%s: invalid source synthesized timestamp: %w", item.Namespace, item.Name, err)
 	}
 	if synthesized.IsZero() {
-		return time.Time{}, fmt.Errorf("missing or zero source synthesized timestamp")
+		return time.Time{}, fmt.Errorf("Secret %s/%s: missing or zero source synthesized timestamp", item.Namespace, item.Name)
 	}
 	return synthesized.UTC(), nil
 }
@@ -240,28 +213,11 @@ func makeInventory(comp *apiv1.Composition, slices []apiv1.ResourceSlice) ([]cor
 	if syn == nil || syn.UUID == "" || syn.Synthesized == nil || syn.Synthesized.IsZero() {
 		return nil, fmt.Errorf("inventory requires a synthesized current synthesis with a UUID")
 	}
-	data := []inventoryResource{}
-	seen := map[resource.Ref]struct{}{}
-	for _, slice := range slices {
-		for i, manifest := range slice.Spec.Resources {
-			_, res, err := parseInventoryManifest(manifest.Manifest)
-			if err != nil {
-				return nil, fmt.Errorf("parsing resource %d of slice %s/%s: %w", i, slice.Namespace, slice.Name, err)
-			}
-			if manifest.Deleted || res.isPatch() {
-				continue
-			}
-			ref := res.ref()
-			// Keep the first occurrence's version and metadata; inventory does not need to reproduce the apply winner.
-			if _, ok := seen[ref]; ok {
-				continue
-			}
-			seen[ref] = struct{}{}
-			data = append(data, res)
-		}
+	data, err := generateInventoryResources(slices)
+	if err != nil {
+		return nil, err
 	}
-	sortInventoryResources(data)
-	payloads, err := packInventory(data)
+	payloads, err := buildInventoryChunks(data)
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +245,34 @@ func makeInventory(comp *apiv1.Composition, slices []apiv1.ResourceSlice) ([]cor
 	return secrets, nil
 }
 
-func packInventory(resources []inventoryResource) ([][]byte, error) {
+// generateInventoryResources returns the de-duplicated resource identities in current slice order.
+// Tombstones and Patch pseudo-resources are excluded.
+func generateInventoryResources(slices []apiv1.ResourceSlice) ([]inventoryResource, error) {
+	data := []inventoryResource{}
+	seen := map[resource.Ref]struct{}{}
+	for _, slice := range slices {
+		for i, manifest := range slice.Spec.Resources {
+			_, res, err := parseInventoryManifest(manifest.Manifest)
+			if err != nil {
+				return nil, fmt.Errorf("parsing resource %d of slice %s/%s: %w", i, slice.Namespace, slice.Name, err)
+			}
+			if manifest.Deleted || res.isPatch() {
+				continue
+			}
+			ref := res.ref()
+			// Keep the first occurrence's version and metadata; inventory does not need to reproduce the apply winner.
+			if _, ok := seen[ref]; ok {
+				continue
+			}
+			seen[ref] = struct{}{}
+			data = append(data, res)
+		}
+	}
+	return data, nil
+}
+
+// buildInventoryChunks encodes resources as JSON arrays, each within the Secret data limit.
+func buildInventoryChunks(resources []inventoryResource) ([][]byte, error) {
 	var chunks [][]byte
 	chunk := []byte{'['}
 	for _, res := range resources {
@@ -369,7 +352,7 @@ func parseInventoryManifest(manifest string) (*unstructured.Unstructured, invent
 	if err := res.validate(); err != nil {
 		return nil, inventoryResource{}, err
 	}
-	for _, key := range []string{inventoryReadinessGroup, inventoryDeletionGroup} {
+	for _, key := range []string{resource.ReadinessGroupKey, resource.DeletionGroupKey} {
 		if value, ok := annotations[key]; ok {
 			if res.Annotations == nil {
 				res.Annotations = map[string]string{}
@@ -411,15 +394,3 @@ func (res inventoryResource) object() *unstructured.Unstructured {
 	return obj
 }
 
-// sortInventoryResources keeps Secret contents deterministic for the same synthesis.
-func sortInventoryResources(resources []inventoryResource) {
-	sort.Slice(resources, func(i, j int) bool {
-		a, b := resources[i], resources[j]
-		for _, pair := range [][2]string{{a.Group, b.Group}, {a.Kind, b.Kind}, {a.Namespace, b.Namespace}, {a.Name, b.Name}} {
-			if pair[0] != pair[1] {
-				return pair[0] < pair[1]
-			}
-		}
-		return a.Version < b.Version
-	})
-}

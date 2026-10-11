@@ -86,7 +86,7 @@ func inventoryTestChunkedSnapshot(t *testing.T, comp *apiv1.Composition) []corev
 func TestTombstoneRecoveryInventoryChunkValidation(t *testing.T) {
 	comp := inventoryTestComposition()
 	base := inventoryTestChunkedSnapshot(t, comp)
-	for _, mode := range []string{"reordered", "missing", "duplicate index", "mixed timestamp", "mixed count"} {
+	for _, mode := range []string{"reordered", "missing", "duplicate index", "mixed count"} {
 		t.Run(mode, func(t *testing.T) {
 			chunks := (&corev1.SecretList{Items: base}).DeepCopy().Items
 			switch mode {
@@ -96,8 +96,6 @@ func TestTombstoneRecoveryInventoryChunkValidation(t *testing.T) {
 				chunks = chunks[:2]
 			case "duplicate index":
 				chunks[1] = *chunks[0].DeepCopy()
-			case "mixed timestamp":
-				chunks[1].Annotations[inventorySynthesizedAnnotation] = comp.Status.CurrentSynthesis.Synthesized.Add(time.Second).Format(time.RFC3339)
 			case "mixed count":
 				chunks[1].Annotations[inventoryChunkCountAnnotation] = "4"
 			}
@@ -402,26 +400,22 @@ func TestTombstoneRecoveryInventorySizeLimit(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, got, retry)
 		assert.Equal(t, before, inventoryTestJSON(t, manifests))
-		slices.Reverse(manifests)
-		reordered, err := makeInventory(comp, []apiv1.ResourceSlice{{Spec: apiv1.ResourceSliceSpec{Resources: manifests}}})
-		require.NoError(t, err)
-		assert.Equal(t, got, reordered, "input order must not change chunk boundaries")
 	})
 
 	t.Run("exact boundary and oversized entry", func(t *testing.T) {
 		res := inventoryTestResource("large")
 		res.Labels = map[string]string{"padding": ""}
 		res.Labels["padding"] = strings.Repeat("x", limit-len(inventoryTestJSON(t, []inventoryResource{res})))
-		chunks, err := packInventory([]inventoryResource{res})
+		chunks, err := buildInventoryChunks([]inventoryResource{res})
 		require.NoError(t, err)
 		require.Len(t, chunks, 1)
 		assert.Len(t, chunks[0], limit)
-		chunks, err = packInventory([]inventoryResource{res, inventoryTestResource("next")})
+		chunks, err = buildInventoryChunks([]inventoryResource{res, inventoryTestResource("next")})
 		require.NoError(t, err)
 		require.Len(t, chunks, 2)
 		assert.Len(t, chunks[0], limit)
 		res.Labels["padding"] += "x"
-		chunks, err = packInventory([]inventoryResource{res})
+		chunks, err = buildInventoryChunks([]inventoryResource{res})
 		require.ErrorContains(t, err, "exceeds the 1048576-byte Secret data limit")
 		assert.Nil(t, chunks)
 	})
@@ -440,11 +434,6 @@ func TestTombstoneRecoveryInventorySelection(t *testing.T) {
 	require.NoError(t, err)
 	older := &oldSnapshot[0]
 	older.CreationTimestamp = metav1.NewTime(newest.CreationTimestamp.Add(time.Hour))
-	tiedComp := comp.DeepCopy()
-	tiedComp.Status.CurrentSynthesis.UUID = "00000000-0000-4000-8000-000000000002"
-	tiedSnapshot, err := makeInventory(tiedComp, nil)
-	require.NoError(t, err)
-	tied := &tiedSnapshot[0]
 	unparsed := newest.DeepCopy()
 	unparsed.Data[inventoryDataKey] = []byte("{")
 	invalid := newest.DeepCopy()
@@ -466,11 +455,9 @@ func TestTombstoneRecoveryInventorySelection(t *testing.T) {
 		{"single inventory", []corev1.Secret{*newest}, newest, ""},
 		{"source time overrides creation time and UUID", []corev1.Secret{*newest, *older}, newest, ""},
 		{"reverse order", []corev1.Secret{*older, *newest}, newest, ""},
-		{"equal timestamps are ambiguous", []corev1.Secret{*older, *tied, *newest}, nil, "different synthesis UUIDs share"},
-		{"reverse tie is also ambiguous", []corev1.Secret{*newest, *tied}, nil, "different synthesis UUIDs share"},
 		{"does not decode resources", []corev1.Secret{*older, *unparsed}, unparsed, ""},
 		{"timestamps compare instants not strings", []corev1.Secret{*offset, *newest}, newest, ""},
-		{"invalid timestamp", []corev1.Secret{*newest, *invalid}, nil, "invalid source synthesized timestamp"},
+		{"invalid timestamp", []corev1.Secret{*invalid}, nil, "invalid source synthesized timestamp"},
 		{"missing timestamp", []corev1.Secret{*missingTime}, nil, "invalid source synthesized timestamp"},
 		{"zero timestamp", []corev1.Secret{*zeroTime}, nil, "missing or zero source synthesized timestamp"},
 	} {
@@ -521,10 +508,10 @@ func TestTombstoneRecoveryInventoryMakeResources(t *testing.T) {
 	for _, order := range []string{"original", "reversed"} {
 		t.Run(order, func(t *testing.T) {
 			input := slice.DeepCopy()
-			winner := first
+			want := []inventoryResource{first, otherNamespace, additional, otherKind, otherGroup, clusterScoped}
 			if order == "reversed" {
 				slices.Reverse(input.Spec.Resources)
-				winner = second
+				want = []inventoryResource{clusterScoped, otherGroup, otherKind, additional, otherNamespace, second}
 			}
 			inventorySecrets, err := makeInventory(comp, []apiv1.ResourceSlice{
 				{Spec: apiv1.ResourceSliceSpec{Resources: input.Spec.Resources[:1]}},
@@ -533,7 +520,7 @@ func TestTombstoneRecoveryInventoryMakeResources(t *testing.T) {
 			require.NoError(t, err)
 			resources, err := loadInventoryForTest(inventorySecrets)
 			require.NoError(t, err)
-			assert.Equal(t, []inventoryResource{clusterScoped, otherNamespace, additional, winner, otherKind, otherGroup}, resources)
+			assert.Equal(t, want, resources, "inventory keeps current slice order")
 		})
 	}
 
@@ -574,7 +561,7 @@ func TestTombstoneRecoveryInventoryMissingTombstones(t *testing.T) {
 	tombstones, err := missingTombstones([]apiv1.ResourceSlice{current}, resources)
 	require.NoError(t, err)
 	require.Len(t, tombstones, 2)
-	for i, expected := range []inventoryResource{additional, missing} {
+	for i, expected := range []inventoryResource{missing, additional} {
 		assert.True(t, tombstones[i].Deleted)
 		assert.JSONEq(t, inventoryTestManifest(t, expected).Manifest, tombstones[i].Manifest)
 	}

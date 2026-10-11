@@ -6,7 +6,7 @@
 - **Recover:** Read saved inventory and restore missing tombstones into the current synthesis. A tombstone is a manifest with `Deleted: true`; normal resource reconciliation performs the downstream deletion.
 - **Coordinate:** Prevent reconstitution and readiness from advancing before the current synthesis has a terminal recovery decision.
 - **Record:** Save the current Ready synthesis's inventory as one or more Secrets for future recovery.
-- **Not included:** General inventory garbage collection or cleanup on Composition deletion. Recording only rotates older lineage snapshots after verifying their replacement.
+- **Not included:** General inventory garbage collection or cleanup on Composition deletion. Recording only rotates older lineage snapshots after writing their replacement.
 - **Not guaranteed:** Recovery of every historical resource when inventory is missing or invalid, or atomic behavior across Composition status, ResourceSlices, and downstream resources.
 - **Related guide:** [Resource Reconciliation](./reconciliation.md) explains ordinary apply, deletion, readiness, and sharding behavior.
 
@@ -95,9 +95,9 @@ Synthesis detects incomplete history or inherits an outstanding requirement
 ### Inventory Recording
 
 - **Does:** Read every referenced current ResourceSlice before preparing any Secret writes; missing, terminating, malformed, or unreadable slices stop the attempt.
-- **Does:** Exclude tombstones and Patch resources, sort inventory identities, and deterministically pack complete JSON arrays into chunks within the Secret data limit.
+- **Does:** Exclude tombstones and Patch resources, keep current slice order, and deterministically pack complete JSON arrays into chunks within the Secret data limit.
 - **Does:** Recheck the current synthesis UUID, opt-in, deletion state, readiness, and finished recovery decision before writes. Namespace and label-selector scope are enforced by the informer cache that enqueues the Composition.
-- **Does:** Return early when the only stored snapshot is complete and belongs to the current synthesis. Otherwise use immutable synthesis-versioned Secret names, skip identical existing chunks, verify the stored chunks exactly match the intended chunks, then delete older lineage snapshots.
+- **Does:** Return early when the only stored snapshot is complete and belongs to the current synthesis. Otherwise use immutable synthesis-versioned Secret names, skip identical existing chunks, then delete older lineage snapshots.
 - **Does not:** Reopen a finished recovery decision, overwrite different contents under the same synthesis UUID, or perform general orphan garbage collection.
 - **Entry points:** [`recordInventory` and `writeInventoryChunk`](../../internal/controllers/tombstonerecovery/recording.go).
 
@@ -190,7 +190,7 @@ Synthesis detects incomplete history or inherits an outstanding requirement
 ### Inventory Recording Fails or Is Superseded
 
 - **Situation:** A Secret write fails, a writer conflicts, or the current synthesis changes during a multi-chunk upload.
-- **Handling:** Report and retry errors; abandon superseded work and reevaluate the current synthesis. Reuse versioned names on retries. Verify the complete new snapshot before deleting older snapshots.
+- **Handling:** Report and retry errors; abandon superseded work and reevaluate the current synthesis. Reuse versioned names on retries. Write every new chunk before deleting older snapshots.
 - **Boundary:** Freshness checks are not a cross-cluster transaction. Recovery ignores an incomplete newer upload while an older complete snapshot remains available.
 
 ## Inventory Format and Helper Contract
@@ -202,11 +202,11 @@ Synthesis detects incomplete history or inherits an outstanding requirement
 - **Payload:** `data["inventory.json"]` contains a JSON array of group/version/kind/namespace/name identities, labels, and the `eno.azure.io/readiness-group` and `eno.azure.io/deletion-group` annotations. Empty inventory is one Secret containing `[]`.
 - **Source metadata:** `eno.azure.io/inventory-synthesized` stores the source synthesis timestamp used for selection.
 - **Chunk metadata:** `eno.azure.io/inventory-chunk-index` is zero-based; `eno.azure.io/inventory-chunk-count` gives the expected number of chunks. Every chunk has the same source UUID, timestamp, and count.
-- **Selection:** Group chunks by source synthesis UUID and choose the newest complete snapshot by source `Synthesized` timestamp, not Secret creation time or UUID ordering. Ignore incomplete newer uploads. Different complete source UUIDs tied for newest are invalid.
-- **Completeness:** Require exactly one chunk for every expected index, matching synthesis UUID/timestamp/count, valid resource identities, and decodable JSON arrays. Missing/mixed/invalid chunks, invalid timestamps, or ambiguous selection produce `InventoryInvalid`; an empty Secret list produces `InventoryNotFound`.
-- **Construction:** `makeInventory` returns Secret chunks after reading a complete current-slice view. It excludes tombstones and Patch pseudo-resources, keeps the first duplicate identity's version/metadata, and sorts entries before packing.
+- **Selection:** Group chunks by source synthesis UUID and choose the newest complete snapshot by source `Synthesized` timestamp, not Secret creation time or UUID ordering. Ignore incomplete newer uploads. If complete snapshots tie for newest, either one is used; both are complete history.
+- **Completeness:** Require exactly one chunk for every expected index, a matching chunk count, a valid source timestamp, valid resource identities, and decodable JSON arrays. Missing/mixed/invalid chunks or invalid timestamps produce `InventoryInvalid`; an empty Secret list produces `InventoryNotFound`.
+- **Construction:** `makeInventory` returns Secret chunks after reading a complete current-slice view. It excludes tombstones and Patch pseudo-resources, keeps the first duplicate identity's version/metadata, and preserves current slice order when packing.
 - **Size:** Each chunk stays within the 1 MiB decoded Secret-data limit, including JSON brackets and commas. Entries are never split; an entry that cannot fit causes an explicit error before writes.
-- **Replacement:** Write and verify every new chunk first. Then delete every older synthesis UUID for the lineage. Cleanup failures leave both complete snapshots and retry later.
+- **Replacement:** Write every new chunk first; each is created or confirmed identical. Then delete every older synthesis UUID for the lineage. Cleanup failures leave both complete snapshots and retry later.
 - **No resource re-selection:** The inventory builder does not re-evaluate resource filters. Stored inventory checks and decoding are separate from construction.
 - **Not a full backup:** Inventory contains deletion identity/metadata, not full resource specifications or Symphony identity.
 

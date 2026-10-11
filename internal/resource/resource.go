@@ -27,6 +27,9 @@ import (
 const (
 	ReservedReadinessGroupLowerBound = -100
 	ReservedReadinessGroupUpperBound = -60
+
+	ReadinessGroupKey = "eno.azure.io/readiness-group"
+	DeletionGroupKey  = "eno.azure.io/deletion-group"
 )
 
 var patchGVK = schema.GroupVersionKind{
@@ -195,8 +198,7 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		}
 	}
 
-	const readinessGroupKey = "eno.azure.io/readiness-group"
-	if str, ok := anno[readinessGroupKey]; ok {
+	if str, ok := anno[ReadinessGroupKey]; ok {
 		logger.Info("parsing readiness-group annotation", "value", str)
 		rg, err := strconv.Atoi(str)
 		if strict && err != nil {
@@ -215,8 +217,7 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		}
 	}
 
-	const deletionGroupKey = "eno.azure.io/deletion-group"
-	if str, ok := anno[deletionGroupKey]; ok {
+	if str, ok := anno[DeletionGroupKey]; ok {
 		logger.Info("parsing deletion-group annotation", "value", str)
 		rg, err := strconv.Atoi(str)
 		if strict && err != nil {
@@ -235,7 +236,7 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 	}
 
 	for key, value := range anno {
-		if !strings.HasPrefix(key, "eno.azure.io/readiness") || key == readinessGroupKey {
+		if !strings.HasPrefix(key, "eno.azure.io/readiness") || key == ReadinessGroupKey {
 			continue
 		}
 
@@ -260,7 +261,7 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 	sort.Slice(res.ReadinessChecks, func(i, j int) bool { return res.ReadinessChecks[i].Name < res.ReadinessChecks[j].Name })
 	// This indicates that this is an infrastructure Kind
 	if defaultGrp, ok := managedCreateOrder[res.GVK.Kind]; ok {
-		if _, ok := anno[readinessGroupKey]; !ok {
+		if _, ok := anno[ReadinessGroupKey]; !ok {
 			logger.Info("assigning default readiness group to managed kind",
 				"kind", res.GVK.Kind, "defaultGroup", defaultGrp)
 			res.readinessGroup = defaultGrp
@@ -269,7 +270,7 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 				"kind", res.GVK.Kind, "readinessGroup", res.readinessGroup)
 		}
 
-		if _, ok := anno[deletionGroupKey]; !ok {
+		if _, ok := anno[DeletionGroupKey]; !ok {
 			logger.Info("assigning default deletion group to managed kind",
 				"kind", res.GVK.Kind, "defaultGroup", defaultGrp)
 			delGroup := -defaultGrp
