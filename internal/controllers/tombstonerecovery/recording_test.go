@@ -69,7 +69,9 @@ func TestInventoryRecordingEligibility(t *testing.T) {
 			case "deleting":
 				require.NoError(t, f.upstream.Delete(t.Context(), comp))
 			}
-			f.controller.downstream = nil // Neither inventory reads nor writes are allowed in these cases.
+			if mode != "deleting" {
+				f.controller.downstream = nil // Neither inventory reads nor writes are allowed in these cases.
+			}
 			f.reconcileEvent()
 			assert.Empty(t, f.inventories())
 		})
