@@ -242,6 +242,20 @@ func TestSelectTombstoneRecoveryOperation(t *testing.T) {
 				},
 			}},
 		}, want: compositionOperationRecover},
+		{name: "deleting cleans up inventory", comp: &apiv1.Composition{
+			ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: ptr.To(metav1.Now())},
+			Status: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{
+				Synthesized: ptr.To(metav1.Now()), TombstoneRecoveryRequired: true,
+			}},
+		}, want: compositionOperationCleanup},
+		{name: "symphony deleting keeps inventory", comp: &apiv1.Composition{
+			ObjectMeta: metav1.ObjectMeta{
+				DeletionTimestamp: ptr.To(metav1.Now()), Labels: map[string]string{symphonyDeletingLabel: "true"},
+			},
+			Status: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{
+				Synthesized: ptr.To(metav1.Now()), TombstoneRecoveryRequired: true,
+			}},
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, selectTombstoneRecoveryOperation(tc.comp))
@@ -567,19 +581,37 @@ func TestTombstoneRecoveryOperatorEmptyCurrentRecoveryAnnotation(t *testing.T) {
 	}
 }
 
-func TestTombstoneRecoveryOperatorDeletingSkipsInventory(t *testing.T) {
-	for _, recording := range []bool{false, true} {
-		t.Run(fmt.Sprintf("recording-%t", recording), func(t *testing.T) {
-			f := newControllerTestFixture(t, !recording)
+func TestTombstoneRecoveryOperatorDeletingCleansUpInventory(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		recording bool
+		change    func(*apiv1.Composition)
+		keep      bool
+	}{
+		{name: "recovery-pending"},
+		{name: "recording", recording: true},
+		{name: "symphony-deleting", keep: true, change: func(comp *apiv1.Composition) {
+			comp.Labels = map[string]string{symphonyDeletingLabel: "true"}
+		}},
+		{name: "not-opted-in", keep: true, change: func(comp *apiv1.Composition) {
+			delete(comp.Annotations, "eno.azure.io/recovery-enabled")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newControllerTestFixture(t, !tc.recording)
 			history := f.history("removed")
-			if recording {
+			if tc.recording {
 				f.finish(reasonNotNeeded)
 				f.ready()
 			}
 			f.updateStatus(func(syn *apiv1.Synthesis) { syn.ResourceSlices = nil })
+			if tc.change != nil {
+				comp := f.composition()
+				tc.change(comp)
+				require.NoError(t, f.upstream.Update(t.Context(), comp))
+			}
 			require.NoError(t, f.upstream.Delete(t.Context(), f.composition()))
 			before := f.composition()
-			f.controller.downstream = nil
 			f.controller.client = interceptor.NewClient(f.upstream, interceptor.Funcs{
 				SubResourcePatch: func(context.Context, client.Client, string, client.Object, client.Patch, ...client.SubResourcePatchOption) error {
 					t.Error("deleting Composition must not receive tombstone recovery status writes")
@@ -588,9 +620,42 @@ func TestTombstoneRecoveryOperatorDeletingSkipsInventory(t *testing.T) {
 			})
 			require.NoError(t, f.reconcile())
 			assert.Equal(t, before, f.composition())
-			assert.Equal(t, []corev1.Secret{*history}, f.inventories())
+			if tc.keep {
+				assert.Equal(t, []corev1.Secret{*history}, f.inventories())
+			} else {
+				assert.Empty(t, f.inventories())
+			}
+			require.NoError(t, f.reconcile(), "repeated cleanup must be idempotent")
 		})
 	}
+}
+
+func TestTombstoneRecoveryOperatorDeletingRetriesInventoryCleanup(t *testing.T) {
+	f := newControllerTestFixture(t, true)
+	other := f.history("removed")
+	other.Name, other.UID, other.ResourceVersion = "unrelated", "unrelated-uid", ""
+	other.Labels = map[string]string{inventoryLineageLabel: "other-lineage"}
+	require.NoError(t, f.downstream.Create(t.Context(), other))
+	require.NoError(t, f.upstream.Delete(t.Context(), f.composition()))
+
+	injected := fmt.Errorf("injected delete failure")
+	fail := true
+	f.controller.downstream = interceptor.NewClient(f.downstream, interceptor.Funcs{
+		Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+			if fail {
+				return injected
+			}
+			return c.Delete(ctx, obj, opts...)
+		},
+	})
+	require.ErrorIs(t, f.reconcile(), injected)
+	assert.Len(t, f.inventories(), 2)
+
+	fail = false
+	require.NoError(t, f.reconcile())
+	items := f.inventories()
+	require.Len(t, items, 1, "only the deleting Composition's lineage is removed")
+	assert.Equal(t, "unrelated", items[0].Name)
 }
 
 func TestTombstoneRecoveryOperatorObsoleteWork(t *testing.T) {
@@ -603,7 +668,6 @@ func TestTombstoneRecoveryOperatorObsoleteWork(t *testing.T) {
 			if mode == "already-deleting" {
 				require.NoError(t, f.upstream.Delete(t.Context(), f.composition()))
 				expected = f.composition()
-				f.controller.downstream = nil
 			} else {
 				f.controller.downstream = interceptor.NewClient(f.downstream, interceptor.Funcs{
 					List: func(ctx context.Context, cli client.WithWatch, obj client.ObjectList, opts ...client.ListOption) error {
@@ -637,12 +701,16 @@ func TestTombstoneRecoveryOperatorObsoleteWork(t *testing.T) {
 			require.NotNil(t, expected, "the external deletion or supersession must occur")
 			assert.Equal(t, expected, f.composition(), "obsolete recovery must not acknowledge or change the new state")
 			assert.Equal(t, original.Spec, f.slice("desired").Spec)
-			assert.Equal(t, []corev1.Secret{*old}, f.inventories())
+			if mode == "already-deleting" {
+				assert.Empty(t, f.inventories(), "deleting Composition removes its lineage inventory")
+			} else {
+				assert.Equal(t, []corev1.Secret{*old}, f.inventories())
+			}
 			if mode != "new-synthesis" {
 				f.restart()
-				f.controller.downstream = nil
 				require.NoError(t, f.reconcile())
 				assert.Equal(t, expected, f.composition())
+				assert.Empty(t, f.inventories(), "deleting Composition removes its lineage inventory")
 			}
 		})
 	}
