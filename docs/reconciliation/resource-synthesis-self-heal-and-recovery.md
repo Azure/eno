@@ -7,7 +7,7 @@
 - **Coordinate:** Prevent reconstitution and readiness from advancing before the current synthesis has a terminal recovery decision.
 - **Record:** Save the current Ready synthesis's inventory as one or more Secrets for future recovery.
 - **Clean up:** Delete a Composition's lineage inventory once it starts deleting, unless its Symphony is being deleted.
-- **Not included:** General inventory garbage collection. Recording only rotates older lineage snapshots after writing their replacement.
+- **Garbage collect:** Periodically delete inventory for lineages whose Composition is gone and older snapshots of existing Compositions, while the reconciler is running.
 - **Not guaranteed:** Recovery of every historical resource when inventory is missing or invalid, or atomic behavior across Composition status, ResourceSlices, and downstream resources.
 - **Related guide:** [Resource Reconciliation](./reconciliation.md) explains ordinary apply, deletion, readiness, and sharding behavior.
 
@@ -83,7 +83,7 @@ Synthesis detects incomplete history or inherits an outstanding requirement
 - **Does:** Treat current manifests, existing tombstones, and Eno Patch targets as present, using group/kind/namespace/name identity.
 - **Does:** Record retriable errors or terminal decisions, publishing overflow references together with completion.
 - **Does:** On a subsequent event, record inventory when the persisted current synthesis is Ready and its recovery decision is finished.
-- **Does not:** Change an existing desired manifest into a tombstone, directly delete downstream resources, or garbage-collect inventory Secrets for Compositions that are already gone.
+- **Does not:** Change an existing desired manifest into a tombstone or directly delete downstream resources.
 - **Entry points:** [`Reconcile` and `recoverMissingTombstones`](../../internal/controllers/tombstonerecovery/controller.go), [`missingTombstones`](../../internal/controllers/tombstonerecovery/inventory.go).
 
 ### Packing Planner and Writer
@@ -109,6 +109,16 @@ Synthesis detects incomplete history or inherits an outstanding requirement
 - **Does not:** Clean up when the Composition has `eno.azure.io/symphony-deleting: "true"`; Symphony deletion orphans downstream resources, so their inventory is kept.
 - **Does not:** Add a finalizer, block Composition deletion, change Composition status, or delete downstream resources.
 - **Entry point:** [`cleanupInventory`](../../internal/controllers/tombstonerecovery/cleanup.go).
+
+### Inventory Garbage Collector
+
+- **Does:** Run as a leader-elected manager runnable when the operator is enabled, starting a cycle every 3 to 4.5 minutes. A failed or panicking cycle is logged and the next cycle starts fresh.
+- **Does:** Each cycle lists downstream `kube-system` Secrets that have the `eno.azure.io/inventory-lineage` label, then lists Compositions and Symphonies in the reconciler's namespace with the uncached API reader. Any read failure skips the cycle.
+- **Does:** Only when the namespace's Symphony exists and is not deleting, delete Secrets whose lineage matches no Composition, and delete an existing Composition's Secrets from older synthesis UUIDs once its current synthesis UUID has a complete snapshot. Compositions are listed before the Symphony so a Composition missing from the list was gone before any observed Symphony deletion.
+- **Does:** Delete with UID preconditions, treat `NotFound` as deleted, continue after a failed delete, and log a per-cycle summary of scanned, deleted, and failed Secrets. Failed deletes are retried by the next cycle.
+- **Does not:** Touch a deleting Composition's inventory, current-UUID Secrets, or Secrets without the lineage label; change Composition status, ResourceSlices, or downstream resources; or add finalizers.
+- **Assumes:** Only this reconciler writes inventory to its downstream `kube-system`, and each namespace has one Symphony.
+- **Entry points:** [`inventoryGarbageCollector` and `findStaleInventory`](../../internal/controllers/tombstonerecovery/gc.go).
 
 ### Reconstitution
 
@@ -226,7 +236,6 @@ Synthesis detects incomplete history or inherits an outstanding requirement
 - **Concurrent downstream deletion:** An already-running deletion can overlap a newer synthesis that wants the resource. Recovery status preconditions do not make downstream operations transactional.
 - **Progress depends on the environment:** Permanent errors, inhibited resynthesis, or continuous synthesis churn can prevent completion.
 - **Namespace and ownership configuration:** Matching reconciliation/recovery scopes and assigning a single recovery owner per Composition are deployment responsibilities, not guarantees enforced by the annotation.
-- **Best-effort inventory cleanup:** Cleanup does not block Composition deletion. If the Composition disappears before cleanup succeeds, its inventory Secrets remain.
-- **Follow-up implementation:** General orphan inventory garbage collection.
+- **Best-effort inventory cleanup:** Cleanup does not block Composition deletion. If the Composition disappears before cleanup succeeds, the garbage collector removes its inventory while the Symphony is active. Inventory kept by Symphony deletion stays until a Composition with the same lineage rotates it out or the downstream cluster is deleted.
 - **Follow-up hardening:** Admission policies restricting unauthorized inventory or ResourceSlice changes, while permitting legitimate cleanup and garbage collection.
 - **Follow-up validation:** End-to-end coverage is deferred; focused unit regressions exercise recovery decisions, inheritance, partial-write retries, status races, and lifecycle guards.

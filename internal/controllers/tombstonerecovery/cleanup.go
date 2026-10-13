@@ -2,11 +2,9 @@ package tombstonerecovery
 
 import (
 	"context"
-	"fmt"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/go-logr/logr"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 // cleanupInventory deletes every inventory Secret for a deleting Composition's lineage.
@@ -18,8 +16,8 @@ func (c *tombstoneRecoveryController) cleanupInventory(ctx context.Context, comp
 	}
 	for i := range items {
 		item := &items[i]
-		if err := c.downstream.Delete(ctx, item); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("deleting inventory Secret %q: %w", item.Name, err)
+		if err := deleteInventorySecret(ctx, c.downstream, item); err != nil {
+			return err
 		}
 		logr.FromContextOrDiscard(ctx).Info("deleted inventory chunk", "secretName", item.Name)
 	}

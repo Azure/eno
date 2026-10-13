@@ -116,6 +116,14 @@ func NewController(mgr ctrl.Manager, opts Options) error {
 	if err != nil {
 		return fmt.Errorf("constructing tombstone recovery downstream client: %w", err)
 	}
+	if err := mgr.Add(&inventoryGarbageCollector{
+		reader:     mgr.GetAPIReader(),
+		downstream: c.downstream,
+		namespace:  opts.Namespace,
+		logger:     mgr.GetLogger().WithName("inventoryGarbageCollector"),
+	}); err != nil {
+		return fmt.Errorf("registering inventory garbage collector: %w", err)
+	}
 	slice := &metav1.PartialObjectMetadata{}
 	slice.SetGroupVersionKind(apiv1.SchemeGroupVersion.WithKind("ResourceSlice"))
 	return ctrl.NewControllerManagedBy(mgr).
@@ -365,6 +373,15 @@ func (c *tombstoneRecoveryController) readInventories(ctx context.Context, comp 
 		return nil, fmt.Errorf("listing downstream inventory Secrets: %w", err)
 	}
 	return list.Items, nil
+}
+
+// deleteInventorySecret deletes one inventory Secret. The UID precondition avoids deleting a recreated Secret with the same name,
+// and NotFound counts as deleted.
+func deleteInventorySecret(ctx context.Context, downstream client.Client, item *corev1.Secret) error {
+	if err := downstream.Delete(ctx, item, &client.Preconditions{UID: &item.UID}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("deleting inventory Secret %q: %w", item.Name, err)
+	}
+	return nil
 }
 
 type statusPatch struct {
