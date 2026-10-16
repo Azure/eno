@@ -40,6 +40,8 @@ const (
 	compositionOperationRecover   compositionOperation = "recoverMissingTombstones"
 	compositionOperationNotNeeded compositionOperation = "recordRecoveryNotNeeded"
 	compositionOperationRecord    compositionOperation = "recordInventory"
+	compositionOperationCleanup   compositionOperation = "cleanupInventory"
+	symphonyDeletingLabel                              = "eno.azure.io/symphony-deleting"
 )
 
 var errSuperseded = errors.New("tombstone recovery operation superseded")
@@ -141,12 +143,6 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 		logger.Error(err, "failed to get composition")
 		return ctrl.Result{}, err
 	}
-	// Deletion reuses existing slices and must not wait for tombstone recovery.
-	if comp.DeletionTimestamp != nil {
-		logger.Info("composition is deleting; skipping recovery and inventory recording", "compositionUID", comp.UID,
-			"synthesisUUID", comp.Status.GetCurrentSynthesisUUID())
-		return ctrl.Result{}, nil
-	}
 	syn := comp.Status.CurrentSynthesis
 	if syn == nil || syn.Synthesized == nil {
 		return ctrl.Result{}, nil
@@ -173,6 +169,8 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 		err = c.recordRecoveryDecision(ctx, comp, reasonNotNeeded, "", nil)
 	case compositionOperationRecord:
 		err = c.recordInventory(ctx, comp)
+	case compositionOperationCleanup:
+		err = c.cleanupInventory(ctx, comp)
 	}
 
 	if errors.Is(err, errSuperseded) {
@@ -191,6 +189,14 @@ func selectTombstoneRecoveryOperation(comp *apiv1.Composition) compositionOperat
 		return compositionOperationNone
 	}
 	syn := comp.Status.CurrentSynthesis
+	// Deletion reuses existing slices and must not wait for tombstone recovery or record inventory.
+	if comp.DeletionTimestamp != nil {
+		// Symphony deletion orphans downstream resources, so their inventory is kept.
+		if comp.Labels[symphonyDeletingLabel] == "true" {
+			return compositionOperationNone
+		}
+		return compositionOperationCleanup
+	}
 	if !syn.IsTombstoneRecoveryFinished() {
 		if syn.TombstoneRecoveryRequired {
 			return compositionOperationRecover

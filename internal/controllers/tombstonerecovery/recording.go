@@ -33,7 +33,7 @@ func (c *tombstoneRecoveryController) recordInventory(ctx context.Context, comp 
 		return fmt.Errorf("building inventory: %w", err)
 	}
 	for i := range secrets {
-		if err := c.writeInventoryChunk(ctx, comp, &secrets[i]); err != nil {
+		if err := c.writeInventoryChunk(ctx, &secrets[i]); err != nil {
 			return err
 		}
 	}
@@ -44,7 +44,7 @@ func (c *tombstoneRecoveryController) recordInventory(ctx context.Context, comp 
 	return nil
 }
 
-func (c *tombstoneRecoveryController) writeInventoryChunk(ctx context.Context, comp *apiv1.Composition, intended *corev1.Secret) error {
+func (c *tombstoneRecoveryController) writeInventoryChunk(ctx context.Context, intended *corev1.Secret) error {
 	existing := &corev1.Secret{}
 	err := c.downstream.Get(ctx, client.ObjectKeyFromObject(intended), existing)
 	if apierrors.IsNotFound(err) {
