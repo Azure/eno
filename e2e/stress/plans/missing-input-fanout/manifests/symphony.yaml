@@ -1,0 +1,282 @@
+apiVersion: eno.azure.io/v1
+kind: Symphony
+metadata:
+  name: stress-symphony
+spec:
+  bindings:
+    - key: input1
+      resource:
+        name: input1
+        namespace: "${namespace}"
+    - key: input2
+      resource:
+        name: input2
+        namespace: "${namespace}"
+    - key: input3
+      resource:
+        name: input3
+        namespace: "${namespace}"
+  synthesisEnv:
+    - name: ENO_STRESS_RUN_ID
+      value: "${runID}"
+  variations:
+    - labels:
+        stress.eno.azure.io/run-id: "${runID}"
+        stress.eno.azure.io/plan: missing-input-fanout
+        stress.eno.azure.io/resource-id: composition
+        stress.eno.azure.io/variation: "1"
+        eno.azure.io/stress-test: "true"
+      synthesizer:
+        name: eno-stress-missing-inputs-1
+      synthesisEnv:
+        - name: ENO_STRESS_VARIATION
+          value: "1"
+        - name: ENO_STRESS_OUTPUT_NAME
+          value: combined-output-1
+    - labels:
+        stress.eno.azure.io/run-id: "${runID}"
+        stress.eno.azure.io/plan: missing-input-fanout
+        stress.eno.azure.io/resource-id: composition
+        stress.eno.azure.io/variation: "2"
+        eno.azure.io/stress-test: "true"
+      synthesizer:
+        name: eno-stress-missing-inputs-2
+      synthesisEnv:
+        - name: ENO_STRESS_VARIATION
+          value: "2"
+        - name: ENO_STRESS_OUTPUT_NAME
+          value: combined-output-2
+    - labels:
+        stress.eno.azure.io/run-id: "${runID}"
+        stress.eno.azure.io/plan: missing-input-fanout
+        stress.eno.azure.io/resource-id: composition
+        stress.eno.azure.io/variation: "3"
+        eno.azure.io/stress-test: "true"
+      synthesizer:
+        name: eno-stress-missing-inputs-3
+      synthesisEnv:
+        - name: ENO_STRESS_VARIATION
+          value: "3"
+        - name: ENO_STRESS_OUTPUT_NAME
+          value: combined-output-3
+    - labels:
+        stress.eno.azure.io/run-id: "${runID}"
+        stress.eno.azure.io/plan: missing-input-fanout
+        stress.eno.azure.io/resource-id: composition
+        stress.eno.azure.io/variation: "4"
+        eno.azure.io/stress-test: "true"
+      synthesizer:
+        name: eno-stress-missing-inputs-4
+      synthesisEnv:
+        - name: ENO_STRESS_VARIATION
+          value: "4"
+        - name: ENO_STRESS_OUTPUT_NAME
+          value: combined-output-4
+    - labels:
+        stress.eno.azure.io/run-id: "${runID}"
+        stress.eno.azure.io/plan: missing-input-fanout
+        stress.eno.azure.io/resource-id: composition
+        stress.eno.azure.io/variation: "5"
+        eno.azure.io/stress-test: "true"
+      synthesizer:
+        name: eno-stress-missing-inputs-5
+      synthesisEnv:
+        - name: ENO_STRESS_VARIATION
+          value: "5"
+        - name: ENO_STRESS_OUTPUT_NAME
+          value: combined-output-5
+    - labels:
+        stress.eno.azure.io/run-id: "${runID}"
+        stress.eno.azure.io/plan: missing-input-fanout
+        stress.eno.azure.io/resource-id: composition
+        stress.eno.azure.io/variation: "6"
+        eno.azure.io/stress-test: "true"
+      synthesizer:
+        name: eno-stress-missing-inputs-6
+      synthesisEnv:
+        - name: ENO_STRESS_VARIATION
+          value: "6"
+        - name: ENO_STRESS_OUTPUT_NAME
+          value: combined-output-6
+    - labels:
+        stress.eno.azure.io/run-id: "${runID}"
+        stress.eno.azure.io/plan: missing-input-fanout
+        stress.eno.azure.io/resource-id: composition
+        stress.eno.azure.io/variation: "7"
+        eno.azure.io/stress-test: "true"
+      synthesizer:
+        name: eno-stress-missing-inputs-7
+      synthesisEnv:
+        - name: ENO_STRESS_VARIATION
+          value: "7"
+        - name: ENO_STRESS_OUTPUT_NAME
+          value: combined-output-7
+    - labels:
+        stress.eno.azure.io/run-id: "${runID}"
+        stress.eno.azure.io/plan: missing-input-fanout
+        stress.eno.azure.io/resource-id: composition
+        stress.eno.azure.io/variation: "8"
+        eno.azure.io/stress-test: "true"
+      synthesizer:
+        name: eno-stress-missing-inputs-8
+      synthesisEnv:
+        - name: ENO_STRESS_VARIATION
+          value: "8"
+        - name: ENO_STRESS_OUTPUT_NAME
+          value: combined-output-8
+    - labels:
+        stress.eno.azure.io/run-id: "${runID}"
+        stress.eno.azure.io/plan: missing-input-fanout
+        stress.eno.azure.io/resource-id: composition
+        stress.eno.azure.io/variation: "9"
+        eno.azure.io/stress-test: "true"
+      synthesizer:
+        name: eno-stress-missing-inputs-9
+      synthesisEnv:
+        - name: ENO_STRESS_VARIATION
+          value: "9"
+        - name: ENO_STRESS_OUTPUT_NAME
+          value: combined-output-9
+    - labels:
+        stress.eno.azure.io/run-id: "${runID}"
+        stress.eno.azure.io/plan: missing-input-fanout
+        stress.eno.azure.io/resource-id: composition
+        stress.eno.azure.io/variation: "10"
+        eno.azure.io/stress-test: "true"
+      synthesizer:
+        name: eno-stress-missing-inputs-10
+      synthesisEnv:
+        - name: ENO_STRESS_VARIATION
+          value: "10"
+        - name: ENO_STRESS_OUTPUT_NAME
+          value: combined-output-10
+    - labels:
+        stress.eno.azure.io/run-id: "${runID}"
+        stress.eno.azure.io/plan: missing-input-fanout
+        stress.eno.azure.io/resource-id: composition
+        stress.eno.azure.io/variation: "11"
+        eno.azure.io/stress-test: "true"
+      synthesizer:
+        name: eno-stress-missing-inputs-11
+      synthesisEnv:
+        - name: ENO_STRESS_VARIATION
+          value: "11"
+        - name: ENO_STRESS_OUTPUT_NAME
+          value: combined-output-11
+    - labels:
+        stress.eno.azure.io/run-id: "${runID}"
+        stress.eno.azure.io/plan: missing-input-fanout
+        stress.eno.azure.io/resource-id: composition
+        stress.eno.azure.io/variation: "12"
+        eno.azure.io/stress-test: "true"
+      synthesizer:
+        name: eno-stress-missing-inputs-12
+      synthesisEnv:
+        - name: ENO_STRESS_VARIATION
+          value: "12"
+        - name: ENO_STRESS_OUTPUT_NAME
+          value: combined-output-12
+    - labels:
+        stress.eno.azure.io/run-id: "${runID}"
+        stress.eno.azure.io/plan: missing-input-fanout
+        stress.eno.azure.io/resource-id: composition
+        stress.eno.azure.io/variation: "13"
+        eno.azure.io/stress-test: "true"
+      synthesizer:
+        name: eno-stress-missing-inputs-13
+      synthesisEnv:
+        - name: ENO_STRESS_VARIATION
+          value: "13"
+        - name: ENO_STRESS_OUTPUT_NAME
+          value: combined-output-13
+    - labels:
+        stress.eno.azure.io/run-id: "${runID}"
+        stress.eno.azure.io/plan: missing-input-fanout
+        stress.eno.azure.io/resource-id: composition
+        stress.eno.azure.io/variation: "14"
+        eno.azure.io/stress-test: "true"
+      synthesizer:
+        name: eno-stress-missing-inputs-14
+      synthesisEnv:
+        - name: ENO_STRESS_VARIATION
+          value: "14"
+        - name: ENO_STRESS_OUTPUT_NAME
+          value: combined-output-14
+    - labels:
+        stress.eno.azure.io/run-id: "${runID}"
+        stress.eno.azure.io/plan: missing-input-fanout
+        stress.eno.azure.io/resource-id: composition
+        stress.eno.azure.io/variation: "15"
+        eno.azure.io/stress-test: "true"
+      synthesizer:
+        name: eno-stress-missing-inputs-15
+      synthesisEnv:
+        - name: ENO_STRESS_VARIATION
+          value: "15"
+        - name: ENO_STRESS_OUTPUT_NAME
+          value: combined-output-15
+    - labels:
+        stress.eno.azure.io/run-id: "${runID}"
+        stress.eno.azure.io/plan: missing-input-fanout
+        stress.eno.azure.io/resource-id: composition
+        stress.eno.azure.io/variation: "16"
+        eno.azure.io/stress-test: "true"
+      synthesizer:
+        name: eno-stress-missing-inputs-16
+      synthesisEnv:
+        - name: ENO_STRESS_VARIATION
+          value: "16"
+        - name: ENO_STRESS_OUTPUT_NAME
+          value: combined-output-16
+    - labels:
+        stress.eno.azure.io/run-id: "${runID}"
+        stress.eno.azure.io/plan: missing-input-fanout
+        stress.eno.azure.io/resource-id: composition
+        stress.eno.azure.io/variation: "17"
+        eno.azure.io/stress-test: "true"
+      synthesizer:
+        name: eno-stress-missing-inputs-17
+      synthesisEnv:
+        - name: ENO_STRESS_VARIATION
+          value: "17"
+        - name: ENO_STRESS_OUTPUT_NAME
+          value: combined-output-17
+    - labels:
+        stress.eno.azure.io/run-id: "${runID}"
+        stress.eno.azure.io/plan: missing-input-fanout
+        stress.eno.azure.io/resource-id: composition
+        stress.eno.azure.io/variation: "18"
+        eno.azure.io/stress-test: "true"
+      synthesizer:
+        name: eno-stress-missing-inputs-18
+      synthesisEnv:
+        - name: ENO_STRESS_VARIATION
+          value: "18"
+        - name: ENO_STRESS_OUTPUT_NAME
+          value: combined-output-18
+    - labels:
+        stress.eno.azure.io/run-id: "${runID}"
+        stress.eno.azure.io/plan: missing-input-fanout
+        stress.eno.azure.io/resource-id: composition
+        stress.eno.azure.io/variation: "19"
+        eno.azure.io/stress-test: "true"
+      synthesizer:
+        name: eno-stress-missing-inputs-19
+      synthesisEnv:
+        - name: ENO_STRESS_VARIATION
+          value: "19"
+        - name: ENO_STRESS_OUTPUT_NAME
+          value: combined-output-19
+    - labels:
+        stress.eno.azure.io/run-id: "${runID}"
+        stress.eno.azure.io/plan: missing-input-fanout
+        stress.eno.azure.io/resource-id: composition
+        stress.eno.azure.io/variation: "20"
+        eno.azure.io/stress-test: "true"
+      synthesizer:
+        name: eno-stress-missing-inputs-20
+      synthesisEnv:
+        - name: ENO_STRESS_VARIATION
+          value: "20"
+        - name: ENO_STRESS_OUTPUT_NAME
+          value: combined-output-20
