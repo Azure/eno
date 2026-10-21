@@ -88,9 +88,27 @@ func TestFindStaleInventory(t *testing.T) {
 			if tc.secrets != nil {
 				secrets = tc.secrets()
 			}
-			assert.Equal(t, tc.want, gcTestNames(findStaleInventory(secrets, []apiv1.Composition{*comp})))
+			symph := &apiv1.Symphony{ObjectMeta: metav1.ObjectMeta{Namespace: comp.Namespace}}
+			assert.Equal(t, tc.want, gcTestNames(findStaleInventory(secrets, []apiv1.Composition{*comp}, symph)))
 		})
 	}
+}
+
+func TestFindStaleInventoryKeepsSymphonyVariations(t *testing.T) {
+	comp := gcTestComposition()
+	current, orphan := gcTestSnapshot(t, comp, 2), gcTestOrphan(t, comp)
+	secrets := []corev1.Secret{current, orphan}
+	withVariation := &apiv1.Symphony{
+		ObjectMeta: metav1.ObjectMeta{Namespace: comp.Namespace},
+		Spec:       apiv1.SymphonySpec{Variations: []apiv1.Variation{{Synthesizer: comp.Spec.Synthesizer}}},
+	}
+	withoutVariation := &apiv1.Symphony{ObjectMeta: metav1.ObjectMeta{Namespace: comp.Namespace}}
+
+	got := findStaleInventory(secrets, nil, withVariation)
+	assert.Equal(t, []string{orphan.Name}, gcTestNames(got), "a variation whose Composition is being recreated keeps its inventory")
+
+	got = findStaleInventory(secrets, nil, withoutVariation)
+	assert.ElementsMatch(t, []string{current.Name, orphan.Name}, gcTestNames(got), "a removed variation's inventory is stale")
 }
 
 func TestIsSymphonyActive(t *testing.T) {

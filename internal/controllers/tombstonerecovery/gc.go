@@ -70,7 +70,7 @@ func (g *inventoryGarbageCollector) deleteStaleInventory(ctx context.Context) er
 		return nil
 	}
 
-	stale := findStaleInventory(secrets.Items, comps.Items)
+	stale := findStaleInventory(secrets.Items, comps.Items, &symphonies.Items[0])
 	deleted, failed := 0, 0
 	for i := range stale {
 		item := &stale[i]
@@ -94,8 +94,8 @@ func isSymphonyActive(symphonies []apiv1.Symphony) bool {
 }
 
 // findStaleInventory returns the inventory Secrets that are safe to delete.
-func findStaleInventory(secrets []corev1.Secret, comps []apiv1.Composition) []corev1.Secret {
-	stale := findInventoryWithoutComposition(secrets, comps)
+func findStaleInventory(secrets []corev1.Secret, comps []apiv1.Composition, symph *apiv1.Symphony) []corev1.Secret {
+	stale := findInventoryWithoutComposition(secrets, comps, symph)
 	stale = append(stale, findInventoryFromOldSyntheses(secrets, comps)...)
 	sort.Slice(stale, func(i, j int) bool {
 		return stale[i].Name < stale[j].Name
@@ -103,11 +103,15 @@ func findStaleInventory(secrets []corev1.Secret, comps []apiv1.Composition) []co
 	return stale
 }
 
-// findInventoryWithoutComposition returns every Secret whose lineage matches no Composition, meaning its Composition is gone.
-func findInventoryWithoutComposition(secrets []corev1.Secret, comps []apiv1.Composition) []corev1.Secret {
-	liveLineages := make(map[string]bool, len(comps))
+// findInventoryWithoutComposition returns every Secret whose lineage matches no Composition and no Symphony variation.
+// A variation without a Composition yet is being (re)created, e.g. after AKS stop/start, and needs its inventory for recovery.
+func findInventoryWithoutComposition(secrets []corev1.Secret, comps []apiv1.Composition, symph *apiv1.Symphony) []corev1.Secret {
+	liveLineages := make(map[string]bool, len(comps)+len(symph.Spec.Variations))
 	for i := range comps {
 		liveLineages[inventoryLineage(&comps[i])] = true
+	}
+	for _, variation := range symph.Spec.Variations {
+		liveLineages[inventoryLineageFor(symph.Namespace, variation.Synthesizer.Name)] = true
 	}
 	var withoutComposition []corev1.Secret
 	for _, secret := range secrets {
