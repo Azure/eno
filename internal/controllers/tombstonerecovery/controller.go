@@ -40,6 +40,8 @@ const (
 	compositionOperationRecover   compositionOperation = "recoverMissingTombstones"
 	compositionOperationNotNeeded compositionOperation = "recordRecoveryNotNeeded"
 	compositionOperationRecord    compositionOperation = "recordInventory"
+	compositionOperationCleanup   compositionOperation = "cleanupInventory"
+	symphonyDeletingLabel                              = "eno.azure.io/symphony-deleting"
 )
 
 var errSuperseded = errors.New("tombstone recovery operation superseded")
@@ -141,24 +143,19 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 		logger.Error(err, "failed to get composition")
 		return ctrl.Result{}, err
 	}
-	// Deletion reuses existing slices and must not wait for tombstone recovery.
-	if comp.DeletionTimestamp != nil {
-		logger.Info("composition is deleting; skipping recovery and inventory recording", "compositionUID", comp.UID,
-			"synthesisUUID", comp.Status.GetCurrentSynthesisUUID())
-		return ctrl.Result{}, nil
-	}
 	syn := comp.Status.CurrentSynthesis
-	if syn == nil || syn.Synthesized == nil {
+	// Deletion cleanup finds inventory by lineage, so it does not need a synthesis.
+	if comp.DeletionTimestamp == nil && (syn == nil || syn.Synthesized == nil) {
 		return ctrl.Result{}, nil
 	}
-	logger = logger.WithValues("compositionUID", comp.UID, "compositionGeneration", comp.Generation, "synthesisUUID", syn.UUID,
+	logger = logger.WithValues("compositionUID", comp.UID, "compositionGeneration", comp.Generation, "synthesisUUID", comp.Status.GetCurrentSynthesisUUID(),
 		"synthesizerName", comp.Spec.Synthesizer.Name, "operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	ctx = logr.NewContext(ctx, logger)
 	if !comp.RecoveryEnabled() {
 		logger.Info("composition has not opted into recovery")
 		return ctrl.Result{}, nil
 	}
-	if syn.UUID == "" {
+	if comp.DeletionTimestamp == nil && syn.UUID == "" {
 		logger.Error(err, "invalid synthesis")
 		return ctrl.Result{}, fmt.Errorf("published synthesis has no UUID")
 	}
@@ -173,6 +170,8 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 		err = c.recordRecoveryDecision(ctx, comp, reasonNotNeeded, "", nil)
 	case compositionOperationRecord:
 		err = c.recordInventory(ctx, comp)
+	case compositionOperationCleanup:
+		err = c.cleanupInventory(ctx, comp)
 	}
 
 	if errors.Is(err, errSuperseded) {
@@ -187,10 +186,21 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 
 // selectTombstoneRecoveryOperation selects one idempotent operation without performing side effects.
 func selectTombstoneRecoveryOperation(comp *apiv1.Composition) compositionOperation {
-	if comp == nil || comp.Status.CurrentSynthesis == nil || comp.Status.CurrentSynthesis.Synthesized == nil {
+	if comp == nil {
 		return compositionOperationNone
 	}
+	// Deletion reuses existing slices and must not wait for tombstone recovery or record inventory.
+	if comp.DeletionTimestamp != nil {
+		// Symphony deletion orphans downstream resources, so their inventory is kept.
+		if comp.Labels[symphonyDeletingLabel] == "true" {
+			return compositionOperationNone
+		}
+		return compositionOperationCleanup
+	}
 	syn := comp.Status.CurrentSynthesis
+	if syn == nil || syn.Synthesized == nil {
+		return compositionOperationNone
+	}
 	if !syn.IsTombstoneRecoveryFinished() {
 		if syn.TombstoneRecoveryRequired {
 			return compositionOperationRecover
