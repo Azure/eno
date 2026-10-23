@@ -2,7 +2,7 @@ module github.com/Azure/eno/pkg/helmshim
 
 go 1.25.0
 
-toolchain go1.25.9
+toolchain go1.26.10
 
 replace github.com/imdario/mergo => github.com/imdario/mergo v0.3.16
 
