@@ -2,7 +2,7 @@ module github.com/Azure/eno/pkg/kclshim
 
 go 1.26.0
 
-toolchain go1.26.9
+toolchain go1.26.10
 
 require (
 	k8s.io/apimachinery v0.35.1
