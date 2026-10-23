@@ -102,8 +102,8 @@ func (c *tombstoneRecoveryController) deleteOldInventorySnapshots(ctx context.Co
 		if item.Labels[inventorySynthesisUUIDLabel] == currentUUID {
 			continue
 		}
-		if err := c.downstream.Delete(ctx, item, &client.Preconditions{UID: &item.UID}); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("deleting old inventory Secret %q: %w", item.Name, err)
+		if err := deleteInventorySecret(ctx, c.downstream, item); err != nil {
+			return err
 		}
 		logr.FromContextOrDiscard(ctx).Info("deleted old inventory chunk", "secretName", item.Name)
 	}

@@ -51,7 +51,11 @@ type synthesisInventory struct {
 }
 
 func inventoryLineage(comp *apiv1.Composition) string {
-	hash := sha256.Sum256([]byte(comp.Namespace + "/" + comp.Spec.Synthesizer.Name))
+	return inventoryLineageFor(comp.Namespace, comp.Spec.Synthesizer.Name)
+}
+
+func inventoryLineageFor(namespace, synthesizer string) string {
+	hash := sha256.Sum256([]byte(namespace + "/" + synthesizer))
 	return hex.EncodeToString(hash[:16])
 }
 
