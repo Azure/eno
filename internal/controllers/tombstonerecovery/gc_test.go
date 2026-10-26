@@ -64,6 +64,11 @@ func TestFindStaleInventory(t *testing.T) {
 		want    []string
 	}{
 		{name: "composition gone and old snapshot", want: []string{old.Name, orphan.Name}},
+		{name: "current snapshot terminating", secrets: func() []corev1.Secret {
+			terminating := *current.DeepCopy()
+			terminating.DeletionTimestamp = ptr.To(metav1.Now())
+			return []corev1.Secret{old, terminating, orphan}
+		}, want: []string{orphan.Name}},
 		{name: "current snapshot missing", secrets: func() []corev1.Secret {
 			return []corev1.Secret{old, orphan}
 		}, want: []string{orphan.Name}},

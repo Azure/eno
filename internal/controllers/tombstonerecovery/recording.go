@@ -74,12 +74,11 @@ func isInventoryAlreadyRecorded(items []corev1.Secret, currentUUID string) bool 
 		return false
 	}
 	for i := range items {
-		if items[i].Labels[inventorySynthesisUUIDLabel] != currentUUID || items[i].DeletionTimestamp != nil {
+		if items[i].Labels[inventorySynthesisUUIDLabel] != currentUUID {
 			return false
 		}
 	}
-	_, complete := orderInventoryChunks(items)
-	return complete
+	return isCompleteSnapshot(items)
 }
 
 func inventorySecretMatches(existing, intended *corev1.Secret) bool {

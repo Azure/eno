@@ -159,7 +159,7 @@ func oldSnapshotsInLineage(items []corev1.Secret, currentUUID string) []corev1.S
 			old = append(old, item)
 		}
 	}
-	if _, complete := orderInventoryChunks(current); !complete {
+	if !isCompleteSnapshot(current) {
 		return nil
 	}
 	return old
