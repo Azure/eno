@@ -3,6 +3,7 @@ package tombstonerecovery
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"sort"
 	"time"
 
@@ -41,7 +42,7 @@ func (g *inventoryGarbageCollector) runCycle(ctx context.Context) {
 	logger := logr.FromContextOrDiscard(ctx)
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Error(fmt.Errorf("panic: %v", r), "inventory garbage collection cycle panicked")
+			logger.Error(fmt.Errorf("panic: %v", r), "inventory garbage collection cycle panicked", "stack", string(debug.Stack()))
 		}
 	}()
 	if err := g.deleteStaleInventory(ctx); err != nil {
@@ -65,8 +66,18 @@ func (g *inventoryGarbageCollector) deleteStaleInventory(ctx context.Context) er
 	if err := g.reader.List(ctx, symphonies, client.InNamespace(g.namespace)); err != nil {
 		return fmt.Errorf("listing Symphonies: %w", err)
 	}
-	if !isSymphonyActive(symphonies.Items) {
-		logger.Info("symphony is deleting or missing; keeping inventory", "scanned", len(secrets.Items))
+	// Eno expects exactly one active Symphony per active cluster cluster; otherwise keep all inventory.
+	switch {
+	case len(symphonies.Items) == 0:
+		logger.Info("no symphony found; keeping inventory", "scanned", len(secrets.Items))
+		return nil
+	case len(symphonies.Items) > 1:
+		logger.Error(nil, "found multiple symphonies, expected exactly one; keeping inventory",
+			"symphonyCount", len(symphonies.Items), "scanned", len(secrets.Items))
+		return nil
+	case symphonies.Items[0].DeletionTimestamp != nil:
+		logger.Info("symphony is deleting; keeping inventory",
+			"symphonyName", symphonies.Items[0].Name, "scanned", len(secrets.Items))
 		return nil
 	}
 
@@ -88,14 +99,9 @@ func (g *inventoryGarbageCollector) deleteStaleInventory(ctx context.Context) er
 	return nil
 }
 
-// isSymphonyActive reports whether the namespace's only Symphony exists and is not deleting.
-func isSymphonyActive(symphonies []apiv1.Symphony) bool {
-	return len(symphonies) == 1 && symphonies[0].DeletionTimestamp == nil
-}
-
 // findStaleInventory returns the inventory Secrets that are safe to delete.
 func findStaleInventory(secrets []corev1.Secret, comps []apiv1.Composition, symph *apiv1.Symphony) []corev1.Secret {
-	stale := findInventoryWithoutComposition(secrets, comps, symph)
+	stale := findOrphanedLineageInventory(secrets, comps, symph)
 	stale = append(stale, findInventoryFromOldSyntheses(secrets, comps)...)
 	sort.Slice(stale, func(i, j int) bool {
 		return stale[i].Name < stale[j].Name
@@ -103,9 +109,9 @@ func findStaleInventory(secrets []corev1.Secret, comps []apiv1.Composition, symp
 	return stale
 }
 
-// findInventoryWithoutComposition returns every Secret whose lineage matches no Composition and no Symphony variation.
+// findOrphanedLineageInventory returns every Secret whose lineage matches no Composition and no Symphony variation.
 // A variation without a Composition yet is being (re)created, e.g. after AKS stop/start, and needs its inventory for recovery.
-func findInventoryWithoutComposition(secrets []corev1.Secret, comps []apiv1.Composition, symph *apiv1.Symphony) []corev1.Secret {
+func findOrphanedLineageInventory(secrets []corev1.Secret, comps []apiv1.Composition, symph *apiv1.Symphony) []corev1.Secret {
 	liveLineages := make(map[string]bool, len(comps)+len(symph.Spec.Variations))
 	for i := range comps {
 		liveLineages[inventoryLineage(&comps[i])] = true
@@ -113,13 +119,13 @@ func findInventoryWithoutComposition(secrets []corev1.Secret, comps []apiv1.Comp
 	for _, variation := range symph.Spec.Variations {
 		liveLineages[inventoryLineageFor(symph.Namespace, variation.Synthesizer.Name)] = true
 	}
-	var withoutComposition []corev1.Secret
+	var orphaned []corev1.Secret
 	for _, secret := range secrets {
 		if !liveLineages[secret.Labels[inventoryLineageLabel]] {
-			withoutComposition = append(withoutComposition, secret)
+			orphaned = append(orphaned, secret)
 		}
 	}
-	return withoutComposition
+	return orphaned
 }
 
 // findInventoryFromOldSyntheses returns each existing Composition's Secrets from older syntheses,

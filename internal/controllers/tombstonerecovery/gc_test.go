@@ -116,12 +116,6 @@ func TestFindStaleInventoryKeepsSymphonyVariations(t *testing.T) {
 	assert.ElementsMatch(t, []string{current.Name, orphan.Name}, gcTestNames(got), "a removed variation's inventory is stale")
 }
 
-func TestIsSymphonyActive(t *testing.T) {
-	assert.False(t, isSymphonyActive(nil), "missing")
-	assert.True(t, isSymphonyActive([]apiv1.Symphony{{}}), "active")
-	assert.False(t, isSymphonyActive([]apiv1.Symphony{{ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: ptr.To(metav1.Now())}}}), "deleting")
-}
-
 func newGCTestCollector(t *testing.T, upstreamObjs []client.Object, secrets ...corev1.Secret) (*inventoryGarbageCollector, client.WithWatch) {
 	t.Helper()
 	scheme := runtime.NewScheme()
@@ -151,22 +145,27 @@ func TestInventoryGarbageCollectorDeleteStaleInventory(t *testing.T) {
 	old, current, orphan := gcTestSnapshot(t, comp, 1), gcTestSnapshot(t, comp, 2), gcTestOrphan(t, comp)
 	unrelated := corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "unrelated", Namespace: inventoryNamespace}}
 
+	active := func(name string) *apiv1.Symphony {
+		return &apiv1.Symphony{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "control"}}
+	}
 	for _, tc := range []struct {
-		name     string
-		symphony *apiv1.Symphony
-		want     []string
+		name       string
+		symphonies []*apiv1.Symphony
+		want       []string
 	}{
-		{name: "active symphony", symphony: &apiv1.Symphony{ObjectMeta: metav1.ObjectMeta{Name: "symphony", Namespace: "control"}},
+		{name: "active symphony", symphonies: []*apiv1.Symphony{active("symphony")},
 			want: []string{current.Name, "unrelated"}},
-		{name: "deleting symphony", symphony: &apiv1.Symphony{ObjectMeta: metav1.ObjectMeta{
+		{name: "deleting symphony", symphonies: []*apiv1.Symphony{{ObjectMeta: metav1.ObjectMeta{
 			Name: "symphony", Namespace: "control", DeletionTimestamp: ptr.To(metav1.Now()), Finalizers: []string{"test"},
-		}}, want: []string{old.Name, current.Name, orphan.Name, "unrelated"}},
+		}}}, want: []string{old.Name, current.Name, orphan.Name, "unrelated"}},
 		{name: "missing symphony", want: []string{old.Name, current.Name, orphan.Name, "unrelated"}},
+		{name: "multiple symphonies", symphonies: []*apiv1.Symphony{active("symphony"), active("symphony-2")},
+			want: []string{old.Name, current.Name, orphan.Name, "unrelated"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			objs := []client.Object{comp}
-			if tc.symphony != nil {
-				objs = append(objs, tc.symphony)
+			for _, symph := range tc.symphonies {
+				objs = append(objs, symph)
 			}
 			g, downstream := newGCTestCollector(t, objs, old, current, orphan, unrelated)
 			require.NoError(t, g.deleteStaleInventory(t.Context()))
