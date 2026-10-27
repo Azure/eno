@@ -7,6 +7,7 @@ import (
 	"github.com/go-logr/logr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/flowcontrol"
@@ -44,12 +45,14 @@ func NewControllerWithInputBufferWorkers(mgr ctrl.Manager, inputBufferWorkers in
 		return err
 	}
 
+	pruner := &pruningController{
+		client: mgr.GetClient(),
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
+		WatchesRawSource(source.Kind(mgr.GetCache(), &apiv1.Synthesizer{}, pruner.newSynthEventHandler())).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "watchPruningController")).
-		Complete(&pruningController{
-			client: mgr.GetClient(),
-		})
+		Complete(pruner)
 }
 
 func (c *WatchController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

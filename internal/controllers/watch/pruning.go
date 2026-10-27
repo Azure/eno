@@ -4,10 +4,13 @@ import (
 	"context"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/manager"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 type pruningController struct {
@@ -33,40 +36,81 @@ func (c *pruningController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	synth := &apiv1.Synthesizer{}
 	synth.Name = comp.Spec.Synthesizer.Name
 	err = c.client.Get(ctx, client.ObjectKeyFromObject(synth), synth)
-	if client.IgnoreNotFound(err) != nil {
+	if errors.IsNotFound(err) {
+		// Without the synthesizer we can't tell which refs are still declared, so don't prune anything
+		return ctrl.Result{}, nil
+	}
+	if err != nil {
 		logger.Error(err, "failed to get synthesizer")
 		return ctrl.Result{}, err
 	}
 
-	for i, ir := range comp.Status.InputRevisions {
-		if hasBindingKey(comp, synth, ir.Key) {
+	kept := make([]apiv1.InputRevisions, 0, len(comp.Status.InputRevisions))
+	var pruned []string
+	for _, ir := range comp.Status.InputRevisions {
+		if isInputBound(comp, synth, ir.Key) {
+			kept = append(kept, ir)
 			continue
 		}
-		logger.Info("pruning input revision - no longer has binding", "key", ir.Key, "revision", ir.Revision, "index", i)
-		comp.Status.InputRevisions = append(comp.Status.InputRevisions[:i], comp.Status.InputRevisions[i+1:]...)
-		err = c.client.Status().Update(ctx, comp)
-		if err != nil {
-			logger.Error(err, "failed to update composition status")
-			return ctrl.Result{}, err
-		}
-
-		logger.Info("pruned old input revision from composition status", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", ir.Key)
+		pruned = append(pruned, ir.Key)
+	}
+	if len(pruned) == 0 {
 		return ctrl.Result{}, nil
 	}
 
+	logger.Info("pruning input revisions - no longer declared by synthesizer or bound by composition", "keys", pruned, "synthesizerGeneration", synth.Generation)
+	comp.Status.InputRevisions = kept
+	err = c.client.Status().Update(ctx, comp)
+	if err != nil {
+		logger.Error(err, "failed to update composition status")
+		return ctrl.Result{}, err
+	}
+
+	logger.Info("pruned old input revisions from composition status", "keys", pruned)
 	return ctrl.Result{}, nil
 }
 
-func hasBindingKey(comp *apiv1.Composition, synth *apiv1.Synthesizer, key string) bool {
-	for _, b := range comp.Spec.Bindings {
-		if b.Key == key {
-			return true
-		}
-	}
+// isInputBound returns true when the synthesizer still declares a ref for the key and that ref
+// is bound either explicitly by the composition or implicitly by the ref itself.
+// A composition binding alone is not enough: bindings can outlive the ref (e.g. bindings inherited from a Symphony).
+func isInputBound(comp *apiv1.Composition, synth *apiv1.Synthesizer, key string) bool {
 	for _, ref := range synth.Spec.Refs {
-		if ref.Key == key && ref.Resource.Name != "" {
+		if ref.Key != key {
+			continue
+		}
+		if ref.Resource.Name != "" {
 			return true // implicit binding
 		}
+		for _, b := range comp.Spec.Bindings {
+			if b.Key == key {
+				return true
+			}
+		}
+		return false
 	}
 	return false
+}
+
+// newSynthEventHandler enqueues every composition that uses the synthesizer, so revisions for refs
+// removed from the synthesizer are pruned without waiting for an unrelated composition event.
+func (c *pruningController) newSynthEventHandler() handler.TypedEventHandler[*apiv1.Synthesizer, reconcile.Request] {
+	fn := func(ctx context.Context, synth *apiv1.Synthesizer) []reconcile.Request {
+		logger := logr.FromContextOrDiscard(ctx)
+
+		list := &apiv1.CompositionList{}
+		err := c.client.List(ctx, list, client.MatchingFields{
+			manager.IdxCompositionsBySynthesizer: synth.Name,
+		})
+		if err != nil {
+			logger.Error(err, "failed to list compositions for synthesizer", "synthesizerName", synth.Name)
+			return nil
+		}
+
+		reqs := make([]reconcile.Request, 0, len(list.Items))
+		for i := range list.Items {
+			reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])})
+		}
+		return reqs
+	}
+	return handler.TypedEnqueueRequestsFromMapFunc(fn)
 }
