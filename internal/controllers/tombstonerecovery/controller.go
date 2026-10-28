@@ -116,6 +116,7 @@ func NewController(mgr ctrl.Manager, opts Options) error {
 	if err != nil {
 		return fmt.Errorf("constructing tombstone recovery downstream client: %w", err)
 	}
+	setPendingCompositionsSource(recoveryCache)
 	slice := &metav1.PartialObjectMetadata{}
 	slice.SetGroupVersionKind(apiv1.SchemeGroupVersion.WithKind("ResourceSlice"))
 	return ctrl.NewControllerManagedBy(mgr).
@@ -300,7 +301,12 @@ func (c *tombstoneRecoveryController) recoverMissingTombstones(ctx context.Conte
 	if err != nil && len(refs) > 0 {
 		return c.recordTombstoneRecoveryError(ctx, comp, reasonSliceWriteError, err)
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	// Observed only after the decision persists, so a retried run is counted once.
+	recoveryTombstones.WithLabelValues(comp.Spec.Synthesizer.Name).Observe(float64(len(tombstones)))
+	return nil
 }
 
 func (c *tombstoneRecoveryController) loadCurrentSynthesisResourceSlices(ctx context.Context, comp *apiv1.Composition) ([]apiv1.ResourceSlice, error) {
@@ -358,6 +364,7 @@ func (c *tombstoneRecoveryController) recordRecoveryDecision(ctx context.Context
 	if err := c.patchStatus(ctx, comp, after); err != nil {
 		return err
 	}
+	observeRecoveryDecision(comp, reason)
 	logr.FromContextOrDiscard(ctx).Info("tombstone recovery preparation finished", "operation", "recoveryPreparation", "reason", reason, "message", message)
 	return nil
 }
