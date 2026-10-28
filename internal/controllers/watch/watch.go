@@ -50,9 +50,11 @@ func NewControllerWithInputBufferWorkers(mgr ctrl.Manager, inputBufferWorkers in
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Composition{}).
-		WatchesRawSource(source.Kind(mgr.GetCache(), &apiv1.Synthesizer{}, pruner.newSynthEventHandler())).
+		WatchesRawSource(source.Kind(mgr.GetCache(), &apiv1.Synthesizer{}, pruner.newSynthEventHandler(), synthRefsChangedPredicate())).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "watchPruningController")).
-		Complete(pruner)
+		Complete(&pruningController{
+			client: mgr.GetClient(),
+		})
 }
 
 func (c *WatchController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

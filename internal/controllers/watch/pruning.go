@@ -6,10 +6,13 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -48,7 +51,7 @@ func (c *pruningController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	kept := make([]apiv1.InputRevisions, 0, len(comp.Status.InputRevisions))
 	var pruned []string
 	for _, ir := range comp.Status.InputRevisions {
-		if isInputBound(comp, synth, ir.Key) {
+		if shouldKeepInputRevision(comp, synth, ir.Key) {
 			kept = append(kept, ir)
 			continue
 		}
@@ -70,10 +73,13 @@ func (c *pruningController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return ctrl.Result{}, nil
 }
 
-// isInputBound returns true when the synthesizer still declares a ref for the key and that ref
-// is bound either explicitly by the composition or implicitly by the ref itself.
-// A composition binding alone is not enough: bindings can outlive the ref (e.g. bindings inherited from a Symphony).
-func isInputBound(comp *apiv1.Composition, synth *apiv1.Synthesizer, key string) bool {
+// shouldKeepInputRevision reports whether the input revision for key should be kept. Both must be true:
+//   - The synthesizer still has a ref with this key.
+//   - The ref points to a resource, either by naming one itself or through a matching composition binding.
+//
+// A composition binding by itself doesn't count. It can stay behind after the ref is removed
+// (e.g. when the binding comes from a Symphony).
+func shouldKeepInputRevision(comp *apiv1.Composition, synth *apiv1.Synthesizer, key string) bool {
 	for _, ref := range synth.Spec.Refs {
 		if ref.Key != key {
 			continue
@@ -113,4 +119,26 @@ func (c *pruningController) newSynthEventHandler() handler.TypedEventHandler[*ap
 		return reqs
 	}
 	return handler.TypedEnqueueRequestsFromMapFunc(fn)
+}
+
+// synthRefsChangedPredicate limits synthesizer events to the ones that can leave stale input revisions:
+//   - Create: a synthesizer created after its compositions; earlier prune passes skipped them.
+//   - Update: only when spec.refs changed. Other changes (e.g. image) can't make a revision stale.
+//
+// Deletes are dropped because the pruner doesn't prune without a synthesizer.
+func synthRefsChangedPredicate() predicate.TypedPredicate[*apiv1.Synthesizer] {
+	return predicate.TypedFuncs[*apiv1.Synthesizer]{
+		CreateFunc: func(e event.TypedCreateEvent[*apiv1.Synthesizer]) bool {
+			return true
+		},
+		UpdateFunc: func(e event.TypedUpdateEvent[*apiv1.Synthesizer]) bool {
+			return !equality.Semantic.DeepEqual(e.ObjectOld.Spec.Refs, e.ObjectNew.Spec.Refs)
+		},
+		DeleteFunc: func(e event.TypedDeleteEvent[*apiv1.Synthesizer]) bool {
+			return false
+		},
+		GenericFunc: func(e event.TypedGenericEvent[*apiv1.Synthesizer]) bool {
+			return false
+		},
+	}
 }

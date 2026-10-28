@@ -10,9 +10,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
-func TestIsInputBound(t *testing.T) {
+func TestShouldKeepInputRevision(t *testing.T) {
 	tests := []struct {
 		name     string
 		refs     []apiv1.Ref
@@ -61,7 +62,7 @@ func TestIsInputBound(t *testing.T) {
 			synth := &apiv1.Synthesizer{}
 			synth.Spec.Refs = tt.refs
 
-			assert.Equal(t, tt.expected, isInputBound(comp, synth, tt.key))
+			assert.Equal(t, tt.expected, shouldKeepInputRevision(comp, synth, tt.key))
 		})
 	}
 }
@@ -131,4 +132,27 @@ func TestPruningControllerReconcile(t *testing.T) {
 		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), after))
 		assert.Equal(t, before.ResourceVersion, after.ResourceVersion)
 	})
+}
+
+func TestSynthRefsChangedPredicate(t *testing.T) {
+	p := synthRefsChangedPredicate()
+	newSynth := func(image string, refs ...apiv1.Ref) *apiv1.Synthesizer {
+		synth := &apiv1.Synthesizer{}
+		synth.Spec.Image = image
+		synth.Spec.Refs = refs
+		return synth
+	}
+	refA := apiv1.Ref{Key: "a"}
+	refB := apiv1.Ref{Key: "b"}
+
+	assert.True(t, p.Create(event.TypedCreateEvent[*apiv1.Synthesizer]{Object: newSynth("v1", refA)}), "create")
+	assert.False(t, p.Delete(event.TypedDeleteEvent[*apiv1.Synthesizer]{Object: newSynth("v1", refA)}), "delete")
+	assert.True(t, p.Update(event.TypedUpdateEvent[*apiv1.Synthesizer]{
+		ObjectOld: newSynth("v1", refA, refB),
+		ObjectNew: newSynth("v1", refA),
+	}), "ref removed")
+	assert.False(t, p.Update(event.TypedUpdateEvent[*apiv1.Synthesizer]{
+		ObjectOld: newSynth("v1", refA),
+		ObjectNew: newSynth("v2", refA),
+	}), "only image changed")
 }
