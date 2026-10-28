@@ -120,6 +120,7 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	readySet := buildReadySet(comps)
 	existSet := buildExistsSet(comps)
 	sortedComps, cyclicSet := topoSortCompositions(comps.Items)
+	publishStuckCompositions(planStuckCompositions(comps.Items, synthsByName, readySet, cyclicSet, c.watchdogThreshold, time.Now()))
 
 	// Pre-loop: set/clear circular dependency status on all compositions.
 	// Cyclic compositions are excluded from sortedComps by Kahn's algorithm,
