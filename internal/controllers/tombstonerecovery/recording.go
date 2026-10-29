@@ -74,12 +74,11 @@ func isInventoryAlreadyRecorded(items []corev1.Secret, currentUUID string) bool 
 		return false
 	}
 	for i := range items {
-		if items[i].Labels[inventorySynthesisUUIDLabel] != currentUUID || items[i].DeletionTimestamp != nil {
+		if items[i].Labels[inventorySynthesisUUIDLabel] != currentUUID {
 			return false
 		}
 	}
-	_, complete := orderInventoryChunks(items)
-	return complete
+	return isCompleteSnapshot(items)
 }
 
 func inventorySecretMatches(existing, intended *corev1.Secret) bool {
@@ -102,8 +101,8 @@ func (c *tombstoneRecoveryController) deleteOldInventorySnapshots(ctx context.Co
 		if item.Labels[inventorySynthesisUUIDLabel] == currentUUID {
 			continue
 		}
-		if err := c.downstream.Delete(ctx, item, &client.Preconditions{UID: &item.UID}); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("deleting old inventory Secret %q: %w", item.Name, err)
+		if err := deleteInventorySecret(ctx, c.downstream, item); err != nil {
+			return err
 		}
 		logr.FromContextOrDiscard(ctx).Info("deleted old inventory chunk", "secretName", item.Name)
 	}
