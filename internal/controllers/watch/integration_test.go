@@ -519,6 +519,77 @@ func TestRemoveInput(t *testing.T) {
 	})
 }
 
+// TestRemoveSynthesizerRefWithLingeringBinding covers a synthesizer dropping a ref while the
+// composition still carries a binding for it (e.g. inherited from a Symphony).
+// The stale revision must be pruned, otherwise it holds the composition out of lockstep forever.
+func TestRemoveSynthesizerRefWithLingeringBinding(t *testing.T) {
+	mgr := testutil.NewManager(t)
+	require.NoError(t, NewController(mgr.Manager))
+	mgr.Start(t)
+
+	ctx := testutil.NewContext(t)
+	cli := mgr.GetClient()
+
+	for _, name := range []string{"input-a", "input-b"} {
+		cm := &corev1.ConfigMap{}
+		cm.Name = name
+		cm.Namespace = "default"
+		cm.Annotations = map[string]string{"eno.azure.io/synthesizer-generation": "1"}
+		require.NoError(t, cli.Create(ctx, cm))
+	}
+
+	refB := apiv1.Ref{Key: "b", Resource: apiv1.ResourceRef{Version: "v1", Kind: "ConfigMap"}}
+	synth := &apiv1.Synthesizer{}
+	synth.Name = "test-synth"
+	synth.Spec.Refs = []apiv1.Ref{
+		{Key: "a", Resource: apiv1.ResourceRef{Version: "v1", Kind: "ConfigMap"}},
+		refB,
+	}
+	require.NoError(t, cli.Create(ctx, synth))
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Spec.Synthesizer.Name = synth.Name
+	comp.Spec.Bindings = []apiv1.Binding{
+		{Key: "a", Resource: apiv1.ResourceBinding{Name: "input-a", Namespace: "default"}},
+		{Key: "b", Resource: apiv1.ResourceBinding{Name: "input-b", Namespace: "default"}},
+	}
+	require.NoError(t, cli.Create(ctx, comp))
+
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return len(comp.Status.InputRevisions) == 2
+	})
+
+	// Remove ref "b" from the synthesizer but leave the binding on the composition
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(synth), synth)
+		synth.Spec.Refs = synth.Spec.Refs[:1]
+		return cli.Update(ctx, synth)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return len(comp.Status.InputRevisions) == 1 && comp.Status.InputRevisions[0].Key == "a"
+	})
+	assert.Len(t, comp.Spec.Bindings, 2, "binding should be left untouched")
+
+	// Adding the ref back restores the revision
+	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		cli.Get(ctx, client.ObjectKeyFromObject(synth), synth)
+		synth.Spec.Refs = append(synth.Spec.Refs, refB)
+		return cli.Update(ctx, synth)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)
+		return len(comp.Status.InputRevisions) == 2
+	})
+}
+
 // TestConcurrentStatusUpdates verifies that the retry mechanism handles
 // concurrent updates to composition status without causing a retry storm.
 // This tests the fix for the issue where conflict errors would cause immediate
