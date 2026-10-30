@@ -9,6 +9,7 @@ import (
 	"github.com/Azure/eno/internal/inputs"
 	"github.com/prometheus/client_golang/prometheus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
@@ -43,24 +44,36 @@ var (
 		[]string{"composition_name", "composition_namespace", "synthesizer_name", "reason"}, nil,
 	)
 
-	stuckCompositionsSnapshot atomic.Pointer[[]stuckComposition]
+	stuckCompositionsSnapshot atomic.Pointer[waitingSnapshot]
 )
 
 func init() {
-	metrics.Registry.MustRegister(stuckCompositionsCollector{})
+	metrics.Registry.MustRegister(stuckCompositionsCollector{now: time.Now})
 }
 
-type stuckComposition struct {
+// waitingSnapshot holds every non-Ready composition. The threshold is applied at scrape time,
+// so a composition becomes stuck without needing another object event.
+type waitingSnapshot struct {
+	threshold time.Duration
+	waiting   []waitingComposition
+}
+
+type waitingComposition struct {
 	name        string
 	namespace   string
 	synthesizer string
 	owner       string
 	reason      string
+	since       time.Time
 }
 
-// planStuckCompositions returns every composition stuck in its current phase for longer than threshold.
-func planStuckCompositions(comps []apiv1.Composition, synths map[string]apiv1.Synthesizer, readySet, cyclicSet map[string]bool, threshold time.Duration, now time.Time) []stuckComposition {
-	var stuck []stuckComposition
+// planWaitingCompositions returns every non-Ready composition with its phase and phase start time.
+// pendingSince holds when each pending resynthesis was first observed, keyed by composition UID.
+// The returned map contains only compositions still pending, so finished or deleted ones are dropped.
+func planWaitingCompositions(comps []apiv1.Composition, synths map[string]apiv1.Synthesizer, readySet, cyclicSet map[string]bool,
+	pendingSince map[types.UID]time.Time, now time.Time) ([]waitingComposition, map[types.UID]time.Time) {
+	var waiting []waitingComposition
+	nextPendingSince := map[types.UID]time.Time{}
 	for i := range comps {
 		comp := &comps[i]
 		synth, found := synths[comp.Spec.Synthesizer.Name]
@@ -69,22 +82,32 @@ func planStuckCompositions(comps []apiv1.Composition, synths map[string]apiv1.Sy
 			synthPtr = &synth
 		}
 		reason, since := classifyComposition(comp, synthPtr, readySet, cyclicSet)
-		if reason == "" || now.Sub(since) <= threshold {
+		if reason == "" {
 			continue
 		}
-		stuck = append(stuck, stuckComposition{
+		// A pending resynthesis has no status timestamp, so it is timed from when it was first observed.
+		if since.IsZero() {
+			since = now
+			if first, ok := pendingSince[comp.UID]; ok {
+				since = first
+			}
+			nextPendingSince[comp.UID] = since
+		}
+		waiting = append(waiting, waitingComposition{
 			name:        comp.Name,
 			namespace:   comp.Namespace,
 			synthesizer: comp.Spec.Synthesizer.Name,
 			owner:       getSynthOwner(synthPtr),
 			reason:      reason,
+			since:       since,
 		})
 	}
-	return stuck
+	return waiting, nextPendingSince
 }
 
 // classifyComposition returns the phase a composition is waiting in and when that phase started.
 // The first matching check wins. An empty reason means the composition is Ready.
+// A zero time means the phase has no status timestamp and the caller must track when it was first observed.
 func classifyComposition(comp *apiv1.Composition, synth *apiv1.Synthesizer, readySet, cyclicSet map[string]bool) (string, time.Time) {
 	created := comp.CreationTimestamp.Time
 	if comp.DeletionTimestamp != nil {
@@ -121,6 +144,10 @@ func classifyComposition(comp *apiv1.Composition, synth *apiv1.Synthesizer, read
 	if current == nil {
 		return stuckReasonPendingSynthesis, created
 	}
+	// Deferred ops are intentionally paced by --rollout-cooldown, so waiting on them is not stuck.
+	if reason, ok := classifyOp(synth, comp); ok && !reason.Deferred() {
+		return stuckReasonPendingSynthesis, time.Time{}
+	}
 	if current.Reconciled == nil {
 		since := firstSetTime(created, current.Synthesized, current.Initialized)
 		// Mirrors the reconstitution gate that blocks reconciliation until recovery finishes.
@@ -144,32 +171,38 @@ func firstSetTime(fallback time.Time, times ...*metav1.Time) time.Time {
 	return fallback
 }
 
-// publishStuckCompositions swaps the whole snapshot so scrapes never observe a partial update.
-func publishStuckCompositions(stuck []stuckComposition) {
-	stuckCompositionsSnapshot.Store(&stuck)
+// publishWaitingCompositions swaps the whole snapshot so scrapes never observe a partial update.
+func publishWaitingCompositions(threshold time.Duration, waiting []waitingComposition) {
+	stuckCompositionsSnapshot.Store(&waitingSnapshot{threshold: threshold, waiting: waiting})
 }
 
-type stuckCompositionsCollector struct{}
+type stuckCompositionsCollector struct {
+	now func() time.Time
+}
 
 func (stuckCompositionsCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- compositionsStuckDesc
 	ch <- compositionStuckReasonDesc
 }
 
-func (stuckCompositionsCollector) Collect(ch chan<- prometheus.Metric) {
+func (c stuckCompositionsCollector) Collect(ch chan<- prometheus.Metric) {
 	snapshot := stuckCompositionsSnapshot.Load()
 	if snapshot == nil {
 		return
 	}
+	now := c.now()
 	type groupKey struct {
 		synthesizer string
 		owner       string
 		reason      string
 	}
 	counts := map[groupKey]int{}
-	for _, s := range *snapshot {
-		counts[groupKey{s.synthesizer, s.owner, s.reason}]++
-		ch <- prometheus.MustNewConstMetric(compositionStuckReasonDesc, prometheus.GaugeValue, 1, s.name, s.namespace, s.synthesizer, s.reason)
+	for _, w := range snapshot.waiting {
+		if now.Sub(w.since) <= snapshot.threshold {
+			continue
+		}
+		counts[groupKey{w.synthesizer, w.owner, w.reason}]++
+		ch <- prometheus.MustNewConstMetric(compositionStuckReasonDesc, prometheus.GaugeValue, 1, w.name, w.namespace, w.synthesizer, w.reason)
 	}
 	for k, count := range counts {
 		ch <- prometheus.MustNewConstMetric(compositionsStuckDesc, prometheus.GaugeValue, float64(count), k.synthesizer, k.owner, k.reason)

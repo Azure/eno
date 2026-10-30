@@ -51,6 +51,10 @@ type controller struct {
 	watchdogThreshold time.Duration
 
 	lastApplied *op
+
+	// When each pending resynthesis was first observed, keyed by composition UID.
+	// In-memory only: a restart or leader change restarts the clock.
+	pendingSince map[types.UID]time.Time
 }
 
 func NewController(mgr ctrl.Manager, concurrencyLimit int, cooldown, watchdogThreshold time.Duration) error {
@@ -120,7 +124,9 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	readySet := buildReadySet(comps)
 	existSet := buildExistsSet(comps)
 	sortedComps, cyclicSet := topoSortCompositions(comps.Items)
-	publishStuckCompositions(planStuckCompositions(comps.Items, synthsByName, readySet, cyclicSet, c.watchdogThreshold, time.Now()))
+	var waiting []waitingComposition
+	waiting, c.pendingSince = planWaitingCompositions(comps.Items, synthsByName, readySet, cyclicSet, c.pendingSince, time.Now())
+	publishWaitingCompositions(c.watchdogThreshold, waiting)
 
 	// Pre-loop: set/clear circular dependency status on all compositions.
 	// Cyclic compositions are excluded from sortedComps by Kahn's algorithm,

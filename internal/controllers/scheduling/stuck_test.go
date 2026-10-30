@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 )
 
@@ -158,6 +159,29 @@ func TestClassifyComposition(t *testing.T) {
 			wantSince:  stuckTestNow.Add(-10 * time.Minute),
 		},
 		{
+			name: "pending resynthesis after a composition update",
+			mutate: func(comp *apiv1.Composition, synth *apiv1.Synthesizer) {
+				comp.Finalizers = []string{"eno.azure.io/cleanup"}
+				comp.Generation = 2
+				syn := stuckTestReadySynthesis()
+				syn.ObservedCompositionGeneration = 1
+				comp.Status.CurrentSynthesis = syn
+			},
+			wantReason: stuckReasonPendingSynthesis,
+			wantSince:  time.Time{},
+		},
+		{
+			name: "deferred synthesizer rollout is not pending",
+			mutate: func(comp *apiv1.Composition, synth *apiv1.Synthesizer) {
+				comp.Finalizers = []string{"eno.azure.io/cleanup"}
+				synth.Generation = 2
+				syn := stuckTestReadySynthesis()
+				syn.ObservedSynthesizerGeneration = 1
+				comp.Status.CurrentSynthesis = syn
+			},
+			wantReason: "",
+		},
+		{
 			name:       "pending first synthesis",
 			wantReason: stuckReasonPendingSynthesis,
 			wantSince:  created,
@@ -236,48 +260,67 @@ func TestClassifyComposition(t *testing.T) {
 	}
 }
 
-func TestPlanStuckCompositionsThreshold(t *testing.T) {
-	threshold := 3 * time.Minute
+func TestPlanWaitingCompositions(t *testing.T) {
 	synth := stuckTestSynth()
 	synths := map[string]apiv1.Synthesizer{synth.Name: *synth}
 
-	atThreshold := stuckTestComp()
-	atThreshold.Name = "at-threshold"
-	atThreshold.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: "a", Synthesized: stuckTestTime(threshold)}
-
-	pastThreshold := stuckTestComp()
-	pastThreshold.Name = "past-threshold"
-	pastThreshold.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: "b", Synthesized: stuckTestTime(threshold + time.Second)}
+	reconciling := stuckTestComp()
+	reconciling.Name = "reconciling"
+	reconciling.Status.CurrentSynthesis = &apiv1.Synthesis{UUID: "a", Synthesized: stuckTestTime(time.Minute)}
 
 	ready := stuckTestComp()
 	ready.Name = "ready"
 	ready.Status.CurrentSynthesis = stuckTestReadySynthesis()
 
-	missingSynth := stuckTestComp()
-	missingSynth.Name = "missing-synth"
-	missingSynth.Spec.Synthesizer.Name = "absent"
+	pending := stuckTestComp()
+	pending.Name = "pending"
+	pending.UID = "pending-uid"
+	pending.Finalizers = []string{"eno.azure.io/cleanup"}
+	pending.Generation = 2
+	pending.Status.CurrentSynthesis = stuckTestReadySynthesis()
+	pending.Status.CurrentSynthesis.ObservedCompositionGeneration = 1
 
-	comps := []apiv1.Composition{*atThreshold, *pastThreshold, *ready, *missingSynth}
-	got := planStuckCompositions(comps, synths, nil, nil, threshold, stuckTestNow)
+	comps := []apiv1.Composition{*reconciling, *ready, *pending}
+	stale := map[types.UID]time.Time{"deleted-uid": stuckTestNow.Add(-time.Hour)}
 
-	assert.Equal(t, []stuckComposition{
-		{name: "past-threshold", namespace: "ns", synthesizer: "synth", owner: "team", reason: stuckReasonReconciling},
-		{name: "missing-synth", namespace: "ns", synthesizer: "absent", owner: "", reason: stuckReasonMissingSynthesizer},
-	}, got)
+	// First observation of the pending resynthesis starts its clock at now.
+	waiting, pendingSince := planWaitingCompositions(comps, synths, nil, nil, stale, stuckTestNow)
+	assert.Equal(t, []waitingComposition{
+		{name: "reconciling", namespace: "ns", synthesizer: "synth", owner: "team", reason: stuckReasonReconciling, since: stuckTestNow.Add(-time.Minute)},
+		{name: "pending", namespace: "ns", synthesizer: "synth", owner: "team", reason: stuckReasonPendingSynthesis, since: stuckTestNow},
+	}, waiting)
+	assert.Equal(t, map[types.UID]time.Time{"pending-uid": stuckTestNow}, pendingSince)
+
+	// Later evaluations keep the first-observed time.
+	later := stuckTestNow.Add(10 * time.Minute)
+	waiting, pendingSince = planWaitingCompositions(comps, synths, nil, nil, pendingSince, later)
+	assert.Equal(t, stuckTestNow, waiting[1].since)
+	assert.Equal(t, map[types.UID]time.Time{"pending-uid": stuckTestNow}, pendingSince)
+
+	// The entry is dropped once the resynthesis is dispatched.
+	pending.Status.InFlightSynthesis = &apiv1.Synthesis{Initialized: &metav1.Time{Time: later}}
+	_, pendingSince = planWaitingCompositions([]apiv1.Composition{*pending}, synths, nil, nil, pendingSince, later)
+	assert.Empty(t, pendingSince)
 }
 
 func TestStuckCompositionsCollector(t *testing.T) {
 	t.Cleanup(func() {
 		stuckCompositionsSnapshot.Store(nil)
 	})
+	now := stuckTestNow
+	collector := stuckCompositionsCollector{now: func() time.Time {
+		return now
+	}}
+	threshold := 3 * time.Minute
 
 	stuckCompositionsSnapshot.Store(nil)
-	assert.Equal(t, 0, prometheustestutil.CollectAndCount(stuckCompositionsCollector{}))
+	assert.Equal(t, 0, prometheustestutil.CollectAndCount(collector))
 
-	publishStuckCompositions([]stuckComposition{
-		{name: "a", namespace: "ns1", synthesizer: "synth", owner: "team", reason: stuckReasonReconciling},
-		{name: "b", namespace: "ns2", synthesizer: "synth", owner: "team", reason: stuckReasonReconciling},
-		{name: "c", namespace: "ns1", synthesizer: "other", owner: "", reason: stuckReasonNotReady},
+	publishWaitingCompositions(threshold, []waitingComposition{
+		{name: "a", namespace: "ns1", synthesizer: "synth", owner: "team", reason: stuckReasonReconciling, since: now.Add(-10 * time.Minute)},
+		{name: "b", namespace: "ns2", synthesizer: "synth", owner: "team", reason: stuckReasonReconciling, since: now.Add(-threshold - time.Second)},
+		{name: "c", namespace: "ns1", synthesizer: "other", owner: "", reason: stuckReasonNotReady, since: now.Add(-time.Hour)},
+		{name: "d", namespace: "ns1", synthesizer: "other", owner: "", reason: stuckReasonMissingSynthesizer, since: now.Add(-threshold)},
 	})
 
 	expected := `
@@ -291,9 +334,26 @@ eno_composition_stuck_reason{composition_name="c",composition_namespace="ns1",re
 eno_compositions_stuck{owner="",reason="NotReady",synthesizer="other"} 1
 eno_compositions_stuck{owner="team",reason="Reconciling",synthesizer="synth"} 2
 `
-	require.NoError(t, prometheustestutil.CollectAndCompare(stuckCompositionsCollector{}, strings.NewReader(expected)))
+	require.NoError(t, prometheustestutil.CollectAndCompare(collector, strings.NewReader(expected)))
+
+	// Without a new snapshot, advancing time alone makes "d" cross the threshold.
+	now = now.Add(time.Second)
+	expected = `
+# HELP eno_composition_stuck_reason Set to 1 for each composition stuck in one phase longer than the watchdog threshold, labeled with the reason
+# TYPE eno_composition_stuck_reason gauge
+eno_composition_stuck_reason{composition_name="a",composition_namespace="ns1",reason="Reconciling",synthesizer_name="synth"} 1
+eno_composition_stuck_reason{composition_name="b",composition_namespace="ns2",reason="Reconciling",synthesizer_name="synth"} 1
+eno_composition_stuck_reason{composition_name="c",composition_namespace="ns1",reason="NotReady",synthesizer_name="other"} 1
+eno_composition_stuck_reason{composition_name="d",composition_namespace="ns1",reason="MissingSynthesizer",synthesizer_name="other"} 1
+# HELP eno_compositions_stuck Number of compositions stuck in one phase longer than the watchdog threshold, partitioned by synthesizer, owner, and reason
+# TYPE eno_compositions_stuck gauge
+eno_compositions_stuck{owner="",reason="MissingSynthesizer",synthesizer="other"} 1
+eno_compositions_stuck{owner="",reason="NotReady",synthesizer="other"} 1
+eno_compositions_stuck{owner="team",reason="Reconciling",synthesizer="synth"} 2
+`
+	require.NoError(t, prometheustestutil.CollectAndCompare(collector, strings.NewReader(expected)))
 
 	// A new snapshot fully replaces the previous one.
-	publishStuckCompositions(nil)
-	assert.Equal(t, 0, prometheustestutil.CollectAndCount(stuckCompositionsCollector{}))
+	publishWaitingCompositions(threshold, nil)
+	assert.Equal(t, 0, prometheustestutil.CollectAndCount(collector))
 }
