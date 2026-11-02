@@ -9,9 +9,11 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/Azure/eno/internal/resource"
 	prometheustestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -212,7 +214,84 @@ func TestRecoveryDecisionMetricsCountRetriedRunOnce(t *testing.T) {
 
 	f.finish(reasonFinished)
 	assert.Equal(t, 1.0, prometheustestutil.ToFloat64(recoveryDecisions.WithLabelValues("synthesizer", reasonFinished)))
-	// The run is observed once. The first attempt already appended the tombstone to the slice,
-	// so the retry finds nothing missing and observes 0 instead of 1.
-	require.NoError(t, prometheustestutil.CollectAndCompare(recoveryTombstones, strings.NewReader(tombstoneHistogramText(1, 0))))
+	// The first attempt appended the tombstone; the retry writes nothing new but still reports the full total.
+	require.NoError(t, prometheustestutil.CollectAndCompare(recoveryTombstones, strings.NewReader(tombstoneHistogramText(0, 1))))
+	assert.Empty(t, f.controller.progress, "progress is cleared once the decision is saved")
+}
+
+func TestWrittenTombstonesAccumulateAcrossPartialWrites(t *testing.T) {
+	f := newControllerTestFixture(t, true)
+	history := []inventoryResource{controllerTestResource("removed-a"), controllerTestResource("removed-b")}
+	tombstones, err := missingTombstones(nil, history)
+	require.NoError(t, err)
+	// Each existing slice has room for exactly one tombstone, so the batch needs two patches.
+	room := resource.MaxSliceJSONBytes - len(tombstones[0].Manifest)
+	slices := sliceTestExisting(f, [][]apiv1.Manifest{
+		{sliceTestManifest(t, "existing-0", room, false)},
+		{sliceTestManifest(t, "existing-1", room, false)},
+	})
+	comp := f.composition()
+
+	rejection := apierrors.NewServiceUnavailable("injected slice write failure")
+	patches := 0
+	f.controller.client = interceptor.NewClient(f.upstream, interceptor.Funcs{
+		Patch: func(ctx context.Context, cli client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+			patches++
+			if patches == 2 {
+				return rejection
+			}
+			return cli.Patch(ctx, obj, patch, opts...)
+		},
+	})
+	_, err = f.controller.writeTombstones(t.Context(), comp, slices, tombstones)
+	require.ErrorIs(t, err, rejection)
+
+	reloaded, err := f.controller.loadCurrentSynthesisResourceSlices(t.Context(), f.composition())
+	require.NoError(t, err)
+	missing, err := missingTombstones(reloaded, history)
+	require.NoError(t, err)
+	require.Len(t, missing, 1, "only the unwritten tombstone remains")
+	_, err = f.controller.writeTombstones(t.Context(), f.composition(), reloaded, missing)
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, f.controller.takeWrittenTombstones(f.composition()), "both attempts' writes are counted")
+	assert.Equal(t, 0, f.controller.takeWrittenTombstones(f.composition()), "taking clears the progress")
+}
+
+func TestWrittenTombstonesIgnoreRewrittenOverflow(t *testing.T) {
+	f := newControllerTestFixture(t, true)
+	slices := sliceTestExisting(f, nil)
+	comp := f.composition()
+	history := []inventoryResource{controllerTestResource("removed")}
+	tombstones, err := missingTombstones(slices, history)
+	require.NoError(t, err)
+
+	_, err = f.controller.writeTombstones(t.Context(), comp, slices, tombstones)
+	require.NoError(t, err)
+	// The overflow reference was never published, so the retry rewrites the same slice and hits AlreadyExists.
+	reloaded, err := f.controller.loadCurrentSynthesisResourceSlices(t.Context(), f.composition())
+	require.NoError(t, err)
+	missing, err := missingTombstones(reloaded, history)
+	require.NoError(t, err)
+	_, err = f.controller.writeTombstones(t.Context(), f.composition(), reloaded, missing)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, f.controller.takeWrittenTombstones(f.composition()), "a matching existing overflow slice is not counted again")
+}
+
+func TestWrittenTombstonesResetForNewSynthesis(t *testing.T) {
+	c := &tombstoneRecoveryController{}
+	comp := pendingTestComposition("composition", 0)
+	comp.UID = "uid"
+	c.addWrittenTombstones(comp, 3)
+
+	next := comp.DeepCopy()
+	next.Status.CurrentSynthesis.UUID = "next"
+	assert.Equal(t, 0, c.takeWrittenTombstones(next), "progress from an older synthesis is not reported")
+
+	c.addWrittenTombstones(comp, 3)
+	recreated := comp.DeepCopy()
+	recreated.UID = "recreated-uid"
+	c.addWrittenTombstones(recreated, 1)
+	assert.Equal(t, 1, c.takeWrittenTombstones(recreated), "a recreated Composition starts from zero")
 }

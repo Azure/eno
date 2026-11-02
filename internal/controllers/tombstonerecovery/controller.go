@@ -63,6 +63,16 @@ type tombstoneRecoveryController struct {
 	client     client.Client
 	reader     client.Reader
 	downstream client.Client
+
+	// Tombstones written so far by each Composition's unfinished recovery, so a retried recovery reports its full total.
+	// In-memory only; the controller runs one reconcile at a time, so no locking is needed.
+	progress map[types.NamespacedName]recoveryProgress
+}
+
+type recoveryProgress struct {
+	uid           types.UID
+	synthesisUUID string
+	written       int
 }
 
 type jitteredRateLimiter struct {
@@ -155,6 +165,7 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 	comp := &apiv1.Composition{}
 	err := c.client.Get(ctx, req.NamespacedName, comp)
 	if apierrors.IsNotFound(err) {
+		delete(c.progress, req.NamespacedName)
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
@@ -189,6 +200,7 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 	case compositionOperationRecord:
 		err = c.recordInventory(ctx, comp)
 	case compositionOperationCleanup:
+		delete(c.progress, req.NamespacedName)
 		err = c.cleanupInventory(ctx, comp)
 	}
 
@@ -351,9 +363,36 @@ func (c *tombstoneRecoveryController) recoverMissingTombstones(ctx context.Conte
 	if err != nil {
 		return err
 	}
-	// Observed only after the decision persists, so a retried run is counted once.
-	recoveryTombstones.WithLabelValues(comp.Spec.Synthesizer.Name).Observe(float64(len(tombstones)))
+	// Observed only after the decision persists, so a retried run is counted once with its full total.
+	recoveryTombstones.WithLabelValues(comp.Spec.Synthesizer.Name).Observe(float64(c.takeWrittenTombstones(comp)))
 	return nil
+}
+
+// addWrittenTombstones adds tombstones persisted for the Composition's current synthesis.
+// Progress from an older synthesis or a recreated Composition is discarded.
+func (c *tombstoneRecoveryController) addWrittenTombstones(comp *apiv1.Composition, count int) {
+	if c.progress == nil {
+		c.progress = map[types.NamespacedName]recoveryProgress{}
+	}
+	key := client.ObjectKeyFromObject(comp)
+	uuid := comp.Status.GetCurrentSynthesisUUID()
+	p := c.progress[key]
+	if p.uid != comp.UID || p.synthesisUUID != uuid {
+		p = recoveryProgress{uid: comp.UID, synthesisUUID: uuid}
+	}
+	p.written += count
+	c.progress[key] = p
+}
+
+// takeWrittenTombstones returns and clears the tombstones written for the Composition's current synthesis.
+func (c *tombstoneRecoveryController) takeWrittenTombstones(comp *apiv1.Composition) int {
+	key := client.ObjectKeyFromObject(comp)
+	p, ok := c.progress[key]
+	delete(c.progress, key)
+	if !ok || p.uid != comp.UID || p.synthesisUUID != comp.Status.GetCurrentSynthesisUUID() {
+		return 0
+	}
+	return p.written
 }
 
 func (c *tombstoneRecoveryController) loadCurrentSynthesisResourceSlices(ctx context.Context, comp *apiv1.Composition) ([]apiv1.ResourceSlice, error) {
