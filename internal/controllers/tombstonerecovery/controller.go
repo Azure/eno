@@ -44,6 +44,8 @@ const (
 	symphonyDeletingLabel                              = "eno.azure.io/symphony-deleting"
 )
 
+const pendingCompositionsListTimeout = 5 * time.Second
+
 var errSuperseded = errors.New("tombstone recovery operation superseded")
 
 type compositionOperation string
@@ -53,6 +55,8 @@ type Options struct {
 	Namespace           string
 	CompositionSelector labels.Selector
 	Downstream          *rest.Config
+	// Compositions waiting on recovery longer than this are counted by the pending compositions gauge.
+	PendingThreshold time.Duration
 }
 
 type tombstoneRecoveryController struct {
@@ -116,7 +120,9 @@ func NewController(mgr ctrl.Manager, opts Options) error {
 	if err != nil {
 		return fmt.Errorf("constructing tombstone recovery downstream client: %w", err)
 	}
-	setPendingCompositionsSource(recoveryCache)
+	setPendingCompositionsSource(func() int {
+		return countPendingCompositions(recoveryCache, opts.PendingThreshold, time.Now())
+	})
 	if err := mgr.Add(&inventoryGarbageCollector{
 		reader:     mgr.GetAPIReader(),
 		downstream: c.downstream,
@@ -191,6 +197,31 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 		logger.Error(err, "tombstone recovery operation failed")
 	}
 	return ctrl.Result{}, err
+}
+
+// countPendingCompositions counts cached Compositions whose reconciliation has waited on tombstone recovery longer than threshold.
+func countPendingCompositions(reader client.Reader, threshold time.Duration, now time.Time) int {
+	ctx, cancel := context.WithTimeout(context.Background(), pendingCompositionsListTimeout)
+	defer cancel()
+	list := &apiv1.CompositionList{}
+	if err := reader.List(ctx, list); err != nil {
+		return 0
+	}
+	count := 0
+	for i := range list.Items {
+		comp := &list.Items[i]
+		if isWaitingForRecovery(comp) && now.Sub(comp.Status.CurrentSynthesis.Synthesized.Time) > threshold {
+			count++
+		}
+	}
+	return count
+}
+
+// isWaitingForRecovery mirrors the reconstitution gate that blocks reconciliation until recovery finishes.
+func isWaitingForRecovery(comp *apiv1.Composition) bool {
+	syn := comp.Status.CurrentSynthesis
+	return comp.RecoveryEnabled() && comp.DeletionTimestamp == nil &&
+		syn != nil && syn.Synthesized != nil && !syn.IsTombstoneRecoveryFinished()
 }
 
 // selectTombstoneRecoveryOperation selects one idempotent operation without performing side effects.

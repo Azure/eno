@@ -1,17 +1,13 @@
 package tombstonerecovery
 
 import (
-	"context"
 	"sync/atomic"
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/prometheus/client_golang/prometheus"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
-
-const pendingCompositionsListTimeout = 5 * time.Second
 
 var (
 	// Persisted recovery decisions, partitioned by synthesizer and reason.
@@ -48,12 +44,12 @@ var (
 		[]string{"synthesizer"},
 	)
 
-	// Compositions whose reconciliation is currently blocked waiting on tombstone recovery.
-	// Alert when this stays above zero; the threshold belongs in the alert rule.
+	// Compositions whose reconciliation has been blocked on tombstone recovery longer than
+	// --tombstone-recovery-pending-threshold, timed from Synthesized. Alert when this is above zero.
 	pendingCompositions = prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Name: "eno_tombstone_recovery_pending_compositions",
-			Help: "Compositions whose reconciliation is waiting on a tombstone recovery decision",
+			Help: "Compositions whose reconciliation has waited on a tombstone recovery decision longer than the pending threshold",
 		},
 		func() float64 {
 			fn := pendingCompositionsFn.Load()
@@ -72,30 +68,9 @@ func init() {
 	metrics.Registry.MustRegister(recoveryDecisions, recoveryTombstones, recoveryWait, pendingCompositions)
 }
 
-func setPendingCompositionsSource(reader client.Reader) {
-	fn := func() int {
-		ctx, cancel := context.WithTimeout(context.Background(), pendingCompositionsListTimeout)
-		defer cancel()
-		list := &apiv1.CompositionList{}
-		if err := reader.List(ctx, list); err != nil {
-			return 0
-		}
-		count := 0
-		for i := range list.Items {
-			if isWaitingForRecovery(&list.Items[i]) {
-				count++
-			}
-		}
-		return count
-	}
+// setPendingCompositionsSource installs the counter used by the pending compositions gauge. Called once during NewController.
+func setPendingCompositionsSource(fn func() int) {
 	pendingCompositionsFn.Store(&fn)
-}
-
-// isWaitingForRecovery mirrors the reconstitution gate that blocks reconciliation until recovery finishes.
-func isWaitingForRecovery(comp *apiv1.Composition) bool {
-	syn := comp.Status.CurrentSynthesis
-	return comp.RecoveryEnabled() && comp.DeletionTimestamp == nil &&
-		syn != nil && syn.Synthesized != nil && !syn.IsTombstoneRecoveryFinished()
 }
 
 func observeRecoveryDecision(comp *apiv1.Composition, reason string) {

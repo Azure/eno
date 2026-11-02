@@ -45,6 +45,7 @@ func run() error {
 		enoBuildVersion              string
 		migratingFieldManagers       string
 		migratingFields              string
+		recoveryPendingThreshold     time.Duration
 
 		mgrOpts = &manager.Options{
 			Rest: ctrl.GetConfigOrDie(),
@@ -64,6 +65,7 @@ func run() error {
 	flag.StringVar(&compositionNamespace, "composition-namespace", metav1.NamespaceAll, "Optional namespace to limit compositions that will be reconciled")
 	flag.StringVar(&resourceFilter, "resource-filter", "", "Optional CEL filter expression for resources within compositions to be reconciled")
 	flag.BoolVar(&recOpts.EnableTombstoneRecovery, "enable-tombstone-recovery", false, "Recover missing tombstones before reconciling synthesized resources")
+	flag.DurationVar(&recoveryPendingThreshold, "tombstone-recovery-pending-threshold", time.Minute, "How long a Composition can wait on tombstone recovery before eno_tombstone_recovery_pending_compositions counts it")
 	flag.DurationVar(&namespaceCreationGracePeriod, "ns-creation-grace-period", time.Second, "A namespace is assumed to be missing if it doesn't exist once one of its resources has existed for this long")
 	flag.BoolVar(&namespaceCleanup, "namespace-cleanup", true, "Clean up orphaned resources caused by namespace force-deletions")
 	flag.BoolVar(&recOpts.FailOpen, "fail-open", false, "Report that resources are reconciled once they've been seen, even if reconciliation failed. Overridden by individual resources with 'eno.azure.io/fail-open: true|false'")
@@ -156,6 +158,7 @@ func run() error {
 		}
 		recoveryOpts.CompositionSelector = mgrOpts.CompositionSelector
 		recoveryOpts.Downstream = remoteConfig
+		recoveryOpts.PendingThreshold = recoveryPendingThreshold
 		err = tombstonerecovery.NewController(mgr, recoveryOpts)
 		if err != nil {
 			return fmt.Errorf("constructing tombstone recovery controller: %w", err)
@@ -181,6 +184,7 @@ func run() error {
 		"resourceFilter", resourceFilter,
 		"enableTombstoneRecovery", recoveryOpts.Enabled,
 		"recoveryCompositionNamespace", recoveryOpts.Namespace,
+		"recoveryPendingThreshold", recoveryOpts.PendingThreshold,
 		"namespaceCreationGracePeriod", namespaceCreationGracePeriod,
 		"namespaceCleanup", namespaceCleanup,
 		"failOpen", recOpts.FailOpen,
