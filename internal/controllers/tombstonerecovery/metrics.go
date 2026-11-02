@@ -26,12 +26,13 @@ var (
 	)
 
 	// Tombstones written by one completed recovery, including runs that found nothing.
-	// Anomaly example: observations in the 100+ buckets suggest a bad synthesis or the wrong inventory lineage.
+	// Diffs are expected to be small. Anomaly example: observations above 50 (the +Inf bucket)
+	// suggest a bad synthesis or the wrong inventory lineage.
 	recoveryTombstones = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "eno_tombstone_recovery_tombstones",
 			Help:    "Number of tombstones written by a completed tombstone recovery",
-			Buckets: []float64{0, 1, 5, 10, 50, 100, 500},
+			Buckets: []float64{0, 1, 2, 5, 10, 20, 50},
 		},
 		[]string{"synthesizer"},
 	)

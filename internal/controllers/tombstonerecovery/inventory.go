@@ -51,7 +51,11 @@ type synthesisInventory struct {
 }
 
 func inventoryLineage(comp *apiv1.Composition) string {
-	hash := sha256.Sum256([]byte(comp.Namespace + "/" + comp.Spec.Synthesizer.Name))
+	return inventoryLineageFor(comp.Namespace, comp.Spec.Synthesizer.Name)
+}
+
+func inventoryLineageFor(namespace, synthesizer string) string {
+	hash := sha256.Sum256([]byte(namespace + "/" + synthesizer))
 	return hex.EncodeToString(hash[:16])
 }
 
@@ -134,6 +138,18 @@ func selectNewestCompleteInventory(inventories []synthesisInventory) ([]corev1.S
 }
 
 // orderInventoryChunks returns chunks in index order and reports whether the set is complete.
+// isCompleteSnapshot reports whether chunks form a full snapshot that is not being deleted.
+// A terminating chunk will disappear, so its snapshot cannot replace an older one.
+func isCompleteSnapshot(chunks []corev1.Secret) bool {
+	for i := range chunks {
+		if chunks[i].DeletionTimestamp != nil {
+			return false
+		}
+	}
+	_, complete := orderInventoryChunks(chunks)
+	return complete
+}
+
 func orderInventoryChunks(items []corev1.Secret) ([]corev1.Secret, bool) {
 	if len(items) == 0 {
 		return nil, false
