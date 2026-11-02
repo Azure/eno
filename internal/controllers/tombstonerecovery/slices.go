@@ -95,7 +95,6 @@ func (c *tombstoneRecoveryController) writeTombstones(ctx context.Context, comp 
 		if err := c.client.Patch(ctx, after, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
 			return nil, fmt.Errorf("appending tombstones to ResourceSlice %q: %w", before.Name, err)
 		}
-		c.addWrittenTombstones(comp, len(addition.tombstones))
 		logr.FromContextOrDiscard(ctx).Info("appended recovery tombstones", "resourceSliceName", after.Name, "tombstoneCount", len(addition.tombstones))
 	}
 
@@ -108,14 +107,11 @@ func (c *tombstoneRecoveryController) writeTombstones(ctx context.Context, comp 
 		if _, err := c.getCurrentComposition(ctx, comp, false); err != nil {
 			return nil, err
 		}
-		err = c.client.Create(ctx, slice)
-		if err == nil {
-			c.addWrittenTombstones(comp, len(overflow.tombstones))
-		} else {
+		if err := c.client.Create(ctx, slice); err != nil {
 			if !apierrors.IsAlreadyExists(err) {
 				return nil, fmt.Errorf("creating recovery ResourceSlice %q: %w", slice.Name, err)
 			}
-			// A retry may find overflow persisted, and already counted, before its reference was published.
+			// A retry may find overflow persisted before its reference was published.
 			existing := &apiv1.ResourceSlice{}
 			if err := c.reader.Get(ctx, client.ObjectKeyFromObject(slice), existing); err != nil {
 				return nil, fmt.Errorf("reading existing recovery ResourceSlice %q: %w", slice.Name, err)
