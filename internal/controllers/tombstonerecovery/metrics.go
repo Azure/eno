@@ -62,15 +62,46 @@ var (
 	// Installed by NewController; nil when tombstone recovery is disabled.
 	// atomic.Pointer makes the swap safe against the scrape goroutine.
 	pendingCompositionsFn atomic.Pointer[func() int]
+
+	// One series per Composition counted by eno_tombstone_recovery_pending_compositions, so an alert can be traced to specific Compositions.
+	pendingCompositionDesc = prometheus.NewDesc(
+		"eno_tombstone_recovery_pending_composition",
+		"Set to 1 for each Composition whose reconciliation has waited on a tombstone recovery decision longer than the pending threshold",
+		[]string{"composition_name", "composition_namespace", "synthesizer"}, nil,
+	)
+	// Installed by NewController; nil when tombstone recovery is disabled.
+	// atomic.Pointer makes the swap safe against the scrape goroutine.
+	pendingCompositionDetailsFn atomic.Pointer[func() []apiv1.Composition]
 )
 
 func init() {
-	metrics.Registry.MustRegister(recoveryDecisions, recoveryTombstones, recoveryWait, pendingCompositions)
+	metrics.Registry.MustRegister(recoveryDecisions, recoveryTombstones, recoveryWait, pendingCompositions, pendingCompositionCollector{})
 }
 
 // setPendingCompositionsSource installs the counter used by the pending compositions gauge. Called once during NewController.
 func setPendingCompositionsSource(fn func() int) {
 	pendingCompositionsFn.Store(&fn)
+}
+
+// setPendingCompositionDetailsSource installs the lister used by the per-Composition pending metric. Called once during NewController.
+func setPendingCompositionDetailsSource(fn func() []apiv1.Composition) {
+	pendingCompositionDetailsFn.Store(&fn)
+}
+
+type pendingCompositionCollector struct{}
+
+func (pendingCompositionCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- pendingCompositionDesc
+}
+
+func (pendingCompositionCollector) Collect(ch chan<- prometheus.Metric) {
+	fn := pendingCompositionDetailsFn.Load()
+	if fn == nil {
+		return
+	}
+	for _, comp := range (*fn)() {
+		ch <- prometheus.MustNewConstMetric(pendingCompositionDesc, prometheus.GaugeValue, 1, comp.Name, comp.Namespace, comp.Spec.Synthesizer.Name)
+	}
 }
 
 func observeRecoveryDecision(comp *apiv1.Composition, reason string) {

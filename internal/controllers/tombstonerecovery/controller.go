@@ -123,6 +123,9 @@ func NewController(mgr ctrl.Manager, opts Options) error {
 	setPendingCompositionsSource(func() int {
 		return countPendingCompositions(recoveryCache, opts.PendingThreshold, time.Now())
 	})
+	setPendingCompositionDetailsSource(func() []apiv1.Composition {
+		return listPendingCompositions(recoveryCache, opts.PendingThreshold, time.Now())
+	})
 	if err := mgr.Add(&inventoryGarbageCollector{
 		reader:     mgr.GetAPIReader(),
 		downstream: c.downstream,
@@ -201,20 +204,25 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 
 // countPendingCompositions counts cached Compositions whose reconciliation has waited on tombstone recovery longer than threshold.
 func countPendingCompositions(reader client.Reader, threshold time.Duration, now time.Time) int {
+	return len(listPendingCompositions(reader, threshold, now))
+}
+
+// listPendingCompositions returns cached Compositions whose reconciliation has waited on tombstone recovery longer than threshold.
+func listPendingCompositions(reader client.Reader, threshold time.Duration, now time.Time) []apiv1.Composition {
 	ctx, cancel := context.WithTimeout(context.Background(), pendingCompositionsListTimeout)
 	defer cancel()
 	list := &apiv1.CompositionList{}
 	if err := reader.List(ctx, list); err != nil {
-		return 0
+		return nil
 	}
-	count := 0
+	var pending []apiv1.Composition
 	for i := range list.Items {
 		comp := &list.Items[i]
 		if isWaitingForRecovery(comp) && now.Sub(comp.Status.CurrentSynthesis.Synthesized.Time) > threshold {
-			count++
+			pending = append(pending, *comp)
 		}
 	}
-	return count
+	return pending
 }
 
 // isWaitingForRecovery mirrors the reconstitution gate that blocks reconciliation until recovery finishes.
