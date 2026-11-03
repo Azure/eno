@@ -14,6 +14,7 @@
 ## Enablement and Ownership
 
 - `--enable-tombstone-recovery` enables the operator; it defaults to `false`.
+- `--tombstone-recovery-pending-threshold` sets how long a Composition can wait on recovery, timed from `Synthesized`, before `eno_tombstone_recovery_pending_compositions` counts it and `eno_tombstone_recovery_pending_composition` lists it by name; it defaults to `1m`.
 - When enabled, `POD_NAMESPACE` must contain the reconciler pod's namespace, supplied through the Downward API.
 - The recovery controller uses a separate informer cache scoped to `POD_NAMESPACE`; its Composition watch also respects `--composition-label-selector`.
 - With recovery enabled, startup requires `--composition-namespace` to match `POD_NAMESPACE`; missing or mismatched namespaces are rejected immediately before recovery controller registration and before the manager starts. Recovery configuration is validated separately from the generic reconciliation constructor. The recovery controller is registered only when enabled, using the same downstream configuration as reconciliation.

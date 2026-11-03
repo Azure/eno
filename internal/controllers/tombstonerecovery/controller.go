@@ -44,6 +44,8 @@ const (
 	symphonyDeletingLabel                              = "eno.azure.io/symphony-deleting"
 )
 
+const pendingCompositionsListTimeout = 5 * time.Second
+
 var errSuperseded = errors.New("tombstone recovery operation superseded")
 
 type compositionOperation string
@@ -53,6 +55,8 @@ type Options struct {
 	Namespace           string
 	CompositionSelector labels.Selector
 	Downstream          *rest.Config
+	// Compositions waiting on recovery longer than this are counted by the pending compositions gauge.
+	PendingThreshold time.Duration
 }
 
 type tombstoneRecoveryController struct {
@@ -116,6 +120,13 @@ func NewController(mgr ctrl.Manager, opts Options) error {
 	if err != nil {
 		return fmt.Errorf("constructing tombstone recovery downstream client: %w", err)
 	}
+	pendingLogger := mgr.GetLogger().WithName("tombstoneRecoveryPendingMetrics")
+	setPendingCompositionsSource(func() int {
+		return countPendingCompositions(pendingLogger, recoveryCache, opts.PendingThreshold, time.Now())
+	})
+	setPendingCompositionDetailsSource(func() []apiv1.Composition {
+		return listPendingCompositions(pendingLogger, recoveryCache, opts.PendingThreshold, time.Now())
+	})
 	if err := mgr.Add(&inventoryGarbageCollector{
 		reader:     mgr.GetAPIReader(),
 		downstream: c.downstream,
@@ -190,6 +201,38 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 		logger.Error(err, "tombstone recovery operation failed")
 	}
 	return ctrl.Result{}, err
+}
+
+// countPendingCompositions counts cached Compositions whose reconciliation has waited on tombstone recovery longer than threshold.
+func countPendingCompositions(logger logr.Logger, reader client.Reader, threshold time.Duration, now time.Time) int {
+	return len(listPendingCompositions(logger, reader, threshold, now))
+}
+
+// listPendingCompositions returns cached Compositions whose reconciliation has waited on tombstone recovery longer than threshold.
+// A list error is logged and reported as no pending Compositions, so it cannot fail the whole metrics scrape.
+func listPendingCompositions(logger logr.Logger, reader client.Reader, threshold time.Duration, now time.Time) []apiv1.Composition {
+	ctx, cancel := context.WithTimeout(context.Background(), pendingCompositionsListTimeout)
+	defer cancel()
+	list := &apiv1.CompositionList{}
+	if err := reader.List(ctx, list); err != nil {
+		logger.Error(err, "failed to list Compositions for tombstone recovery pending metrics")
+		return nil
+	}
+	var pending []apiv1.Composition
+	for i := range list.Items {
+		comp := &list.Items[i]
+		if isWaitingForRecovery(comp) && now.Sub(comp.Status.CurrentSynthesis.Synthesized.Time) > threshold {
+			pending = append(pending, *comp)
+		}
+	}
+	return pending
+}
+
+// isWaitingForRecovery mirrors the reconstitution gate that blocks reconciliation until recovery finishes.
+func isWaitingForRecovery(comp *apiv1.Composition) bool {
+	syn := comp.Status.CurrentSynthesis
+	return comp.RecoveryEnabled() && comp.DeletionTimestamp == nil &&
+		syn != nil && syn.Synthesized != nil && !syn.IsTombstoneRecoveryFinished()
 }
 
 // selectTombstoneRecoveryOperation selects one idempotent operation without performing side effects.
@@ -308,7 +351,11 @@ func (c *tombstoneRecoveryController) recoverMissingTombstones(ctx context.Conte
 	if err != nil && len(refs) > 0 {
 		return c.recordTombstoneRecoveryError(ctx, comp, reasonSliceWriteError, err)
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	recoveryTombstones.WithLabelValues(comp.Spec.Synthesizer.Name).Observe(float64(len(tombstones)))
+	return nil
 }
 
 func (c *tombstoneRecoveryController) loadCurrentSynthesisResourceSlices(ctx context.Context, comp *apiv1.Composition) ([]apiv1.ResourceSlice, error) {
@@ -366,6 +413,7 @@ func (c *tombstoneRecoveryController) recordRecoveryDecision(ctx context.Context
 	if err := c.patchStatus(ctx, comp, after); err != nil {
 		return err
 	}
+	observeRecoveryDecision(comp, reason)
 	logr.FromContextOrDiscard(ctx).Info("tombstone recovery preparation finished", "operation", "recoveryPreparation", "reason", reason, "message", message)
 	return nil
 }
