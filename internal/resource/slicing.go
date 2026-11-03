@@ -16,7 +16,7 @@ const MaxSliceJSONBytes = 1024 * 512
 // Slice builds a new set of resource slices by merging a new set of resources onto an old set of slices.
 // - New and updated resources are partitioned across slices per maxJsonBytes
 // - Removed resources are converted into "tombstones" i.e. manifests with Deleted == true
-func Slice(comp *apiv1.Composition, previous []*apiv1.ResourceSlice, outputs []*unstructured.Unstructured, maxJsonBytes int) ([]*apiv1.ResourceSlice, error) {
+func Slice(comp *apiv1.Composition, synthesisUUID string, previous []*apiv1.ResourceSlice, outputs []*unstructured.Unstructured, maxJsonBytes int) ([]*apiv1.ResourceSlice, error) {
 	refs := map[Ref]struct{}{}
 	manifests := []apiv1.Manifest{}
 	for i, output := range outputs {
@@ -79,9 +79,7 @@ func Slice(comp *apiv1.Composition, previous []*apiv1.ResourceSlice, outputs []*
 				BlockOwnerDeletion: &blockOwnerDeletion, // we need the composition in order to successfully delete its resource slices
 				Controller:         &blockOwnerDeletion,
 			}}
-			if comp.Status.CurrentSynthesis != nil {
-				slice.Spec.SynthesisUUID = comp.Status.CurrentSynthesis.UUID
-			}
+			slice.Spec.SynthesisUUID = synthesisUUID
 			slices = append(slices, slice)
 		}
 		sliceBytes += len(manifest.Manifest)

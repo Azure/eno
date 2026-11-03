@@ -93,6 +93,7 @@ func TestBasics(t *testing.T) {
 		err = cli.Get(ctx, client.ObjectKeyFromObject(slice), slice)
 		require.NoError(t, err)
 		assert.Len(t, slice.Spec.Resources, 1)
+		assert.Equal(t, "test-uuid", slice.Spec.SynthesisUUID)
 	}
 
 	// Second pass

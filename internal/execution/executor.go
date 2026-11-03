@@ -102,7 +102,7 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 	}
 	if err == nil {
 		logger.Info("writing resource slices")
-		sliceRefs, recoveryRequired, err = e.writeSlices(ctx, comp, output)
+		sliceRefs, recoveryRequired, err = e.writeSlices(ctx, comp, env.SynthesisUUID, output)
 		if errors.IsForbidden(err) && errors.HasStatusCause(err, corev1.NamespaceTerminatingCause) {
 			logger.Info("composition namespace is terminating - abandoning synthesis")
 			return nil
@@ -202,7 +202,7 @@ func (e *Executor) preflightValidateResources(rl *krmv1.ResourceList) error {
 	return nil
 }
 
-func (e *Executor) writeSlices(ctx context.Context, comp *apiv1.Composition, rl *krmv1.ResourceList) ([]*apiv1.ResourceSliceRef, bool, error) {
+func (e *Executor) writeSlices(ctx context.Context, comp *apiv1.Composition, synthesisUUID string, rl *krmv1.ResourceList) ([]*apiv1.ResourceSliceRef, bool, error) {
 	logger := logr.FromContextOrDiscard(ctx)
 
 	previous, recoveryRequired, err := e.fetchCurrentSynthesisResSlices(ctx, comp)
@@ -211,7 +211,7 @@ func (e *Executor) writeSlices(ctx context.Context, comp *apiv1.Composition, rl 
 		return nil, false, err
 	}
 
-	slices, err := resource.Slice(comp, previous, rl.Items, maxSliceJsonBytes)
+	slices, err := resource.Slice(comp, synthesisUUID, previous, rl.Items, maxSliceJsonBytes)
 	if err != nil {
 		logger.Error(err, "failed to slice resources", "maxSliceBytes", maxSliceJsonBytes, "resourceCount", len(rl.Items))
 		return nil, false, err

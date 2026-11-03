@@ -15,7 +15,7 @@ func TestSliceOverflow(t *testing.T) {
 		outputs = append(outputs, &unstructured.Unstructured{})
 	}
 
-	slices, err := Slice(&apiv1.Composition{}, []*apiv1.ResourceSlice{}, outputs, 20)
+	slices, err := Slice(&apiv1.Composition{}, "", []*apiv1.ResourceSlice{}, outputs, 20)
 	require.NoError(t, err)
 	assert.Len(t, slices, 4)
 }
@@ -32,7 +32,7 @@ func TestSliceTombstonesBasics(t *testing.T) {
 		},
 	}}
 
-	slices, err := Slice(&apiv1.Composition{Status: apiv1.CompositionStatus{CurrentSynthesis: &apiv1.Synthesis{UUID: "test-uuid"}}}, []*apiv1.ResourceSlice{}, outputs, 100000)
+	slices, err := Slice(&apiv1.Composition{}, "test-uuid", []*apiv1.ResourceSlice{}, outputs, 100000)
 	require.NoError(t, err)
 	require.Len(t, slices, 1)
 	require.Len(t, slices[0].Spec.Resources, 1)
@@ -40,14 +40,14 @@ func TestSliceTombstonesBasics(t *testing.T) {
 	assert.Equal(t, "test-uuid", slices[0].Spec.SynthesisUUID)
 
 	// Remove the resource - initial tombstone record is created
-	slices, err = Slice(&apiv1.Composition{}, slices, []*unstructured.Unstructured{}, 100000)
+	slices, err = Slice(&apiv1.Composition{}, "", slices, []*unstructured.Unstructured{}, 100000)
 	require.NoError(t, err)
 	require.Len(t, slices, 1)
 	require.Len(t, slices[0].Spec.Resources, 1)
 	assert.True(t, slices[0].Spec.Resources[0].Deleted)
 
 	// The actual resource hasn't been reconciled (deleted) yet, so the tombstone will persist in new states
-	slices, err = Slice(&apiv1.Composition{}, slices, []*unstructured.Unstructured{}, 100000)
+	slices, err = Slice(&apiv1.Composition{}, "", slices, []*unstructured.Unstructured{}, 100000)
 	require.NoError(t, err)
 	require.Len(t, slices, 1)
 	require.Len(t, slices[0].Spec.Resources, 1)
@@ -55,7 +55,7 @@ func TestSliceTombstonesBasics(t *testing.T) {
 
 	// The tombstone is removed once it has been reconciled
 	slices[0].Status.Resources = []apiv1.ResourceState{{Reconciled: true}}
-	slices, err = Slice(&apiv1.Composition{}, slices, []*unstructured.Unstructured{}, 100000)
+	slices, err = Slice(&apiv1.Composition{}, "", slices, []*unstructured.Unstructured{}, 100000)
 	require.NoError(t, err)
 	require.Len(t, slices, 0)
 }
@@ -87,19 +87,19 @@ func TestSliceTombstonesPatch(t *testing.T) {
 		},
 	}}
 
-	slices, err := Slice(&apiv1.Composition{}, []*apiv1.ResourceSlice{}, firstOutputs, 100000)
+	slices, err := Slice(&apiv1.Composition{}, "", []*apiv1.ResourceSlice{}, firstOutputs, 100000)
 	require.NoError(t, err)
 	require.Len(t, slices, 1)
 	require.Len(t, slices[0].Spec.Resources, 1)
 	assert.False(t, slices[0].Spec.Resources[0].Deleted)
 
-	slices, err = Slice(&apiv1.Composition{}, slices, secondOutputs, 100000)
+	slices, err = Slice(&apiv1.Composition{}, "", slices, secondOutputs, 100000)
 	require.NoError(t, err)
 	require.Len(t, slices, 1)
 	require.Len(t, slices[0].Spec.Resources, 1)
 	assert.False(t, slices[0].Spec.Resources[0].Deleted)
 
-	slices, err = Slice(&apiv1.Composition{}, slices, []*unstructured.Unstructured{}, 100000)
+	slices, err = Slice(&apiv1.Composition{}, "", slices, []*unstructured.Unstructured{}, 100000)
 	require.NoError(t, err)
 	require.Len(t, slices, 0)
 }
@@ -114,7 +114,7 @@ func TestSliceTombstonesWithShortStatus(t *testing.T) {
 	}
 	before := previous.DeepCopy()
 
-	slices, err := Slice(&apiv1.Composition{}, []*apiv1.ResourceSlice{previous}, nil, MaxSliceJSONBytes)
+	slices, err := Slice(&apiv1.Composition{}, "", []*apiv1.ResourceSlice{previous}, nil, MaxSliceJSONBytes)
 	require.NoError(t, err)
 	require.Len(t, slices, 1)
 	assert.Equal(t, []apiv1.Manifest{previous.Spec.Resources[1]}, slices[0].Spec.Resources,
@@ -133,7 +133,7 @@ func TestSliceTombstonesVersionSemantics(t *testing.T) {
 			},
 		},
 	}}
-	slices, err := Slice(&apiv1.Composition{}, []*apiv1.ResourceSlice{}, outputs, 100000)
+	slices, err := Slice(&apiv1.Composition{}, "", []*apiv1.ResourceSlice{}, outputs, 100000)
 	require.NoError(t, err)
 	require.Len(t, slices, 1)
 	require.Len(t, slices[0].Spec.Resources, 1)
@@ -150,7 +150,7 @@ func TestSliceTombstonesVersionSemantics(t *testing.T) {
 			},
 		},
 	}}
-	slices, err = Slice(&apiv1.Composition{}, slices, outputs, 100000)
+	slices, err = Slice(&apiv1.Composition{}, "", slices, outputs, 100000)
 	require.NoError(t, err)
 	require.Len(t, slices, 1)
 	require.Len(t, slices[0].Spec.Resources, 1)
@@ -167,7 +167,7 @@ func TestSliceTombstonesVersionSemantics(t *testing.T) {
 			},
 		},
 	}}
-	slices, err = Slice(&apiv1.Composition{}, slices, outputs, 100000)
+	slices, err = Slice(&apiv1.Composition{}, "", slices, outputs, 100000)
 	require.NoError(t, err)
 	require.Len(t, slices, 1)
 	require.Len(t, slices[0].Spec.Resources, 2)
