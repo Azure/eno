@@ -120,11 +120,12 @@ func NewController(mgr ctrl.Manager, opts Options) error {
 	if err != nil {
 		return fmt.Errorf("constructing tombstone recovery downstream client: %w", err)
 	}
+	pendingLogger := mgr.GetLogger().WithName("tombstoneRecoveryPendingMetrics")
 	setPendingCompositionsSource(func() int {
-		return countPendingCompositions(recoveryCache, opts.PendingThreshold, time.Now())
+		return countPendingCompositions(pendingLogger, recoveryCache, opts.PendingThreshold, time.Now())
 	})
 	setPendingCompositionDetailsSource(func() []apiv1.Composition {
-		return listPendingCompositions(recoveryCache, opts.PendingThreshold, time.Now())
+		return listPendingCompositions(pendingLogger, recoveryCache, opts.PendingThreshold, time.Now())
 	})
 	if err := mgr.Add(&inventoryGarbageCollector{
 		reader:     mgr.GetAPIReader(),
@@ -203,16 +204,18 @@ func (c *tombstoneRecoveryController) Reconcile(ctx context.Context, req ctrl.Re
 }
 
 // countPendingCompositions counts cached Compositions whose reconciliation has waited on tombstone recovery longer than threshold.
-func countPendingCompositions(reader client.Reader, threshold time.Duration, now time.Time) int {
-	return len(listPendingCompositions(reader, threshold, now))
+func countPendingCompositions(logger logr.Logger, reader client.Reader, threshold time.Duration, now time.Time) int {
+	return len(listPendingCompositions(logger, reader, threshold, now))
 }
 
 // listPendingCompositions returns cached Compositions whose reconciliation has waited on tombstone recovery longer than threshold.
-func listPendingCompositions(reader client.Reader, threshold time.Duration, now time.Time) []apiv1.Composition {
+// A list error is logged and reported as no pending Compositions, so it cannot fail the whole metrics scrape.
+func listPendingCompositions(logger logr.Logger, reader client.Reader, threshold time.Duration, now time.Time) []apiv1.Composition {
 	ctx, cancel := context.WithTimeout(context.Background(), pendingCompositionsListTimeout)
 	defer cancel()
 	list := &apiv1.CompositionList{}
 	if err := reader.List(ctx, list); err != nil {
+		logger.Error(err, "failed to list Compositions for tombstone recovery pending metrics")
 		return nil
 	}
 	var pending []apiv1.Composition

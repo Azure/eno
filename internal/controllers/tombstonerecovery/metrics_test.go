@@ -9,6 +9,8 @@ import (
 	"time"
 
 	apiv1 "github.com/Azure/eno/api/v1"
+	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 	prometheustestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -77,14 +79,14 @@ func TestListPendingCompositions(t *testing.T) {
 	notSynthesized.Status.CurrentSynthesis.Synthesized = nil
 
 	reader := pendingTestReader(t, pastThreshold, atThreshold, notOptedIn, deleting, finished, staleDecision, notSynthesized)
-	pending := listPendingCompositions(reader, threshold, metricsTestNow)
+	pending := listPendingCompositions(logr.Discard(), reader, threshold, metricsTestNow)
 
 	var names []string
 	for _, comp := range pending {
 		names = append(names, comp.Name)
 	}
 	assert.ElementsMatch(t, []string{"past-threshold", "stale-decision"}, names)
-	assert.Equal(t, 2, countPendingCompositions(reader, threshold, metricsTestNow))
+	assert.Equal(t, 2, countPendingCompositions(logr.Discard(), reader, threshold, metricsTestNow))
 }
 
 func TestListPendingCompositionsListError(t *testing.T) {
@@ -93,8 +95,14 @@ func TestListPendingCompositionsListError(t *testing.T) {
 			return errors.New("cache not synced")
 		},
 	})
-	assert.Nil(t, listPendingCompositions(reader, time.Minute, metricsTestNow))
-	assert.Equal(t, 0, countPendingCompositions(reader, time.Minute, metricsTestNow))
+	var logged []string
+	logger := funcr.New(func(prefix, args string) {
+		logged = append(logged, args)
+	}, funcr.Options{})
+	assert.Nil(t, listPendingCompositions(logger, reader, time.Minute, metricsTestNow))
+	assert.Equal(t, 0, countPendingCompositions(logger, reader, time.Minute, metricsTestNow))
+	require.Len(t, logged, 2, "each failed list is logged")
+	assert.Contains(t, logged[0], "cache not synced")
 }
 
 func TestPendingCompositionMetrics(t *testing.T) {
@@ -110,10 +118,10 @@ func TestPendingCompositionMetrics(t *testing.T) {
 		pendingTestComposition("recent", time.Second),
 	)
 	setPendingCompositionsSource(func() int {
-		return countPendingCompositions(reader, time.Minute, metricsTestNow)
+		return countPendingCompositions(logr.Discard(), reader, time.Minute, metricsTestNow)
 	})
 	setPendingCompositionDetailsSource(func() []apiv1.Composition {
-		return listPendingCompositions(reader, time.Minute, metricsTestNow)
+		return listPendingCompositions(logr.Discard(), reader, time.Minute, metricsTestNow)
 	})
 
 	assert.Equal(t, 2.0, prometheustestutil.ToFloat64(pendingCompositions))
