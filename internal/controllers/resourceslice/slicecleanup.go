@@ -154,9 +154,10 @@ func (c *cleanupController) shouldDelete(ctx context.Context, reader client.Read
 		return false, 0, fmt.Errorf("getting composition: %w", err)
 	}
 
-	// Don't delete slices that are part of an active synthesis.
-	// Requeue because a replaced or canceled synthesis never references its slices in the composition status, so no composition event would enqueue them again.
+	// Slices of the in-flight synthesis aren't referenced in status until it completes, so keep them for now.
+	// Recheck later: if this synthesis is replaced or canceled, nothing else will enqueue its slices for cleanup
 	if comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.UUID == slice.Spec.SynthesisUUID {
+		logr.FromContextOrDiscard(ctx).Info("retaining resource slice of in-flight synthesis, will recheck later", "requeueAfter", time.Minute.String())
 		return false, time.Minute, nil
 	}
 
