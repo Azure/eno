@@ -112,9 +112,11 @@ func (c *cleanupController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// Don't bother checking on brand new resource slices
-	if delta := time.Since(slice.CreationTimestamp.Time); delta < 5*time.Second {
-		logger.Info(fmt.Sprintf("Resource slice is newly created, retyring after %d", delta))
-		return ctrl.Result{RequeueAfter: delta}, nil
+	const newSliceGracePeriod = 5 * time.Second
+	if delta := time.Since(slice.CreationTimestamp.Time); delta < newSliceGracePeriod {
+		wait := newSliceGracePeriod - delta
+		logger.Info("resource slice is newly created, retrying later", "requeueAfter", wait.String())
+		return ctrl.Result{RequeueAfter: wait}, nil
 	}
 
 	del, requeueAfter, err := c.shouldDelete(ctx, c.client, slice, owner)

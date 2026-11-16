@@ -145,7 +145,7 @@ func (s *sliceController) handleMissingSlice(ctx context.Context, comp *apiv1.Co
 	if synthd := comp.Status.CurrentSynthesis.Synthesized; synthd != nil {
 		delta := time.Since(synthd.Time)
 		if delta < time.Second*5 {
-			return ctrl.Result{RequeueAfter: delta}, nil
+			return ctrl.Result{RequeueAfter: time.Second*5 - delta}, nil
 		}
 	}
 
