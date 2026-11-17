@@ -64,6 +64,7 @@ func runController() error {
 		inputBufferWorkers        int
 		compositionWorkers        int
 		symphonyWorkers           int
+		sliceCleanupWorkers       int
 		podTimeout                time.Duration
 		containerCreationTimeout  time.Duration
 		statusLogFreq             time.Duration
@@ -93,6 +94,7 @@ func runController() error {
 	flag.IntVar(&inputBufferWorkers, "input-buffer-workers", flowcontrol.DefaultCompositionInputRevisionWriteBufferWorkers, "Maximum number of workers flushing Composition input revisions")
 	flag.IntVar(&compositionWorkers, "composition-workers", composition.DefaultMaxConcurrentReconciles, "Maximum number of concurrent Composition reconciles")
 	flag.IntVar(&symphonyWorkers, "symphony-workers", symphony.DefaultMaxConcurrentReconciles, "Maximum number of concurrent Symphony reconciles")
+	flag.IntVar(&sliceCleanupWorkers, "slice-cleanup-workers", resourceslice.DefaultCleanupMaxConcurrentReconciles, "Maximum number of concurrent ResourceSlice cleanup reconciles")
 	mgrOpts.Bind(flag.CommandLine)
 	flag.Parse()
 	if inputBufferWorkers < 1 {
@@ -103,6 +105,9 @@ func runController() error {
 	}
 	if symphonyWorkers < 1 {
 		return fmt.Errorf("--symphony-workers must be positive")
+	}
+	if sliceCleanupWorkers < 1 {
+		return fmt.Errorf("--slice-cleanup-workers must be positive")
 	}
 	watch.SetKindWatchRateLimit(inputRateLimit)
 
@@ -152,7 +157,7 @@ func runController() error {
 		return fmt.Errorf("constructing resource slice controller: %w", err)
 	}
 
-	err = resourceslice.NewCleanupController(mgr)
+	err = resourceslice.NewCleanupControllerWithWorkers(mgr, sliceCleanupWorkers)
 	if err != nil {
 		return fmt.Errorf("constructing resource slice cleanup controller: %w", err)
 	}

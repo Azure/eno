@@ -300,20 +300,23 @@ func TestSliceCleanupInFlight(t *testing.T) {
 	require.NoError(t, cli.Create(ctx, slice))
 	req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(slice)}
 
-	// Composition has an in-flight synthesis matching the resource slice - it shouldn't be deleted
+	// Composition has an in-flight synthesis matching the resource slice - keep it but check again later,
+	// since a replaced synthesis never references its slices in status
 	comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: slice.Spec.SynthesisUUID}
 	require.NoError(t, cli.Status().Update(ctx, comp))
 
-	_, err := c.Reconcile(ctx, req)
+	res, err := c.Reconcile(ctx, req)
 	require.NoError(t, err)
+	assert.Equal(t, time.Minute, res.RequeueAfter)
 	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(slice), slice))
 
 	// Wrong UUID
 	comp.Status.InFlightSynthesis = &apiv1.Synthesis{UUID: "wrong-uuid"}
 	require.NoError(t, cli.Status().Update(ctx, comp))
 
-	_, err = c.Reconcile(ctx, req)
+	res, err = c.Reconcile(ctx, req)
 	require.NoError(t, err)
+	assert.Zero(t, res.RequeueAfter)
 	require.True(t, errors.IsNotFound(cli.Get(ctx, client.ObjectKeyFromObject(slice), slice)))
 }
 

@@ -15,11 +15,14 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
+
+const DefaultCleanupMaxConcurrentReconciles = 1
 
 // cleanupController is responsible for deleting resource slices when they are no longer needed by their composition.
 // It holds a finalizer on slices so they can't be deleted by the k8s GC controller until the composition has been deleted.
@@ -33,6 +36,14 @@ type cleanupController struct {
 }
 
 func NewCleanupController(mgr ctrl.Manager) error {
+	return NewCleanupControllerWithWorkers(mgr, DefaultCleanupMaxConcurrentReconciles)
+}
+
+func NewCleanupControllerWithWorkers(mgr ctrl.Manager, workers int) error {
+	if workers < 1 {
+		return fmt.Errorf("slice cleanup controller worker count must be positive")
+	}
+	mgr.GetLogger().Info("configured slice cleanup controller", "maxConcurrentReconciles", workers)
 	c := &cleanupController{
 		client:        mgr.GetClient(),
 		noCacheReader: mgr.GetAPIReader(),
@@ -40,6 +51,7 @@ func NewCleanupController(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.ResourceSlice{}).
 		WatchesRawSource(source.Kind(mgr.GetCache(), &apiv1.Composition{}, c.newCompEventHandler())).
+		WithOptions(controller.Options{MaxConcurrentReconciles: workers}).
 		WithLogConstructor(manager.NewLogConstructor(mgr, "sliceCleanupController")).
 		Complete(c)
 }
@@ -100,9 +112,11 @@ func (c *cleanupController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// Don't bother checking on brand new resource slices
-	if delta := time.Since(slice.CreationTimestamp.Time); delta < 5*time.Second {
-		logger.Info(fmt.Sprintf("Resource slice is newly created, retyring after %d", delta))
-		return ctrl.Result{RequeueAfter: delta}, nil
+	const newSliceGracePeriod = 5 * time.Second
+	if delta := time.Since(slice.CreationTimestamp.Time); delta < newSliceGracePeriod {
+		wait := newSliceGracePeriod - delta
+		logger.Info("resource slice is newly created, retrying later", "requeueAfter", wait.String())
+		return ctrl.Result{RequeueAfter: wait}, nil
 	}
 
 	del, requeueAfter, err := c.shouldDelete(ctx, c.client, slice, owner)
@@ -142,9 +156,10 @@ func (c *cleanupController) shouldDelete(ctx context.Context, reader client.Read
 		return false, 0, fmt.Errorf("getting composition: %w", err)
 	}
 
-	// Don't delete slices that are part of an active synthesis
+	// Slices of the in-flight synthesis aren't referenced in status until it completes, so keep them for now.
+	// Recheck later: if this synthesis is replaced or canceled, nothing else will enqueue its slices for cleanup
 	if comp.Status.InFlightSynthesis != nil && comp.Status.InFlightSynthesis.UUID == slice.Spec.SynthesisUUID {
-		return false, 0, nil
+		return false, time.Minute, nil
 	}
 
 	// Check resource slice references
