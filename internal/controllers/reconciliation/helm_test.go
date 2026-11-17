@@ -154,6 +154,7 @@ func TestHelmOwnershipTransferAfterCreation(t *testing.T) {
 
 	ctx := testutil.NewContext(t)
 	mgr := testutil.NewManager(t)
+	requireSSA(t, mgr)
 	upstream := mgr.GetClient()
 	downstream := mgr.DownstreamClient
 
