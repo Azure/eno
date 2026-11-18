@@ -284,7 +284,10 @@ func analyzeManagerConflicts(managedFields []metav1.ManagedFieldsEntry, uniqueMi
 		entry := &managedFields[i]
 
 		if entry.Manager == enoManager {
-			enoEntryCount++
+			// Only Apply entries are merged by NormalizeConflictingManagers; counting other operations (e.g. Update) would request a migration that never converges
+			if entry.Operation == metav1.ManagedFieldsOperationApply {
+				enoEntryCount++
+			}
 			continue
 		}
 

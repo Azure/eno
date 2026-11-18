@@ -620,6 +620,26 @@ func TestNormalizeConflictingManagers(t *testing.T) {
 			expectModified:    true,
 			expectManagers:    []string{"eno"},
 		},
+		{
+			name: "eno Update entry alongside a single eno Apply entry - should not normalize",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{
+					Manager:    "eno",
+					Operation:  metav1.ManagedFieldsOperationApply,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:ports":{}}}`)},
+				},
+				{
+					Manager:    "eno",
+					Operation:  metav1.ManagedFieldsOperationUpdate,
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:ipFamilies":{},"f:ipFamilyPolicy":{}}}`)},
+				},
+			},
+			migratingManagers: []string{"Go-http-client", "helm-controller", "kubectl-client-side-apply", "before-first-apply"},
+			expectModified:    false,
+			expectManagers:    []string{"eno", "eno"},
+		},
 	}
 
 	for _, tc := range tests {
@@ -653,6 +673,61 @@ func TestNormalizeConflictingManagers(t *testing.T) {
 			}
 		})
 	}
+}
+
+// An eno Update entry is never merged into the eno Apply entry, so it must not keep
+// NormalizeConflictingManagers reporting a modification on every call.
+func TestNormalizeConflictingManagers_EnoUpdateEntryConverges(t *testing.T) {
+	migratingManagers := []string{"Go-http-client"}
+	migratingFields := []string{"spec", "data", "stringData", "binaryData", "metadata.labels", "metadata.annotations"}
+	enoUpdateFields := `{"f:spec":{"f:ipFamilies":{},"f:ipFamilyPolicy":{}}}`
+
+	obj := &unstructured.Unstructured{}
+	obj.SetManagedFields(withDefaultAPIVersion([]metav1.ManagedFieldsEntry{
+		{
+			Manager:    "eno",
+			Operation:  metav1.ManagedFieldsOperationApply,
+			FieldsType: "FieldsV1",
+			FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:ports":{}}}`)},
+		},
+		{
+			Manager:    "eno",
+			Operation:  metav1.ManagedFieldsOperationUpdate,
+			FieldsType: "FieldsV1",
+			FieldsV1:   &metav1.FieldsV1{Raw: []byte(enoUpdateFields)},
+		},
+		{
+			Manager:    "Go-http-client",
+			Operation:  metav1.ManagedFieldsOperationUpdate,
+			FieldsType: "FieldsV1",
+			FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:selector":{}}}`)},
+		},
+	}))
+
+	modified, err := NormalizeConflictingManagers(context.Background(), obj, migratingManagers, migratingFields)
+	require.NoError(t, err)
+	assert.True(t, modified, "legacy manager should be migrated")
+
+	modified, err = NormalizeConflictingManagers(context.Background(), obj, migratingManagers, migratingFields)
+	require.NoError(t, err)
+	assert.False(t, modified, "second normalization should be a no-op")
+
+	var applyEntries, updateEntries []metav1.ManagedFieldsEntry
+	for _, entry := range obj.GetManagedFields() {
+		if entry.Manager != "eno" {
+			continue
+		}
+		switch entry.Operation {
+		case metav1.ManagedFieldsOperationApply:
+			applyEntries = append(applyEntries, entry)
+		case metav1.ManagedFieldsOperationUpdate:
+			updateEntries = append(updateEntries, entry)
+		}
+	}
+	require.Len(t, applyEntries, 1)
+	require.Len(t, updateEntries, 1)
+	assert.JSONEq(t, enoUpdateFields, string(updateEntries[0].FieldsV1.Raw), "eno Update entry should be preserved as-is")
+	assert.NotContains(t, string(applyEntries[0].FieldsV1.Raw), "f:ipFamilies", "eno Update fields should not be folded into the Apply entry")
 }
 
 // parseFieldPath converts a path string to field components with "f:" prefix
