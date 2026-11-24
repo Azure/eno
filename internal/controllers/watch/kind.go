@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"path"
+	"reflect"
 	"slices"
 	"time"
 
@@ -178,7 +179,6 @@ func (k *KindWatchController) Stop(ctx context.Context) {
 func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logr.FromContextOrDiscard(ctx).WithValues("group", k.gvk.Group, "version", k.gvk.Version, "kind", k.gvk.Kind)
 
-	logger.Info("reconciling watched resource")
 	meta := &metav1.PartialObjectMetadata{}
 	meta.SetGroupVersionKind(k.gvk)
 	err := k.client.Get(ctx, req.NamespacedName, meta)
@@ -190,12 +190,11 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// If deleted, we still need to process it to remove from compositions
 	if isDeleted {
-		logger.Info("watched resource deleted, processing deletion")
 		meta.SetName(req.Name)
 		meta.SetNamespace(req.Namespace)
 	}
+	logger = logger.WithValues("deleted", isDeleted, "resourceVersion", meta.GetResourceVersion())
 
-	logger.Info("watched resource exists, processing update", "resourceVersion", meta.GetResourceVersion())
 	list := &apiv1.SynthesizerList{}
 	err = k.client.List(ctx, list, client.MatchingFields{
 		manager.IdxSynthesizersByRef: path.Join(k.gvk.Group, k.gvk.Version, k.gvk.Kind),
@@ -206,6 +205,7 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 	rand.Shuffle(len(list.Items), func(i, j int) { list.Items[i], list.Items[j] = list.Items[j], list.Items[i] })
 
+	inputChanges := 0
 	for _, synth := range list.Items {
 		for _, ref := range synth.Spec.Refs {
 			if ref.Resource.Name != meta.GetName() || ref.Resource.Namespace != meta.GetNamespace() || ref.Resource.Group != k.gvk.Group || ref.Resource.Kind != k.gvk.Kind || ref.Resource.Version != k.gvk.Version {
@@ -220,7 +220,7 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 				logger.Error(err, "failed to list compositions for synthesizer", "synthesizerName", synth.Name)
 				return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 			}
-			k.updateCompositions(logger, &synth, meta, list, isDeleted)
+			inputChanges += k.updateCompositions(logger, &synth, meta, list, isDeleted)
 		}
 
 		list := &apiv1.CompositionList{}
@@ -231,18 +231,22 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 			logger.Error(err, "failed to list compositions by binding", "synthesizerName", synth.Name)
 			return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 		}
-		k.updateCompositions(logger, &synth, meta, list, isDeleted)
+		inputChanges += k.updateCompositions(logger, &synth, meta, list, isDeleted)
 	}
 
-	logger.Info("finished reconciling watched resource")
+	// Most runs re-process inputs the compositions already have, so only log when an input actually changed.
+	if inputChanges > 0 {
+		logger.Info("finished reconciling watched resource", "inputChanges", inputChanges)
+	}
 	return ctrl.Result{}, nil
 }
 
 // updateCompositions enqueues an input-revision change for every composition bound to the
 // watched resource. Writes are coalesced per composition by the write buffer, so multiple
 // inputs changing for the same composition in a short window collapse into a single
-// Status().Update instead of one write per input.
-func (k *KindWatchController) updateCompositions(logger logr.Logger, synth *apiv1.Synthesizer, meta *metav1.PartialObjectMetadata, list *apiv1.CompositionList, isDeleted bool) {
+// Status().Update instead of one write per input. It returns how many compositions don't already have this input revision recorded.
+func (k *KindWatchController) updateCompositions(logger logr.Logger, synth *apiv1.Synthesizer, meta *metav1.PartialObjectMetadata, list *apiv1.CompositionList, isDeleted bool) int {
+	changes := 0
 	for i := range list.Items {
 		comp := list.Items[i]
 		key := findRefKey(&comp, synth, meta)
@@ -258,15 +262,38 @@ func (k *KindWatchController) updateCompositions(logger logr.Logger, synth *apiv
 			// composition controller handles that case.
 			if isOptionalRef(synth, key) {
 				k.buffer.RemoveInputRevisionAsync(compKey, key)
-				logger.V(1).Info("buffered input revision removal", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key)
+				if hasInputRevision(&comp, key) {
+					changes++
+					logger.V(1).Info("buffered input revision removal", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key)
+				}
 			}
 			continue
 		}
 
 		revs := apiv1.NewInputRevisions(meta, key)
 		k.buffer.PatchInputRevisionAsync(compKey, revs)
-		logger.V(1).Info("buffered input resource change", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key)
+		if inputRevisionChanged(&comp, revs) {
+			changes++
+			logger.V(1).Info("buffered input resource change", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key)
+		}
 	}
+	return changes
+}
+
+// inputRevisionChanged reports whether the composition's recorded revision for revs.Key differs from revs. It uses the same comparison as the input revision write buffer.
+func inputRevisionChanged(comp *apiv1.Composition, revs *apiv1.InputRevisions) bool {
+	for _, ir := range comp.Status.InputRevisions {
+		if ir.Key == revs.Key {
+			return !reflect.DeepEqual(ir, *revs)
+		}
+	}
+	return true
+}
+
+func hasInputRevision(comp *apiv1.Composition, key string) bool {
+	return slices.ContainsFunc(comp.Status.InputRevisions, func(ir apiv1.InputRevisions) bool {
+		return ir.Key == key
+	})
 }
 
 func findRefKey(comp *apiv1.Composition, synth *apiv1.Synthesizer, meta *metav1.PartialObjectMetadata) string {

@@ -88,7 +88,6 @@ func (o *Op) UnmarshalJSON(data []byte) error {
 // Apply applies the operation to the "mutated" object if the condition is met by the "current" object.
 func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutated *unstructured.Unstructured) (Status, error) {
 	logger := logr.FromContextOrDiscard(ctx)
-	logger.Info("applying mutation operation", "path", o.Path.String(), "hasCondition", o.Condition != nil, "currentExists", current != nil)
 
 	if o.Condition != nil {
 		val, err := enocel.Eval(ctx, o.Condition, comp, current, o.Path)
@@ -102,8 +101,12 @@ func (o *Op) Apply(ctx context.Context, comp *apiv1.Composition, current, mutate
 			}
 			return StatusInvalidCondition, nil
 		}
-		if b, ok := val.Value().(bool); !ok || !b {
-			logger.Info("mutation condition not met, skipping", "path", o.Path.String(), "conditionResult", val.Value(), "resultType", fmt.Sprintf("%T", val.Value()))
+		b, ok := val.Value().(bool)
+		if !ok {
+			logger.Info("mutation condition did not return a bool, skipping", "path", o.Path.String(), "conditionResult", val.Value(), "resultType", fmt.Sprintf("%T", val.Value()))
+			return StatusInactive, nil
+		}
+		if !b {
 			return StatusInactive, nil // condition not met
 		}
 	}

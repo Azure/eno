@@ -159,7 +159,6 @@ func compareEnoManagedFields(a, b []metav1.ManagedFieldsEntry) bool {
 func NormalizeConflictingManagers(ctx context.Context, current *unstructured.Unstructured, migratingManagers []string, migratingFields []string) (modified bool, err error) {
 	managedFields := current.GetManagedFields()
 	logger := logr.FromContextOrDiscard(ctx)
-	logger.Info("NormalizingConflictingManager", "Name", current.GetName(), "Namespace", current.GetNamespace())
 	if len(managedFields) == 0 {
 		return false, nil
 	}
@@ -179,6 +178,7 @@ func NormalizeConflictingManagers(ctx context.Context, current *unstructured.Uns
 	if !hasLegacyManager && enoEntryCount <= 1 {
 		return false, nil
 	}
+	logger.Info("NormalizingConflictingManager", "Name", current.GetName(), "Namespace", current.GetNamespace(), "hasLegacyManager", hasLegacyManager, "enoEntryCount", enoEntryCount)
 
 	// Merge all eno entries first to get the combined fieldset
 	mergedEnoSet, mergedEnoTime := mergeEnoEntries(managedFields, allowedPrefixes)
@@ -211,7 +211,7 @@ func NormalizeConflictingManagers(ctx context.Context, current *unstructured.Uns
 		}
 
 		logger.Info("NormalizeConflictingManagers found migrating managers", "manager", entry.Manager,
-			"resoruceName", current.GetName(), "resourceNamespace", current.GetNamespace())
+			"resourceName", current.GetName(), "resourceNamespace", current.GetNamespace())
 		// Check if this is a legacy manager that should be migrated to eno
 		// Separate allowed fields (to migrate) from excluded fields (to keep with legacy manager)
 		if mergedEnoSet == nil {

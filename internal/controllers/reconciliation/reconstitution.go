@@ -112,7 +112,6 @@ func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// The reconciliation controller assumes that the previous synthesis will be loaded first
-	logger.Info("populating cache with previous synthesis")
 	filled, err := r.populateCache(ctx, comp, comp.Status.PreviousSynthesis, true)
 	if err != nil {
 		logger.Error(err, "failed to process previous state")
@@ -123,7 +122,6 @@ func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	logger.Info("populating cache with current synthesis")
 	filled, err = r.populateCache(ctx, comp, comp.Status.CurrentSynthesis, false)
 	if err != nil {
 		logger.Error(err, "failed to process current state")
@@ -134,7 +132,6 @@ func (r *reconstitutionSource) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	logger.Info("purging stale syntheses from cache")
 	r.cache.Purge(ctx, req.NamespacedName, comp)
 
 	logger.Info("reconstitution complete")
@@ -196,6 +193,8 @@ func (r *reconstitutionSource) populateCache(ctx context.Context, comp *apiv1.Co
 		return false, nil
 	}
 
+	// Only logged on a cache miss, right before the uncached apiserver reads, so a hung read still shows which synthesis was loading.
+	logger.Info("loading resource slices from apiserver to fill cache", "sliceCount", len(cachedSlices))
 	fullSlices := make([]apiv1.ResourceSlice, 0, len(cachedSlices))
 	for _, cached := range cachedSlices {
 		slice := apiv1.ResourceSlice{}

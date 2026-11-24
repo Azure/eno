@@ -143,7 +143,6 @@ func (c *Cache) Purge(ctx context.Context, compNSN types.NamespacedName, comp *a
 	c.mut.Lock()
 	defer c.mut.Unlock()
 	c.initUnlocked()
-	logger.Info("purging resource cache", "compositionName", compNSN.Name, "compositionNamespace", compNSN.Namespace, "candidateSyntheses", len(c.synByComp[compNSN]))
 
 	remainingSyns := []string{}
 	for _, uuid := range c.synByComp[compNSN] {

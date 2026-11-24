@@ -153,7 +153,6 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	ctx = logr.NewContext(ctx, logger)
 
 	// Find the current and (optionally) previous desired states in the cache
-	logger.Info("retrieving resource from cache", "synthesisUUID", synthesisUUID)
 	var prev *resource.Resource
 	resource, visible, exists := c.resourceClient.Get(ctx, synthesisUUID, req.Resource)
 	if !exists {
@@ -167,16 +166,20 @@ func (c *Controller) Reconcile(ctx context.Context, req resource.Request) (ctrl.
 	logger = logger.WithValues("resourceKind", resource.Ref.Kind, "resourceName", resource.Ref.Name, "resourceNamespace", resource.Ref.Namespace)
 	ctx = logr.NewContext(ctx, logger)
 
+	var previousSynthesisUUID string
 	if syn := comp.Status.PreviousSynthesis; syn != nil {
+		previousSynthesisUUID = syn.UUID
 		prev, _, _ = c.resourceClient.Get(ctx, syn.UUID, req.Resource)
-		logger.Info("retrieved previous synthesis from cache", "previousSynthesisUUID", syn.UUID, "hasPrevious", prev != nil)
 	}
 
-	logger.Info("reconcileResource")
+	// Everything above only reads in-memory caches, so one line right before the first downstream apiserver call is enough to locate where a reconcile stopped.
+	logger.Info("retrieved resource from cache", "previousSynthesisUUID", previousSynthesisUUID, "hasPrevious", prev != nil)
 	snap, current, ready, modified, err := c.reconcileResource(ctx, comp, prev, resource)
 	failingOpen := c.shouldFailOpen(snap, resource)
 	if failingOpen {
-		logger.Info("FailOpen - suppressing errors")
+		if err != nil {
+			logger.Info("FailOpen - suppressing errors", "error", err)
+		}
 		err = nil
 		modified = false
 	}
@@ -215,13 +218,12 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 
 	// Fetch the current resource
 	current, err = c.getCurrent(ctx, resource)
-	logger.Info("fetching current state of resource")
 	if client.IgnoreNotFound(err) != nil && !isErrMissingNS(err) && !isErrNoKindMatch(err) {
 		logger.Error(err, "failed to get current state")
 		return nil, nil, nil, false, err
 	}
+	logger.Info("fetched current state of resource", "currentExists", current != nil)
 
-	logger.Info("creating resource snapshot")
 	snap, err = resource.Snapshot(ctx, comp, current)
 	if err != nil {
 		logger.Error(err, "failed to create resource snapshot")
@@ -239,7 +241,6 @@ func (c *Controller) reconcileResource(ctx context.Context, comp *apiv1.Composit
 		// - Readiness checks are skipped when this version of the resource's desired state has already become ready
 		// - Readiness checks are skipped when the resource hasn't changed since the last check
 		// - Readiness defaults to true if no checks are given
-		logger.Info("evaluating resource readiness")
 		if status == nil || status.Ready == nil {
 			readiness, ok := resource.ReadinessChecks.EvalOptionally(ctx, &apiv1.Composition{}, current)
 			if ok {

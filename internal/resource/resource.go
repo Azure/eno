@@ -168,7 +168,6 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 		anno = map[string]string{}
 	}
 
-	logger.Info("processing resource annotations", "annotationCount", len(anno), "labelCount", len(res.Labels))
 	const overridesKey = "eno.azure.io/overrides"
 	if js, ok := anno[overridesKey]; ok {
 		logger.Info("parsing overrides annotation", "overridesLength", len(js))
@@ -262,25 +261,14 @@ func newResource(ctx context.Context, parsed *unstructured.Unstructured, strict 
 	// This indicates that this is an infrastructure Kind
 	if defaultGrp, ok := managedCreateOrder[res.GVK.Kind]; ok {
 		if _, ok := anno[ReadinessGroupKey]; !ok {
-			logger.Info("assigning default readiness group to managed kind",
-				"kind", res.GVK.Kind, "defaultGroup", defaultGrp)
 			res.readinessGroup = defaultGrp
-		} else {
-			logger.Info("user-specified readiness group present, skipping default for managed kind",
-				"kind", res.GVK.Kind, "readinessGroup", res.readinessGroup)
 		}
 
 		if _, ok := anno[DeletionGroupKey]; !ok {
-			logger.Info("assigning default deletion group to managed kind",
-				"kind", res.GVK.Kind, "defaultGroup", defaultGrp)
 			delGroup := -defaultGrp
 			res.deletionGroup = &delGroup
-		} else {
-			logger.Info("user-specified deletion group present, skipping default for managed kind",
-				"kind", res.GVK.Kind, "deletionGroup", *res.deletionGroup)
 		}
 	}
-	logger.Info("resource created successfully")
 	return res, nil
 }
 
