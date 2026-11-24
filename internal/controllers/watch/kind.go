@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/rand"
 	"path"
-	"reflect"
 	"slices"
 	"time"
 
@@ -262,7 +261,7 @@ func (k *KindWatchController) updateCompositions(logger logr.Logger, synth *apiv
 			// composition controller handles that case.
 			if isOptionalRef(synth, key) {
 				k.buffer.RemoveInputRevisionAsync(compKey, key)
-				if hasInputRevision(&comp, key) {
+				if flowcontrol.HasInputRevision(&comp, key) {
 					changes++
 					logger.V(1).Info("buffered input revision removal", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key)
 				}
@@ -272,28 +271,12 @@ func (k *KindWatchController) updateCompositions(logger logr.Logger, synth *apiv
 
 		revs := apiv1.NewInputRevisions(meta, key)
 		k.buffer.PatchInputRevisionAsync(compKey, revs)
-		if inputRevisionChanged(&comp, revs) {
+		if flowcontrol.InputRevisionChanged(&comp, revs) {
 			changes++
 			logger.V(1).Info("buffered input resource change", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "ref", key)
 		}
 	}
 	return changes
-}
-
-// inputRevisionChanged reports whether the composition's recorded revision for revs.Key differs from revs. It uses the same comparison as the input revision write buffer.
-func inputRevisionChanged(comp *apiv1.Composition, revs *apiv1.InputRevisions) bool {
-	for _, ir := range comp.Status.InputRevisions {
-		if ir.Key == revs.Key {
-			return !reflect.DeepEqual(ir, *revs)
-		}
-	}
-	return true
-}
-
-func hasInputRevision(comp *apiv1.Composition, key string) bool {
-	return slices.ContainsFunc(comp.Status.InputRevisions, func(ir apiv1.InputRevisions) bool {
-		return ir.Key == key
-	})
 }
 
 func findRefKey(comp *apiv1.Composition, synth *apiv1.Synthesizer, meta *metav1.PartialObjectMetadata) string {

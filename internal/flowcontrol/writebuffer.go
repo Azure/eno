@@ -126,7 +126,6 @@ func (w *ResourceSliceWriteBuffer) processQueueItem(ctx context.Context) bool {
 	// We only forget the rate limit once the update queue for this slice is empty.
 	// So the first write is fast, but a steady stream of writes will be throttled exponentially.
 	if len(updates) == 0 {
-		logger.Info("no updates to process, forgetting rate limit")
 		w.queue.Forget(sliceNSN)
 		w.mut.Lock()
 		delete(w.insertionTime, sliceNSN)
@@ -165,7 +164,6 @@ func (w *ResourceSliceWriteBuffer) updateSlice(ctx context.Context, insertionTim
 
 	patches := w.buildPatch(slice, updates)
 	if len(patches) == 0 {
-		logger.Info("no patches to apply after building patch")
 		return true // nothing to do!
 	}
 
