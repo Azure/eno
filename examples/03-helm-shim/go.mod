@@ -2,7 +2,7 @@ module github.com/Azure/eno/examples/helm-shim
 
 go 1.26.0
 
-toolchain go1.26.10
+toolchain go1.26.11
 
 replace github.com/Azure/eno/pkg/helmshim => ../../pkg/helmshim
 
