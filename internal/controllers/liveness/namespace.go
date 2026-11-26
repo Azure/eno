@@ -82,7 +82,6 @@ func (c *namespaceController) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, nil
 	}
 	if err == nil {
-		logger.Info("namespace still exits, do nothing")
 		// Successful GETs mean the namespace still exists - nothing for us to do
 		return ctrl.Result{}, nil
 	}

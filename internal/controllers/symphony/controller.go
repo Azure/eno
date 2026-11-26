@@ -83,7 +83,8 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 		logger.Error(err, "failed to list existing compositions")
 		return ctrl.Result{}, err
 	}
-	logger.Info("listed existing compositions", "compositionCount", len(existing.Items))
+	logger = logger.WithValues("compositionCount", len(existing.Items))
+	ctx = logr.NewContext(ctx, logger)
 
 	modified, err := c.reconcileReverse(ctx, symph, existing)
 	if err != nil {
@@ -122,7 +123,6 @@ func (c *symphonyController) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, nil
 	}
 
-	logger.Info("syncing symphony status")
 	err = c.syncStatus(ctx, symph, existing)
 	if err != nil {
 		logger.Error(err, "failed to sync status")
@@ -142,7 +142,6 @@ func (c *symphonyController) reconcileReverse(ctx context.Context, symph *apiv1.
 		expectedSynths[variation.Synthesizer.Name] = struct{}{}
 	}
 
-	logger.Info("reconciling reverse - checking for compositions to delete", "variationCount", len(symph.Spec.Variations), "existingCompositionCount", len(comps.Items), "symphonyDeleting", symph.DeletionTimestamp != nil)
 	// Delete compositions when their synth has been removed from the symphony
 	existingBySynthName := map[string][]*apiv1.Composition{}
 	for _, comp := range comps.Items {
@@ -205,13 +204,11 @@ func (c *symphonyController) reconcileReverse(ctx context.Context, symph *apiv1.
 		return true, nil
 	}
 
-	logger.Info("reconcile reverse complete")
 	return false, nil
 }
 
 func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.Symphony, comps *apiv1.CompositionList) (modified bool, err error) {
 	logger := logr.FromContextOrDiscard(ctx)
-	logger.Info("reconciling forward - syncing compositions with variations", "variationCount", len(symph.Spec.Variations), "existingCompositionCount", len(comps.Items))
 
 	// Prune any annotations that are currently set to empty strings.
 	// This happens before populating other values to enable workflows where an annotation can only be set on (at most) one composition.
@@ -360,7 +357,6 @@ func (c *symphonyController) reconcileForward(ctx context.Context, symph *apiv1.
 		modified = true
 	}
 
-	logger.Info("reconcile forward complete")
 	return modified, nil
 }
 
@@ -374,6 +370,7 @@ func (c *symphonyController) syncStatus(ctx context.Context, symph *apiv1.Sympho
 
 	copy := symph.DeepCopy()
 	copy.Status = newStatus
+	logger.Info("syncing symphony status")
 	if err := c.client.Status().Patch(ctx, copy, client.MergeFrom(symph)); err != nil {
 		return fmt.Errorf("syncing status: %w", err)
 	}

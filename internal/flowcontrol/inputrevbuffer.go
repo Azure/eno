@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"sync"
 	"time"
 
@@ -271,16 +272,31 @@ func (w *CompositionInputRevisionWriteBuffer) updateComposition(ctx context.Cont
 	return true
 }
 
+// InputRevisionChanged reports whether writing revs would change the composition's recorded input revisions.
+// The write buffer and the input watch controller both use it, so they always agree on what counts as a change.
+func InputRevisionChanged(comp *apiv1.Composition, revs *apiv1.InputRevisions) bool {
+	i := inputRevisionIndex(comp, revs.Key)
+	return i < 0 || !reflect.DeepEqual(comp.Status.InputRevisions[i], *revs)
+}
+
+// HasInputRevision reports whether the composition has a recorded input revision for key.
+func HasInputRevision(comp *apiv1.Composition, key string) bool {
+	return inputRevisionIndex(comp, key) >= 0
+}
+
+func inputRevisionIndex(comp *apiv1.Composition, key string) int {
+	return slices.IndexFunc(comp.Status.InputRevisions, func(ir apiv1.InputRevisions) bool {
+		return ir.Key == key
+	})
+}
+
 // setInputRevisions sets or replaces the revision for revs.Key on the composition.
 // Returns true when the composition's status was changed.
 func setInputRevisions(comp *apiv1.Composition, revs *apiv1.InputRevisions) bool {
-	for i, ir := range comp.Status.InputRevisions {
-		if ir.Key != revs.Key {
-			continue
-		}
-		if reflect.DeepEqual(ir, *revs) {
-			return false
-		}
+	if !InputRevisionChanged(comp, revs) {
+		return false
+	}
+	if i := inputRevisionIndex(comp, revs.Key); i >= 0 {
 		comp.Status.InputRevisions[i] = *revs
 		return true
 	}
@@ -291,11 +307,10 @@ func setInputRevisions(comp *apiv1.Composition, revs *apiv1.InputRevisions) bool
 // removeInputRevision drops the revision for key from the composition.
 // Returns true when the composition's status was changed.
 func removeInputRevision(comp *apiv1.Composition, key string) bool {
-	for i, ir := range comp.Status.InputRevisions {
-		if ir.Key == key {
-			comp.Status.InputRevisions = append(comp.Status.InputRevisions[:i], comp.Status.InputRevisions[i+1:]...)
-			return true
-		}
+	i := inputRevisionIndex(comp, key)
+	if i < 0 {
+		return false
 	}
-	return false
+	comp.Status.InputRevisions = append(comp.Status.InputRevisions[:i], comp.Status.InputRevisions[i+1:]...)
+	return true
 }
