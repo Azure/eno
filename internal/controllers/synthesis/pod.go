@@ -26,7 +26,7 @@ func newPod(cfg *Config, comp *apiv1.Composition, syn *apiv1.Synthesizer) *corev
 		compositionNameLabelKey:      comp.Name,
 		compositionNamespaceLabelKey: comp.Namespace,
 		manager.SynthesisIDLabelKey:  comp.Status.InFlightSynthesis.UUID,
-		synthesizerNameLabelKey:      comp.Spec.Synthesizer.Name,
+		synthesizerNameLabelKey:      syn.Name,
 		manager.ManagerLabelKey:      manager.ManagerLabelValue,
 	}
 	// Apply controller flag overrides first.

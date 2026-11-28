@@ -7,6 +7,7 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/inputs"
+	"github.com/Azure/eno/internal/synthref"
 	"github.com/prometheus/client_golang/prometheus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -76,11 +77,7 @@ func planWaitingCompositions(comps []apiv1.Composition, synths map[string]apiv1.
 	nextPendingSince := map[types.UID]time.Time{}
 	for i := range comps {
 		comp := &comps[i]
-		synth, found := synths[comp.Spec.Synthesizer.Name]
-		var synthPtr *apiv1.Synthesizer
-		if found {
-			synthPtr = &synth
-		}
+		synthPtr, _ := synthref.ResolveFromMap(&comp.Spec.Synthesizer, synths)
 		reason, since := classifyComposition(comp, synthPtr, readySet, cyclicSet)
 		if reason == "" {
 			continue

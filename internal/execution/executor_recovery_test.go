@@ -293,6 +293,7 @@ func (f *recoveryFixture) assertPublished(t *testing.T, cli client.Client, outpu
 	current.Synthesized = comp.Status.CurrentSynthesis.Synthesized
 	current.ResourceSlices = comp.Status.CurrentSynthesis.ResourceSlices
 	current.ObservedSynthesizerGeneration = f.syn.Generation
+	current.SynthesizerName = f.syn.Name
 	current.InputRevisions = []apiv1.InputRevisions{*apiv1.NewInputRevisions(f.input, "config")}
 	current.TombstoneRecoveryRequired = flag
 	current.Results = nil
@@ -509,6 +510,7 @@ func TestRecoveryExecutorOutputFailureDoesNotPromote(t *testing.T) {
 				require.NotNil(t, stored.Status.InFlightSynthesis.Synthesized)
 				expected.Status.InFlightSynthesis.Synthesized = stored.Status.InFlightSynthesis.Synthesized
 				expected.Status.InFlightSynthesis.ObservedSynthesizerGeneration = f.syn.Generation
+				expected.Status.InFlightSynthesis.SynthesizerName = f.syn.Name
 				expected.Status.InFlightSynthesis.InputRevisions = []apiv1.InputRevisions{*apiv1.NewInputRevisions(f.input, "config")}
 				expected.Status.InFlightSynthesis.Results = wantResults
 			}

@@ -280,6 +280,21 @@ spec:
                       was written
                     format: date-time
                     type: string
+                  synthesizerName:
+                    description: |-
+                      The name of the synthesizer used by this synthesis. When the composition selects its
+                      synthesizer by label, this is the synthesizer the selector resolved to.
+                    type: string
+                  tombstoneRecoveryRequired:
+                    description: |-
+                      TombstoneRecoveryRequired indicates that this synthesis encountered incomplete history.
+                      A synthesis inherits an outstanding recovery requirement, including when its predecessor skipped recovery because the operator was disabled.
+                      It is set when there is no current synthesis to use as history, or a historical ResourceSlice reference is nameless
+                      or points to a missing slice. Even a first synthesis may encounter resources left by a prior incarnation whose inventory was lost.
+                      A complete historical reference list, including an empty list, does not introduce a new recovery requirement.
+                      It does not request or block synthesis.
+                      Recovery preparation gates reconstitution through TombstoneRecoveryStatus only when the tombstone recovery operator is enabled and the Composition is opted in and not deleting.
+                    type: boolean
                   tombstoneRecoveryStatus:
                     description: |-
                       TombstoneRecoveryStatus records the recovery decision for this synthesis.
@@ -302,16 +317,6 @@ spec:
                     - status
                     - synthesisUUID
                     type: object
-                  tombstoneRecoveryRequired:
-                    description: |-
-                      TombstoneRecoveryRequired indicates that this synthesis encountered incomplete history.
-                      A synthesis inherits an outstanding recovery requirement, including when its predecessor skipped recovery because the operator was disabled.
-                      It is set when there is no current synthesis to use as history, or a historical ResourceSlice reference is nameless
-                      or points to a missing slice. Even a first synthesis may encounter resources left by a prior incarnation whose inventory was lost.
-                      A complete historical reference list, including an empty list, does not introduce a new recovery requirement.
-                      It does not request or block synthesis.
-                      Recovery preparation gates reconstitution through TombstoneRecoveryStatus only when the tombstone recovery operator is enabled and the Composition is opted in and not deleting.
-                    type: boolean
                   uuid:
                     description: |-
                       A random UUID scoped to this particular synthesis operation.
@@ -442,6 +447,21 @@ spec:
                       was written
                     format: date-time
                     type: string
+                  synthesizerName:
+                    description: |-
+                      The name of the synthesizer used by this synthesis. When the composition selects its
+                      synthesizer by label, this is the synthesizer the selector resolved to.
+                    type: string
+                  tombstoneRecoveryRequired:
+                    description: |-
+                      TombstoneRecoveryRequired indicates that this synthesis encountered incomplete history.
+                      A synthesis inherits an outstanding recovery requirement, including when its predecessor skipped recovery because the operator was disabled.
+                      It is set when there is no current synthesis to use as history, or a historical ResourceSlice reference is nameless
+                      or points to a missing slice. Even a first synthesis may encounter resources left by a prior incarnation whose inventory was lost.
+                      A complete historical reference list, including an empty list, does not introduce a new recovery requirement.
+                      It does not request or block synthesis.
+                      Recovery preparation gates reconstitution through TombstoneRecoveryStatus only when the tombstone recovery operator is enabled and the Composition is opted in and not deleting.
+                    type: boolean
                   tombstoneRecoveryStatus:
                     description: |-
                       TombstoneRecoveryStatus records the recovery decision for this synthesis.
@@ -464,16 +484,6 @@ spec:
                     - status
                     - synthesisUUID
                     type: object
-                  tombstoneRecoveryRequired:
-                    description: |-
-                      TombstoneRecoveryRequired indicates that this synthesis encountered incomplete history.
-                      A synthesis inherits an outstanding recovery requirement, including when its predecessor skipped recovery because the operator was disabled.
-                      It is set when there is no current synthesis to use as history, or a historical ResourceSlice reference is nameless
-                      or points to a missing slice. Even a first synthesis may encounter resources left by a prior incarnation whose inventory was lost.
-                      A complete historical reference list, including an empty list, does not introduce a new recovery requirement.
-                      It does not request or block synthesis.
-                      Recovery preparation gates reconstitution through TombstoneRecoveryStatus only when the tombstone recovery operator is enabled and the Composition is opted in and not deleting.
-                    type: boolean
                   uuid:
                     description: |-
                       A random UUID scoped to this particular synthesis operation.
@@ -597,6 +607,21 @@ spec:
                       was written
                     format: date-time
                     type: string
+                  synthesizerName:
+                    description: |-
+                      The name of the synthesizer used by this synthesis. When the composition selects its
+                      synthesizer by label, this is the synthesizer the selector resolved to.
+                    type: string
+                  tombstoneRecoveryRequired:
+                    description: |-
+                      TombstoneRecoveryRequired indicates that this synthesis encountered incomplete history.
+                      A synthesis inherits an outstanding recovery requirement, including when its predecessor skipped recovery because the operator was disabled.
+                      It is set when there is no current synthesis to use as history, or a historical ResourceSlice reference is nameless
+                      or points to a missing slice. Even a first synthesis may encounter resources left by a prior incarnation whose inventory was lost.
+                      A complete historical reference list, including an empty list, does not introduce a new recovery requirement.
+                      It does not request or block synthesis.
+                      Recovery preparation gates reconstitution through TombstoneRecoveryStatus only when the tombstone recovery operator is enabled and the Composition is opted in and not deleting.
+                    type: boolean
                   tombstoneRecoveryStatus:
                     description: |-
                       TombstoneRecoveryStatus records the recovery decision for this synthesis.
@@ -619,16 +644,6 @@ spec:
                     - status
                     - synthesisUUID
                     type: object
-                  tombstoneRecoveryRequired:
-                    description: |-
-                      TombstoneRecoveryRequired indicates that this synthesis encountered incomplete history.
-                      A synthesis inherits an outstanding recovery requirement, including when its predecessor skipped recovery because the operator was disabled.
-                      It is set when there is no current synthesis to use as history, or a historical ResourceSlice reference is nameless
-                      or points to a missing slice. Even a first synthesis may encounter resources left by a prior incarnation whose inventory was lost.
-                      A complete historical reference list, including an empty list, does not introduce a new recovery requirement.
-                      It does not request or block synthesis.
-                      Recovery preparation gates reconstitution through TombstoneRecoveryStatus only when the tombstone recovery operator is enabled and the Composition is opted in and not deleting.
-                    type: boolean
                   uuid:
                     description: |-
                       A random UUID scoped to this particular synthesis operation.

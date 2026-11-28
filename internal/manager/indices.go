@@ -14,7 +14,29 @@ const (
 	IdxCompositionsByBinding     = ".compositionsByBinding"
 	IdxSynthesizersByRef         = ".synthesizersByRef"
 	IdxCompositionsByDependency  = ".spec.dependsOn"
+
+	// SelectorSynthesizerKey replaces the synthesizer name in the index keys of compositions that
+	// select their synthesizer by label, since the matching synthesizer isn't known at index time.
+	SelectorSynthesizerKey = "*labelSelector"
 )
+
+// SynthesizerIndexKey returns the synthesizer part of a composition's index keys.
+func SynthesizerIndexKey(comp *apiv1.Composition) string {
+	if comp.Spec.Synthesizer.LabelSelector != nil {
+		return SelectorSynthesizerKey
+	}
+	return comp.Spec.Synthesizer.Name
+}
+
+func indexSynthesizer() client.IndexerFunc {
+	return func(o client.Object) []string {
+		comp, ok := o.(*apiv1.Composition)
+		if !ok {
+			return nil
+		}
+		return []string{SynthesizerIndexKey(comp)}
+	}
+}
 
 func indexController() client.IndexerFunc {
 	return func(o client.Object) []string {
@@ -35,7 +57,7 @@ func indexResourceBindings() client.IndexerFunc {
 
 		keys := []string{}
 		for _, binding := range comp.Spec.Bindings {
-			keys = append(keys, path.Join(comp.Spec.Synthesizer.Name, binding.Resource.Namespace, binding.Resource.Name))
+			keys = append(keys, path.Join(SynthesizerIndexKey(comp), binding.Resource.Namespace, binding.Resource.Name))
 		}
 		return keys
 	}

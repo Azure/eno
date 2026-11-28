@@ -11,6 +11,7 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/flowcontrol"
 	"github.com/Azure/eno/internal/manager"
+	"github.com/Azure/eno/internal/synthref"
 	"github.com/go-logr/logr"
 	"golang.org/x/time/rate"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -97,12 +98,11 @@ func (k *KindWatchController) newResourceWatchController(parent *WatchController
 	// Watch inputs declared by refs/bindings in synthesizers/compositions
 	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), &apiv1.Composition{},
 		handler.TypedEnqueueRequestsFromMapFunc(handler.TypedMapFunc[*apiv1.Composition, reconcile.Request](func(ctx context.Context, comp *apiv1.Composition) []reconcile.Request {
-			if comp.Spec.Synthesizer.Name == "" {
+			if comp.Spec.Synthesizer.Name == "" && comp.Spec.Synthesizer.LabelSelector == nil {
 				return nil
 			}
 
-			synth := &apiv1.Synthesizer{}
-			err = parent.client.Get(ctx, types.NamespacedName{Name: comp.Spec.Synthesizer.Name}, synth)
+			synth, err := synthref.Resolve(ctx, parent.client, &comp.Spec.Synthesizer)
 			if err != nil {
 				logr.FromContextOrDiscard(ctx).Error(err, "unable to get synthesizer for composition")
 				return nil
@@ -115,16 +115,13 @@ func (k *KindWatchController) newResourceWatchController(parent *WatchController
 	}
 	err = rrc.Watch(source.Kind(parent.mgr.GetCache(), &apiv1.Synthesizer{},
 		handler.TypedEnqueueRequestsFromMapFunc(handler.TypedMapFunc[*apiv1.Synthesizer, reconcile.Request](func(ctx context.Context, synth *apiv1.Synthesizer) []reconcile.Request {
-			compList := &apiv1.CompositionList{}
-			err = parent.client.List(ctx, compList, client.MatchingFields{
-				manager.IdxCompositionsBySynthesizer: synth.Name,
-			})
+			comps, err := synthref.ListCompositions(ctx, parent.client, synth, manager.IdxCompositionsBySynthesizer, synthref.Identity)
 			if err != nil {
 				logr.FromContextOrDiscard(ctx).Error(err, "unable to get compositions for synthesizer")
 				return nil
 			}
 
-			return k.buildRequests(synth, compList.Items...)
+			return k.buildRequests(synth, comps...)
 		}))))
 	if err != nil {
 		return nil, err
@@ -211,26 +208,22 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 				continue
 			}
 
-			list := &apiv1.CompositionList{}
-			err = k.client.List(ctx, list, client.MatchingFields{
-				manager.IdxCompositionsBySynthesizer: synth.Name,
-			})
+			comps, err := synthref.ListCompositions(ctx, k.client, &synth, manager.IdxCompositionsBySynthesizer, synthref.Identity)
 			if err != nil {
 				logger.Error(err, "failed to list compositions for synthesizer", "synthesizerName", synth.Name)
 				return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 			}
-			inputChanges += k.updateCompositions(logger, &synth, meta, list, isDeleted)
+			inputChanges += k.updateCompositions(logger, &synth, meta, comps, isDeleted)
 		}
 
-		list := &apiv1.CompositionList{}
-		err = k.client.List(ctx, list, client.MatchingFields{
-			manager.IdxCompositionsByBinding: path.Join(synth.Name, meta.Namespace, meta.Name),
+		comps, err := synthref.ListCompositions(ctx, k.client, &synth, manager.IdxCompositionsByBinding, func(synthKey string) string {
+			return path.Join(synthKey, meta.Namespace, meta.Name)
 		})
 		if err != nil {
 			logger.Error(err, "failed to list compositions by binding", "synthesizerName", synth.Name)
 			return ctrl.Result{}, fmt.Errorf("listing compositions: %w", err)
 		}
-		inputChanges += k.updateCompositions(logger, &synth, meta, list, isDeleted)
+		inputChanges += k.updateCompositions(logger, &synth, meta, comps, isDeleted)
 	}
 
 	// Most runs re-process inputs the compositions already have, so only log when an input actually changed.
@@ -244,10 +237,10 @@ func (k *KindWatchController) Reconcile(ctx context.Context, req ctrl.Request) (
 // watched resource. Writes are coalesced per composition by the write buffer, so multiple
 // inputs changing for the same composition in a short window collapse into a single
 // Status().Update instead of one write per input. It returns how many compositions don't already have this input revision recorded.
-func (k *KindWatchController) updateCompositions(logger logr.Logger, synth *apiv1.Synthesizer, meta *metav1.PartialObjectMetadata, list *apiv1.CompositionList, isDeleted bool) int {
+func (k *KindWatchController) updateCompositions(logger logr.Logger, synth *apiv1.Synthesizer, meta *metav1.PartialObjectMetadata, comps []apiv1.Composition, isDeleted bool) int {
 	changes := 0
-	for i := range list.Items {
-		comp := list.Items[i]
+	for i := range comps {
+		comp := comps[i]
 		key := findRefKey(&comp, synth, meta)
 		if key == "" {
 			continue

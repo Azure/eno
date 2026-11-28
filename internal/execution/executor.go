@@ -8,6 +8,7 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/inputs"
 	"github.com/Azure/eno/internal/resource"
+	"github.com/Azure/eno/internal/synthref"
 	krmv1 "github.com/Azure/eno/pkg/krm/functions/api/v1"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -47,11 +48,7 @@ func (e *Executor) Synthesize(ctx context.Context, env *Env) error {
 		return fmt.Errorf("fetching composition: %w", err)
 	}
 
-	syn := &apiv1.Synthesizer{}
-	syn.Name = comp.Spec.Synthesizer.Name
-	logger = logger.WithValues("synthesizerName", syn.Name)
-	ctx = logr.NewContext(ctx, logger)
-	err = e.Reader.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+	syn, err := synthref.Resolve(ctx, e.Reader, &comp.Spec.Synthesizer)
 	if err != nil {
 		logger.Error(err, "unable to fetch synthesizer")
 		return fmt.Errorf("fetching synthesizer: %w", err)
@@ -316,6 +313,7 @@ func (e *Executor) updateComposition(ctx context.Context, env *Env, oldComp *api
 		comp.Status.InFlightSynthesis.Synthesized = &now
 		comp.Status.InFlightSynthesis.ResourceSlices = refs
 		comp.Status.InFlightSynthesis.ObservedSynthesizerGeneration = syn.Generation
+		comp.Status.InFlightSynthesis.SynthesizerName = syn.Name
 		comp.Status.InFlightSynthesis.InputRevisions = revs
 		comp.Status.InFlightSynthesis.Results = nil
 		for _, result := range rl.Results {
