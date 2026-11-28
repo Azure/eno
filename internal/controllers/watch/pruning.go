@@ -5,6 +5,7 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
+	"github.com/Azure/eno/internal/synthref"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -36,10 +37,8 @@ func (c *pruningController) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		"operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	ctx = logr.NewContext(ctx, logger)
 
-	synth := &apiv1.Synthesizer{}
-	synth.Name = comp.Spec.Synthesizer.Name
-	err = c.client.Get(ctx, client.ObjectKeyFromObject(synth), synth)
-	if errors.IsNotFound(err) {
+	synth, err := synthref.Resolve(ctx, c.client, &comp.Spec.Synthesizer)
+	if synthref.IsMissing(err) {
 		// Without the synthesizer we can't tell which refs are still declared, so don't prune anything
 		return ctrl.Result{}, nil
 	}
@@ -103,18 +102,15 @@ func (c *pruningController) newSynthEventHandler() handler.TypedEventHandler[*ap
 	fn := func(ctx context.Context, synth *apiv1.Synthesizer) []reconcile.Request {
 		logger := logr.FromContextOrDiscard(ctx)
 
-		list := &apiv1.CompositionList{}
-		err := c.client.List(ctx, list, client.MatchingFields{
-			manager.IdxCompositionsBySynthesizer: synth.Name,
-		})
+		comps, err := synthref.ListCompositions(ctx, c.client, synth, manager.IdxCompositionsBySynthesizer, synthref.Identity)
 		if err != nil {
 			logger.Error(err, "failed to list compositions for synthesizer", "synthesizerName", synth.Name)
 			return nil
 		}
 
-		reqs := make([]reconcile.Request, 0, len(list.Items))
-		for i := range list.Items {
-			reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])})
+		reqs := make([]reconcile.Request, 0, len(comps))
+		for i := range comps {
+			reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&comps[i])})
 		}
 		return reqs
 	}

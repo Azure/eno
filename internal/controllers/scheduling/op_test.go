@@ -1040,3 +1040,32 @@ func TestInputChangeCount(t *testing.T) {
 		})
 	}
 }
+
+func TestOpResolvedSynthesizerChanged(t *testing.T) {
+	newState := func(usedSynth string) (*apiv1.Synthesizer, *apiv1.Composition) {
+		synth := &apiv1.Synthesizer{ObjectMeta: metav1.ObjectMeta{Name: "coredns-synth-slot-2", Generation: 3}}
+		comp := &apiv1.Composition{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-comp", Finalizers: []string{"eno.azure.io/cleanup"}, Generation: 1},
+			Status: apiv1.CompositionStatus{
+				CurrentSynthesis: &apiv1.Synthesis{
+					ObservedCompositionGeneration: 1,
+					ObservedSynthesizerGeneration: 7, // generation of a different synthesizer
+					SynthesizerName:               usedSynth,
+					Synthesized:                   ptr.To(metav1.Now()),
+					Initialized:                   ptr.To(metav1.Now()),
+					UUID:                          "initial-uuid",
+				},
+			},
+		}
+		return synth, comp
+	}
+
+	synth, comp := newState("coredns-synth-slot-1")
+	op := newOp(synth, comp, time.Time{})
+	if assert.NotNil(t, op) {
+		assert.Equal(t, synthesizerModifiedOp, op.Reason)
+	}
+
+	synth, comp = newState("coredns-synth-slot-2")
+	assert.Nil(t, newOp(synth, comp, time.Time{}), "same synthesizer at an older generation is not a change")
+}

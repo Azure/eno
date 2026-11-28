@@ -92,6 +92,11 @@ func classifyOp(synth *apiv1.Synthesizer, comp *apiv1.Composition) (opReason, bo
 		return deferredInputModifiedOp, true
 	}
 
+	// A label selector that now resolves to a different synthesizer is a synthesizer change.
+	if syn.SynthesizerName != "" && syn.SynthesizerName != synth.Name {
+		return synthesizerModifiedOp, true
+	}
+
 	if syn.ObservedSynthesizerGeneration > 0 && syn.ObservedSynthesizerGeneration < synth.Generation {
 		return synthesizerModifiedOp, true
 	}

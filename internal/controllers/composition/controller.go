@@ -29,6 +29,7 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/inputs"
 	"github.com/Azure/eno/internal/manager"
+	"github.com/Azure/eno/internal/synthref"
 )
 
 const (
@@ -117,15 +118,12 @@ func (c *compositionController) newSynthEventHandler() handler.TypedEventHandler
 	fn := func(ctx context.Context, synth *apiv1.Synthesizer) (reqs []reconcile.Request) {
 		logger := logr.FromContextOrDiscard(ctx)
 
-		list := &apiv1.CompositionList{}
-		err := c.client.List(ctx, list, client.MatchingFields{
-			manager.IdxCompositionsBySynthesizer: synth.Name,
-		})
+		comps, err := synthref.ListCompositions(ctx, c.client, synth, manager.IdxCompositionsBySynthesizer, synthref.Identity)
 		if err != nil {
 			logger.Error(err, "failed to list compositions for synthesizer")
 			return nil
 		}
-		for _, comp := range list.Items {
+		for _, comp := range comps {
 			reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&comp)})
 		}
 		return reqs
@@ -162,11 +160,9 @@ func (c *compositionController) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, nil
 	}
 
-	synth := &apiv1.Synthesizer{}
-	synth.Name = comp.Spec.Synthesizer.Name
-	err = c.client.Get(ctx, client.ObjectKeyFromObject(synth), synth)
-	if errors.IsNotFound(err) {
-		logger.Info(fmt.Sprintf("synthesizer not found for composition[%s], namespace[%s], synthName[%s]", comp.GetName(), comp.GetNamespace(), comp.Spec.Synthesizer.Name))
+	synth, err := synthref.Resolve(ctx, c.client, &comp.Spec.Synthesizer)
+	if synthref.IsMissing(err) {
+		logger.Info(fmt.Sprintf("synthesizer not found for composition[%s], namespace[%s], synthName[%s]: %s", comp.GetName(), comp.GetNamespace(), comp.Spec.Synthesizer.Name, err))
 		synth = nil
 		err = nil
 	}

@@ -246,6 +246,62 @@ func TestControllerSwitchingSynthesizers(t *testing.T) {
 	})
 }
 
+// TestControllerSynthesizerLabelSelector proves that a composition can select its synthesizer by label,
+// that the selector wins over the name, and that changing the selector moves it to the newly selected synthesizer.
+func TestControllerSynthesizerLabelSelector(t *testing.T) {
+	ctx := testutil.NewContext(t)
+	mgr := testutil.NewManager(t)
+	cli := mgr.GetClient()
+
+	testutil.WithFakeExecutor(t, mgr, func(ctx context.Context, s *apiv1.Synthesizer, input *krmv1.ResourceList) (*krmv1.ResourceList, error) {
+		return &krmv1.ResourceList{}, nil
+	})
+	require.NoError(t, scheduling.NewController(mgr.Manager, 10, 2*time.Second, time.Second))
+	require.NoError(t, NewPodLifecycleController(mgr.Manager, minimalTestConfig))
+	require.NoError(t, NewPodGC(mgr.Manager, 0))
+	mgr.Start(t)
+
+	for _, s := range []struct{ name, version string }{{"unit", ""}, {"unit-slot-1", "v1"}, {"unit-slot-2", "v2"}} {
+		syn := &apiv1.Synthesizer{}
+		syn.Name = s.name
+		syn.Spec.Image = s.name + "-image"
+		if s.version != "" {
+			syn.Labels = map[string]string{"component": "unit", "version": s.version}
+		}
+		require.NoError(t, cli.Create(ctx, syn))
+	}
+
+	comp := &apiv1.Composition{}
+	comp.Name = "test-comp"
+	comp.Namespace = "default"
+	comp.Finalizers = []string{"eno.azure.io/cleanup"}
+	comp.Spec.Synthesizer.Name = "unit"
+	comp.Spec.Synthesizer.LabelSelector = &metav1.LabelSelector{MatchLabels: map[string]string{"component": "unit", "version": "v1"}}
+	require.NoError(t, cli.Create(ctx, comp))
+
+	testutil.Eventually(t, func() bool {
+		require.NoError(t, client.IgnoreNotFound(cli.Get(ctx, client.ObjectKeyFromObject(comp), comp)))
+		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.Synthesized != nil
+	})
+	assert.Equal(t, "unit-slot-1", comp.Status.CurrentSynthesis.SynthesizerName)
+	initialGen := comp.Generation
+
+	err := retry.RetryOnConflict(testutil.Backoff, func() error {
+		if err := cli.Get(ctx, client.ObjectKeyFromObject(comp), comp); err != nil {
+			return err
+		}
+		comp.Spec.Synthesizer.LabelSelector.MatchLabels["version"] = "v2"
+		return cli.Update(ctx, comp)
+	})
+	require.NoError(t, err)
+
+	testutil.Eventually(t, func() bool {
+		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(comp), comp))
+		return comp.Status.CurrentSynthesis != nil && comp.Status.CurrentSynthesis.ObservedCompositionGeneration > initialGen
+	})
+	assert.Equal(t, "unit-slot-2", comp.Status.CurrentSynthesis.SynthesizerName)
+}
+
 // TestDeadKubelet proves that we recover quickly when kubelet is not alive on the Ready node.
 func TestDeadKubelet(t *testing.T) {
 	ctx := testutil.NewContext(t)

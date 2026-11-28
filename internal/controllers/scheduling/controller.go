@@ -19,6 +19,7 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
+	"github.com/Azure/eno/internal/synthref"
 )
 
 const (
@@ -165,8 +166,8 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 
 		if missedReconciliation(&comp, c.watchdogThreshold) {
-			synth := synthsByName[comp.Spec.Synthesizer.Name]
-			stuckReconciling.WithLabelValues(comp.Spec.Synthesizer.Name, getSynthOwner(&synth)).Inc()
+			synth, _ := synthref.ResolveFromMap(&comp.Spec.Synthesizer, synthsByName)
+			stuckReconciling.WithLabelValues(comp.Spec.Synthesizer.Name, getSynthOwner(synth)).Inc()
 			compositionHealth.WithLabelValues(comp.Name, comp.Namespace, comp.Spec.Synthesizer.Name).Set(1)
 			logger.Info("detected composition missed reconciliation", "compositionName", comp.Name, "compositionNamespace", comp.Namespace, "synthesizerName", comp.Spec.Synthesizer.Name)
 		} else {
@@ -213,12 +214,12 @@ func (c *controller) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			}
 		}
 
-		synth, ok := synthsByName[comp.Spec.Synthesizer.Name]
-		if !ok {
+		synth, err := synthref.ResolveFromMap(&comp.Spec.Synthesizer, synthsByName)
+		if err != nil {
 			continue
 		}
 
-		next := newOp(&synth, &comp, nextSlot)
+		next := newOp(synth, &comp, nextSlot)
 		if next != nil && (op == nil || next.Less(op)) {
 			op = next
 		}

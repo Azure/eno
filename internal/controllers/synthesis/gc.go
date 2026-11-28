@@ -7,6 +7,7 @@ import (
 
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/manager"
+	"github.com/Azure/eno/internal/synthref"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -104,18 +105,16 @@ func (p *podGarbageCollector) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// GC pods from missing synthesizers
-	syn := &apiv1.Synthesizer{}
-	syn.Name = comp.Spec.Synthesizer.Name
-	err = p.client.Get(ctx, client.ObjectKeyFromObject(syn), syn)
-	logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
-	if errors.IsNotFound(err) {
-		logger = logger.WithValues("reason", "SynthesizerDeleted")
+	syn, err := synthref.Resolve(ctx, p.client, &comp.Spec.Synthesizer)
+	if synthref.IsMissing(err) {
+		logger = logger.WithValues("synthesizerName", comp.Spec.Synthesizer.Name, "reason", "SynthesizerDeleted")
 		return ctrl.Result{}, p.deletePod(ctx, pod, getSynthesizerName(pod), reasonSynthesizerDeleted, logger)
 	}
 	if err != nil {
 		logger.Error(err, "failed to get synthesizer")
 		return ctrl.Result{}, err
 	}
+	logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
 
 	// Ignore brand new pods since the pod/composition informer might not be in sync
 	const gracePeriod = time.Second

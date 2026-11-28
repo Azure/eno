@@ -138,6 +138,10 @@ type Synthesis struct {
 	// This is a min i.e. a newer composition may have been used.
 	ObservedSynthesizerGeneration int64 `json:"observedSynthesizerGeneration,omitempty"`
 
+	// The name of the synthesizer used by this synthesis. When the composition selects its
+	// synthesizer by label, this is the synthesizer the selector resolved to.
+	SynthesizerName string `json:"synthesizerName,omitempty"`
+
 	// Initialized is set when the synthesis process is initiated.
 	Initialized *metav1.Time `json:"initialized,omitempty"`
 

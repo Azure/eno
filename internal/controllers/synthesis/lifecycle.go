@@ -21,6 +21,7 @@ import (
 	apiv1 "github.com/Azure/eno/api/v1"
 	"github.com/Azure/eno/internal/controllers/scheduling"
 	"github.com/Azure/eno/internal/manager"
+	"github.com/Azure/eno/internal/synthref"
 )
 
 type Config struct {
@@ -117,12 +118,13 @@ func (c *podLifecycleController) Reconcile(ctx context.Context, req ctrl.Request
 		"operationID", comp.GetAzureOperationID(), "operationOrigin", comp.GetAzureOperationOrigin())
 	ctx = logr.NewContext(ctx, logger)
 
-	syn := &apiv1.Synthesizer{}
-	syn.Name = comp.Spec.Synthesizer.Name
-	err = c.client.Get(ctx, client.ObjectKeyFromObject(syn), syn)
+	syn, err := synthref.Resolve(ctx, c.client, &comp.Spec.Synthesizer)
 	if err != nil {
 		logger.Error(err, "failed to get synthesizer")
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if synthref.IsMissing(err) {
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
 	}
 	if syn != nil {
 		logger = logger.WithValues("synthesizerName", syn.Name, "synthesizerGeneration", syn.Generation)
